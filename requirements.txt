@@ -94,12 +94,6 @@ statsmodels==0.14.0
 streamlit==1.29.0
 TA-Lib==0.4.28
 tenacity==8.2.3
-tensorboard==2.15.1
-tensorboard-data-server==0.7.2
-tensorflow==2.15.0
-tensorflow-estimator==2.15.0
-tensorflow-io-gcs-filesystem==0.34.0
-tensorflow-macos==2.15.0
 termcolor==2.4.0
 threadpoolctl==3.2.0
 toml==0.10.2
