@@ -5,11 +5,11 @@ from scipy.signal import argrelextrema
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 from src.config import config
-
+import os
 
 class helper:
     def __init__(self):
-        self.APIKEY: str = config["APIKEY"]
+        self.APIKEY: str = os.environ["APIKEY"]
         self.data: pd.DataFrame = None
 
     def get_tickers(self):
