@@ -4,7 +4,6 @@ import requests as r
 from scipy.signal import argrelextrema
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
-from src.config import config
 import os
 
 class helper:
