@@ -33,6 +33,38 @@ class helper:
         else:
             return url + "?apikey=" + self.APIKEY
 
+    def get_quote_prices(self,tickers: list):
+
+        joined_tickers = ",".join(tickers)
+
+        url = self.add_query_token(f"https://financialmodelingprep.com/api/v3/quote/{joined_tickers}")
+
+        response = r.get(url)
+
+        if response.status_code != 200:
+            raise Exception("API response on eod prices: " + str(response.status_code))
+        
+        data = response.json()
+
+        df = pd.DataFrame(data)
+
+        df["PRICE_OVER_SMA200"] = (df["price"] > df["price"] / df["priceAvg200"]).astype(int)
+        df["SMA50_OVER_SMA200"] = (df["priceAvg50"] > df["priceAvg200"]).astype(int)
+        df["PRICE_25PCT_OVER_LOW"] = (df["price"] > df["yearLow"] * 1.25).astype(int)
+        df["PRICE_25PCT_WITHIN_HIGH"] = (df["price"] > df["yearHigh"] * 0.75).astype(int)
+
+        cols=["PRICE_OVER_SMA200","SMA50_OVER_SMA200","PRICE_25PCT_OVER_LOW","PRICE_25PCT_WITHIN_HIGH"]
+
+        df["SCREENER"] = (df[cols].sum(axis=1)==len(cols)).astype(int)
+
+        return df
+
+    def screen_quotes(self, quotes: pd.DataFrame):
+        
+        #
+
+        return quotes
+
     def add_smadata(self, ticker, startdate, enddate, period):
         url = self.add_query_token(
             f"https://financialmodelingprep.com/api/v3/technical_indicator/1day/{ticker}?type=sma&period={period}&from={startdate}&to={enddate}",
