@@ -68,12 +68,10 @@ class technical:
         chart["SMA200_slope"] = chart["SMA200"].diff()
         chart["SMA200_slope_direction"] = (chart["SMA200_slope"] > 0).astype(int)
 
-        ########
-        price_target = self.fmp.price_target(ticker)
         ### clean up
         chart = chart.sort_values(by="date")
 
-        return chart, price_target
+        return chart
 
     def getextremes(self, data, order):
         localmin = argrelextrema(data["low"].values, np.less, order=order)[0]
@@ -345,9 +343,7 @@ class technical:
         return fig
 
     def get_complete_graph(self, ticker, startdate, enddate):
-        self.data, price_target = self.get_daily_chart(
-            ticker, startdate=startdate, enddate=enddate
-        )
+        self.data = self.get_daily_chart(ticker, startdate=startdate, enddate=enddate)
         localmin, localmax, sorted_extremes = self.getextremes(self.data, 10)
 
         self.fig = self.create_candlestick_graph(self.data)
