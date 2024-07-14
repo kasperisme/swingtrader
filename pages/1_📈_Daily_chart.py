@@ -103,7 +103,7 @@ def get_ticker_data(ticker):
     st.sidebar.markdown("## Minervini trend template")
     col01, col02 = st.sidebar.columns(2)
 
-    trend_template_dict = helper.minervini_trend_template(ticker, today.strftime(strf))
+    trend_template_dict = helper.trend_template_dict
 
     st.session_state["trend_template"].append(trend_template_dict)
 

@@ -381,4 +381,6 @@ class technical:
         )
         self.fig = self.draw_extreme_lines(self.fig, self.data, sorted_extremes)
         self.fig = self.draw_support_lines(self.fig, self.data, localmax, localmin)
+
+        self.minervini_trend_template(ticker, enddate)
         return self.fig
