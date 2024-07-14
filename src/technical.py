@@ -47,6 +47,31 @@ class technical:
 
         return quotes
 
+    def minervini_trend_template(
+        self,
+        ticker,
+        today,
+    ):
+        self.trend_template_dict = {
+            "ticker": ticker,
+            "date": today,
+            "PriceOverSMA150And200": self.data["close"].iloc[-1]
+            > self.data["SMA200"].iloc[-1]
+            and self.data["close"].iloc[-1] > self.data["SMA150"].iloc[-1],
+            "SMA150AboveSMA200": self.data["SMA150"].iloc[-1]
+            > self.data["SMA200"].iloc[-1],
+            "SMA50AboveSMA150And200": self.data["SMA50"].iloc[-1]
+            > self.data["SMA200"].iloc[-1]
+            and self.data["SMA50"].iloc[-1] > self.data["SMA150"].iloc[-1],
+            "SMA200Slope": self.data["SMA200_slope_direction"].tail(20).sum() == 20,
+            "PriceAbove25Percent52WeekLow": min(self.data["low"]) * 1.25
+            <= self.data["close"].iloc[-1],
+            "PriceWithin25Percent52WeekHigh": max(self.data["high"]) * 0.75
+            <= self.data["close"].iloc[-1],
+        }
+
+        return self.trend_template_dict
+
     def get_daily_chart(self, ticker, startdate="2024-01-01", enddate="2024-07-11"):
         chart = self.fmp.daily_chart(ticker, startdate, enddate)
         ####______________________SMA200______________________####

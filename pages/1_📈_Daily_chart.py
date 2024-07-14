@@ -103,23 +103,7 @@ def get_ticker_data(ticker):
     st.sidebar.markdown("## Minervini trend template")
     col01, col02 = st.sidebar.columns(2)
 
-    trend_template_dict = {
-        "ticker": ticker,
-        "date": today.strftime(strf),
-        "PriceOverSMA150And200": helper.data["close"].iloc[-1]
-        > helper.data["SMA200"].iloc[-1]
-        and helper.data["close"].iloc[-1] > helper.data["SMA150"].iloc[-1],
-        "SMA150AboveSMA200": helper.data["SMA150"].iloc[-1]
-        > helper.data["SMA200"].iloc[-1],
-        "SMA50AboveSMA150And200": helper.data["SMA50"].iloc[-1]
-        > helper.data["SMA200"].iloc[-1]
-        and helper.data["SMA50"].iloc[-1] > helper.data["SMA150"].iloc[-1],
-        "SMA200Slope": helper.data["SMA200_slope_direction"].tail(20).sum() == 20,
-        "PriceAbove25Percent52WeekLow": min(helper.data["low"]) * 1.25
-        <= helper.data["close"].iloc[-1],
-        "PriceWithin25Percent52WeekHigh": max(helper.data["high"]) * 0.75
-        <= helper.data["close"].iloc[-1],
-    }
+    trend_template_dict = helper.minervini_trend_template(ticker, today.strftime(strf))
 
     st.session_state["trend_template"].append(trend_template_dict)
 
