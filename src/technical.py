@@ -1,118 +1,66 @@
 import pandas as pd
 import numpy as np
-import requests as r
 from scipy.signal import argrelextrema
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import os
+import time
+from src.fmp import fmp
 
-class helper:
+
+class technical:
     def __init__(self):
         self.APIKEY: str = os.environ["APIKEY"]
         self.data: pd.DataFrame = None
+        self.fmp = fmp()
 
     def get_tickers(self):
-        url = self.add_query_token(
-            "https://financialmodelingprep.com/api/v3/sp500_constituent"
-        )
+        return self.fmp.sp500tickers()
 
-        response = r.get(url)
+    def get_quote_prices(self, tickers: list):
 
-        if response.status_code != 200:
-            raise Exception("API response on tickers: " + str(response.status_code))
+        df = self.fmp.quote_price(tickers)
 
-        data = response.json()
-
-        tickers = pd.DataFrame(data)
-
-        return tickers
-
-    def add_query_token(self, url):
-        if "?" in url:
-            return url + "&apikey=" + self.APIKEY
-        else:
-            return url + "?apikey=" + self.APIKEY
-
-    def get_quote_prices(self,tickers: list):
-
-        joined_tickers = ",".join(tickers)
-
-        url = self.add_query_token(f"https://financialmodelingprep.com/api/v3/quote/{joined_tickers}")
-
-        response = r.get(url)
-
-        if response.status_code != 200:
-            raise Exception("API response on eod prices: " + str(response.status_code))
-        
-        data = response.json()
-
-        df = pd.DataFrame(data)
-
-        df["PRICE_OVER_SMA200"] = (df["price"] > df["price"] / df["priceAvg200"]).astype(int)
+        df["PRICE_OVER_SMA200"] = (
+            df["price"] > df["price"] / df["priceAvg200"]
+        ).astype(int)
         df["SMA50_OVER_SMA200"] = (df["priceAvg50"] > df["priceAvg200"]).astype(int)
         df["PRICE_25PCT_OVER_LOW"] = (df["price"] > df["yearLow"] * 1.25).astype(int)
-        df["PRICE_25PCT_WITHIN_HIGH"] = (df["price"] > df["yearHigh"] * 0.75).astype(int)
+        df["PRICE_25PCT_WITHIN_HIGH"] = (df["price"] > df["yearHigh"] * 0.75).astype(
+            int
+        )
 
-        cols=["PRICE_OVER_SMA200","SMA50_OVER_SMA200","PRICE_25PCT_OVER_LOW","PRICE_25PCT_WITHIN_HIGH"]
+        cols = [
+            "PRICE_OVER_SMA200",
+            "SMA50_OVER_SMA200",
+            "PRICE_25PCT_OVER_LOW",
+            "PRICE_25PCT_WITHIN_HIGH",
+        ]
 
-        df["SCREENER"] = (df[cols].sum(axis=1)==len(cols)).astype(int)
+        df["SCREENER"] = (df[cols].sum(axis=1) == len(cols)).astype(int)
 
         return df
 
     def screen_quotes(self, quotes: pd.DataFrame):
-        
+
         #
 
         return quotes
 
-    def add_smadata(self, ticker, startdate, enddate, period):
-        url = self.add_query_token(
-            f"https://financialmodelingprep.com/api/v3/technical_indicator/1day/{ticker}?type=sma&period={period}&from={startdate}&to={enddate}",
-        )
-
-        response = r.get(url)
-
-        if response.status_code != 200:
-            raise Exception("API response on SMA200: " + str(response.status_code))
-
-        data = response.json()
-
-        sma = pd.DataFrame(data)
-
-        sma["date"] = pd.to_datetime(sma["date"])
-
-        colname = "SMA{}".format(period)
-        sma = sma.rename(columns={"sma": colname})
-        sma = sma[["date", colname]]
-
-        return sma
-
     def get_daily_chart(self, ticker, startdate="2024-01-01", enddate="2024-07-11"):
-        url = self.add_query_token(
-            f"https://financialmodelingprep.com/api/v3/historical-price-full/{ticker}?from={startdate}&to={enddate}",
-        )
-        response = r.get(url)
-
-        if response.status_code != 200:
-            raise Exception("API response on chart: " + str(response.status_code))
-
-        data = response.json()
-
-        chart = pd.DataFrame(data["historical"])
-        chart["date"] = pd.to_datetime(chart["date"])
-        chart = chart.sort_values(by="date", ascending=True).reset_index(drop=True)
+        chart = self.fmp.daily_chart(ticker, startdate, enddate)
         ####______________________SMA200______________________####
-        sma200 = self.add_smadata(ticker, startdate, enddate, 200)
+        sma200 = self.fmp.sma(ticker, 200, startdate, enddate)
 
         chart = chart.merge(sma200, on="date", how="left")
 
         ####______________________SMA150______________________####
-        sma50 = self.add_smadata(ticker, startdate, enddate, 150)
+        sma50 = self.fmp.sma(ticker, 150, startdate, enddate)
 
         chart = chart.merge(sma50, on="date", how="left")
 
         ####______________________SMA50______________________####
-        sma50 = self.add_smadata(ticker, startdate, enddate, 50)
+        sma50 = self.fmp.sma(ticker, 50, startdate, enddate)
 
         chart = chart.merge(sma50, on="date", how="left")
 
@@ -121,18 +69,7 @@ class helper:
         chart["SMA200_slope_direction"] = (chart["SMA200_slope"] > 0).astype(int)
 
         ########
-
-        url = self.add_query_token(
-            f"https://financialmodelingprep.com/api/v4/price-target-consensus?symbol={ticker}",
-        )
-
-        response = r.get(url)
-
-        if response.status_code != 200:
-            raise Exception("API response on pricetarget: " + str(response.status_code))
-
-        price_target = response.json()
-
+        price_target = self.fmp.price_target(ticker)
         ### clean up
         chart = chart.sort_values(by="date")
 
@@ -411,11 +348,10 @@ class helper:
         self.data, price_target = self.get_daily_chart(
             ticker, startdate=startdate, enddate=enddate
         )
-
         localmin, localmax, sorted_extremes = self.getextremes(self.data, 10)
 
         self.fig = self.create_candlestick_graph(self.data)
-        self.fig = self.add_price_target(self.fig, self.data, price_target)
+
         self.fig = self.add_circles(
             self.fig, self.data, localmin, yparam="low", color="red"
         )
@@ -424,5 +360,4 @@ class helper:
         )
         self.fig = self.draw_extreme_lines(self.fig, self.data, sorted_extremes)
         self.fig = self.draw_support_lines(self.fig, self.data, localmax, localmin)
-
         return self.fig

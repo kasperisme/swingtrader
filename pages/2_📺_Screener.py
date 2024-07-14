@@ -1,10 +1,8 @@
-from src import helpers
-from datetime import datetime, timedelta
 import streamlit as st
-import pandas as pd 
+import pandas as pd
 
-if 'trend_template' not in st.session_state:
-    st.session_state["trend_template"]=[]
+if "trend_template" not in st.session_state:
+    st.session_state["trend_template"] = []
 
 df = pd.DataFrame(st.session_state["trend_template"])
 
