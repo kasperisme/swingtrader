@@ -91,7 +91,7 @@ smmap==5.0.1
 soupsieve==2.5
 stack-data==0.6.3
 statsmodels==0.14.0
-streamlit==1.29.0
+streamlit
 tenacity==8.2.3
 termcolor==2.4.0
 threadpoolctl==3.2.0
