@@ -23,82 +23,22 @@ def set_counter(df, index):
     st.session_state["ticker_index"] = index
 
 
-if "ticker_index" not in st.session_state:
-    st.session_state["ticker_index"] = 0
-    st.session_state["trend_template"] = []
-
-st.set_page_config(
-    page_title="Ticker screener",
-    page_icon="📈",
-    layout="wide",
-    initial_sidebar_state="expanded",
-)
-
-st.markdown("# Daily chart - 1 year")
-st.sidebar.header("Plotting Daily chart - 1 year")
-
-df_tickers = helper.get_tickers()
-
-tickers = df_tickers["symbol"].to_list()
-df_quote = helper.get_quote_prices(tickers)
-
-
-df_quote = df_quote.sort_values("symbol")
-
-df_quote["label"] = df_quote["symbol"] + " - " + df_quote["name"]
-
-filter_tickers = st.toggle("Show only stage 2 tickers", on_change=reset_counter)
-
-colselect1, colselect2, colselect3 = st.columns(
-    [0.2, 0.6, 0.2], vertical_alignment="bottom"
-)
-
-if filter_tickers:
-    mask = df_quote["SCREENER"] == 1
-
-    ls_labels = df_quote[mask]["label"].tolist()
-
-    ls_len = len(ls_labels)
-
-    label = colselect2.selectbox(
-        f"Choose a ticker ({ls_len} available):",
-        ls_labels,
-        index=st.session_state["ticker_index"],
-    )
-    st.session_state["ticker_index"] = ls_labels.index(label)
-else:
-    ls_labels = df_quote["label"].tolist()
-
-    ls_len = len(ls_labels)
-
-    label = colselect2.selectbox(
-        f"Choose a ticker ({ls_len} available):",
-        ls_labels,
-        index=st.session_state["ticker_index"],
-    )
-    st.session_state["ticker_index"] = ls_labels.index(label)
-
-
-prevbtn = colselect1.button("Previous ticker", on_click=decrement_counter)
-nextbtn = colselect3.button("Next ticker", on_click=increment_counter)
-
-
 @st.cache_data
-def get_ticker_data(ticker):
+def get_ticker_data(ticker, curr_ticker):
     period = 365
     strf = "%Y-%m-%d"
 
     today = datetime.today()
     startdate = today - timedelta(days=period)
 
-    try:
-        st.plotly_chart(
-            helper.get_complete_graph(
-                ticker, startdate=startdate.strftime(strf), enddate=today.strftime(strf)
-            ),
-        )
-    except:
-        st.error("No data found for the selected ticker")
+    st.plotly_chart(
+        helper.get_complete_graph(
+            ticker,
+            startdate=startdate.strftime(strf),
+            enddate=today.strftime(strf),
+            shares_outstanding=curr_ticker["sharesOutstanding"],
+        ),
+    )
 
     st.sidebar.markdown("## Minervini trend template")
     col01, col02 = st.sidebar.columns(2)
@@ -147,6 +87,13 @@ def get_ticker_data(ticker):
     sector = company["sector"].values[0]
     industry = company["subSector"].values[0]
     founded = company["founded"].values[0]
+    sharesoutstanding = curr_ticker["sharesOutstanding"]
+    turnovertate = round(period / helper.data["relative_volume"].sum(), 2)
+    consensusprice = round(
+        sum(helper.data["relative_volume"] * helper.data["close"])
+        / sum(helper.data["relative_volume"]),
+        2,
+    )
 
     st.sidebar.markdown(
         f"""
@@ -156,10 +103,77 @@ def get_ticker_data(ticker):
         Sector: {sector}\n
         Industry: {industry}\n
         Founded: {founded}\n
+        Stocks outstanding: {sharesoutstanding}\n
+        Turnover rate: {turnovertate} days\n
+        Holders entry level: $ {consensusprice}\n
         """
     )
 
 
+if "ticker_index" not in st.session_state:
+    st.session_state["ticker_index"] = 0
+    st.session_state["trend_template"] = []
+
+st.set_page_config(
+    page_title="Ticker screener",
+    page_icon="📈",
+    layout="wide",
+    initial_sidebar_state="expanded",
+)
+
+st.markdown("# Daily chart - 1 year")
+st.sidebar.header("Plotting Daily chart - 1 year")
+
+df_tickers = helper.get_tickers()
+
+tickers = df_tickers["symbol"].to_list()
+df_quote = helper.get_quote_prices(tickers)
+
+
+df_quote = df_quote.sort_values("symbol")
+
+df_quote["label"] = df_quote["symbol"] + " - " + df_quote["name"]
+
+filter_tickers = st.toggle("Show only stage 2 tickers", on_change=reset_counter)
+
+colselect1, colselect2, colselect3 = st.columns(
+    [0.2, 0.6, 0.2], vertical_alignment="bottom"
+)
+
+
+if filter_tickers:
+    mask = df_quote["SCREENER"] == 1
+
+    ls_labels = df_quote[mask]["label"].tolist()
+
+    ls_len = len(ls_labels)
+
+    label = colselect2.selectbox(
+        f"Choose a ticker ({ls_len} available):",
+        ls_labels,
+        index=st.session_state["ticker_index"],
+    )
+    st.session_state["ticker_index"] = ls_labels.index(label)
+else:
+    ls_labels = df_quote["label"].tolist()
+
+    ls_len = len(ls_labels)
+
+    label = colselect2.selectbox(
+        f"Choose a ticker ({ls_len} available):",
+        ls_labels,
+        index=st.session_state["ticker_index"],
+    )
+    st.session_state["ticker_index"] = ls_labels.index(label)
+
+
+prevbtn = colselect1.button("Previous ticker", on_click=decrement_counter)
+nextbtn = colselect3.button("Next ticker", on_click=increment_counter)
+
+
 if label:
     ticker = label.split(" - ")[0]
-    get_ticker_data(ticker)
+
+    curr_ticker = df_quote[df_quote["symbol"] == ticker].iloc[0]
+
+    get_ticker_data(ticker, curr_ticker)

@@ -12,6 +12,7 @@ class technical:
     def __init__(self):
         self.APIKEY: str = os.environ["APIKEY"]
         self.data: pd.DataFrame = None
+        self.trend_template_dict = None
         self.fmp = fmp()
 
     def get_tickers(self):
@@ -52,6 +53,11 @@ class technical:
         ticker,
         today,
     ):
+
+        latest_trading_day = self.data["date"].iloc[-1]
+
+        mask_remove_latest = self.data["date"] != latest_trading_day
+
         self.trend_template_dict = {
             "ticker": ticker,
             "date": today,
@@ -64,15 +70,23 @@ class technical:
             > self.data["SMA200"].iloc[-1]
             and self.data["SMA50"].iloc[-1] > self.data["SMA150"].iloc[-1],
             "SMA200Slope": self.data["SMA200_slope_direction"].tail(20).sum() == 20,
-            "PriceAbove25Percent52WeekLow": min(self.data["low"]) * 1.25
+            "PriceAbove25Percent52WeekLow": min(self.data[mask_remove_latest]["low"])
+            * 1.25
             <= self.data["close"].iloc[-1],
-            "PriceWithin25Percent52WeekHigh": max(self.data["high"]) * 0.75
-            <= self.data["close"].iloc[-1],
+            "PriceWithin25Percent52WeekHigh": max(
+                self.data[mask_remove_latest]["close"]
+            )
+            * 0.75
+            <= self.data["close"].iloc[-1]
+            and max(self.data[mask_remove_latest]["close"])
+            >= self.data["close"].iloc[-1],
         }
 
         return self.trend_template_dict
 
-    def get_daily_chart(self, ticker, startdate="2024-01-01", enddate="2024-07-11"):
+    def get_daily_chart(
+        self, ticker, startdate="2024-01-01", enddate="2024-07-11", shares_outstanding=1
+    ):
         chart = self.fmp.daily_chart(ticker, startdate, enddate)
         ####______________________SMA200______________________####
         sma200 = self.fmp.sma(ticker, 200, startdate, enddate)
@@ -93,6 +107,20 @@ class technical:
         chart["SMA200_slope"] = chart["SMA200"].diff()
         chart["SMA200_slope_direction"] = (chart["SMA200_slope"] > 0).astype(int)
 
+        ##_____________VOLUME TURNOVER %_____________##
+        chart["relative_volume"] = chart["volume"].astype(int) / shares_outstanding
+
+        ##_____________VWAP______________##
+        period = 12 * 5  # 12 trading weeks
+        chart["price"] = (chart["close"] + chart["high"] + chart["low"]) / 3
+        chart["product_volume_price"] = chart["volume"] * chart["price"]
+
+        chart["product_volume_price_rolling"] = (
+            chart["product_volume_price"].rolling(window=period).sum()
+        )
+        chart["volume_rolling"] = chart["volume"].rolling(window=period).sum()
+
+        chart["vwap"] = chart["product_volume_price_rolling"] / chart["volume_rolling"]
         ### clean up
         chart = chart.sort_values(by="date")
 
@@ -172,10 +200,30 @@ class technical:
         )
 
         fig.add_trace(
-            go.Bar(x=data["date"], y=data["volume"], showlegend=False), row=2, col=1
+            go.Scatter(
+                x=data["date"],
+                y=data["vwap"],
+                mode="lines",
+                line=dict(color="blue", width=1),
+                name="VWAP(60)",
+            ),
+            row=1,
+            col=1,
         )
 
-        fig.update_layout(xaxis_rangeslider_visible=False)
+        fig.add_trace(
+            go.Bar(
+                x=data["date"],
+                y=data["relative_volume"],
+                showlegend=False,
+            ),
+            row=2,
+            col=1,
+        )
+
+        fig.update_layout(
+            xaxis_rangeslider_visible=False, yaxis2={"tickformat": ",.2%"}
+        )
 
         dt_all = pd.date_range(
             start=data["date"].iloc[0], end=data["date"].iloc[-1], freq="1D"
@@ -367,8 +415,14 @@ class technical:
 
         return fig
 
-    def get_complete_graph(self, ticker, startdate, enddate):
-        self.data = self.get_daily_chart(ticker, startdate=startdate, enddate=enddate)
+    def get_complete_graph(self, ticker, startdate, enddate, shares_outstanding=1):
+        self.data = self.get_daily_chart(
+            ticker,
+            startdate=startdate,
+            enddate=enddate,
+            shares_outstanding=shares_outstanding,
+        )
+
         localmin, localmax, sorted_extremes = self.getextremes(self.data, 10)
 
         self.fig = self.create_candlestick_graph(self.data)
@@ -383,4 +437,12 @@ class technical:
         self.fig = self.draw_support_lines(self.fig, self.data, localmax, localmin)
 
         self.minervini_trend_template(ticker, enddate)
+
         return self.fig
+
+    def get_screening(self, ticker, startdate, enddate):
+        self.data = self.get_daily_chart(ticker, startdate=startdate, enddate=enddate)
+
+        self.minervini_trend_template(ticker, enddate)
+
+        return self.data, self.trend_template_dict
