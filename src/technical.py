@@ -4,16 +4,18 @@ from scipy.signal import argrelextrema
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import os
-import time
 from src.fmp import fmp
 
 
 class technical:
     def __init__(self):
         self.APIKEY: str = os.environ["APIKEY"]
+        self.VWAP_PERIOD = 60
+
         self.data: pd.DataFrame = None
         self.trend_template_dict = None
         self.fmp = fmp()
+        self.df_rs = None
 
     def get_tickers(self):
         return self.fmp.sp500tickers()
@@ -42,6 +44,27 @@ class technical:
 
         return df
 
+    def get_change_prices(self, tickers: list):
+        self.df_rs = self.fmp.change_price(tickers)
+
+        cols = [
+            {"period": "3M", "weight": 2},
+            {"period": "6M", "weight": 1},
+            {"period": "1Y", "weight": 1},
+        ]
+
+        self.df_rs["Weighted_score"] = 0
+        for col in cols:
+            period = col["period"]
+            self.df_rs[f"{period}_RANK"] = self.df_rs[f"{period}"].rank(ascending=True)
+            self.df_rs["Weighted_score"] += self.df_rs[f"{period}_RANK"] * col["weight"]
+
+        maxscore = len(self.df_rs["symbol"]) * sum([i["weight"] for i in cols])
+
+        self.df_rs["RS"] = (self.df_rs["Weighted_score"] / maxscore) * 100
+
+        return self.df_rs
+
     def screen_quotes(self, quotes: pd.DataFrame):
 
         #
@@ -57,6 +80,8 @@ class technical:
         latest_trading_day = self.data["date"].iloc[-1]
 
         mask_remove_latest = self.data["date"] != latest_trading_day
+
+        mask_rs = self.df_rs["symbol"] == ticker
 
         self.trend_template_dict = {
             "ticker": ticker,
@@ -80,8 +105,18 @@ class technical:
             <= self.data["close"].iloc[-1]
             and max(self.data[mask_remove_latest]["close"])
             >= self.data["close"].iloc[-1],
+            "RSOver70": self.df_rs[mask_rs]["RS"].iloc[0] > 70,
         }
 
+        self.trend_template_dict["Passed"] = (
+            self.trend_template_dict["PriceOverSMA150And200"]
+            and self.trend_template_dict["SMA150AboveSMA200"]
+            and self.trend_template_dict["SMA50AboveSMA150And200"]
+            and self.trend_template_dict["SMA200Slope"]
+            and self.trend_template_dict["PriceAbove25Percent52WeekLow"]
+            and self.trend_template_dict["PriceWithin25Percent52WeekHigh"]
+            and self.trend_template_dict["RSOver70"]
+        )
         return self.trend_template_dict
 
     def get_daily_chart(
@@ -103,6 +138,11 @@ class technical:
 
         chart = chart.merge(sma50, on="date", how="left")
 
+        ####______________________RSI(63)______________________####
+        rsi = self.fmp.rsi(ticker, 63, startdate, enddate)
+
+        chart = chart.merge(rsi, on="date", how="left")
+
         ####_SLOPE_####
         chart["SMA200_slope"] = chart["SMA200"].diff()
         chart["SMA200_slope_direction"] = (chart["SMA200_slope"] > 0).astype(int)
@@ -111,14 +151,13 @@ class technical:
         chart["relative_volume"] = chart["volume"].astype(int) / shares_outstanding
 
         ##_____________VWAP______________##
-        period = 12 * 5  # 12 trading weeks
         chart["price"] = (chart["close"] + chart["high"] + chart["low"]) / 3
         chart["product_volume_price"] = chart["volume"] * chart["price"]
 
         chart["product_volume_price_rolling"] = (
-            chart["product_volume_price"].rolling(window=period).sum()
+            chart["product_volume_price"].rolling(window=self.VWAP_PERIOD).sum()
         )
-        chart["volume_rolling"] = chart["volume"].rolling(window=period).sum()
+        chart["volume_rolling"] = chart["volume"].rolling(window=self.VWAP_PERIOD).sum()
 
         chart["vwap"] = chart["product_volume_price_rolling"] / chart["volume_rolling"]
         ### clean up
@@ -142,12 +181,12 @@ class technical:
     def create_candlestick_graph(self, data):
         template = "plotly_dark"
         fig = make_subplots(
-            rows=2,
+            rows=3,
             cols=1,
             shared_xaxes=True,
             vertical_spacing=0.03,
             subplot_titles=("OHLC", "Volume"),
-            row_width=[0.2, 0.7],
+            row_width=[0.15, 0.15, 0.7],
         )
 
         fig.update_layout(template=template)
@@ -205,7 +244,7 @@ class technical:
                 y=data["vwap"],
                 mode="lines",
                 line=dict(color="blue", width=1),
-                name="VWAP(60)",
+                name=f"VWAP({self.VWAP_PERIOD})",
             ),
             row=1,
             col=1,
@@ -220,6 +259,19 @@ class technical:
             row=2,
             col=1,
         )
+
+        fig.add_trace(
+            go.Scatter(
+                x=data["date"],
+                y=data["RSI63"],
+                mode="lines",
+                showlegend=False,
+            ),
+            row=3,
+            col=1,
+        )
+
+        fig.add_hline(70, row=3, col=1)
 
         fig.update_layout(
             xaxis_rangeslider_visible=False, yaxis2={"tickformat": ",.2%"}

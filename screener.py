@@ -15,7 +15,7 @@ mask = df_quote["SCREENER"] == 1
 
 ls_symbol = df_quote[mask]["symbol"].tolist()
 
-period = 365
+period = 90
 strf = "%Y-%m-%d"
 
 today = datetime.today()

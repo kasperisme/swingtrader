@@ -1,6 +1,5 @@
 import streamlit as st
 from datetime import datetime, timedelta
-import time
 
 from src import technical
 
@@ -48,8 +47,8 @@ def get_ticker_data(ticker, curr_ticker):
     st.session_state["trend_template"].append(trend_template_dict)
 
     col01.metric(
-        "Price over SMA150 and 200",
-        ("✅" if trend_template_dict["PriceOverSMA150And200"] else "❌"),
+        "All passed",
+        ("✅" if trend_template_dict["Passed"] else "❌"),
     )
 
     col02.metric(
@@ -79,6 +78,18 @@ def get_ticker_data(ticker, curr_ticker):
     col22.metric(
         "Current Price is within 25% of 52 week high",
         ("✅" if trend_template_dict["PriceWithin25Percent52WeekHigh"] else "❌"),
+    )
+
+    col31, col32 = st.sidebar.columns(2)
+
+    col31.metric(
+        "Relative Strength is above 70",
+        ("✅" if trend_template_dict["RSOver70"] else "❌"),
+    )
+
+    col32.metric(
+        "Price over SMA150 and 200",
+        ("✅" if trend_template_dict["PriceOverSMA150And200"] else "❌"),
     )
 
     company = df_tickers[df_tickers["symbol"] == ticker]
@@ -129,6 +140,7 @@ df_tickers = helper.get_tickers()
 tickers = df_tickers["symbol"].to_list()
 df_quote = helper.get_quote_prices(tickers)
 
+df = helper.get_change_prices(tickers)
 
 df_quote = df_quote.sort_values("symbol")
 

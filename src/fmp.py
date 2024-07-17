@@ -52,6 +52,22 @@ class fmp:
 
         return df
 
+    def change_price(self, tickers: list):
+        joined_tickers = ",".join(tickers)
+
+        url = f"https://financialmodelingprep.com/api/v3/stock-price-change/{joined_tickers}"
+
+        response = requests.get(url, params={"apikey": self.APIKEY})
+
+        if response.status_code != 200:
+            raise Exception("API response on eod prices: " + str(response.status_code))
+
+        data = response.json()
+
+        df = pd.DataFrame(data)
+
+        return df
+
     def sma(self, ticker, period, startdate, enddate):
         url = f"https://financialmodelingprep.com/api/v3/technical_indicator/1day/{ticker}?type=sma&period={period}&from={startdate}&to={enddate}"
 
@@ -70,6 +86,25 @@ class fmp:
         sma = sma.rename(columns={"sma": colname})
         sma = sma[["date", colname]]
         return sma
+
+    def rsi(self, ticker, period, startdate, enddate):
+        url = f"https://financialmodelingprep.com/api/v3/technical_indicator/1day/{ticker}?type=rsi&period={period}&from={startdate}&to={enddate}"
+
+        response = requests.get(url, params={"apikey": self.APIKEY})
+
+        if response.status_code != 200:
+            raise Exception("API response on RSI: " + str(response.status_code))
+
+        data = response.json()
+
+        rsi = pd.DataFrame(data)
+
+        rsi["date"] = pd.to_datetime(rsi["date"])
+
+        colname = "RSI{}".format(period)
+        rsi = rsi.rename(columns={"rsi": colname})
+        rsi = rsi[["date", colname]]
+        return rsi
 
     def daily_chart(self, ticker, startdate, enddate):
         url = f"https://financialmodelingprep.com/api/v3/historical-price-full/{ticker}?from={startdate}&to={enddate}"
