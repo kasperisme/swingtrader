@@ -27,14 +27,15 @@ print(" - Total tickers: ", len(ls_symbol))
 print(" - Start date: ", startdate.strftime(strf))
 print(" - End date: ", today.strftime(strf))
 
+tech.get_change_prices(tickers)
+
 for symbol in ls_symbol:
     print("Screening for: ", symbol)
-    try:
-        df_data, trend_template_dict = tech.get_screening(
-            symbol, startdate=startdate.strftime(strf), enddate=today.strftime(strf)
-        )
-    except:
-        print(f"- No data found for the selected ticker: {symbol}")
+    df_data, trend_template_dict = tech.get_screening(
+        symbol,
+        startdate=startdate.strftime(strf),
+        enddate=today.strftime(strf),
+    )
 
     ls_trend_template.append(trend_template_dict)
 

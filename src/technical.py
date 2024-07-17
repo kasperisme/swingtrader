@@ -493,6 +493,7 @@ class technical:
         return self.fig
 
     def get_screening(self, ticker, startdate, enddate):
+
         self.data = self.get_daily_chart(ticker, startdate=startdate, enddate=enddate)
 
         self.minervini_trend_template(ticker, enddate)
