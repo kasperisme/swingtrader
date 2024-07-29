@@ -4,17 +4,33 @@ import pandas as pd
 
 tech = technical.technical()
 
-df_tickers = tech.get_tickers()
+index = "SPX"
+index = "CPH"
+
+# getting all tickers from SPX
+if index == "SPX":
+    df_tickers = tech.get_sp500_tickers()
+else:
+    # getting all tickers from CPH
+    df_tickers = tech.get_exhange_tickers(index)
 
 tickers = df_tickers["symbol"].to_list()
-df_quote = tech.get_quote_prices(tickers)
 
+# get the fast quotes for all tickers
+df_quote = tech.get_quote_prices(tickers)
 df_quote = df_quote.sort_values("symbol")
 
-mask = df_quote["SCREENER"] == 1
+# initializing the RS rating for the tickers
+# constructing it for entire SPX
+df_rs = tech.get_change_prices(tickers)
+df_quote = df_quote.merge(df_rs, on="symbol", how="left")
 
+# construct a mask for the screener
+# only getting the passed tickers
+mask = (df_quote["SCREENER"] == 1) & (df_quote["RS"] >= 70)
 ls_symbol = df_quote[mask]["symbol"].tolist()
 
+# get the last 90 days of data
 period = 90
 strf = "%Y-%m-%d"
 
@@ -23,22 +39,41 @@ startdate = today - timedelta(days=period)
 
 ls_trend_template = []
 print("Screening for Minervini trend template")
-print(" - Total tickers: ", len(ls_symbol))
+print(" - Total tickers: ", len(tickers))
+print(" - Total screened tickers: ", len(ls_symbol))
 print(" - Start date: ", startdate.strftime(strf))
 print(" - End date: ", today.strftime(strf))
 
+# initializing the RS rating for the tickers
+# constructing it for entire SPX
 tech.get_change_prices(tickers)
 
 for symbol in ls_symbol:
     print("Screening for: ", symbol)
-    df_data, trend_template_dict = tech.get_screening(
-        symbol,
-        startdate=startdate.strftime(strf),
-        enddate=today.strftime(strf),
-    )
+    try:
+        df_data, trend_template_dict = tech.get_screening(
+            symbol,
+            startdate=startdate.strftime(strf),
+            enddate=today.strftime(strf),
+        )
 
-    ls_trend_template.append(trend_template_dict)
+        try:
+            trend_template_dict["sector"] = df_tickers[df_tickers["symbol"] == symbol][
+                "sector"
+            ].values[0]
 
+            trend_template_dict["subSector"] = df_tickers[
+                df_tickers["symbol"] == symbol
+            ]["subSector"].values[0]
+        except:
+            trend_template_dict["sector"] = "N/A"
+            trend_template_dict["subSector"] = "N/A"
+
+        ls_trend_template.append(trend_template_dict)
+    except Exception as e:
+        print("Error: ", e)
+
+# save the trend template to excel
 df_trend_template = pd.DataFrame(ls_trend_template).to_excel(
-    "./output/trend_template.xlsx", index=False
+    f"./output/{index}_trend_template.xlsx", index=False
 )

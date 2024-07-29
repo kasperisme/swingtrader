@@ -15,9 +15,12 @@ st.set_page_config(
 )
 
 
+fundamentals = Fundamentals()
+
+
 @st.cache_data
-def get_data():
-    fundamentals = Fundamentals()
+def get_data(sector: str = "Information Technology"):
+    fundamentals.sector = sector
     fundamentals.get_ratios()
     df_ratios = fundamentals.ratio
 
@@ -33,7 +36,11 @@ def get_data():
     return df_ratios, df_scaled_ratios, df_ranked_ratios
 
 
-df_ratios, df_scaled_ratios, df_ranked_ratios = get_data()
+sector = st.selectbox(
+    "Which sector do you want to screen?", fundamentals.sector_options
+)
+
+df_ratios, df_scaled_ratios, df_ranked_ratios = get_data(sector)
 
 df_ratios = df_ratios.reindex(sorted(df_scaled_ratios.columns), axis=1)
 

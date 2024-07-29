@@ -26,6 +26,21 @@ class Fundamentals:
     def __init__(self) -> None:
 
         self.fmp = fmp.fmp()
+
+        self.sector_options = [
+            "Communication Services",
+            "Consumer Discretionary",
+            "Consumer Staples",
+            "Energy",
+            "Financials",
+            "Health Care",
+            "Industrials",
+            "Information Technology",
+            "Materials",
+            "Real Estate",
+            "Utilities",
+        ]
+
         self.sector = "Information Technology"
         self.tickers = []
 

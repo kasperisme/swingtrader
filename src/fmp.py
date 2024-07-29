@@ -36,6 +36,15 @@ class fmp:
 
         return self.__format_ticker_df(r)
 
+    def exchange_tickers(self, exchange: str):
+        url = f"https://financialmodelingprep.com/api/v3/symbol/{exchange}"
+
+        r = requests.get(url, params={"apikey": self.APIKEY})
+        if r.status_code != 200:
+            raise RequestError
+
+        return self.__format_ticker_df(r)
+
     def quote_price(self, tickers: list):
         joined_tickers = ",".join(tickers)
 

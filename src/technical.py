@@ -17,21 +17,22 @@ class technical:
         self.fmp = fmp()
         self.df_rs = None
 
-    def get_tickers(self):
+    def get_sp500_tickers(self):
         return self.fmp.sp500tickers()
+
+    def get_exhange_tickers(self, exchange: str):
+        return self.fmp.exchange_tickers(exchange)
 
     def get_quote_prices(self, tickers: list):
 
         df = self.fmp.quote_price(tickers)
 
-        df["PRICE_OVER_SMA200"] = (
-            df["price"] > df["price"] / df["priceAvg200"]
-        ).astype(int)
+        df["PRICE_OVER_SMA200"] = (df["price"] > df["priceAvg200"]).astype(int)
         df["SMA50_OVER_SMA200"] = (df["priceAvg50"] > df["priceAvg200"]).astype(int)
         df["PRICE_25PCT_OVER_LOW"] = (df["price"] > df["yearLow"] * 1.25).astype(int)
-        df["PRICE_25PCT_WITHIN_HIGH"] = (df["price"] > df["yearHigh"] * 0.75).astype(
-            int
-        )
+        df["PRICE_25PCT_WITHIN_HIGH"] = (
+            (df["price"] > df["yearHigh"] * 0.75) & (df["price"] < df["yearHigh"])
+        ).astype(int)
 
         cols = [
             "PRICE_OVER_SMA200",
@@ -64,12 +65,6 @@ class technical:
         self.df_rs["RS"] = (self.df_rs["Weighted_score"] / maxscore) * 100
 
         return self.df_rs
-
-    def screen_quotes(self, quotes: pd.DataFrame):
-
-        #
-
-        return quotes
 
     def minervini_trend_template(
         self,
