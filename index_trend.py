@@ -182,7 +182,7 @@ fig = make_subplots(
     cols=1,
     shared_xaxes=True,
     vertical_spacing=0.03,
-    subplot_titles=("OHLC", "Slope", "Velocity"),
+    subplot_titles=("OHLC", "OBV", "Velocity"),
     row_width=[0.15, 0.15, 0.7],
     specs=[
         [{"type": "candlestick"}],
