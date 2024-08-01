@@ -1,16 +1,9 @@
 import pandas as pd
-import logging
 import json
 from sklearn.preprocessing import MinMaxScaler
 import src.fmp as fmp
 
-
-logger = logging.getLogger(__name__)
-logger.setLevel(logging.INFO)
-handler = logging.StreamHandler()
-formatter = logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
-handler.setFormatter(formatter)
-logger.addHandler(handler)
+from src.logging import logger
 
 
 class RequestError(Exception):
@@ -27,21 +20,9 @@ class Fundamentals:
 
         self.fmp = fmp.fmp()
 
-        self.sector_options = [
-            "Communication Services",
-            "Consumer Discretionary",
-            "Consumer Staples",
-            "Energy",
-            "Financials",
-            "Health Care",
-            "Industrials",
-            "Information Technology",
-            "Materials",
-            "Real Estate",
-            "Utilities",
-        ]
+        self.sector_options = self.fmp.sectors()
 
-        self.sector = "Information Technology"
+        self.sector = self.sector_options[0]
         self.tickers = []
 
         self.ratio_scaled = None
@@ -77,6 +58,11 @@ class Fundamentals:
         self.ratio = pd.concat(ls_ratio, axis=0)
 
         return self.ratio
+
+    def get_earnings(self, ticker):
+        logger.info(f"Getting earnings for {ticker}")
+        earnings = self.fmp.earnings_calender(ticker)
+        return earnings
 
     def scale_ratios(self):
 

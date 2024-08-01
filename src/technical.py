@@ -6,6 +6,8 @@ from plotly.subplots import make_subplots
 import os
 from src.fmp import fmp
 
+from src.logging import logger
+
 
 class technical:
     def __init__(self):
@@ -25,7 +27,18 @@ class technical:
 
     def get_quote_prices(self, tickers: list):
 
-        df = self.fmp.quote_price(tickers)
+        cutoff = 400
+        if len(tickers) < cutoff:
+            df = self.fmp.quote_price(tickers)
+        else:
+            logger.info("Getting quotes in chunks")
+            col = []
+            for i in range(0, len(tickers), cutoff):
+
+                df = self.fmp.quote_price(tickers[i : i + cutoff])
+                col.append(df)
+
+            df = pd.concat(col, axis=0)
 
         df["PRICE_OVER_SMA200"] = (df["price"] > df["priceAvg200"]).astype(int)
         df["SMA50_OVER_SMA200"] = (df["priceAvg50"] > df["priceAvg200"]).astype(int)
@@ -115,7 +128,11 @@ class technical:
         return self.trend_template_dict
 
     def get_daily_chart(
-        self, ticker, startdate="2024-01-01", enddate="2024-07-11", shares_outstanding=1
+        self,
+        ticker,
+        startdate="2024-01-01",
+        enddate="2024-07-11",
+        shares_outstanding=1,
     ):
         chart = self.fmp.daily_chart(ticker, startdate, enddate)
         ####______________________SMA200______________________####
@@ -134,9 +151,9 @@ class technical:
         chart = chart.merge(sma50, on="date", how="left")
 
         ####______________________RSI(63)______________________####
-        rsi = self.fmp.rsi(ticker, 63, startdate, enddate)
+        # rsi = self.fmp.rsi(ticker, 63, startdate, enddate)
 
-        chart = chart.merge(rsi, on="date", how="left")
+        # chart = chart.merge(rsi, on="date", how="left")
 
         ####_SLOPE_####
         chart["SMA200_slope"] = chart["SMA200"].diff()
@@ -487,10 +504,10 @@ class technical:
 
         return self.fig
 
-    def get_screening(self, ticker, startdate, enddate):
+    def get_screening(self, tickers, startdate, enddate):
 
-        self.data = self.get_daily_chart(ticker, startdate=startdate, enddate=enddate)
+        self.data = self.get_daily_chart(tickers, startdate=startdate, enddate=enddate)
 
-        self.minervini_trend_template(ticker, enddate)
+        self.minervini_trend_template(tickers, enddate)
 
         return self.data, self.trend_template_dict

@@ -1,6 +1,7 @@
 import os
 import requests
 import pandas as pd
+from src.logging import logger
 
 
 class RequestError(Exception):
@@ -26,6 +27,33 @@ class fmp:
         r = requests.get(url, params={"apikey": self.APIKEY})
 
         return self.__format_ticker_df(r)
+
+    def earnings_calender(self, ticker):
+        url = f"https://financialmodelingprep.com/api/v3/historical/earning_calendar/{ticker}"
+
+        r = requests.get(url, params={"apikey": self.APIKEY})
+        if r.status_code != 200:
+            raise RequestError
+
+        return self.__format_ticker_df(r)
+
+    def sectors(self):
+        url = f"https://financialmodelingprep.com/api/v3/sectors-list"
+
+        r = requests.get(url, params={"apikey": self.APIKEY})
+        if r.status_code != 200:
+            raise RequestError
+
+        return r.json()
+
+    def industries(self):
+        url = f"https://financialmodelingprep.com/api/v3/industries-list"
+
+        r = requests.get(url, params={"apikey": self.APIKEY})
+        if r.status_code != 200:
+            raise RequestError
+
+        return r.json()
 
     def sp500tickers(self):
         url = f"https://financialmodelingprep.com/api/v3/sp500_constituent"
@@ -62,20 +90,43 @@ class fmp:
         return df
 
     def change_price(self, tickers: list):
-        joined_tickers = ",".join(tickers)
+        if len(tickers) < 500:
+            joined_tickers = ",".join(tickers)
 
-        url = f"https://financialmodelingprep.com/api/v3/stock-price-change/{joined_tickers}"
+            url = f"https://financialmodelingprep.com/api/v3/stock-price-change/{joined_tickers}"
 
-        response = requests.get(url, params={"apikey": self.APIKEY})
+            response = requests.get(url, params={"apikey": self.APIKEY})
 
-        if response.status_code != 200:
-            raise Exception("API response on eod prices: " + str(response.status_code))
+            if response.status_code != 200:
+                raise Exception(
+                    "API response on eod prices: " + str(response.status_code)
+                )
 
-        data = response.json()
+            data = response.json()
 
-        df = pd.DataFrame(data)
+            df = pd.DataFrame(data)
 
-        return df
+            return df
+        else:
+            logger.info("Getting change in chunks")
+            df = pd.DataFrame()
+            for i in range(0, len(tickers), 500):
+                joined_tickers = ",".join(tickers[i : i + 500])
+
+                url = f"https://financialmodelingprep.com/api/v3/stock-price-change/{joined_tickers}"
+
+                response = requests.get(url, params={"apikey": self.APIKEY})
+
+                if response.status_code != 200:
+                    raise Exception(
+                        "API response on eod prices: " + str(response.status_code)
+                    )
+
+                data = response.json()
+
+                df = pd.concat([df, pd.DataFrame(data)], axis=0)
+
+            return df
 
     def sma(self, ticker, period, startdate, enddate):
         url = f"https://financialmodelingprep.com/api/v3/technical_indicator/1day/{ticker}?type=sma&period={period}&from={startdate}&to={enddate}"

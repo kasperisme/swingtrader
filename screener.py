@@ -1,11 +1,16 @@
-from src import technical
+from src import technical, logging
 from datetime import datetime, timedelta
 import pandas as pd
+import time
 
 tech = technical.technical()
+logger = logging.logger
 
 index = "SPX"
+
+index = "NYSE"
 index = "CPH"
+
 
 # getting all tickers from SPX
 if index == "SPX":
@@ -13,6 +18,7 @@ if index == "SPX":
 else:
     # getting all tickers from CPH
     df_tickers = tech.get_exhange_tickers(index)
+
 
 tickers = df_tickers["symbol"].to_list()
 
@@ -38,18 +44,15 @@ today = datetime.today()
 startdate = today - timedelta(days=period)
 
 ls_trend_template = []
-print("Screening for Minervini trend template")
-print(" - Total tickers: ", len(tickers))
-print(" - Total screened tickers: ", len(ls_symbol))
-print(" - Start date: ", startdate.strftime(strf))
-print(" - End date: ", today.strftime(strf))
 
-# initializing the RS rating for the tickers
-# constructing it for entire SPX
-tech.get_change_prices(tickers)
+logger.info("Screening for Minervini trend template")
+logger.info(" - Total tickers: " + str(len(tickers)))
+logger.info(" - Total screened tickers: " + str(len(ls_symbol)))
+logger.info(" - Start date: " + startdate.strftime(strf))
+logger.info(" - End date: " + today.strftime(strf))
 
 for symbol in ls_symbol:
-    print("Screening for: ", symbol)
+    logger.info("Screening for: " + symbol)
     try:
         df_data, trend_template_dict = tech.get_screening(
             symbol,
@@ -71,8 +74,7 @@ for symbol in ls_symbol:
 
         ls_trend_template.append(trend_template_dict)
     except Exception as e:
-        print("Error: ", e)
-
+        logger.error(f"Error in screening: {symbol}")
 # save the trend template to excel
 df_trend_template = pd.DataFrame(ls_trend_template).to_excel(
     f"./output/{index}_trend_template.xlsx", index=False
