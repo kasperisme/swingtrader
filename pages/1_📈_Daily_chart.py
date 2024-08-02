@@ -1,8 +1,10 @@
 import streamlit as st
 from datetime import datetime, timedelta
+from src import fundamentals
 
 from src import technical
 
+fund = fundamentals.Fundamentals()
 helper = technical.technical()
 
 
@@ -36,6 +38,14 @@ def get_ticker_data(ticker, curr_ticker):
             startdate=startdate.strftime(strf),
             enddate=today.strftime(strf),
             shares_outstanding=curr_ticker["sharesOutstanding"],
+        ),
+    )
+
+    st.plotly_chart(
+        fund.get_earnings_graph(
+            ticker,
+            startdate=startdate,
+            enddate=today,
         ),
     )
 
@@ -135,7 +145,7 @@ st.set_page_config(
 st.markdown("# Daily chart - 1 year")
 st.sidebar.header("Plotting Daily chart - 1 year")
 
-df_tickers = helper.get_tickers()
+df_tickers = helper.get_sp500_tickers()
 
 tickers = df_tickers["symbol"].to_list()
 df_quote = helper.get_quote_prices(tickers)

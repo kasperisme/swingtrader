@@ -6,7 +6,7 @@ import plotly.express as px
 fmp = fmp()
 technical = technical.technical()
 
-df_tickers = technical.get_tickers()
+df_tickers = technical.get_sp500_tickers()
 
 tickers = df_tickers["symbol"].to_list()
 df_quote = technical.get_quote_prices(tickers)

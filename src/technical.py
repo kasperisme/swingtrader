@@ -22,6 +22,9 @@ class technical:
     def get_sp500_tickers(self):
         return self.fmp.sp500tickers()
 
+    def get_indices_tickers(self):
+        return self.fmp.indices_tickers()
+
     def get_exhange_tickers(self, exchange: str):
         return self.fmp.exchange_tickers(exchange)
 
@@ -269,17 +272,6 @@ class technical:
                 showlegend=False,
             ),
             row=2,
-            col=1,
-        )
-
-        fig.add_trace(
-            go.Scatter(
-                x=data["date"],
-                y=data["RSI63"],
-                mode="lines",
-                showlegend=False,
-            ),
-            row=3,
             col=1,
         )
 

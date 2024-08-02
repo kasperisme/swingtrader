@@ -11,10 +11,13 @@ index = "SPX"
 index = "NYSE"
 index = "CPH"
 
+index = "INDICES"
 
 # getting all tickers from SPX
 if index == "SPX":
     df_tickers = tech.get_sp500_tickers()
+elif index == "INDICES":
+    df_tickers = tech.get_indices_tickers()
 else:
     # getting all tickers from CPH
     df_tickers = tech.get_exhange_tickers(index)
@@ -76,6 +79,17 @@ for symbol in ls_symbol:
     except Exception as e:
         logger.error(f"Error in screening: {symbol}")
 # save the trend template to excel
-df_trend_template = pd.DataFrame(ls_trend_template).to_excel(
-    f"./output/{index}_trend_template.xlsx", index=False
+df_trend_template = pd.DataFrame(ls_trend_template)
+
+df_trend_template = df_trend_template.merge(
+    df_tickers, left_on="ticker", right_on="symbol", how="left"
 )
+
+df_rs = df_rs.merge(df_tickers, left_on="symbol", right_on="symbol", how="left")
+
+df_quote = df_quote.merge(df_tickers, left_on="symbol", right_on="symbol", how="left")
+
+with pd.ExcelWriter(f"./output/{index}_trend_template.xlsx") as writer:
+    df_trend_template.to_excel(writer, sheet_name="trend_template")
+    df_rs.to_excel(writer, sheet_name="rs_rating")
+    df_quote.to_excel(writer, sheet_name="quote")
