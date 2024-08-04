@@ -115,11 +115,14 @@ scaled_back = []
 complete_exit = []
 profit_ls = []
 scaled_ls = []
+earlyalarm = []
 
 downscaleddate = None
 downscaleprice = 0
 upscaleddate = None
 upscaleprice = 0
+exitedlow = 0
+lowcount = 0
 
 exitdate = None
 exitprice = 0
@@ -197,11 +200,15 @@ for i, row in df_index.iterrows():
         and exitdate is None
     ):
         if count_trend <= trend_days:
+            earlyalarm.append(
+                {"x": row["date"], "y": row["high"], "count": count_trend}
+            )
             count_trend += 1
         else:
             # starting exit
             exitdate = row["date"]
             exitprice = row["close"]
+            exitedlow = row["low"]
 
             # if complete exit, then scaling is cancelled on date
             scaled_results = {
@@ -240,20 +247,10 @@ for i, row in df_index.iterrows():
         and row["SMA_50"] >= row["SMA_100"]
         and exitdate is not None
     ):
-
         entrydate = row["date"]
         entryprice = row["close"]
         complete_exit.append({"x0": exitdate, "x1": entrydate})
 
-        """
-        print("Exit date:", exitdate)
-        print("Exit price:", exitprice)
-        print("Entry date:", entrydate)
-        print("Entry price:", entryprice)
-        print("Price range:", exitprice - entryprice)
-        print("Change:", ((exitprice - entryprice) / exitprice) * 100)
-        print("____________________")
-        """
         count_trend = 0
         exitdate = None
 
@@ -286,6 +283,8 @@ print(capital / startcapital)
 print(f"{ticker} staying in:")
 print(df_index["close"].iloc[-1] / df_index["close"].iloc[0])
 
+if exitdate is not None:
+    print("Exit market")
 
 # endregion ######## Trading ########
 # region ######## Plotting ########
@@ -411,6 +410,16 @@ for i in scaled_back:
         fillcolor="yellow",
         opacity=0.25,
         layer="below",
+        row=1,
+        col=1,
+    )
+
+for i in earlyalarm:
+    fig.add_annotation(
+        x=i["x"],
+        y=i["y"],
+        text=f"{i['count']+1}",
+        showarrow=True,
         row=1,
         col=1,
     )

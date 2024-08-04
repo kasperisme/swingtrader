@@ -7,27 +7,21 @@ tech = technical.technical()
 logger = logging.logger
 
 
-index = "NYSE"
-index = "CPH"
-index = "INDICES"
-index = "SPX"
 index = ["NYSE", "NASDAQ"]
 
-# getting all tickers from SPX
-if index == "SPX":
-    df_tickers = tech.get_sp500_tickers()
-elif index == "INDICES":
-    df_tickers = tech.get_indices_tickers()
-elif type(index) == list:
-    df_col = []
-    for i in index:
-        df = tech.get_exhange_tickers(i)
-        df_col.append(df)
-    df_tickers = pd.concat(df_col, axis=0)
-else:
-    # getting all tickers from CPH
-    df_tickers = tech.get_exhange_tickers(index)
+df_col = []
+for i in index:
+    df = tech.get_exhange_tickers(i)
+    df_col.append(df)
 
+df_tickers = pd.concat(df_col, axis=0)
+
+df_ibd = pd.read_excel("./input/IBD Data Tables.xlsx", skiprows=11)
+df_ibd = df_ibd.dropna(subset=["RS Rating"])
+
+df_tickers = df_ibd.merge(df_tickers, left_on="Symbol", right_on="symbol", how="left")
+df_tickers["symbol"] = df_tickers["Symbol"]
+df_tickers = df_tickers.dropna(subset=["Symbol"])
 
 tickers = df_tickers["symbol"].to_list()
 
@@ -42,7 +36,7 @@ df_quote = df_quote.merge(df_rs, on="symbol", how="left")
 
 # construct a mask for the screener
 # only getting the passed tickers
-mask = (df_quote["SCREENER"] == 1) & (df_quote["RS"] >= 70)
+mask = df_quote["SCREENER"] == 1
 ls_symbol = df_quote[mask]["symbol"].tolist()
 
 # get the last 90 days of data
@@ -95,7 +89,14 @@ df_rs = df_rs.merge(df_tickers, left_on="symbol", right_on="symbol", how="left")
 
 df_quote = df_quote.merge(df_tickers, left_on="symbol", right_on="symbol", how="left")
 
-with pd.ExcelWriter(f"./output/{index}_trend_template.xlsx") as writer:
+with pd.ExcelWriter(f"./output/IBD_trend_template.xlsx") as writer:
     df_trend_template.to_excel(writer, sheet_name="trend_template")
     df_rs.to_excel(writer, sheet_name="rs_rating")
     df_quote.to_excel(writer, sheet_name="quote")
+
+df_trend_template[df_trend_template["Passed"] == True].to_csv(
+    columns=["symbol"],
+    header=False,
+    index=False,
+    path_or_buf="./output/IBD_trend_template.csv",
+)

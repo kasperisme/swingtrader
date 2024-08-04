@@ -14,15 +14,15 @@ df_tickers = pd.read_excel("./output/SPX_trend_template.xlsx")
 
 
 # df_tickers = df_tickers[df_tickers["Passed"] == True]
-ticker = "NOW"
-df_tickers = df_tickers[df_tickers["ticker"] == ticker]
+ticker = "CMRE"
+tickers = [ticker]
 
 df_earn = pd.DataFrame()
 today = pd.Timestamp.today()
 
 err_ls = []
 df_col = []
-for t in df_tickers["ticker"]:
+for t in tickers:
     # get the fast quotes for all tickers
     try:
         df = fund.get_earnings(t)
