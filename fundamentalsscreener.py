@@ -14,7 +14,7 @@ df_tickers = pd.read_excel("./output/SPX_trend_template.xlsx")
 
 
 # df_tickers = df_tickers[df_tickers["Passed"] == True]
-ticker = "CMRE"
+ticker = "NOVO-B.CO"
 tickers = [ticker]
 
 df_earn = pd.DataFrame()

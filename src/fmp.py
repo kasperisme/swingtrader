@@ -156,6 +156,20 @@ class fmp:
         sma = sma[["date", colname]]
         return sma
 
+    def earningscalltranscript(self, ticker, year, quarter):
+        url = f"https://financialmodelingprep.com/api/v3/earning_call_transcript/{ticker}?year={year}&quarter={quarter}"
+
+        response = requests.get(url, params={"apikey": self.APIKEY})
+
+        if response.status_code != 200:
+            raise Exception(
+                "API response on earnings call transcript: " + str(response.status_code)
+            )
+
+        data = response.json()
+
+        return data
+
     def rsi(self, ticker, period, startdate, enddate):
         url = f"https://financialmodelingprep.com/api/v3/technical_indicator/1day/{ticker}?type=rsi&period={period}&from={startdate}&to={enddate}"
 

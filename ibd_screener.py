@@ -40,7 +40,7 @@ mask = df_quote["SCREENER"] == 1
 ls_symbol = df_quote[mask]["symbol"].tolist()
 
 # get the last 90 days of data
-period = 90
+period = 365
 strf = "%Y-%m-%d"
 
 today = datetime.today()

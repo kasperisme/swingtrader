@@ -109,12 +109,10 @@ class technical:
             "PriceAbove25Percent52WeekLow": min(self.data[mask_remove_latest]["low"])
             * 1.25
             <= self.data["close"].iloc[-1],
-            "PriceWithin25Percent52WeekHigh": max(
-                self.data[mask_remove_latest]["close"]
-            )
+            "PriceWithin25Percent52WeekHigh": max(self.data[mask_remove_latest]["high"])
             * 0.75
             <= self.data["close"].iloc[-1]
-            and max(self.data[mask_remove_latest]["close"])
+            and max(self.data[mask_remove_latest]["high"])
             >= self.data["close"].iloc[-1],
             "RSOver70": self.df_rs[mask_rs]["RS"].iloc[0] > 70,
         }
@@ -126,7 +124,6 @@ class technical:
             and self.trend_template_dict["SMA200Slope"]
             and self.trend_template_dict["PriceAbove25Percent52WeekLow"]
             and self.trend_template_dict["PriceWithin25Percent52WeekHigh"]
-            and self.trend_template_dict["RSOver70"]
         )
         return self.trend_template_dict
 
@@ -471,7 +468,14 @@ class technical:
 
         return fig
 
-    def get_complete_graph(self, ticker, startdate, enddate, shares_outstanding=1):
+    def get_complete_graph(
+        self,
+        ticker,
+        startdate,
+        enddate,
+        shares_outstanding=1,
+        include_trend_template=True,
+    ):
         self.data = self.get_daily_chart(
             ticker,
             startdate=startdate,
@@ -492,7 +496,8 @@ class technical:
         self.fig = self.draw_extreme_lines(self.fig, self.data, sorted_extremes)
         self.fig = self.draw_support_lines(self.fig, self.data, localmax, localmin)
 
-        self.minervini_trend_template(ticker, enddate)
+        if include_trend_template:
+            self.minervini_trend_template(ticker, enddate)
 
         return self.fig
 

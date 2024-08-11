@@ -150,11 +150,10 @@ class Fundamentals:
         mask = df["symbol"] == ticker
 
         fig.add_trace(
-            go.Scatter(
+            go.Bar(
                 x=df[mask]["date"],
                 y=df[mask]["eps"],
                 opacity=0.5,
-                mode="lines",
                 name="EPS",
             ),
             row=1,
@@ -162,10 +161,9 @@ class Fundamentals:
         )
 
         fig.add_trace(
-            go.Scatter(
+            go.Bar(
                 x=df["date"],
                 y=df["epsEstimated"],
-                mode="lines",
                 name="epsEst",
                 opacity=0.5,
             ),
