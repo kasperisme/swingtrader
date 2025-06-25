@@ -1,9 +1,10 @@
-from src import technical, logging
+from src import technical, logging, fundamentals
 from datetime import datetime, timedelta
 import pandas as pd
 import time
 
 tech = technical.technical()
+fund = fundamentals.Fundamentals()
 logger = logging.logger
 
 
@@ -63,6 +64,20 @@ for symbol in ls_symbol:
             enddate=today.strftime(strf),
         )
 
+        df_fund = fund.get_earnings_data(symbol)
+
+        trend_template_dict["increasing_eps"] = (
+            df_fund["eps_sma_direction"].iloc[-1] == 1
+        )
+        trend_template_dict["beat_estimate"] = (
+            df_fund.tail(3)["beat_estimate"].sum() == 3
+        )
+
+        trend_template_dict["PASSED_FUNDAMENTALS"] = (
+            trend_template_dict["increasing_eps"]
+            and trend_template_dict["beat_estimate"]
+        )
+
         try:
             trend_template_dict["sector"] = df_tickers[df_tickers["symbol"] == symbol][
                 "sector"
@@ -98,5 +113,5 @@ df_trend_template[df_trend_template["Passed"] == True].to_csv(
     columns=["symbol"],
     header=False,
     index=False,
-    path_or_buf="./output/IBD_trend_template.csv",
+    path_or_buf="./output/IBD_trend_template.txt",
 )

@@ -204,6 +204,21 @@ class fmp:
         chart = chart.sort_values(by="date", ascending=True).reset_index(drop=True)
         return chart
 
+    def intraday_chart(self, interval, ticker, startdate, enddate):
+        url = f"https://financialmodelingprep.com/api/v3/historical-chart/{interval}/{ticker}?from={startdate}&to={enddate}"
+
+        response = requests.get(url, params={"apikey": self.APIKEY})
+
+        if response.status_code != 200:
+            raise Exception("API response on chart: " + str(response.status_code))
+
+        data = response.json()
+
+        chart = pd.DataFrame(data)
+        chart["date"] = pd.to_datetime(chart["date"])
+        chart = chart.sort_values(by="date", ascending=True).reset_index(drop=True)
+        return chart
+
     def price_target(self, ticker):
         url = f"https://financialmodelingprep.com/api/v4/price-target-consensus?symbol={ticker}"
 

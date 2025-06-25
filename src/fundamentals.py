@@ -94,7 +94,7 @@ class Fundamentals:
 
         return self.ratio_scaled
 
-    def get_earnings_graph(self, ticker, startdate, enddate):
+    def get_earnings_data(self, ticker):
         today = pd.Timestamp.today()
 
         df = self.get_earnings(ticker)
@@ -109,6 +109,7 @@ class Fundamentals:
         df["eps_pct_change"] = df["eps"].diff() / abs(df["eps"].shift(1))
         df["eps_pct_change_annual"] = df["eps"].diff() / abs(df["eps"].shift(4))
         df["eps_sma_gap"] = df["eps"] - df["eps_sma"]
+        df["beat_estimate"] = (df["eps"] >= df["epsEstimated"]).astype(int)
 
         mask = df["eps_sma_slope"] > 0
         df["eps_sma_slope_above"] = 0.0
@@ -130,9 +131,10 @@ class Fundamentals:
             df["revenue"].shift(4)
         )
 
-        mask = df["date"] >= today - pd.Timedelta(days=365 * 5)
+        return df
 
-        df = df[mask]
+    def get_earnings_graph(self, ticker):
+        df = self.get_earnings_data(ticker)
 
         fig = make_subplots(
             rows=3,
