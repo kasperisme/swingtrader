@@ -502,9 +502,16 @@ class technical:
         return self.fig
 
     def get_screening(self, tickers, startdate, enddate):
+        error = False
+        try:
+            self.data = self.get_daily_chart(
+                tickers, startdate=startdate, enddate=enddate
+            )
 
-        self.data = self.get_daily_chart(tickers, startdate=startdate, enddate=enddate)
+            self.minervini_trend_template(tickers, enddate)
+        except:
+            error = True
+            self.data = None
+            self.trend_template_dict = None
 
-        self.minervini_trend_template(tickers, enddate)
-
-        return self.data, self.trend_template_dict
+        return self.data, self.trend_template_dict, error
