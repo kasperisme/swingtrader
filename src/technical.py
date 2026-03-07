@@ -695,15 +695,22 @@ class technical:
     # ------------------------------------------------------------------
 
     def get_screening(self, tickers, startdate, enddate):
+        error = False
+        try:
+            self.data = self.get_daily_chart(
+                tickers, startdate=startdate, enddate=enddate
+            )
+            self.minervini_trend_template(tickers, enddate)
 
-        self.data = self.get_daily_chart(tickers, startdate=startdate, enddate=enddate)
+            # Attach supplementary metrics to the same dict
+            self.trend_template_dict.update(self._compute_volume_metrics(self.data))
+            self.trend_template_dict.update(self._compute_adr(self.data))
+            self.trend_template_dict.update(self._compute_buy_point(self.data))
+            self.trend_template_dict.update(self._compute_rs_line(self.data))
+        except Exception as e:
+            logger.error(f"get_screening failed for {tickers}: {e}")
+            error = True
+            self.data = None
+            self.trend_template_dict = None
 
-        self.minervini_trend_template(tickers, enddate)
-
-        # Attach supplementary metrics to the same dict
-        self.trend_template_dict.update(self._compute_volume_metrics(self.data))
-        self.trend_template_dict.update(self._compute_adr(self.data))
-        self.trend_template_dict.update(self._compute_buy_point(self.data))
-        self.trend_template_dict.update(self._compute_rs_line(self.data))
-
-        return self.data, self.trend_template_dict
+        return self.data, self.trend_template_dict, error

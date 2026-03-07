@@ -1,14 +1,20 @@
-from src import technical, logging, fundamentals
+from src import (
+    technical,
+    logging,
+    fundamentals,
+)
 from datetime import datetime, timedelta
 import pandas as pd
 import time
+import os
 
 tech = technical.technical()
 fund = fundamentals.Fundamentals()
 logger = logging.logger
 
-
+model = "gpt-5"
 index = ["NYSE", "NASDAQ"]
+run_ai = False
 
 df_col = []
 for i in index:
@@ -17,12 +23,8 @@ for i in index:
 
 df_tickers = pd.concat(df_col, axis=0)
 
-df_ibd = pd.read_excel("./input/IBD Data Tables.xlsx", skiprows=11)
-df_ibd = df_ibd.dropna(subset=["RS Rating"])
+df_tickers = df_tickers.dropna(subset=["symbol"])
 
-df_tickers = df_ibd.merge(df_tickers, left_on="Symbol", right_on="symbol", how="left")
-df_tickers["symbol"] = df_tickers["Symbol"]
-df_tickers = df_tickers.dropna(subset=["Symbol"])
 
 tickers = df_tickers["symbol"].to_list()
 
@@ -37,13 +39,14 @@ df_quote = df_quote.merge(df_rs, on="symbol", how="left")
 
 # construct a mask for the screener
 # only getting the passed tickers
-mask = df_quote["SCREENER"] == 1
+mask = (df_quote["SCREENER"] == 1) & (df_quote["RS"] > 80)
 ls_symbol = df_quote[mask]["symbol"].tolist()
 
 # get the last 90 days of data
 period = 365
 strf = "%Y-%m-%d"
 
+now = datetime.now()
 today = datetime.today()
 startdate = today - timedelta(days=period)
 
@@ -58,7 +61,7 @@ logger.info(" - End date: " + today.strftime(strf))
 for symbol in ls_symbol:
     logger.info("Screening for: " + symbol)
     try:
-        df_data, trend_template_dict = tech.get_screening(
+        df_data, trend_template_dict, error = tech.get_screening(
             symbol,
             startdate=startdate.strftime(strf),
             enddate=today.strftime(strf),
@@ -78,6 +81,18 @@ for symbol in ls_symbol:
             and trend_template_dict["beat_estimate"]
         )
 
+        # save the df_data to output dir
+        output_dir = f"./output/screening/{now}/{symbol}"
+        os.makedirs(output_dir, exist_ok=True)
+
+        df_data.to_csv(f"{output_dir}/chart.csv")
+
+        # Convert trend_template_dict to DataFrame for saving
+        df_trend_template_single = pd.DataFrame([trend_template_dict])
+        df_trend_template_single.to_csv(f"{output_dir}/trend_template.csv", index=False)
+
+        df_fund.to_csv(f"{output_dir}/fundamentals.csv")
+
         try:
             trend_template_dict["sector"] = df_tickers[df_tickers["symbol"] == symbol][
                 "sector"
@@ -90,9 +105,42 @@ for symbol in ls_symbol:
             trend_template_dict["sector"] = "N/A"
             trend_template_dict["subSector"] = "N/A"
 
+        # Analyze this individual symbol with OpenAI
+        if run_ai:
+            from src import analyze_files, save_analysis, parse_analysis
+
+            try:
+                logger.info(f"Starting OpenAI analysis for {symbol}...")
+
+                # Create file paths for this symbol
+                file_paths = [
+                    f"{output_dir}/chart.csv",
+                    f"{output_dir}/fundamentals.csv",
+                ]
+
+                # Read the system prompt
+                with open("./input/system_prompt.md", "r") as f:
+                    instructions = f.read()
+
+                analysis = analyze_files(file_paths, instructions, model="gpt-4o")
+
+                # Parse the analysis to extract key information
+                parsed_analysis = parse_analysis(analysis)
+                logger.info(
+                    f"Analysis for {symbol}: {parsed_analysis.get('primary_pattern', 'Unknown')} pattern with {parsed_analysis.get('pattern_confidence', 0):.2f} confidence"
+                )
+
+                # Save individual symbol analysis
+                symbol_analysis_file = f"{output_dir}/openai_analysis.json"
+                save_analysis(analysis, symbol_analysis_file)
+                logger.info(f"OpenAI analysis completed for {symbol}")
+
+            except Exception as e:
+                logger.warning(f"OpenAI analysis failed for {symbol}: {e}")
+
         ls_trend_template.append(trend_template_dict)
     except Exception as e:
-        logger.error(f"Error in screening: {symbol}")
+        logger.error(f"Error in screening: {symbol} {e}")
 # save the trend template to excel
 df_trend_template = pd.DataFrame(ls_trend_template)
 

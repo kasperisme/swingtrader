@@ -5,3 +5,4 @@ requests
 scikit-learn
 openpyxl
 python-dotenv
+openai

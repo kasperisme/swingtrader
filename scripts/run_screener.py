@@ -162,21 +162,27 @@ def screen(ibd_file_path: str, lookback_days: int) -> dict:
         logger.info(f"Screening {symbol}…")
         try:
             # ---- Minervini trend template + volume + RS line + buy point ----
-            _df, ttd = tech.get_screening(
+            _df, ttd, screen_error = tech.get_screening(
                 symbol,
                 startdate=startdate.strftime(strf),
                 enddate=today.strftime(strf),
             )
+
+            if screen_error or ttd is None:
+                errors.append({"symbol": symbol, "error": "screening data fetch failed"})
+                continue
 
             if not ttd["Passed"]:
                 logger.info(f"  {symbol} failed Minervini template")
                 continue
 
             # ---- Sector / sub-sector ----
+            # exchange_tickers now uses /stable/company-screener which returns
+            # "industry" rather than "subSector" — fall back gracefully.
             try:
                 row = df_tickers[df_tickers["symbol"] == symbol].iloc[0]
                 ttd["sector"] = row.get("sector", "N/A")
-                ttd["subSector"] = row.get("subSector", "N/A")
+                ttd["subSector"] = row.get("subSector", row.get("industry", "N/A"))
             except Exception:
                 ttd["sector"] = "N/A"
                 ttd["subSector"] = "N/A"

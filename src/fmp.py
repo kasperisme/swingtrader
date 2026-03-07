@@ -74,7 +74,7 @@ class fmp:
         return self.__format_ticker_df(r)
 
     def exchange_tickers(self, exchange: str):
-        url = f"https://financialmodelingprep.com/api/v3/symbol/{exchange}"
+        url = f"https://financialmodelingprep.com/stable/company-screener?exchange={exchange}&isEtf=false&isFund=false&isActivelyTrading=true&limit=10000"
 
         r = requests.get(url, params={"apikey": self.APIKEY})
         if r.status_code != 200:
