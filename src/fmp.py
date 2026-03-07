@@ -219,6 +219,40 @@ class fmp:
         chart = chart.sort_values(by="date", ascending=True).reset_index(drop=True)
         return chart
 
+    def stock_screener(
+        self,
+        price_min: float = 15.0,
+        volume_min: int = 300_000,
+        country: str = "US",
+        exchange: str = "nyse,nasdaq",
+        limit: int = 3000,
+    ) -> pd.DataFrame:
+        """
+        FMP stock screener — returns all US-listed stocks that pass basic
+        liquidity and price filters in a single API call.
+
+        Used as an upstream filter before the per-ticker Minervini loop so
+        that tickers that can't possibly pass are never fetched individually.
+
+        Parameters deliberately set slightly looser than our hard thresholds
+        (price_min=15, volume_min=300k vs our 400k) to avoid edge cases where
+        FMP's volume metric differs slightly from the quote's avgVolume.
+        """
+        url = "https://financialmodelingprep.com/api/v3/stock-screener"
+        params = {
+            "apikey": self.APIKEY,
+            "priceMoreThan": price_min,
+            "volumeMoreThan": volume_min,
+            "country": country,
+            "exchange": exchange,
+            "isActivelyTrading": "true",
+            "limit": limit,
+        }
+        r = requests.get(url, params=params)
+        if r.status_code != 200:
+            raise RequestError(r.content)
+        return pd.DataFrame(r.json())
+
     def sector_performance(self):
         """Current daily performance % for each S&P sector."""
         url = "https://financialmodelingprep.com/api/v3/sectors-performance"

@@ -83,7 +83,25 @@ def screen(ibd_file_path: str, lookback_days: int) -> dict:
         sys.exit(0)
 
     # ==================================================================
-    # STEP 2-4 – Build ticker universe, apply liquidity + pre-screener
+    # STEP 2 – FMP screener: single call that drops illiquid / foreign /
+    #           inactive names before we touch the IBD list at all.
+    #           Slightly looser thresholds than our hard limits to avoid
+    #           edge cases where FMP's volume field differs from avgVolume.
+    # ==================================================================
+    try:
+        logger.info("Running FMP stock screener pre-filter…")
+        df_fmp_screen = tech.fmp.stock_screener(
+            price_min=MIN_PRICE - 1,
+            volume_min=int(MIN_AVG_VOL * 0.75),
+        )
+        fmp_allowed = set(df_fmp_screen["symbol"].tolist())
+        logger.info(f"FMP screener returned {len(fmp_allowed)} symbols")
+    except Exception as e:
+        logger.warning(f"FMP screener failed ({e}) — continuing without it")
+        fmp_allowed = None  # fall back: don't filter on this step
+
+    # ==================================================================
+    # STEP 3-5 – Build ticker universe, apply liquidity + pre-screener
     # ==================================================================
     try:
         df_col = [tech.get_exhange_tickers(i) for i in ["NYSE", "NASDAQ"]]
@@ -99,7 +117,13 @@ def screen(ibd_file_path: str, lookback_days: int) -> dict:
         df_tickers = df_tickers.dropna(subset=["Symbol"])
         tickers = df_tickers["symbol"].tolist()
 
-        # Batch quote fetch includes price and avgVolume — use for liquidity gate
+        # Intersect IBD universe with FMP screener result — reduces quote
+        # chunk calls before the slow per-ticker loop even starts.
+        if fmp_allowed is not None:
+            tickers = [t for t in tickers if t in fmp_allowed]
+            logger.info(f"After FMP screener intersection: {len(tickers)} tickers")
+
+        # Batch quote fetch — confirms price/volume and computes SMA flags
         df_quote = tech.get_quote_prices(tickers)
         df_quote = df_quote.sort_values("symbol")
 
@@ -110,7 +134,7 @@ def screen(ibd_file_path: str, lookback_days: int) -> dict:
         ]
         tickers_liquid = df_quote["symbol"].tolist()
         logger.info(
-            f"IBD universe: {len(tickers)} | after liquidity: {len(tickers_liquid)}"
+            f"IBD universe: {len(df_tickers)} | after FMP+liquidity: {len(tickers_liquid)}"
         )
 
         df_rs = tech.get_change_prices(tickers_liquid)

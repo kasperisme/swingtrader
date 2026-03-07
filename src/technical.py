@@ -137,25 +137,11 @@ class technical:
         shares_outstanding=1,
     ):
         chart = self.fmp.daily_chart(ticker, startdate, enddate)
-        ####______________________SMA200______________________####
-        sma200 = self.fmp.sma(ticker, 200, startdate, enddate)
 
-        chart = chart.merge(sma200, on="date", how="left")
-
-        ####______________________SMA150______________________####
-        sma50 = self.fmp.sma(ticker, 150, startdate, enddate)
-
-        chart = chart.merge(sma50, on="date", how="left")
-
-        ####______________________SMA50______________________####
-        sma50 = self.fmp.sma(ticker, 50, startdate, enddate)
-
-        chart = chart.merge(sma50, on="date", how="left")
-
-        ####______________________RSI(63)______________________####
-        # rsi = self.fmp.rsi(ticker, 63, startdate, enddate)
-
-        # chart = chart.merge(rsi, on="date", how="left")
+        # SMAs computed locally — replaces 3 separate API calls per ticker
+        chart["SMA200"] = chart["close"].rolling(window=200).mean()
+        chart["SMA150"] = chart["close"].rolling(window=150).mean()
+        chart["SMA50"] = chart["close"].rolling(window=50).mean()
 
         ####_SLOPE_####
         chart["SMA200_slope"] = chart["SMA200"].diff()
