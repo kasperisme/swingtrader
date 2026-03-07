@@ -219,6 +219,34 @@ class fmp:
         chart = chart.sort_values(by="date", ascending=True).reset_index(drop=True)
         return chart
 
+    def sector_performance(self):
+        """Current daily performance % for each S&P sector."""
+        url = "https://financialmodelingprep.com/api/v3/sectors-performance"
+        r = requests.get(url, params={"apikey": self.APIKEY})
+        if r.status_code != 200:
+            raise RequestError(r.content)
+        return r.json()
+
+    def shares_float(self, ticker):
+        """Free float and shares outstanding for a ticker."""
+        url = "https://financialmodelingprep.com/api/v3/shares-float"
+        r = requests.get(url, params={"apikey": self.APIKEY, "symbol": ticker})
+        if r.status_code != 200:
+            raise RequestError(r.content)
+        return self.__format_ticker_df(r)
+
+    def institutional_ownership_summary(self, ticker):
+        """
+        Aggregate institutional ownership snapshot (number of holders,
+        total invested, ownership %) from 13-F filings.
+        Uses the stable positions-summary endpoint.
+        """
+        url = "https://financialmodelingprep.com/stable/positions-summary"
+        r = requests.get(url, params={"apikey": self.APIKEY, "symbol": ticker})
+        if r.status_code != 200:
+            raise RequestError(r.content)
+        return self.__format_ticker_df(r)
+
     def price_target(self, ticker):
         url = f"https://financialmodelingprep.com/api/v4/price-target-consensus?symbol={ticker}"
 

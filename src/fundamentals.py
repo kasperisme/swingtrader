@@ -131,7 +131,137 @@ class Fundamentals:
             df["revenue"].shift(4)
         )
 
+        # ------------------------------------------------------------------
+        # O'Neil / Minervini growth metrics
+        # ------------------------------------------------------------------
+
+        # Year-over-year growth: current quarter vs same quarter 12 months ago
+        # Uses shift(4) — same fiscal quarter in the prior year
+        df["eps_yoy_growth"] = (
+            (df["eps"] - df["eps"].shift(4)) / df["eps"].shift(4).abs() * 100
+        )
+        df["rev_yoy_growth"] = (
+            (df["revenue"] - df["revenue"].shift(4))
+            / df["revenue"].shift(4).abs()
+            * 100
+        )
+
+        # EPS acceleration: current quarter YoY growth > prior quarter YoY growth
+        df["eps_accelerating"] = df["eps_yoy_growth"] > df["eps_yoy_growth"].shift(1)
+
+        # Trailing-twelve-month EPS (sum of last 4 quarters) for annual growth check
+        df["eps_ttm"] = df["eps"].rolling(window=4).sum()
+        df["eps_ttm_yoy"] = (
+            (df["eps_ttm"] - df["eps_ttm"].shift(4))
+            / df["eps_ttm"].shift(4).abs()
+            * 100
+        )
+
         return df
+
+    def get_fundamental_flags(self, ticker):
+        """
+        Returns a flat dict of fundamental screening flags aligned with
+        the O'Neil (CAN SLIM) and Minervini SEPA criteria.
+
+        Criteria applied:
+        - EPS YoY growth ≥ 25 % (O'Neil current-quarter minimum)
+        - Revenue YoY growth ≥ 20 % (O'Neil sales growth requirement)
+        - Beat consensus EPS estimate in last 3 quarters
+        - EPS accelerating quarter-over-quarter
+        - 3 consecutive years of TTM EPS growth ≥ 25 % (CAN SLIM A criterion)
+
+        Returns None if insufficient data.
+        """
+        try:
+            df = self.get_earnings_data(ticker)
+        except Exception:
+            return None
+
+        if len(df) < 5:
+            return None
+
+        latest = df.iloc[-1]
+
+        eps_yoy = float(latest["eps_yoy_growth"]) if pd.notna(latest["eps_yoy_growth"]) else None
+        rev_yoy = float(latest["rev_yoy_growth"]) if pd.notna(latest["rev_yoy_growth"]) else None
+        eps_accel = bool(latest["eps_accelerating"]) if pd.notna(latest["eps_accelerating"]) else None
+
+        # 3 consecutive years of ≥ 25 % TTM EPS growth
+        annual_growth_series = (
+            df.dropna(subset=["eps_ttm_yoy"])
+            .tail(3)["eps_ttm_yoy"]
+            .tolist()
+        )
+        three_yr_25pct = (
+            len(annual_growth_series) >= 3
+            and all(g >= 25 for g in annual_growth_series)
+        )
+
+        beat_last_3 = bool(df.tail(3)["beat_estimate"].sum() == 3)
+        eps_direction = bool(latest["eps_sma_direction"] == 1)
+
+        passes_oneil = bool(
+            eps_yoy is not None and eps_yoy >= 25
+            and rev_yoy is not None and rev_yoy >= 20
+            and beat_last_3
+        )
+
+        return {
+            # Carry-over from original checks
+            "increasing_eps": eps_direction,
+            "beat_estimate": beat_last_3,
+            # Growth rates
+            "eps_growth_yoy": round(eps_yoy, 1) if eps_yoy is not None else None,
+            "rev_growth_yoy": round(rev_yoy, 1) if rev_yoy is not None else None,
+            # Acceleration
+            "eps_accelerating": eps_accel,
+            # 3-year annual criterion
+            "three_yr_annual_eps_25pct": three_yr_25pct,
+            # Composite O'Neil pass
+            "passes_oneil_fundamentals": passes_oneil,
+        }
+
+    def get_sector_leadership(self, sector):
+        """
+        Checks whether the given sector is in the top 40 % of S&P sectors
+        by today's performance — O'Neil's sector-leadership filter.
+
+        Returns dict with sector_rank, total_sectors, sector_pct_change,
+        sector_is_leader.  All values are None if the lookup fails.
+        """
+        _null = {"sector_rank": None, "total_sectors": None,
+                 "sector_pct_change": None, "sector_is_leader": None}
+        try:
+            raw = self.fmp.sector_performance()
+            df = pd.DataFrame(raw)
+
+            # changesPercentage may arrive as "1.23%" string or as a float
+            def _parse_pct(v):
+                if isinstance(v, str):
+                    return float(v.replace("%", "").strip())
+                return float(v)
+
+            df["pct"] = df["changesPercentage"].apply(_parse_pct)
+            df = df.sort_values("pct", ascending=False).reset_index(drop=True)
+            total = len(df)
+
+            # Fuzzy match — FMP sector names can differ slightly from profile data
+            match = df[df["sector"].str.lower().str.contains(
+                sector.lower().split()[0], na=False
+            )]
+            if match.empty:
+                return _null
+
+            rank = int(match.index[0] + 1)
+            return {
+                "sector_rank": rank,
+                "total_sectors": total,
+                "sector_pct_change": round(float(match["pct"].iloc[0]), 2),
+                "sector_is_leader": bool(rank / total <= 0.40),
+            }
+        except Exception:
+            return _null
 
     def get_earnings_graph(self, ticker):
         df = self.get_earnings_data(ticker)
