@@ -16,8 +16,7 @@
             }
           ]
         }
-      },
-      "notes": "Mon–Fri at 22:00 UTC (5 PM EST). Adjust to your timezone."
+      }
     },
 
     {
@@ -29,7 +28,45 @@
       "parameters": {
         "command": "cd /path/to/swingtrader && python scripts/run_screener.py --ibd-file \"./input/IBD Data Tables.xlsx\" --lookback-days 365"
       },
-      "notes": "Update the cd path to match where the project lives on your server. All log output goes to stderr; only the JSON result goes to stdout."
+      "notes": "Update the cd path to match your server. stdout = JSON result, stderr = logs."
+    },
+
+    {
+      "id": "node-check-exit",
+      "name": "Script succeeded?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [440, 300],
+      "parameters": {
+        "conditions": {
+          "conditions": [
+            {
+              "id": "cond-exit",
+              "leftValue": "={{ $json.exitCode }}",
+              "rightValue": 0,
+              "operator": { "type": "number", "operation": "equals" }
+            }
+          ],
+          "combinator": "and"
+        }
+      }
+    },
+
+    {
+      "id": "node-slack-script-error",
+      "name": "Alert: Script crashed",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.2,
+      "position": [660, 460],
+      "parameters": {
+        "resource": "message",
+        "operation": "post",
+        "channel": "#stock-screener",
+        "text": ":red_circle: *IBD Screener failed to run* (exit code {{ $('Run Screener Script').item.json.exitCode }})\n\n*stderr:*\n```{{ $('Run Screener Script').item.json.stderr.slice(0, 1500) }}```"
+      },
+      "credentials": {
+        "slackApi": { "id": "REPLACE_WITH_SLACK_CREDENTIAL_ID", "name": "Slack account" }
+      }
     },
 
     {
@@ -37,12 +74,49 @@
       "name": "Parse JSON output",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [440, 300],
+      "position": [660, 200],
       "parameters": {
         "mode": "runOnceForAllItems",
-        "jsCode": "const stdout = $input.first().json.stdout;\nreturn [{ json: JSON.parse(stdout) }];"
+        "jsCode": "const item = $input.first().json;\nconst stdout = (item.stdout || '').trim();\n\nif (!stdout) {\n  return [{ json: {\n    _parseError: true,\n    message: 'Script produced no stdout output',\n    stderr: item.stderr || ''\n  }}];\n}\n\ntry {\n  const parsed = JSON.parse(stdout);\n  // Script itself reported a fatal error\n  if (parsed.fatal) {\n    return [{ json: {\n      _parseError: true,\n      message: parsed.message || 'Fatal error in screener',\n      stderr: parsed.traceback || ''\n    }}];\n  }\n  return [{ json: parsed }];\n} catch(e) {\n  return [{ json: {\n    _parseError: true,\n    message: `JSON parse failed: ${e.message}`,\n    stderr: stdout.slice(0, 500)\n  }}];\n}"
+      }
+    },
+
+    {
+      "id": "node-check-parse",
+      "name": "Output parsed OK?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [880, 200],
+      "parameters": {
+        "conditions": {
+          "conditions": [
+            {
+              "id": "cond-parse",
+              "leftValue": "={{ $json._parseError }}",
+              "rightValue": true,
+              "operator": { "type": "boolean", "operation": "notEquals" }
+            }
+          ],
+          "combinator": "and"
+        }
+      }
+    },
+
+    {
+      "id": "node-slack-parse-error",
+      "name": "Alert: Bad output",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.2,
+      "position": [1100, 360],
+      "parameters": {
+        "resource": "message",
+        "operation": "post",
+        "channel": "#stock-screener",
+        "text": ":red_circle: *IBD Screener – could not read results*\n{{ $json.message }}\n\n```{{ $json.stderr.slice(0, 1000) }}```"
       },
-      "notes": "Execute Command returns { stdout, stderr, exitCode }. This extracts and parses the JSON the script printed."
+      "credentials": {
+        "slackApi": { "id": "REPLACE_WITH_SLACK_CREDENTIAL_ID", "name": "Slack account" }
+      }
     },
 
     {
@@ -50,18 +124,15 @@
       "name": "Any stocks passed?",
       "type": "n8n-nodes-base.if",
       "typeVersion": 2,
-      "position": [660, 300],
+      "position": [1100, 160],
       "parameters": {
         "conditions": {
           "conditions": [
             {
-              "id": "cond-1",
+              "id": "cond-passed",
               "leftValue": "={{ $json.passed_count }}",
               "rightValue": 0,
-              "operator": {
-                "type": "number",
-                "operation": "gt"
-              }
+              "operator": { "type": "number", "operation": "gt" }
             }
           ],
           "combinator": "and"
@@ -74,10 +145,10 @@
       "name": "Format Slack Message",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [880, 160],
+      "position": [1320, 80],
       "parameters": {
         "mode": "runOnceForAllItems",
-        "jsCode": "const data = $input.first().json;\n\nconst header = `*IBD Minervini Screener – ${data.run_date}*\\n` +\n  `_${data.total_ibd_tickers} IBD tickers → ` +\n  `${data.pre_screened_count} pre-screened → ` +\n  `*${data.passed_count} passed all criteria*_`;\n\nconst rows = data.passed_stocks.map(s =>\n  `• *${s.symbol}*  ${s.sector ?? 'N/A'} / ${s.subSector ?? 'N/A'}` +\n  `  |  EPS↑ ${s.increasing_eps ? '✅' : '❌'}` +\n  `  Beat 3Q ${s.beat_estimate ? '✅' : '❌'}`\n).join('\\n');\n\nconst blocks = [\n  { type: 'section', text: { type: 'mrkdwn', text: header } },\n  { type: 'divider' },\n  { type: 'section', text: { type: 'mrkdwn', text: rows } }\n];\n\nreturn [{ json: { blocks: JSON.stringify(blocks), text: header } }];"
+        "jsCode": "const data = $input.first().json;\n\nconst errorWarn = data.error_count > 0\n  ? `\\n:warning: _${data.error_count} ticker(s) could not be screened due to errors_`\n  : '';\n\nconst header =\n  `*IBD Minervini Screener – ${data.run_date}*${errorWarn}\\n` +\n  `_${data.total_ibd_tickers} IBD tickers → ` +\n  `${data.pre_screened_count} pre-screened → ` +\n  `*${data.passed_count} passed all criteria*_`;\n\nconst rows = data.passed_stocks.map(s =>\n  `• *${s.symbol}*  ${s.sector ?? 'N/A'} / ${s.subSector ?? 'N/A'}` +\n  `  |  EPS↑ ${s.increasing_eps ? '✅' : '❌'}` +\n  `  Beat 3Q ${s.beat_estimate ? '✅' : '❌'}`\n).join('\\n');\n\nconst blocks = [\n  { type: 'section', text: { type: 'mrkdwn', text: header } },\n  { type: 'divider' },\n  { type: 'section', text: { type: 'mrkdwn', text: rows } }\n];\n\nreturn [{ json: { blocks: JSON.stringify(blocks), text: header } }];"
       }
     },
 
@@ -86,7 +157,7 @@
       "name": "Post Results to Slack",
       "type": "n8n-nodes-base.slack",
       "typeVersion": 2.2,
-      "position": [1100, 160],
+      "position": [1540, 80],
       "parameters": {
         "resource": "message",
         "operation": "post",
@@ -96,10 +167,7 @@
         "otherOptions": { "unfurl_links": false }
       },
       "credentials": {
-        "slackApi": {
-          "id": "REPLACE_WITH_SLACK_CREDENTIAL_ID",
-          "name": "Slack account"
-        }
+        "slackApi": { "id": "REPLACE_WITH_SLACK_CREDENTIAL_ID", "name": "Slack account" }
       }
     },
 
@@ -108,18 +176,15 @@
       "name": "Post 'Nothing Today' to Slack",
       "type": "n8n-nodes-base.slack",
       "typeVersion": 2.2,
-      "position": [880, 440],
+      "position": [1320, 260],
       "parameters": {
         "resource": "message",
         "operation": "post",
         "channel": "#stock-screener",
-        "text": "={{ '*IBD Screener – ' + $('Parse JSON output').item.json.run_date + '*\\nNo stocks passed all criteria today.' }}"
+        "text": "={{ '*IBD Screener – ' + $('Parse JSON output').item.json.run_date + '*\\nNo stocks passed all criteria today.' + ($('Parse JSON output').item.json.error_count > 0 ? '\\n:warning: ' + $('Parse JSON output').item.json.error_count + ' ticker(s) skipped due to errors.' : '') }}"
       },
       "credentials": {
-        "slackApi": {
-          "id": "REPLACE_WITH_SLACK_CREDENTIAL_ID",
-          "name": "Slack account"
-        }
+        "slackApi": { "id": "REPLACE_WITH_SLACK_CREDENTIAL_ID", "name": "Slack account" }
       }
     },
 
@@ -128,12 +193,11 @@
       "name": "Split passed_stocks into rows",
       "type": "n8n-nodes-base.splitOut",
       "typeVersion": 1,
-      "position": [1320, 160],
+      "position": [1760, 80],
       "parameters": {
         "fieldToSplitOut": "passed_stocks",
         "options": {}
-      },
-      "notes": "One item per passing stock, ready to append to Google Sheets."
+      }
     },
 
     {
@@ -141,24 +205,24 @@
       "name": "Add run_date to each row",
       "type": "n8n-nodes-base.set",
       "typeVersion": 3.4,
-      "position": [1540, 160],
+      "position": [1980, 80],
       "parameters": {
         "mode": "manual",
         "fields": {
           "values": [
-            { "name": "run_date",                    "value": "={{ $('Parse JSON output').item.json.run_date }}" },
-            { "name": "symbol",                      "value": "={{ $json.symbol }}" },
-            { "name": "sector",                      "value": "={{ $json.sector }}" },
-            { "name": "subSector",                   "value": "={{ $json.subSector }}" },
-            { "name": "increasing_eps",              "value": "={{ $json.increasing_eps }}" },
-            { "name": "beat_estimate",               "value": "={{ $json.beat_estimate }}" },
-            { "name": "PriceOverSMA150And200",       "value": "={{ $json.PriceOverSMA150And200 }}" },
-            { "name": "SMA150AboveSMA200",           "value": "={{ $json.SMA150AboveSMA200 }}" },
-            { "name": "SMA50AboveSMA150And200",      "value": "={{ $json.SMA50AboveSMA150And200 }}" },
-            { "name": "SMA200Slope",                 "value": "={{ $json.SMA200Slope }}" },
-            { "name": "PriceAbove25Percent52WeekLow","value": "={{ $json.PriceAbove25Percent52WeekLow }}" },
-            { "name": "PriceWithin25Percent52WeekHigh","value":"={{ $json.PriceWithin25Percent52WeekHigh }}" },
-            { "name": "RSOver70",                    "value": "={{ $json.RSOver70 }}" }
+            { "name": "run_date",                      "value": "={{ $('Parse JSON output').item.json.run_date }}" },
+            { "name": "symbol",                        "value": "={{ $json.symbol }}" },
+            { "name": "sector",                        "value": "={{ $json.sector }}" },
+            { "name": "subSector",                     "value": "={{ $json.subSector }}" },
+            { "name": "increasing_eps",                "value": "={{ $json.increasing_eps }}" },
+            { "name": "beat_estimate",                 "value": "={{ $json.beat_estimate }}" },
+            { "name": "PriceOverSMA150And200",         "value": "={{ $json.PriceOverSMA150And200 }}" },
+            { "name": "SMA150AboveSMA200",             "value": "={{ $json.SMA150AboveSMA200 }}" },
+            { "name": "SMA50AboveSMA150And200",        "value": "={{ $json.SMA50AboveSMA150And200 }}" },
+            { "name": "SMA200Slope",                   "value": "={{ $json.SMA200Slope }}" },
+            { "name": "PriceAbove25Percent52WeekLow",  "value": "={{ $json.PriceAbove25Percent52WeekLow }}" },
+            { "name": "PriceWithin25Percent52WeekHigh","value": "={{ $json.PriceWithin25Percent52WeekHigh }}" },
+            { "name": "RSOver70",                      "value": "={{ $json.RSOver70 }}" }
           ]
         }
       }
@@ -169,7 +233,10 @@
       "name": "Append to Google Sheets",
       "type": "n8n-nodes-base.googleSheets",
       "typeVersion": 4.5,
-      "position": [1760, 160],
+      "position": [2200, 80],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000,
       "parameters": {
         "resource": "spreadsheet",
         "operation": "appendOrUpdate",
@@ -195,7 +262,24 @@
           "name": "Google Sheets account"
         }
       },
-      "notes": "Sheet must have these headers in row 1: run_date, symbol, sector, subSector, increasing_eps, beat_estimate, PriceOverSMA150And200, SMA150AboveSMA200, SMA50AboveSMA150And200, SMA200Slope, PriceAbove25Percent52WeekLow, PriceWithin25Percent52WeekHigh, RSOver70"
+      "notes": "Retries 3x with 5s delay if Sheets is temporarily unavailable. Sheet headers (row 1): run_date, symbol, sector, subSector, increasing_eps, beat_estimate, PriceOverSMA150And200, SMA150AboveSMA200, SMA50AboveSMA150And200, SMA200Slope, PriceAbove25Percent52WeekLow, PriceWithin25Percent52WeekHigh, RSOver70"
+    },
+
+    {
+      "id": "node-slack-sheets-error",
+      "name": "Alert: Sheets save failed",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.2,
+      "position": [2200, 260],
+      "parameters": {
+        "resource": "message",
+        "operation": "post",
+        "channel": "#stock-screener",
+        "text": ":warning: *IBD Screener – results posted to Slack but failed to save to Google Sheets.* Results for {{ $('Parse JSON output').item.json.run_date }} may need to be saved manually."
+      },
+      "credentials": {
+        "slackApi": { "id": "REPLACE_WITH_SLACK_CREDENTIAL_ID", "name": "Slack account" }
+      }
     }
   ],
 
@@ -204,15 +288,27 @@
       "main": [[{ "node": "Run Screener Script", "type": "main", "index": 0 }]]
     },
     "Run Screener Script": {
-      "main": [[{ "node": "Parse JSON output", "type": "main", "index": 0 }]]
+      "main": [[{ "node": "Script succeeded?", "type": "main", "index": 0 }]]
+    },
+    "Script succeeded?": {
+      "main": [
+        [{ "node": "Parse JSON output",      "type": "main", "index": 0 }],
+        [{ "node": "Alert: Script crashed",  "type": "main", "index": 0 }]
+      ]
     },
     "Parse JSON output": {
-      "main": [[{ "node": "Any stocks passed?", "type": "main", "index": 0 }]]
+      "main": [[{ "node": "Output parsed OK?", "type": "main", "index": 0 }]]
+    },
+    "Output parsed OK?": {
+      "main": [
+        [{ "node": "Any stocks passed?",   "type": "main", "index": 0 }],
+        [{ "node": "Alert: Bad output",    "type": "main", "index": 0 }]
+      ]
     },
     "Any stocks passed?": {
       "main": [
-        [{ "node": "Format Slack Message",          "type": "main", "index": 0 }],
-        [{ "node": "Post 'Nothing Today' to Slack", "type": "main", "index": 0 }]
+        [{ "node": "Format Slack Message",           "type": "main", "index": 0 }],
+        [{ "node": "Post 'Nothing Today' to Slack",  "type": "main", "index": 0 }]
       ]
     },
     "Format Slack Message": {
@@ -226,12 +322,19 @@
     },
     "Add run_date to each row": {
       "main": [[{ "node": "Append to Google Sheets", "type": "main", "index": 0 }]]
+    },
+    "Append to Google Sheets": {
+      "main": [
+        [],
+        [{ "node": "Alert: Sheets save failed", "type": "main", "index": 0 }]
+      ]
     }
   },
 
   "settings": {
     "executionOrder": "v1",
-    "saveManualExecutions": true
+    "saveManualExecutions": true,
+    "errorWorkflow": "REPLACE_WITH_ERROR_WORKFLOW_ID"
   },
 
   "tags": ["screener", "ibd", "slack", "stocks"]

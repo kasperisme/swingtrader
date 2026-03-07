@@ -2,22 +2,29 @@
 IBD Minervini screener – outputs JSON to stdout so n8n can read it
 via the Execute Command node.
 
+Exit codes:
+  0  success  – JSON result printed to stdout
+  1  fatal    – could not build ticker list / pre-screener step failed;
+                error JSON printed to stdout so n8n can surface it
+
+Per-ticker errors are non-fatal: the loop continues and each failure is
+recorded in the 'errors' list inside the result JSON.
+
 Usage:
     python scripts/run_screener.py --ibd-file "./input/IBD Data Tables.xlsx"
     python scripts/run_screener.py --ibd-file "./input/IBD Data Tables.xlsx" --lookback-days 365
 
-n8n reads the last line of stdout and parses it as JSON.
-All logging goes to stderr so it doesn't pollute the JSON output.
+All logging goes to stderr so it does not pollute the JSON output.
 """
 
 import argparse
 import json
 import sys
+import traceback
 from datetime import datetime, timedelta
 
 import pandas as pd
 
-# Add project root to path so src.* imports work when n8n calls this script
 sys.path.insert(0, ".")
 
 from src import fundamentals, logging, technical
@@ -26,41 +33,54 @@ logger = logging.logger
 
 
 def screen(ibd_file_path: str, lookback_days: int) -> dict:
-    tech = technical.technical()
-    fund = fundamentals.Fundamentals()
+    errors = []
 
-    # 1. Exchange tickers
-    df_col = [tech.get_exhange_tickers(i) for i in ["NYSE", "NASDAQ"]]
-    df_tickers = pd.concat(df_col, axis=0)
+    # ------------------------------------------------------------------
+    # Fatal section – if anything here fails the whole run is worthless
+    # ------------------------------------------------------------------
+    try:
+        tech = technical.technical()
+        fund = fundamentals.Fundamentals()
 
-    # 2. IBD data
-    df_ibd = pd.read_excel(ibd_file_path, skiprows=11)
-    df_ibd = df_ibd.dropna(subset=["RS Rating"])
+        df_col = [tech.get_exhange_tickers(i) for i in ["NYSE", "NASDAQ"]]
+        df_tickers = pd.concat(df_col, axis=0)
 
-    # 3. Merge
-    df_tickers = df_ibd.merge(df_tickers, left_on="Symbol", right_on="symbol", how="left")
-    df_tickers["symbol"] = df_tickers["Symbol"]
-    df_tickers = df_tickers.dropna(subset=["Symbol"])
-    tickers = df_tickers["symbol"].tolist()
+        df_ibd = pd.read_excel(ibd_file_path, skiprows=11)
+        df_ibd = df_ibd.dropna(subset=["RS Rating"])
 
-    # 4. Quotes + pre-screener flags
-    df_quote = tech.get_quote_prices(tickers)
-    df_quote = df_quote.sort_values("symbol")
+        df_tickers = df_ibd.merge(
+            df_tickers, left_on="Symbol", right_on="symbol", how="left"
+        )
+        df_tickers["symbol"] = df_tickers["Symbol"]
+        df_tickers = df_tickers.dropna(subset=["Symbol"])
+        tickers = df_tickers["symbol"].tolist()
 
-    # 5. RS scores
-    df_rs = tech.get_change_prices(tickers)
-    df_quote = df_quote.merge(df_rs, on="symbol", how="left")
+        df_quote = tech.get_quote_prices(tickers)
+        df_quote = df_quote.sort_values("symbol")
 
-    # 6. Pre-screener filter
-    ls_symbol = df_quote[df_quote["SCREENER"] == 1]["symbol"].tolist()
+        df_rs = tech.get_change_prices(tickers)
+        df_quote = df_quote.merge(df_rs, on="symbol", how="left")
 
+        ls_symbol = df_quote[df_quote["SCREENER"] == 1]["symbol"].tolist()
+
+    except Exception as e:
+        # Print error JSON so n8n can read it, then exit 1
+        print(json.dumps({
+            "fatal": True,
+            "message": str(e),
+            "traceback": traceback.format_exc(),
+        }))
+        sys.exit(1)
+
+    # ------------------------------------------------------------------
+    # Per-ticker section – failures are recorded but do not stop the run
+    # ------------------------------------------------------------------
     today = datetime.today()
     startdate = today - timedelta(days=lookback_days)
     strf = "%Y-%m-%d"
 
     logger.info(f"total={len(tickers)} pre-screened={len(ls_symbol)}")
 
-    # 7. Full screening loop
     passed_stocks = []
 
     for symbol in ls_symbol:
@@ -103,12 +123,16 @@ def screen(ibd_file_path: str, lookback_days: int) -> dict:
 
         except Exception as e:
             logger.error(f"Error screening {symbol}: {e}")
+            errors.append({"symbol": symbol, "error": str(e)})
 
     return {
+        "fatal": False,
         "run_date": today.strftime(strf),
         "total_ibd_tickers": len(tickers),
         "pre_screened_count": len(ls_symbol),
         "passed_count": len(passed_stocks),
+        "error_count": len(errors),
+        "errors": errors,
         "passed_stocks": passed_stocks,
     }
 
@@ -120,6 +144,4 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     result = screen(args.ibd_file, args.lookback_days)
-
-    # Print JSON to stdout – n8n reads this
     print(json.dumps(result))
