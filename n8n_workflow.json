@@ -1,0 +1,306 @@
+{
+  "name": "IBD Screener – Daily Run",
+  "nodes": [
+    {
+      "id": "node-schedule",
+      "name": "Schedule Trigger",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [0, 300],
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 22 * * 1-5"
+            }
+          ]
+        }
+      },
+      "notes": "Runs Mon–Fri at 22:00 UTC (5 PM EST). Adjust to your timezone."
+    },
+
+    {
+      "id": "node-run-screener",
+      "name": "Run IBD Screener",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [220, 300],
+      "parameters": {
+        "method": "POST",
+        "url": "http://localhost:8000/run-screener",
+        "sendBody": true,
+        "contentType": "json",
+        "body": {
+          "ibd_file_path": "./input/IBD Data Tables.xlsx",
+          "lookback_days": 365
+        },
+        "options": {
+          "timeout": 600000
+        }
+      },
+      "notes": "Calls the FastAPI screener. Increase timeout if screening many tickers."
+    },
+
+    {
+      "id": "node-check-results",
+      "name": "Any stocks passed?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [440, 300],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "cond-1",
+              "leftValue": "={{ $json.passed_both }}",
+              "rightValue": 0,
+              "operator": {
+                "type": "number",
+                "operation": "gt"
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      }
+    },
+
+    {
+      "id": "node-format-slack",
+      "name": "Format Slack Message",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [660, 200],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// Build a Slack Block Kit message from screener results\nconst data = $input.first().json;\n\nconst header = `*IBD Minervini Screener – ${data.run_date}*\\n` +\n  `_Universe: ${data.total_ibd_tickers} IBD tickers → ` +\n  `${data.pre_screened_count} pre-screened → ` +\n  `${data.passed_technical} technical → ` +\n  `*${data.passed_both} passed all*_`;\n\nconst rows = data.passed_stocks.map(s =>\n  `• *${s.symbol}* | ${s.sector ?? 'N/A'} / ${s.subSector ?? 'N/A'}` +\n  ` | EPS↑: ${s.increasing_eps ? '✅' : '❌'}` +\n  ` | Beat 3Q: ${s.beat_estimate ? '✅' : '❌'}`\n).join('\\n');\n\nconst blocks = [\n  {\n    type: 'section',\n    text: { type: 'mrkdwn', text: header }\n  },\n  { type: 'divider' },\n  {\n    type: 'section',\n    text: { type: 'mrkdwn', text: rows || '_No stocks passed today._' }\n  }\n];\n\nreturn [{ json: { blocks: JSON.stringify(blocks), text: header } }];"
+      }
+    },
+
+    {
+      "id": "node-slack-post",
+      "name": "Post to Slack",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.2,
+      "position": [880, 200],
+      "parameters": {
+        "resource": "message",
+        "operation": "post",
+        "channel": "#stock-screener",
+        "blocksUi": "={{ $json.blocks }}",
+        "text": "={{ $json.text }}",
+        "otherOptions": {
+          "unfurl_links": false
+        }
+      },
+      "credentials": {
+        "slackApi": {
+          "id": "REPLACE_WITH_SLACK_CREDENTIAL_ID",
+          "name": "Slack account"
+        }
+      }
+    },
+
+    {
+      "id": "node-no-results-slack",
+      "name": "Notify: No Results",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.2,
+      "position": [660, 420],
+      "parameters": {
+        "resource": "message",
+        "operation": "post",
+        "channel": "#stock-screener",
+        "text": "={{ '*IBD Screener – ' + $('Run IBD Screener').item.json.run_date + '*\\nNo stocks passed all criteria today.' }}"
+      },
+      "credentials": {
+        "slackApi": {
+          "id": "REPLACE_WITH_SLACK_CREDENTIAL_ID",
+          "name": "Slack account"
+        }
+      }
+    },
+
+    {
+      "id": "node-split-stocks",
+      "name": "Split into rows",
+      "type": "n8n-nodes-base.splitOut",
+      "typeVersion": 1,
+      "position": [880, 420],
+      "parameters": {
+        "fieldToSplitOut": "passed_stocks",
+        "options": {
+          "destinationFieldName": ""
+        }
+      },
+      "notes": "Each passed stock becomes its own item for Google Sheets append."
+    },
+
+    {
+      "id": "node-add-run-date",
+      "name": "Add run_date to each row",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [1100, 420],
+      "parameters": {
+        "mode": "manual",
+        "fields": {
+          "values": [
+            {
+              "name": "run_date",
+              "value": "={{ $('Run IBD Screener').item.json.run_date }}"
+            },
+            {
+              "name": "symbol",
+              "value": "={{ $json.symbol }}"
+            },
+            {
+              "name": "sector",
+              "value": "={{ $json.sector }}"
+            },
+            {
+              "name": "subSector",
+              "value": "={{ $json.subSector }}"
+            },
+            {
+              "name": "Passed",
+              "value": "={{ $json.Passed }}"
+            },
+            {
+              "name": "PASSED_FUNDAMENTALS",
+              "value": "={{ $json.PASSED_FUNDAMENTALS }}"
+            },
+            {
+              "name": "increasing_eps",
+              "value": "={{ $json.increasing_eps }}"
+            },
+            {
+              "name": "beat_estimate",
+              "value": "={{ $json.beat_estimate }}"
+            },
+            {
+              "name": "PriceOverSMA150And200",
+              "value": "={{ $json.PriceOverSMA150And200 }}"
+            },
+            {
+              "name": "SMA150AboveSMA200",
+              "value": "={{ $json.SMA150AboveSMA200 }}"
+            },
+            {
+              "name": "SMA50AboveSMA150And200",
+              "value": "={{ $json.SMA50AboveSMA150And200 }}"
+            },
+            {
+              "name": "SMA200Slope",
+              "value": "={{ $json.SMA200Slope }}"
+            },
+            {
+              "name": "PriceAbove25Percent52WeekLow",
+              "value": "={{ $json.PriceAbove25Percent52WeekLow }}"
+            },
+            {
+              "name": "PriceWithin25Percent52WeekHigh",
+              "value": "={{ $json.PriceWithin25Percent52WeekHigh }}"
+            },
+            {
+              "name": "RSOver70",
+              "value": "={{ $json.RSOver70 }}"
+            }
+          ]
+        }
+      }
+    },
+
+    {
+      "id": "node-sheets-append",
+      "name": "Save to Google Sheets",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [1320, 420],
+      "parameters": {
+        "resource": "spreadsheet",
+        "operation": "appendOrUpdate",
+        "documentId": {
+          "__rl": true,
+          "value": "REPLACE_WITH_SPREADSHEET_ID",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "screener_results",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "value": {}
+        },
+        "options": {}
+      },
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "REPLACE_WITH_GOOGLE_CREDENTIAL_ID",
+          "name": "Google Sheets account"
+        }
+      },
+      "notes": "Appends each passed stock as a new row. Column headers in row 1: run_date, symbol, sector, subSector, Passed, PASSED_FUNDAMENTALS, increasing_eps, beat_estimate, PriceOverSMA150And200, SMA150AboveSMA200, SMA50AboveSMA150And200, SMA200Slope, PriceAbove25Percent52WeekLow, PriceWithin25Percent52WeekHigh, RSOver70"
+    }
+  ],
+
+  "connections": {
+    "Schedule Trigger": {
+      "main": [
+        [{ "node": "Run IBD Screener", "type": "main", "index": 0 }]
+      ]
+    },
+    "Run IBD Screener": {
+      "main": [
+        [{ "node": "Any stocks passed?", "type": "main", "index": 0 }]
+      ]
+    },
+    "Any stocks passed?": {
+      "main": [
+        [{ "node": "Format Slack Message", "type": "main", "index": 0 }],
+        [{ "node": "Notify: No Results", "type": "main", "index": 0 }]
+      ]
+    },
+    "Format Slack Message": {
+      "main": [
+        [{ "node": "Post to Slack", "type": "main", "index": 0 }]
+      ]
+    },
+    "Post to Slack": {
+      "main": [
+        [{ "node": "Split into rows", "type": "main", "index": 0 }]
+      ]
+    },
+    "Split into rows": {
+      "main": [
+        [{ "node": "Add run_date to each row", "type": "main", "index": 0 }]
+      ]
+    },
+    "Add run_date to each row": {
+      "main": [
+        [{ "node": "Save to Google Sheets", "type": "main", "index": 0 }]
+      ]
+    }
+  },
+
+  "settings": {
+    "executionOrder": "v1",
+    "saveManualExecutions": true,
+    "callerPolicy": "workflowsFromSameOwner",
+    "errorWorkflow": ""
+  },
+
+  "staticData": null,
+  "tags": ["screener", "ibd", "slack", "stocks"],
+  "triggerCount": 0,
+  "updatedAt": "2026-03-07T00:00:00.000Z",
+  "versionId": "1"
+}
