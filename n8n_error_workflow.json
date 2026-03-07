@@ -1,0 +1,42 @@
+{
+  "name": "IBD Screener – Error Handler",
+  "nodes": [
+    {
+      "id": "node-error-trigger",
+      "name": "Error Trigger",
+      "type": "n8n-nodes-base.errorTrigger",
+      "typeVersion": 1,
+      "position": [0, 300],
+      "parameters": {}
+    },
+    {
+      "id": "node-slack-infra-error",
+      "name": "Alert: Workflow crashed",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.2,
+      "position": [220, 300],
+      "parameters": {
+        "resource": "message",
+        "operation": "post",
+        "channel": "#stock-screener",
+        "text": ":sos: *IBD Screener workflow crashed*\n*Node:* {{ $json.execution.lastNodeExecuted }}\n*Error:* {{ $json.execution.error.message }}\n*Execution ID:* {{ $json.execution.id }}\n\nCheck the n8n execution log for details."
+      },
+      "credentials": {
+        "slackApi": { "id": "REPLACE_WITH_SLACK_CREDENTIAL_ID", "name": "Slack account" }
+      }
+    }
+  ],
+
+  "connections": {
+    "Error Trigger": {
+      "main": [[{ "node": "Alert: Workflow crashed", "type": "main", "index": 0 }]]
+    }
+  },
+
+  "settings": {
+    "executionOrder": "v1"
+  },
+
+  "notes": "Import this workflow first, copy its ID, then paste it into the 'errorWorkflow' field in n8n_workflow.json settings.",
+  "tags": ["screener", "error-handler"]
+}

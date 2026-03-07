@@ -4,6 +4,7 @@ from scipy.signal import argrelextrema
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import os
+from datetime import datetime, timedelta
 from src.fmp import fmp
 
 from src.logging import logger
@@ -18,6 +19,7 @@ class technical:
         self.trend_template_dict = None
         self.fmp = fmp()
         self.df_rs = None
+        self.spx_df: pd.DataFrame = None  # populated by get_market_direction()
 
     def get_sp500_tickers(self):
         return self.fmp.sp500tickers()
@@ -135,25 +137,11 @@ class technical:
         shares_outstanding=1,
     ):
         chart = self.fmp.daily_chart(ticker, startdate, enddate)
-        ####______________________SMA200______________________####
-        sma200 = self.fmp.sma(ticker, 200, startdate, enddate)
 
-        chart = chart.merge(sma200, on="date", how="left")
-
-        ####______________________SMA150______________________####
-        sma50 = self.fmp.sma(ticker, 150, startdate, enddate)
-
-        chart = chart.merge(sma50, on="date", how="left")
-
-        ####______________________SMA50______________________####
-        sma50 = self.fmp.sma(ticker, 50, startdate, enddate)
-
-        chart = chart.merge(sma50, on="date", how="left")
-
-        ####______________________RSI(63)______________________####
-        # rsi = self.fmp.rsi(ticker, 63, startdate, enddate)
-
-        # chart = chart.merge(rsi, on="date", how="left")
+        # SMAs computed locally — replaces 3 separate API calls per ticker
+        chart["SMA200"] = chart["close"].rolling(window=200).mean()
+        chart["SMA150"] = chart["close"].rolling(window=150).mean()
+        chart["SMA50"] = chart["close"].rolling(window=50).mean()
 
         ####_SLOPE_####
         chart["SMA200_slope"] = chart["SMA200"].diff()
@@ -501,15 +489,226 @@ class technical:
 
         return self.fig
 
+    def get_market_direction(self, lookback_days=365):
+        """
+        Assesses overall market condition using the S&P 500 (^SPX).
+
+        Combines:
+        - SMA alignment (21 > 50 > 150 > 200) — Minervini / O'Neil market filter
+        - Distribution day count in last 25 sessions — O'Neil (≥5 = danger)
+        - OBV trend vs its 21-day SMA — from index_trend.py logic
+
+        Also populates self.spx_df so RS-line calculations can reuse the data.
+
+        Returns dict:
+            condition            : "uptrend" | "uptrend_under_pressure" |
+                                   "correction" | "downtrend"
+            is_confirmed_uptrend : bool — safe to take new positions
+            distribution_days    : int  — count of distribution days in last 25
+            sma_aligned          : bool — SMA21 > SMA50 > SMA150 > SMA200
+            price_above_sma200   : bool
+            price_above_sma50    : bool
+            sma50_rising         : bool — SMA50 trending up over last 10 sessions
+            obv_rising           : bool — OBV above its 21-day SMA
+        """
+        today = datetime.today()
+        start = (today - timedelta(days=lookback_days)).strftime("%Y-%m-%d")
+        end = today.strftime("%Y-%m-%d")
+
+        df = self.fmp.daily_chart("^SPX", start, end)
+        df = df.sort_values("date").reset_index(drop=True)
+
+        # SMAs computed locally — avoids extra API calls
+        for p in [21, 50, 150, 200]:
+            df[f"SMA{p}"] = df["close"].rolling(window=p).mean()
+
+        # OBV
+        df["_price_chg"] = df["close"].diff()
+        df["_obv_day"] = df["volume"] * ((df["_price_chg"] > 0).astype(int) * 2 - 1)
+        df["OBV"] = df["_obv_day"].cumsum()
+        df["OBV_SMA21"] = df["OBV"].rolling(window=21).mean()
+
+        # Distribution day: closes lower AND volume higher than previous session
+        df["_down"] = df["close"] < df["close"].shift(1)
+        df["_higher_vol"] = df["volume"] > df["volume"].shift(1)
+        df["dist_day"] = (df["_down"] & df["_higher_vol"]).astype(int)
+        distribution_days = int(df.tail(25)["dist_day"].sum())
+
+        latest = df.iloc[-1]
+
+        price_above_sma200 = bool(latest["close"] > latest["SMA200"])
+        price_above_sma150 = bool(latest["close"] > latest["SMA150"])
+        price_above_sma50 = bool(latest["close"] > latest["SMA50"])
+        sma_aligned = bool(
+            latest["SMA21"] > latest["SMA50"]
+            and latest["SMA50"] > latest["SMA150"]
+            and latest["SMA150"] > latest["SMA200"]
+        )
+        sma50_rising = bool(df["SMA50"].tail(10).diff().sum() > 0)
+        obv_rising = bool(latest["OBV"] > latest["OBV_SMA21"])
+
+        if price_above_sma200 and sma_aligned and sma50_rising:
+            if distribution_days >= 5:
+                condition = "uptrend_under_pressure"
+                is_confirmed = False
+            elif distribution_days >= 3:
+                condition = "uptrend_under_pressure"
+                is_confirmed = True   # tradeable but cautious
+            else:
+                condition = "uptrend"
+                is_confirmed = True
+        elif price_above_sma200:
+            condition = "correction"
+            is_confirmed = False
+        else:
+            condition = "downtrend"
+            is_confirmed = False
+
+        # Store for RS-line calculations downstream
+        self.spx_df = df[["date", "close"]].copy()
+
+        return {
+            "condition": condition,
+            "is_confirmed_uptrend": is_confirmed,
+            "distribution_days": distribution_days,
+            "sma_aligned": sma_aligned,
+            "price_above_sma50": price_above_sma50,
+            "price_above_sma150": price_above_sma150,
+            "price_above_sma200": price_above_sma200,
+            "sma50_rising": sma50_rising,
+            "obv_rising": obv_rising,
+        }
+
+    # ------------------------------------------------------------------
+    # Per-stock metric helpers
+    # ------------------------------------------------------------------
+
+    def _compute_volume_metrics(self, df):
+        """
+        Volume-based flags from OHLCV data.
+
+        up_down_vol_ratio   — ratio of volume on up-days vs down-days (50-day)
+                              >1.25 = institutional accumulation (O'Neil / Minervini)
+        vol_ratio_today     — today's volume / 50-day average
+                              >1.4 on a breakout day is the O'Neil confirmation signal
+        vol_contracting     — average volume of last 20 days < prior 20 days
+                              desirable during base formation (Minervini VCP)
+        """
+        if len(df) < 20:
+            return {}
+
+        avg_vol_50 = df["volume"].tail(50).mean()
+        latest_vol = float(df["volume"].iloc[-1])
+
+        last_50 = df.tail(50).copy()
+        last_50["_up"] = last_50["close"] >= last_50["close"].shift(1)
+        up_vol = last_50.loc[last_50["_up"], "volume"].sum()
+        down_vol = last_50.loc[~last_50["_up"], "volume"].sum()
+        ud_ratio = float(up_vol / down_vol) if down_vol > 0 else 9.99
+
+        recent_avg = df["volume"].tail(20).mean()
+        prior_avg = df["volume"].tail(40).head(20).mean()
+
+        return {
+            "avg_vol_50d": int(avg_vol_50),
+            "vol_ratio_today": round(latest_vol / avg_vol_50, 2) if avg_vol_50 > 0 else 0.0,
+            "up_down_vol_ratio": round(ud_ratio, 2),
+            "accumulation": bool(ud_ratio >= 1.25),
+            "vol_contracting_in_base": bool(recent_avg < prior_avg),
+        }
+
+    def _compute_adr(self, df, period=20):
+        """
+        Average Daily Range % — Minervini's volatility measure.
+        ADR% = mean((high - low) / midpoint) over last {period} sessions.
+        Practical range for swing trading: 3–15%.
+        Below 2% = too slow; above 15% = too risky for standard position sizing.
+        """
+        if len(df) < period:
+            return {"adr_pct": None}
+        tail = df.tail(period).copy()
+        tail["mid"] = (tail["high"] + tail["low"]) / 2
+        tail["range_pct"] = (tail["high"] - tail["low"]) / tail["mid"] * 100
+        return {"adr_pct": round(float(tail["range_pct"].mean()), 2)}
+
+    def _compute_buy_point(self, df, max_extension_pct=5.0):
+        """
+        Approximates the Minervini / O'Neil pivot and extension.
+
+        Pivot  = highest high of the prior 50 sessions (the base high).
+        Extension % = (current price − pivot) / pivot × 100.
+
+        within_buy_range : 0 % ≤ extension ≤ 5 %  (O'Neil: don't chase > 5%)
+        extended         : extension > 5 %
+        below_pivot      : stock has not broken out yet
+        """
+        if len(df) < 15:
+            return {"buy_point_status": "insufficient_data"}
+
+        base = df.iloc[-51:-1] if len(df) >= 51 else df.iloc[:-1]
+        pivot = float(base["high"].max())
+        current = float(df["close"].iloc[-1])
+        ext = (current - pivot) / pivot * 100
+
+        return {
+            "pivot": round(pivot, 2),
+            "extension_pct": round(ext, 1),
+            "within_buy_range": bool(0 <= ext <= max_extension_pct),
+            "extended": bool(ext > max_extension_pct),
+            "below_pivot": bool(ext < 0),
+        }
+
+    def _compute_rs_line(self, df):
+        """
+        RS line = normalised stock return / normalised SPX return.
+
+        O'Neil / IBD: an RS line making new highs before or with the price
+        breakout is one of the most powerful confirmation signals.
+
+        Requires self.spx_df to be populated (call get_market_direction first).
+        """
+        if self.spx_df is None or len(df) < 20:
+            return {"rs_line_new_high": None}
+
+        merged = df[["date", "close"]].merge(
+            self.spx_df.rename(columns={"close": "spx_close"}),
+            on="date",
+            how="inner",
+        )
+        if len(merged) < 20:
+            return {"rs_line_new_high": None}
+
+        merged["rs_line"] = (
+            (merged["close"] / merged["close"].iloc[0])
+            / (merged["spx_close"] / merged["spx_close"].iloc[0])
+            * 100
+        )
+
+        rs_52w_high = merged["rs_line"].tail(252).max()
+        rs_now = float(merged["rs_line"].iloc[-1])
+
+        return {
+            "rs_line_new_high": bool(rs_now >= rs_52w_high * 0.98),
+            "rs_line_value": round(rs_now, 1),
+        }
+
+    # ------------------------------------------------------------------
+
     def get_screening(self, tickers, startdate, enddate):
         error = False
         try:
             self.data = self.get_daily_chart(
                 tickers, startdate=startdate, enddate=enddate
             )
-
             self.minervini_trend_template(tickers, enddate)
-        except:
+
+            # Attach supplementary metrics to the same dict
+            self.trend_template_dict.update(self._compute_volume_metrics(self.data))
+            self.trend_template_dict.update(self._compute_adr(self.data))
+            self.trend_template_dict.update(self._compute_buy_point(self.data))
+            self.trend_template_dict.update(self._compute_rs_line(self.data))
+        except Exception as e:
+            logger.error(f"get_screening failed for {tickers}: {e}")
             error = True
             self.data = None
             self.trend_template_dict = None
