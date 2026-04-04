@@ -3,19 +3,32 @@ from src import (
     logging,
     fundamentals,
 )
+from src.db import persist_market_wide_scan, update_scan_job_progress
 from datetime import datetime, timedelta
 import pandas as pd
-import time
 import os
+from dotenv import load_dotenv
+
+load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), ".env"))
+
+_JOB_ID = int(os.environ.get("SWINGTRADER_JOB_ID", 0))
+
+
+def _progress(msg: str) -> None:
+    if _JOB_ID:
+        try:
+            update_scan_job_progress(_JOB_ID, msg)
+        except Exception:
+            pass
+
 
 tech = technical.technical()
 fund = fundamentals.Fundamentals()
 logger = logging.logger
 
-model = "gpt-5"
 index = ["NYSE", "NASDAQ"]
-run_ai = False
 
+_progress("Step 1/4: Fetching NYSE/NASDAQ tickers…")
 df_col = []
 for i in index:
     df = tech.get_exhange_tickers(i)
@@ -28,6 +41,7 @@ df_tickers = df_tickers.dropna(subset=["symbol"])
 
 tickers = df_tickers["symbol"].to_list()
 
+_progress("Step 2/4: Fetching quotes and computing RS ratings…")
 # get the fast quotes for all tickers
 df_quote = tech.get_quote_prices(tickers)
 df_quote = df_quote.sort_values("symbol")
@@ -51,6 +65,7 @@ today = datetime.today()
 startdate = today - timedelta(days=period)
 
 ls_trend_template = []
+_total_to_screen = len(ls_symbol)
 
 logger.info("Screening for Minervini trend template")
 logger.info(" - Total tickers: " + str(len(tickers)))
@@ -58,7 +73,8 @@ logger.info(" - Total screened tickers: " + str(len(ls_symbol)))
 logger.info(" - Start date: " + startdate.strftime(strf))
 logger.info(" - End date: " + today.strftime(strf))
 
-for symbol in ls_symbol:
+for _idx, symbol in enumerate(ls_symbol, 1):
+    _progress(f"Step 3/4: Deep screening {symbol} ({_idx}/{_total_to_screen})…")
     logger.info("Screening for: " + symbol)
     try:
         df_data, trend_template_dict, error = tech.get_screening(
@@ -105,39 +121,6 @@ for symbol in ls_symbol:
             trend_template_dict["sector"] = "N/A"
             trend_template_dict["subSector"] = "N/A"
 
-        # Analyze this individual symbol with OpenAI
-        if run_ai:
-            from src import analyze_files, save_analysis, parse_analysis
-
-            try:
-                logger.info(f"Starting OpenAI analysis for {symbol}...")
-
-                # Create file paths for this symbol
-                file_paths = [
-                    f"{output_dir}/chart.csv",
-                    f"{output_dir}/fundamentals.csv",
-                ]
-
-                # Read the system prompt
-                with open("./input/system_prompt.md", "r") as f:
-                    instructions = f.read()
-
-                analysis = analyze_files(file_paths, instructions, model="gpt-4o")
-
-                # Parse the analysis to extract key information
-                parsed_analysis = parse_analysis(analysis)
-                logger.info(
-                    f"Analysis for {symbol}: {parsed_analysis.get('primary_pattern', 'Unknown')} pattern with {parsed_analysis.get('pattern_confidence', 0):.2f} confidence"
-                )
-
-                # Save individual symbol analysis
-                symbol_analysis_file = f"{output_dir}/openai_analysis.json"
-                save_analysis(analysis, symbol_analysis_file)
-                logger.info(f"OpenAI analysis completed for {symbol}")
-
-            except Exception as e:
-                logger.warning(f"OpenAI analysis failed for {symbol}: {e}")
-
         ls_trend_template.append(trend_template_dict)
     except Exception as e:
         logger.error(f"Error in screening: {symbol} {e}")
@@ -156,6 +139,19 @@ with pd.ExcelWriter(f"./output/IBD_trend_template.xlsx") as writer:
     df_trend_template.to_excel(writer, sheet_name="trend_template")
     df_rs.to_excel(writer, sheet_name="rs_rating")
     df_quote.to_excel(writer, sheet_name="quote")
+
+_progress("Step 4/4: Saving results to DuckDB and Excel…")
+try:
+    _rid = persist_market_wide_scan(
+        today.date(),
+        "ibd_screener",
+        df_trend_template,
+        df_rs,
+        df_quote,
+    )
+    logger.info("DuckDB scan saved (run_id=%s)", _rid)
+except Exception as e:
+    logger.warning("DuckDB persist failed: %s", e)
 
 df_trend_template[df_trend_template["Passed"] == True].to_csv(
     columns=["symbol"],

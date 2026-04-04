@@ -23,6 +23,7 @@ All log output goes to stderr so it does not pollute the JSON on stdout.
 
 import argparse
 import json
+import os
 import sys
 import traceback
 from datetime import datetime, timedelta
@@ -32,6 +33,17 @@ import pandas as pd
 sys.path.insert(0, ".")
 
 from src import fundamentals, logging, technical
+from src.db import persist_screener_json_result, update_scan_job_progress
+
+_JOB_ID = int(os.environ.get("SWINGTRADER_JOB_ID", 0))
+
+
+def _progress(msg: str) -> None:
+    if _JOB_ID:
+        try:
+            update_scan_job_progress(_JOB_ID, msg)
+        except Exception:
+            pass
 
 logger = logging.logger
 
@@ -55,6 +67,7 @@ def screen(ibd_file_path: str, lookback_days: int) -> dict:
     # STEP 1 – Market direction gate
     # All three traders: never fight the general market.
     # ==================================================================
+    _progress("Step 1/5: Checking market direction (SPX)…")
     logger.info("Checking market direction (SPX)…")
     market = tech.get_market_direction(lookback_days=lookback_days)
     logger.info(
@@ -88,6 +101,7 @@ def screen(ibd_file_path: str, lookback_days: int) -> dict:
     #           Slightly looser thresholds than our hard limits to avoid
     #           edge cases where FMP's volume field differs from avgVolume.
     # ==================================================================
+    _progress("Step 2/5: Running FMP stock screener pre-filter…")
     try:
         logger.info("Running FMP stock screener pre-filter…")
         df_fmp_screen = tech.fmp.stock_screener(
@@ -103,6 +117,7 @@ def screen(ibd_file_path: str, lookback_days: int) -> dict:
     # ==================================================================
     # STEP 3-5 – Build ticker universe, apply liquidity + pre-screener
     # ==================================================================
+    _progress("Step 3/5: Building ticker universe and applying liquidity filter…")
     try:
         df_col = [tech.get_exhange_tickers(i) for i in ["NYSE", "NASDAQ"]]
         df_tickers = pd.concat(df_col, axis=0)
@@ -157,8 +172,10 @@ def screen(ibd_file_path: str, lookback_days: int) -> dict:
     # ==================================================================
     passed_stocks = []
     sector_cache = {}  # avoid duplicate sector-performance calls
+    total_to_screen = len(ls_symbol)
 
-    for symbol in ls_symbol:
+    for _idx, symbol in enumerate(ls_symbol, 1):
+        _progress(f"Step 4/5: Deep screening {symbol} ({_idx}/{total_to_screen})…")
         logger.info(f"Screening {symbol}…")
         try:
             # ---- Minervini trend template + volume + RS line + buy point ----
@@ -275,6 +292,9 @@ def screen(ibd_file_path: str, lookback_days: int) -> dict:
             logger.error(f"Error screening {symbol}: {e}")
             errors.append({"symbol": symbol, "error": str(e)})
 
+    _progress(
+        f"Step 5/5: Persisting results — {len(passed_stocks)} stocks passed out of {total_to_screen} screened…"
+    )
     return {
         "fatal": False,
         "run_date": today.strftime(strf),
@@ -296,4 +316,10 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     result = screen(args.ibd_file, args.lookback_days)
+    try:
+        _rid = persist_screener_json_result(result)
+        if _rid is not None:
+            logger.info("DuckDB scan saved (run_id=%s)", _rid)
+    except Exception as e:
+        logger.warning("DuckDB persist failed: %s", e)
     print(json.dumps(result))
