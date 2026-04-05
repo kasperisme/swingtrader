@@ -1,5 +1,5 @@
 """
-Run a screening script to completion and update scan_jobs in DuckDB (finish_scan_job).
+Run a screening script to completion and update scan_jobs in Supabase (finish_scan_job).
 
 Invoked by the MCP server as:
   python -m swingtrader_mcp.job_runner <job_id> <script_rel> [script_args...]

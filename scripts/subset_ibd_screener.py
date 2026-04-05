@@ -8,7 +8,7 @@ Examples (from repo root, with .env APIKEY set):
   python scripts/subset_ibd_screener.py --no-prefilter AXON DUOL
   python scripts/subset_ibd_screener.py --tickers-file ./input/my_tickers.txt
 
-Writes to DuckDB (source=ibd_screener_subset). Optional --excel and per-symbol CSVs.
+Writes to Supabase (source=ibd_screener_subset). Optional --excel and per-symbol CSVs.
 """
 
 from __future__ import annotations
@@ -235,9 +235,9 @@ def main() -> None:
             df_rs,
             df_quote,
         )
-        logger.info("DuckDB scan saved (run_id=%s, source=ibd_screener_subset)", rid)
+        logger.info("Supabase scan saved (run_id=%s, source=ibd_screener_subset)", rid)
     except Exception as e:
-        logger.warning("DuckDB persist failed: %s", e)
+        logger.warning("Supabase persist failed: %s", e)
 
 
 if __name__ == "__main__":

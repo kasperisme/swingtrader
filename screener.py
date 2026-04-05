@@ -109,6 +109,6 @@ try:
         df_rs,
         df_quote,
     )
-    logger.info("DuckDB scan saved (run_id=%s)", _rid)
+    logger.info("Supabase scan saved (run_id=%s)", _rid)
 except Exception as e:
-    logger.warning("DuckDB persist failed: %s", e)
+    logger.warning("Supabase persist failed: %s", e)

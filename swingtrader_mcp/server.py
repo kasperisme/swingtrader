@@ -1,5 +1,5 @@
 """
-SwingTrader MCP server — DuckDB (scan_runs, scan_rows, scan_jobs) + background screeners.
+SwingTrader MCP server — Supabase (scan_runs, scan_rows, scan_jobs) + background screeners.
 
 Run from repo root:
   python -m swingtrader_mcp.server
@@ -9,7 +9,7 @@ Cursor / Claude Desktop (example):
   "args": ["-m", "swingtrader_mcp.server"],
   "cwd": "/absolute/path/to/swingtrader"
 
-Requires: pip install mcp (see requirements.txt)
+Requires: pip install mcp supabase psycopg2-binary (see requirements.txt)
 """
 
 from __future__ import annotations
@@ -45,13 +45,14 @@ def _load_db_module():
 
 
 _db = _load_db_module()
-connect: Callable = _db.connect
-default_db_path: Callable[[], str] = _db.default_db_path
 ensure_schema: Callable = _db.ensure_schema
 create_scan_job: Callable = _db.create_scan_job
 update_scan_job_pid: Callable = _db.update_scan_job_pid
 update_scan_job_progress: Callable = _db.update_scan_job_progress
 finish_scan_job: Callable = _db.finish_scan_job
+get_supabase_client: Callable = _db.get_supabase_client
+get_schema: Callable = _db.get_schema
+
 
 mcp = FastMCP(
     "swingtrader",
@@ -104,8 +105,6 @@ within 3 weeks. Stocks within 3 weeks of earnings are HIGH RISK for position
 entries — Minervini and O'Neil both advise avoiding new buys before earnings
 unless you intend to hold through the report.
 
-Surface the earnings dates to the user via Telegram before they act.
-
 ### Step 5 — Communicate to the User
 Send a Telegram message summarising:
 1. Market regime (uptrend / defensive)
@@ -122,7 +121,7 @@ Send a Telegram message summarising:
 - **Earnings = risk**: Stocks within 21 days of earnings should be flagged, not recommended for new entries
 - **Stage analysis**: The screener catches Stage 2 uptrends (Weinstein). Avoid Stage 3 (extended) and Stage 4 (downtrend) stocks
 
-## DuckDB Schema
+## Supabase Schema (swingtrader)
 - `scan_runs`: one row per screening run (id, scan_date, source, market_json, result_json)
 - `scan_rows`: normalised per-stock rows (run_id, dataset, symbol, row_data JSON)
   - datasets: "passed_stocks" (run_screener), "trend_template" / "rs_rating" (ibd_screener)
@@ -143,7 +142,6 @@ Send a Telegram message summarising:
 """,
 )
 
-# Must match scan_runs.source written by each script (persist_* calls).
 _SCAN_SOURCE_BY_SCRIPT: dict[str, str] = {
     "scripts/run_screener.py": "run_screener",
     "ibd_screener.py": "ibd_screener",
@@ -155,180 +153,20 @@ def _scan_source_for_script(rel_script: str) -> str:
     return _SCAN_SOURCE_BY_SCRIPT.get(key, key)
 
 
-def _db_connect():
-    conn = connect()
-    ensure_schema(conn)
-    return conn
+def _get_client():
+    client = get_supabase_client()
+    ensure_schema()
+    return client
 
 
-def _rows_to_dicts(rows: list[tuple], columns: list[str]) -> list[dict[str, Any]]:
-    return [dict(zip(columns, row)) for row in rows]
+def _tbl(client, table: str):
+    return client.schema(get_schema()).table(table)
 
 
-@mcp.tool()
-def swingtrader_db_path() -> str:
-    """Return the resolved DuckDB file path (HANS_DUCKDB_PATH or default under data/)."""
-    return default_db_path()
-
-
-@mcp.tool()
-def get_scan_jobs(limit: int = 25) -> str:
-    """
-    Screening process state from DuckDB (scan_jobs): running / completed / failed, PID, logs,
-    linked scan_run_id when finished. Use this to answer whether a screen is still running or what happened last.
-    """
-    limit = max(1, min(int(limit), 200))
-    conn = _db_connect()
-    try:
-        cur = conn.execute(
-            f"""
-            SELECT id, created_at, started_at, finished_at, status, scan_source, script_rel,
-                   args_json, pid, exit_code, scan_run_id, stdout_log, stderr_log, error_message,
-                   progress_message
-            FROM scan_jobs
-            ORDER BY CASE WHEN status = 'running' THEN 0 ELSE 1 END,
-                     COALESCE(finished_at, started_at) DESC,
-                     id DESC
-            LIMIT {limit}
-            """
-        )
-        cols = [d[0] for d in cur.description]
-        rows = cur.fetchall()
-        return json.dumps(_rows_to_dicts(rows, cols), default=str)
-    finally:
-        conn.close()
-
-
-@mcp.tool()
-def get_scan_job(job_id: int) -> str:
-    """Single scan_jobs row by id (state of one screening process)."""
-    conn = _db_connect()
-    try:
-        cur = conn.execute(
-            """
-            SELECT id, created_at, started_at, finished_at, status, scan_source, script_rel,
-                   args_json, pid, exit_code, scan_run_id, stdout_log, stderr_log, error_message,
-                   progress_message
-            FROM scan_jobs WHERE id = ?
-            """,
-            [job_id],
-        )
-        cols = [d[0] for d in cur.description]
-        row = cur.fetchone()
-        if not row:
-            return json.dumps({"error": "job_id not found", "job_id": job_id})
-        return json.dumps(dict(zip(cols, row)), default=str)
-    finally:
-        conn.close()
-
-
-@mcp.tool()
-def list_scan_runs(limit: int = 20) -> str:
-    """List recent screening runs (id, scan_date, source, created_at). JSON array."""
-    limit = max(1, min(int(limit), 200))
-    conn = _db_connect()
-    try:
-        cur = conn.execute(
-            f"""
-            SELECT id, created_at, scan_date, source,
-                   LENGTH(COALESCE(market_json, '')) AS market_json_len,
-                   LENGTH(COALESCE(result_json, '')) AS result_json_len
-            FROM scan_runs
-            ORDER BY id DESC
-            LIMIT {limit}
-            """
-        )
-        cols = [d[0] for d in cur.description]
-        rows = cur.fetchall()
-        return json.dumps(_rows_to_dicts(rows, cols), default=str)
-    finally:
-        conn.close()
-
-
-@mcp.tool()
-def get_run_detail(run_id: int) -> str:
-    """Return one scan_runs row; result_json and market_json are included as strings (may be large)."""
-    conn = _db_connect()
-    try:
-        cur = conn.execute(
-            """
-            SELECT id, created_at, scan_date, source, market_json, result_json
-            FROM scan_runs WHERE id = ?
-            """,
-            [run_id],
-        )
-        cols = [d[0] for d in cur.description]
-        row = cur.fetchone()
-        if not row:
-            return json.dumps({"error": "run_id not found", "run_id": run_id})
-        return json.dumps(dict(zip(cols, row)), default=str)
-    finally:
-        conn.close()
-
-
-@mcp.tool()
-def get_scan_rows(
-    run_id: int,
-    dataset: Optional[str] = None,
-    symbol: Optional[str] = None,
-    limit: int = 500,
-    offset: int = 0,
-) -> str:
-    """
-    Rows from scan_rows for a run. dataset filters: trend_template, rs_rating, quote, passed_stocks.
-    Use offset for pagination (e.g. offset=500 to get rows 500-999). row_data is parsed JSON per row.
-    """
-    limit = max(1, min(int(limit), 5000))
-    offset = max(0, int(offset))
-    conn = _db_connect()
-    try:
-        where = ["run_id = ?"]
-        params: list[Any] = [run_id]
-        if dataset:
-            where.append("dataset = ?")
-            params.append(dataset)
-        if symbol:
-            where.append("symbol = ?")
-            params.append(symbol.upper())
-        sql = f"""
-            SELECT run_id, scan_date, dataset, symbol, row_data
-            FROM scan_rows
-            WHERE {' AND '.join(where)}
-            ORDER BY symbol
-            LIMIT {limit} OFFSET {offset}
-        """
-        cur = conn.execute(sql, params)
-        cols = [d[0] for d in cur.description]
-        out = []
-        for row in cur.fetchall():
-            rec = dict(zip(cols, row))
-            raw = rec.get("row_data")
-            if isinstance(raw, str):
-                try:
-                    rec["row_data_parsed"] = json.loads(raw)
-                except json.JSONDecodeError:
-                    rec["row_data_parsed"] = None
-            out.append(rec)
-        total = conn.execute(
-            f"SELECT COUNT(*) FROM scan_rows WHERE {' AND '.join(where)}",
-            params,
-        ).fetchone()[0]
-        return json.dumps({"total": total, "offset": offset, "limit": limit, "rows": out}, default=str)
-    finally:
-        conn.close()
-
-
-def _resolve_passed_dataset(conn: Any, run_id: int) -> tuple[str, Optional[str]]:
-    """
-    Return (dataset_name, passed_flag_field) for a run.
-    passed_flag_field is None when every row in the dataset is a passing stock.
-    """
-    datasets = {
-        r[0]
-        for r in conn.execute(
-            "SELECT DISTINCT dataset FROM scan_rows WHERE run_id = ?", [run_id]
-        ).fetchall()
-    }
+def _resolve_passed_dataset(client, run_id: int) -> tuple[str, Optional[str]]:
+    """Return (dataset_name, passed_flag_field) for a run."""
+    res = _tbl(client, "scan_rows").select("dataset").eq("run_id", run_id).execute()
+    datasets = {r["dataset"] for r in (res.data or [])}
     if "passed_stocks" in datasets:
         return "passed_stocks", None
     if "trend_template" in datasets:
@@ -337,12 +175,7 @@ def _resolve_passed_dataset(conn: Any, run_id: int) -> tuple[str, Optional[str]]
 
 
 def _extract_stock_fields(row_data: dict[str, Any]) -> dict[str, Any]:
-    """Pull the minimal actionable fields from a parsed row_data dict."""
-    symbol = (
-        row_data.get("symbol")
-        or row_data.get("ticker")
-        or row_data.get("Symbol")
-    )
+    symbol = row_data.get("symbol") or row_data.get("ticker") or row_data.get("Symbol")
     return {
         "symbol": symbol,
         "sector": row_data.get("sector") or row_data.get("Sector"),
@@ -372,122 +205,228 @@ def _extract_stock_fields(row_data: dict[str, Any]) -> dict[str, Any]:
 
 
 @mcp.tool()
+def get_scan_jobs(limit: int = 25) -> str:
+    """
+    Screening process state from Supabase (scan_jobs): running / completed / failed,
+    PID, logs, linked scan_run_id when finished.
+    """
+    limit = max(1, min(int(limit), 200))
+    client = _get_client()
+    res = (
+        _tbl(client, "scan_jobs")
+        .select(
+            "id,created_at,started_at,finished_at,status,scan_source,script_rel,"
+            "args_json,pid,exit_code,scan_run_id,stdout_log,stderr_log,error_message,progress_message"
+        )
+        .order("id", desc=True)
+        .limit(limit)
+        .execute()
+    )
+    return json.dumps(res.data or [], default=str)
+
+
+@mcp.tool()
+def get_scan_job(job_id: int) -> str:
+    """Single scan_jobs row by id."""
+    client = _get_client()
+    res = (
+        _tbl(client, "scan_jobs")
+        .select(
+            "id,created_at,started_at,finished_at,status,scan_source,script_rel,"
+            "args_json,pid,exit_code,scan_run_id,stdout_log,stderr_log,error_message,progress_message"
+        )
+        .eq("id", job_id)
+        .single()
+        .execute()
+    )
+    if not res.data:
+        return json.dumps({"error": "job_id not found", "job_id": job_id})
+    return json.dumps(res.data, default=str)
+
+
+@mcp.tool()
+def list_scan_runs(limit: int = 20) -> str:
+    """List recent screening runs (id, scan_date, source, created_at). JSON array."""
+    limit = max(1, min(int(limit), 200))
+    client = _get_client()
+    res = (
+        _tbl(client, "scan_runs")
+        .select("id,created_at,scan_date,source,market_json,result_json")
+        .order("id", desc=True)
+        .limit(limit)
+        .execute()
+    )
+    # Replace heavy JSON blobs with lengths for the listing
+    rows = []
+    for r in (res.data or []):
+        rows.append({
+            "id": r["id"],
+            "created_at": r["created_at"],
+            "scan_date": r["scan_date"],
+            "source": r["source"],
+            "market_json_len": len(r.get("market_json") or ""),
+            "result_json_len": len(r.get("result_json") or ""),
+        })
+    return json.dumps(rows, default=str)
+
+
+@mcp.tool()
+def get_run_detail(run_id: int) -> str:
+    """Return one scan_runs row including market_json and result_json."""
+    client = _get_client()
+    res = (
+        _tbl(client, "scan_runs")
+        .select("id,created_at,scan_date,source,market_json,result_json")
+        .eq("id", run_id)
+        .single()
+        .execute()
+    )
+    if not res.data:
+        return json.dumps({"error": "run_id not found", "run_id": run_id})
+    return json.dumps(res.data, default=str)
+
+
+@mcp.tool()
+def get_scan_rows(
+    run_id: int,
+    dataset: Optional[str] = None,
+    symbol: Optional[str] = None,
+    limit: int = 500,
+    offset: int = 0,
+) -> str:
+    """
+    Rows from scan_rows for a run. dataset filters: trend_template, rs_rating, quote, passed_stocks.
+    Use offset for pagination. row_data is parsed JSON per row.
+    """
+    limit = max(1, min(int(limit), 5000))
+    offset = max(0, int(offset))
+    client = _get_client()
+
+    q = _tbl(client, "scan_rows").select("run_id,scan_date,dataset,symbol,row_data", count="exact").eq("run_id", run_id)
+    if dataset:
+        q = q.eq("dataset", dataset)
+    if symbol:
+        q = q.eq("symbol", symbol.upper())
+
+    res = q.order("symbol").range(offset, offset + limit - 1).execute()
+
+    out = []
+    for rec in (res.data or []):
+        raw = rec.get("row_data")
+        if isinstance(raw, str):
+            try:
+                rec["row_data_parsed"] = json.loads(raw)
+            except json.JSONDecodeError:
+                rec["row_data_parsed"] = None
+        out.append(rec)
+
+    total = res.count if res.count is not None else len(out)
+    return json.dumps({"total": total, "offset": offset, "limit": limit, "rows": out}, default=str)
+
+
+@mcp.tool()
 def get_screener_summary(run_id: int) -> str:
     """
     Aggregate stats for a run: total scanned, passed trend template, within buy range,
-    near-pivot count, and sector breakdown. Avoids downloading the full dataset.
-    Works for both run_screener and ibd_screener runs.
+    near-pivot count, and sector breakdown.
     """
-    conn = _db_connect()
-    try:
-        src_row = conn.execute(
-            "SELECT source, scan_date, result_json FROM scan_runs WHERE id = ?", [run_id]
-        ).fetchone()
-        if not src_row:
-            return json.dumps({"error": "run_id not found", "run_id": run_id})
-        source, scan_date, result_json = src_row
+    client = _get_client()
 
-        # Fast path: run_screener stores top-level counts in result_json
-        if source == "run_screener" and result_json:
-            try:
-                result = json.loads(result_json)
-                passed = result.get("passed_stocks") or []
-                within_buy = sum(1 for s in passed if s.get("within_buy_range"))
-                near_pivot = sum(
-                    1 for s in passed
-                    if not s.get("extended")
-                    and s.get("extension_pct") is not None
-                    and s["extension_pct"] <= 5
-                )
-                sector_counts: dict[str, int] = {}
-                for s in passed:
-                    sec = s.get("sector") or "Unknown"
-                    sector_counts[sec] = sector_counts.get(sec, 0) + 1
-                return json.dumps({
-                    "run_id": run_id,
-                    "source": source,
-                    "scan_date": str(scan_date),
-                    "market_condition": (result.get("market") or {}).get("condition"),
-                    "distribution_days": (result.get("market") or {}).get("distribution_days"),
-                    "total_ibd_tickers": result.get("total_ibd_tickers"),
-                    "total_after_liquidity": result.get("total_after_liquidity"),
-                    "pre_screened_count": result.get("pre_screened_count"),
-                    "passed_trend_template": result.get("passed_count"),
-                    "within_buy_range": within_buy,
-                    "near_pivot_count": near_pivot,
-                    "error_count": result.get("error_count"),
-                    "sector_breakdown": dict(sorted(sector_counts.items(), key=lambda x: -x[1])),
-                }, default=str)
-            except (json.JSONDecodeError, TypeError):
-                pass  # fall through to scan_rows path
+    src_res = _tbl(client, "scan_runs").select("source,scan_date,result_json").eq("id", run_id).single().execute()
+    if not src_res.data:
+        return json.dumps({"error": "run_id not found", "run_id": run_id})
 
-        # Generic path: derive stats from scan_rows via DuckDB JSON extraction
-        dataset, passed_field = _resolve_passed_dataset(conn, run_id)
-        if not dataset:
-            return json.dumps({"error": "no usable dataset in scan_rows", "run_id": run_id})
+    source = src_res.data["source"]
+    scan_date = src_res.data["scan_date"]
+    result_json = src_res.data.get("result_json")
 
-        total_rows = conn.execute(
-            "SELECT COUNT(*) FROM scan_rows WHERE run_id = ? AND dataset = ?",
-            [run_id, dataset],
-        ).fetchone()[0]
+    # Fast path: run_screener stores top-level counts in result_json
+    if source == "run_screener" and result_json:
+        try:
+            result = json.loads(result_json)
+            passed = result.get("passed_stocks") or []
+            within_buy = sum(1 for s in passed if s.get("within_buy_range"))
+            near_pivot = sum(
+                1 for s in passed
+                if not s.get("extended")
+                and s.get("extension_pct") is not None
+                and s["extension_pct"] <= 5
+            )
+            sector_counts: dict[str, int] = {}
+            for s in passed:
+                sec = s.get("sector") or "Unknown"
+                sector_counts[sec] = sector_counts.get(sec, 0) + 1
+            return json.dumps({
+                "run_id": run_id,
+                "source": source,
+                "scan_date": str(scan_date),
+                "market_condition": (result.get("market") or {}).get("condition"),
+                "distribution_days": (result.get("market") or {}).get("distribution_days"),
+                "total_ibd_tickers": result.get("total_ibd_tickers"),
+                "total_after_liquidity": result.get("total_after_liquidity"),
+                "pre_screened_count": result.get("pre_screened_count"),
+                "passed_trend_template": result.get("passed_count"),
+                "within_buy_range": within_buy,
+                "near_pivot_count": near_pivot,
+                "error_count": result.get("error_count"),
+                "sector_breakdown": dict(sorted(sector_counts.items(), key=lambda x: -x[1])),
+            }, default=str)
+        except (json.JSONDecodeError, TypeError):
+            pass
 
-        if passed_field:
-            passed_count = conn.execute(
-                f"""
-                SELECT COUNT(*) FROM scan_rows
-                WHERE run_id = ? AND dataset = ?
-                  AND json_extract_string(row_data, '$.{passed_field}') IN ('true', 'True', '1')
-                """,
-                [run_id, dataset],
-            ).fetchone()[0]
-        else:
-            passed_count = total_rows
+    # Generic path: derive stats from scan_rows in Python
+    dataset, passed_field = _resolve_passed_dataset(client, run_id)
+    if not dataset:
+        return json.dumps({"error": "no usable dataset in scan_rows", "run_id": run_id})
 
-        within_buy = conn.execute(
-            """
-            SELECT COUNT(*) FROM scan_rows
-            WHERE run_id = ? AND dataset = ?
-              AND json_extract_string(row_data, '$.within_buy_range') IN ('true', 'True', '1')
-            """,
-            [run_id, dataset],
-        ).fetchone()[0]
+    rows_res = (
+        _tbl(client, "scan_rows")
+        .select("symbol,row_data")
+        .eq("run_id", run_id)
+        .eq("dataset", dataset)
+        .execute()
+    )
+    all_rows = rows_res.data or []
 
-        near_pivot = conn.execute(
-            """
-            SELECT COUNT(*) FROM scan_rows
-            WHERE run_id = ? AND dataset = ?
-              AND TRY_CAST(json_extract_string(row_data, '$.extension_pct') AS DOUBLE) <= 5
-              AND TRY_CAST(json_extract_string(row_data, '$.extension_pct') AS DOUBLE) IS NOT NULL
-              AND COALESCE(json_extract_string(row_data, '$.extended'), 'false')
-                  NOT IN ('true', 'True', '1')
-            """,
-            [run_id, dataset],
-        ).fetchone()[0]
+    passed_count = 0
+    within_buy = 0
+    near_pivot = 0
+    sector_counts = {}
 
-        sector_rows = conn.execute(
-            """
-            SELECT COALESCE(json_extract_string(row_data, '$.sector'), 'Unknown') AS sector,
-                   COUNT(*) AS cnt
-            FROM scan_rows
-            WHERE run_id = ? AND dataset = ?
-            GROUP BY sector ORDER BY cnt DESC
-            """,
-            [run_id, dataset],
-        ).fetchall()
+    for rec in all_rows:
+        try:
+            rd = json.loads(rec.get("row_data") or "{}")
+        except (json.JSONDecodeError, TypeError):
+            rd = {}
 
-        return json.dumps({
-            "run_id": run_id,
-            "source": source,
-            "scan_date": str(scan_date),
-            "dataset": dataset,
-            "total_scanned": total_rows,
-            "passed_trend_template": passed_count,
-            "within_buy_range": within_buy,
-            "near_pivot_count": near_pivot,
-            "sector_breakdown": {r[0]: r[1] for r in sector_rows},
-        }, default=str)
-    finally:
-        conn.close()
+        if passed_field and not rd.get(passed_field):
+            continue
+        passed_count += 1
+
+        if rd.get("within_buy_range"):
+            within_buy += 1
+
+        ext = rd.get("extension_pct")
+        try:
+            if ext is not None and float(ext) <= 5 and not rd.get("extended"):
+                near_pivot += 1
+        except (TypeError, ValueError):
+            pass
+
+        sec = rd.get("sector") or "Unknown"
+        sector_counts[sec] = sector_counts.get(sec, 0) + 1
+
+    return json.dumps({
+        "run_id": run_id,
+        "source": source,
+        "scan_date": str(scan_date),
+        "dataset": dataset,
+        "total_scanned": len(all_rows),
+        "passed_trend_template": passed_count,
+        "within_buy_range": within_buy,
+        "near_pivot_count": near_pivot,
+        "sector_breakdown": dict(sorted(sector_counts.items(), key=lambda x: -x[1])),
+    }, default=str)
 
 
 @mcp.tool()
@@ -497,52 +436,42 @@ def get_passed_stocks(
     limit: int = 200,
 ) -> str:
     """
-    Stocks that passed the full screen for a run, with a minimal field set:
-    symbol, sector, industry, price, pivot, extension_pct, within_buy_range,
-    extended, accumulation, rs_line_new_high, adr_pct, vol_ratio_today,
-    up_down_vol_ratio, eps_growth_yoy, rev_growth_yoy.
+    Stocks that passed the full screen for a run, with a minimal field set.
     Optionally filter by sector (case-insensitive substring match).
-    Much lighter than get_scan_rows — use this instead of downloading all 40 fields.
     """
     limit = max(1, min(int(limit), 2000))
-    conn = _db_connect()
-    try:
-        dataset, passed_field = _resolve_passed_dataset(conn, run_id)
-        if not dataset:
-            return json.dumps({"error": "no usable dataset in scan_rows", "run_id": run_id})
+    client = _get_client()
+    dataset, passed_field = _resolve_passed_dataset(client, run_id)
+    if not dataset:
+        return json.dumps({"error": "no usable dataset in scan_rows", "run_id": run_id})
 
-        where = ["run_id = ?", "dataset = ?"]
-        params: list[Any] = [run_id, dataset]
-        if passed_field:
-            where.append(
-                f"json_extract_string(row_data, '$.{passed_field}') IN ('true', 'True', '1')"
-            )
+    res = (
+        _tbl(client, "scan_rows")
+        .select("symbol,row_data")
+        .eq("run_id", run_id)
+        .eq("dataset", dataset)
+        .order("symbol")
+        .limit(limit)
+        .execute()
+    )
 
-        sql = f"""
-            SELECT symbol, row_data FROM scan_rows
-            WHERE {' AND '.join(where)}
-            ORDER BY symbol
-            LIMIT {limit}
-        """
-        rows = conn.execute(sql, params).fetchall()
+    out = []
+    for row in (res.data or []):
+        try:
+            rd = json.loads(row.get("row_data") or "{}")
+        except (json.JSONDecodeError, TypeError):
+            rd = {}
+        if passed_field and not rd.get(passed_field):
+            continue
+        rec = _extract_stock_fields(rd)
+        if sector and not (
+            sector.lower() in (rec.get("sector") or "").lower()
+            or sector.lower() in (rec.get("industry") or "").lower()
+        ):
+            continue
+        out.append(rec)
 
-        out = []
-        for sym, raw in rows:
-            try:
-                rd = json.loads(raw) if isinstance(raw, str) else {}
-            except (json.JSONDecodeError, TypeError):
-                rd = {}
-            rec = _extract_stock_fields(rd)
-            if sector and not (
-                sector.lower() in (rec.get("sector") or "").lower()
-                or sector.lower() in (rec.get("industry") or "").lower()
-            ):
-                continue
-            out.append(rec)
-
-        return json.dumps({"run_id": run_id, "count": len(out), "stocks": out}, default=str)
-    finally:
-        conn.close()
+    return json.dumps({"run_id": run_id, "count": len(out), "stocks": out}, default=str)
 
 
 @mcp.tool()
@@ -554,106 +483,86 @@ def get_near_pivot_stocks(
 ) -> str:
     """
     Passed stocks within a buy range defined by extension_pct bounds (default -5% to +5%).
-    Set require_accumulation=True to further filter to only accumulating names.
     Sorted by extension_pct ascending (closest-to-pivot first).
-    Returns the same minimal field set as get_passed_stocks.
     """
-    conn = _db_connect()
-    try:
-        dataset, passed_field = _resolve_passed_dataset(conn, run_id)
-        if not dataset:
-            return json.dumps({"error": "no usable dataset in scan_rows", "run_id": run_id})
+    client = _get_client()
+    dataset, passed_field = _resolve_passed_dataset(client, run_id)
+    if not dataset:
+        return json.dumps({"error": "no usable dataset in scan_rows", "run_id": run_id})
 
-        where = ["run_id = ?", "dataset = ?"]
-        params: list[Any] = [run_id, dataset]
-        if passed_field:
-            where.append(
-                f"json_extract_string(row_data, '$.{passed_field}') IN ('true', 'True', '1')"
-            )
+    res = (
+        _tbl(client, "scan_rows")
+        .select("symbol,row_data")
+        .eq("run_id", run_id)
+        .eq("dataset", dataset)
+        .order("symbol")
+        .execute()
+    )
 
-        sql = f"SELECT symbol, row_data FROM scan_rows WHERE {' AND '.join(where)} ORDER BY symbol"
-        rows = conn.execute(sql, params).fetchall()
+    out = []
+    for row in (res.data or []):
+        try:
+            rd = json.loads(row.get("row_data") or "{}")
+        except (json.JSONDecodeError, TypeError):
+            rd = {}
+        if passed_field and not rd.get(passed_field):
+            continue
+        ext = rd.get("extension_pct")
+        if ext is None:
+            continue
+        try:
+            ext = float(ext)
+        except (TypeError, ValueError):
+            continue
+        if not (min_ext_pct <= ext <= max_ext_pct):
+            continue
+        if require_accumulation and not rd.get("accumulation"):
+            continue
+        rec = _extract_stock_fields(rd)
+        rec["extension_pct"] = ext
+        out.append(rec)
 
-        out = []
-        for sym, raw in rows:
-            try:
-                rd = json.loads(raw) if isinstance(raw, str) else {}
-            except (json.JSONDecodeError, TypeError):
-                rd = {}
-            ext = rd.get("extension_pct")
-            if ext is None:
-                continue
-            try:
-                ext = float(ext)
-            except (TypeError, ValueError):
-                continue
-            if not (min_ext_pct <= ext <= max_ext_pct):
-                continue
-            if require_accumulation and not rd.get("accumulation"):
-                continue
-            rec = _extract_stock_fields(rd)
-            rec["extension_pct"] = ext
-            out.append(rec)
-
-        out.sort(key=lambda r: r.get("extension_pct") or 0)
-        return json.dumps({"run_id": run_id, "count": len(out), "stocks": out}, default=str)
-    finally:
-        conn.close()
+    out.sort(key=lambda r: r.get("extension_pct") or 0)
+    return json.dumps({"run_id": run_id, "count": len(out), "stocks": out}, default=str)
 
 
 @mcp.tool()
 def get_latest_screener_result() -> str:
     """
     Actionable output of the most recent completed screening run.
-    Returns summary stats + passed stocks (minimal fields). Works for both
-    run_screener and ibd_screener. Shortcut for the get_scan_job → get_run_detail
-    → get_scan_rows chain.
+    Returns summary stats + passed stocks (minimal fields).
     """
-    conn = _db_connect()
-    try:
-        # Find the most recent completed job that has a linked scan_run_id
-        job_row = conn.execute(
-            """
-            SELECT scan_run_id, scan_source, finished_at FROM scan_jobs
-            WHERE status = 'completed' AND scan_run_id IS NOT NULL
-            ORDER BY finished_at DESC LIMIT 1
-            """
-        ).fetchone()
-        if not job_row:
-            # Fall back to most recent scan_run regardless of job linkage
-            run_row = conn.execute(
-                "SELECT id FROM scan_runs ORDER BY id DESC LIMIT 1"
-            ).fetchone()
-            if not run_row:
-                return json.dumps({"error": "no completed screening runs found"})
-            run_id = int(run_row[0])
-        else:
-            run_id = int(job_row[0])
+    client = _get_client()
 
-        conn.close()
+    job_res = (
+        _tbl(client, "scan_jobs")
+        .select("scan_run_id,scan_source,finished_at")
+        .eq("status", "completed")
+        .not_.is_("scan_run_id", "null")
+        .order("finished_at", desc=True)
+        .limit(1)
+        .execute()
+    )
 
-        # Re-use existing tools for consistency
-        summary = json.loads(get_screener_summary(run_id))
-        passed = json.loads(get_passed_stocks(run_id))
-        return json.dumps({
-            "run_id": run_id,
-            "summary": summary,
-            "passed_stocks": passed.get("stocks", []),
-        }, default=str)
-    except Exception:
-        # conn may already be closed
-        try:
-            conn.close()
-        except Exception:
-            pass
-        raise
+    if job_res.data:
+        run_id = int(job_res.data[0]["scan_run_id"])
+    else:
+        run_res = _tbl(client, "scan_runs").select("id").order("id", desc=True).limit(1).execute()
+        if not run_res.data:
+            return json.dumps({"error": "no completed screening runs found"})
+        run_id = int(run_res.data[0]["id"])
+
+    summary = json.loads(get_screener_summary(run_id))
+    passed = json.loads(get_passed_stocks(run_id))
+    return json.dumps({
+        "run_id": run_id,
+        "summary": summary,
+        "passed_stocks": passed.get("stocks", []),
+    }, default=str)
 
 
 def _start_repo_script(rel_script: str, args: list[str]) -> dict[str, Any]:
-    """
-    Launch job_runner → screening script in the background; record state in DuckDB (scan_jobs).
-    Does not block MCP stdio. Stdout/stderr go to output/mcp_screener_logs/.
-    """
+    """Launch job_runner → screening script in the background; record state in Supabase (scan_jobs)."""
     script_path = _REPO_ROOT / rel_script
     if not script_path.is_file():
         return {"ok": False, "started": False, "error": f"script not found: {script_path}"}
@@ -668,13 +577,7 @@ def _start_repo_script(rel_script: str, args: list[str]) -> dict[str, Any]:
     err_log_rel = str(err_log.relative_to(_REPO_ROOT))
 
     scan_source = _scan_source_for_script(rel_script)
-    job_id = create_scan_job(
-        scan_source,
-        rel_script,
-        args,
-        out_log_rel,
-        err_log_rel,
-    )
+    job_id = create_scan_job(scan_source, rel_script, args, out_log_rel, err_log_rel)
 
     env = os.environ.copy()
     env.setdefault("PYTHONUNBUFFERED", "1")
@@ -683,14 +586,7 @@ def _start_repo_script(rel_script: str, args: list[str]) -> dict[str, Any]:
     fe = open(err_log, "w", encoding="utf-8")
     try:
         proc = subprocess.Popen(
-            [
-                sys.executable,
-                "-m",
-                "swingtrader_mcp.job_runner",
-                str(job_id),
-                rel_script,
-            ]
-            + args,
+            [sys.executable, "-m", "swingtrader_mcp.job_runner", str(job_id), rel_script] + args,
             cwd=str(_REPO_ROOT),
             stdout=fo,
             stderr=fe,
@@ -731,42 +627,34 @@ def get_earnings_alerts(days_ahead: int = 21, run_id: Optional[int] = None) -> s
     """
     Returns upcoming earnings for watchlist stocks within the next days_ahead days.
     Loads the watchlist from passed_stocks in the most recent (or specified) scan run.
-    Hans reads this output and sends the Telegram notification.
-
-    Returns JSON: {run_id, checked_at, alerts: [{symbol, earnings_date, time, days_until}]}
     """
     import importlib.util as _ilu
-    import sys as _sys
     from datetime import datetime as _dt, timedelta as _td
 
-    # Load fmp without triggering the full src package
     _fmp_path = _REPO_ROOT / "src" / "fmp.py"
     _fmp_spec = _ilu.spec_from_file_location("swingtrader_fmp", _fmp_path)
     _fmp_mod = _ilu.module_from_spec(_fmp_spec)
     _fmp_spec.loader.exec_module(_fmp_mod)
     fmp_client = _fmp_mod.fmp()
 
-    conn = _db_connect()
-    try:
-        # Resolve run_id
-        if run_id is None:
-            row = conn.execute(
-                "SELECT id FROM scan_runs ORDER BY id DESC LIMIT 1"
-            ).fetchone()
-            if not row:
-                return json.dumps({"error": "no scan runs found"})
-            resolved_run_id = int(row[0])
-        else:
-            resolved_run_id = int(run_id)
+    client = _get_client()
 
-        # Load watchlist symbols from passed_stocks
-        sym_rows = conn.execute(
-            "SELECT symbol FROM scan_rows WHERE run_id = ? AND dataset = 'passed_stocks'",
-            [resolved_run_id],
-        ).fetchall()
-        watchlist = {r[0].upper() for r in sym_rows if r[0]}
-    finally:
-        conn.close()
+    if run_id is None:
+        row = _tbl(client, "scan_runs").select("id").order("id", desc=True).limit(1).execute()
+        if not row.data:
+            return json.dumps({"error": "no scan runs found"})
+        resolved_run_id = int(row.data[0]["id"])
+    else:
+        resolved_run_id = int(run_id)
+
+    sym_res = (
+        _tbl(client, "scan_rows")
+        .select("symbol")
+        .eq("run_id", resolved_run_id)
+        .eq("dataset", "passed_stocks")
+        .execute()
+    )
+    watchlist = {r["symbol"].upper() for r in (sym_res.data or []) if r.get("symbol")}
 
     if not watchlist:
         return json.dumps({
@@ -791,9 +679,7 @@ def get_earnings_alerts(days_ahead: int = 21, run_id: Optional[int] = None) -> s
         for _, row in matches.iterrows():
             earnings_date = str(row.get("date", ""))
             try:
-                days_until = (
-                    _dt.strptime(earnings_date[:10], "%Y-%m-%d") - today
-                ).days
+                days_until = (_dt.strptime(earnings_date[:10], "%Y-%m-%d") - today).days
             except (ValueError, TypeError):
                 days_until = None
             alerts.append({
@@ -819,8 +705,8 @@ def run_json_screener(
     lookback_days: int = 365,
 ) -> str:
     """
-    Start scripts/run_screener.py (IBD + Minervini pipeline) in the background — returns immediately.
-    Job state is in DuckDB (get_scan_jobs). Does not block the MCP. Logs under output/mcp_screener_logs/.
+    Start scripts/run_screener.py (IBD + Minervini pipeline) in the background.
+    Returns immediately. Poll get_scan_job(job_id) for status.
     """
     args = ["--ibd-file", ibd_file, "--lookback-days", str(int(lookback_days))]
     return json.dumps(_start_repo_script("scripts/run_screener.py", args), default=str)
@@ -829,8 +715,8 @@ def run_json_screener(
 @mcp.tool()
 def run_ibd_market_screener() -> str:
     """
-    Start ibd_screener.py (NYSE/NASDAQ market-wide Minervini screen) in the background — returns immediately.
-    Job state is in DuckDB (get_scan_jobs). Does not block the MCP. Logs under output/mcp_screener_logs/.
+    Start ibd_screener.py (NYSE/NASDAQ market-wide Minervini screen) in the background.
+    Returns immediately. Poll get_scan_job(job_id) for status.
     """
     return json.dumps(_start_repo_script("ibd_screener.py", []), default=str)
 

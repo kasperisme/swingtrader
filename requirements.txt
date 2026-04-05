@@ -2,8 +2,10 @@ pandas
 scipy
 plotly
 requests
+httpx
 scikit-learn
 openpyxl
 python-dotenv
-duckdb
+supabase
+psycopg2-binary
 mcp

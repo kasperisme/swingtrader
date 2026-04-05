@@ -140,7 +140,7 @@ with pd.ExcelWriter(f"./output/IBD_trend_template.xlsx") as writer:
     df_rs.to_excel(writer, sheet_name="rs_rating")
     df_quote.to_excel(writer, sheet_name="quote")
 
-_progress("Step 4/4: Saving results to DuckDB and Excel…")
+_progress("Step 4/4: Saving results to Supabase and Excel…")
 try:
     _rid = persist_market_wide_scan(
         today.date(),
@@ -149,9 +149,9 @@ try:
         df_rs,
         df_quote,
     )
-    logger.info("DuckDB scan saved (run_id=%s)", _rid)
+    logger.info("Supabase scan saved (run_id=%s)", _rid)
 except Exception as e:
-    logger.warning("DuckDB persist failed: %s", e)
+    logger.warning("Supabase persist failed: %s", e)
 
 df_trend_template[df_trend_template["Passed"] == True].to_csv(
     columns=["symbol"],
