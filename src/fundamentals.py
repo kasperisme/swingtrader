@@ -201,10 +201,24 @@ class Fundamentals:
         beat_last_3 = bool(df.tail(3)["beat_estimate"].sum() == 3)
         eps_direction = bool(latest["eps_sma_direction"] == 1)
 
+        # ROE from key metrics (most recent quarter)
+        roe = None
+        roe_above_17pct = False
+        try:
+            km_df = self.fmp.key_metrics_quarterly(ticker, limit=2)
+            if not km_df.empty:
+                roe_raw = km_df.iloc[-1].get("returnOnEquity")
+                if roe_raw is not None:
+                    roe = round(float(roe_raw) * 100, 1)  # FMP returns decimal (0.23 = 23%)
+                    roe_above_17pct = bool(roe >= 17)
+        except Exception:
+            pass  # ROE is supplementary — do not block
+
         passes_oneil = bool(
             eps_yoy is not None and eps_yoy >= 25
             and rev_yoy is not None and rev_yoy >= 20
             and beat_last_3
+            and roe_above_17pct
         )
 
         return {
@@ -218,7 +232,10 @@ class Fundamentals:
             "eps_accelerating": eps_accel,
             # 3-year annual criterion
             "three_yr_annual_eps_25pct": three_yr_25pct,
-            # Composite O'Neil pass
+            # ROE
+            "roe": roe,
+            "roe_above_17pct": roe_above_17pct,
+            # Composite O'Neil pass (now includes ROE)
             "passes_oneil_fundamentals": passes_oneil,
         }
 
@@ -262,6 +279,66 @@ class Fundamentals:
             }
         except Exception:
             return _null
+
+    def get_institutional_flags(self, ticker: str) -> dict:
+        """
+        Analyzes quarter-over-quarter changes in institutional ownership from 13-F data.
+
+        Returns a flat dict with:
+        - inst_holders              : int   — number of institutional holders (latest quarter)
+        - inst_shares_held          : float — total shares held institutionally
+        - inst_ownership_pct        : float — % of shares outstanding held institutionally
+        - inst_holders_increasing   : bool  — holder count up vs prior quarter
+        - inst_shares_increasing    : bool  — total shares held up vs prior quarter
+        - inst_ownership_pct_increasing: bool
+        - inst_net_new_holders      : int   — delta in holder count vs prior quarter
+        - inst_qoq_share_change_pct : float — % change in shares held vs prior quarter
+
+        Returns {} on any exception (supplementary data — must not block the pipeline).
+        """
+        try:
+            df = self.fmp.institutional_ownership_summary(ticker)
+        except Exception:
+            return {}
+
+        if df.empty or len(df) < 1:
+            return {}
+
+        # Use the dominant filing date (the one with the most records — most complete 13-F tranche)
+        if "dateReported" not in df.columns or "shares" not in df.columns:
+            return {}
+
+        df["dateReported"] = pd.to_datetime(df["dateReported"], errors="coerce")
+        df = df.dropna(subset=["dateReported"])
+
+        # Most complete quarter = date with the most individual holder filings
+        latest_date = df["dateReported"].value_counts().index[0]
+        latest_df = df[df["dateReported"] == latest_date]
+
+        holders_now = int(latest_df["holder"].nunique())
+        shares_now = float(latest_df["shares"].sum())
+
+        # net_change: sum of change values from most recent filings (positive = accumulation)
+        net_change = float(latest_df["change"].sum()) if "change" in latest_df.columns else None
+        pct_accumulators = None
+        if "change" in latest_df.columns and len(latest_df) > 0:
+            n_accumulating = int((latest_df["change"] > 0).sum())
+            pct_accumulators = round(n_accumulating / len(latest_df) * 100, 1)
+
+        return {
+            "inst_holders": holders_now,
+            "inst_shares_held": shares_now,
+            "inst_ownership_pct": None,   # not available from this endpoint
+            "inst_holders_increasing": None,  # can't determine without prior-period aggregate
+            "inst_shares_increasing": bool(net_change > 0) if net_change is not None else None,
+            "inst_ownership_pct_increasing": None,
+            "inst_net_new_holders": None,
+            "inst_qoq_share_change_pct": (
+                round(net_change / (shares_now - net_change) * 100, 1)
+                if net_change is not None and (shares_now - net_change) > 0 else None
+            ),
+            "inst_pct_accumulating": pct_accumulators,  # % of holders that increased positions
+        }
 
     def get_earnings_graph(self, ticker):
         df = self.get_earnings_data(ticker)

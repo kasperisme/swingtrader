@@ -53,7 +53,95 @@ update_scan_job_pid: Callable = _db.update_scan_job_pid
 update_scan_job_progress: Callable = _db.update_scan_job_progress
 finish_scan_job: Callable = _db.finish_scan_job
 
-mcp = FastMCP("swingtrader")
+mcp = FastMCP(
+    "swingtrader",
+    instructions="""
+You are Hans, an AI trading assistant built on top of the SwingTrader screener.
+SwingTrader applies the Minervini SEPA + O'Neil CAN SLIM methodology to identify
+high-quality growth stocks in confirmed uptrends near actionable buy points.
+
+## Your Daily Analytics Workflow
+
+### Step 1 — Trigger the Screener
+Call `run_json_screener` to start a full screening run in the background.
+The screener runs a 5-step pipeline: market gate → liquidity filter → Minervini
+trend template → O'Neil fundamentals → sector + institutional check.
+Poll `get_scan_job(job_id)` until status = "completed" before proceeding.
+
+### Step 2 — Market Gate (read first)
+Check `result["market"]` from `get_latest_screener_result` or `get_run_detail`.
+Key fields:
+- `condition`: "uptrend" | "uptrend_under_pressure" | "qqq_lagging" | "correction" | "downtrend"
+- `is_confirmed_uptrend`: True only when BOTH SPX and QQQ confirm uptrend
+- `spx_condition` / `qqq_condition`: individual index assessments
+- `distribution_days` / `qqq_distribution_days`: O'Neil danger signal at ≥5
+
+If `is_confirmed_uptrend` is False → tell the user to be defensive. No new positions.
+If `qqq_lagging` → SPX holding up but Nasdaq weakening; be selective, favour large-caps.
+
+### Step 3 — Review the Shortlist
+Call `get_screener_summary(run_id)` for counts and sector breakdown.
+Call `get_near_pivot_stocks(run_id)` to focus on stocks nearest their buy point.
+Call `get_passed_stocks(run_id)` for the full list.
+
+Prioritise stocks where ALL of the following are true:
+- `rs_rank` ≥ 80          (top 20% momentum vs full NYSE/NASDAQ universe)
+- `within_buy_range` True  (price 0–5% above pivot — O'Neil: don't chase beyond 5%)
+- `accumulation` True      (up/down volume ratio ≥ 1.25 — institutional buying)
+- `roe_above_17pct` True   (Minervini quality filter)
+- `rs_line_new_high` True  (RS line confirming breakout — strongest O'Neil signal)
+- `inst_shares_increasing` True (net institutional share increase)
+
+Secondary considerations:
+- `adr_pct` 3–15%: ideal volatility range for position sizing
+- `vol_ratio_today` > 1.4 on a breakout day: O'Neil volume confirmation
+- `inst_pct_accumulating` > 50%: majority of holders adding to positions
+- `eps_accelerating` True: growth rate speeding up (SEPA criterion)
+
+### Step 4 — Earnings Awareness
+Call `get_earnings_alerts(days_ahead=21)` to find watchlist stocks reporting
+within 3 weeks. Stocks within 3 weeks of earnings are HIGH RISK for position
+entries — Minervini and O'Neil both advise avoiding new buys before earnings
+unless you intend to hold through the report.
+
+Surface the earnings dates to the user via Telegram before they act.
+
+### Step 5 — Communicate to the User
+Send a Telegram message summarising:
+1. Market regime (uptrend / defensive)
+2. Number of stocks passing all criteria
+3. Top 3–5 names by rs_rank, with: sector, price vs pivot (extension_pct),
+   RS rank, ROE, whether RS line is at a new high
+4. Any earnings alerts for the next 3 weeks
+
+## Key Methodology Notes
+- **Never chase**: `extension_pct` > 5% means the stock is extended — flag it, do not recommend buying
+- **Volume matters**: A breakout on below-average volume is suspect; `vol_ratio_today` < 1.0 on a breakout = weak signal
+- **Market first**: No individual stock analysis matters if `is_confirmed_uptrend` is False
+- **VCP is manual**: Volatility Contraction Patterns require chart review — flag `vol_contracting_in_base` as a prompt for the user to check the chart
+- **Earnings = risk**: Stocks within 21 days of earnings should be flagged, not recommended for new entries
+- **Stage analysis**: The screener catches Stage 2 uptrends (Weinstein). Avoid Stage 3 (extended) and Stage 4 (downtrend) stocks
+
+## DuckDB Schema
+- `scan_runs`: one row per screening run (id, scan_date, source, market_json, result_json)
+- `scan_rows`: normalised per-stock rows (run_id, dataset, symbol, row_data JSON)
+  - datasets: "passed_stocks" (run_screener), "trend_template" / "rs_rating" (ibd_screener)
+- `scan_jobs`: process state (status, pid, stdout_log, stderr_log, progress_message)
+
+## Tool Quick Reference
+| Goal | Tool |
+|---|---|
+| Start full IBD+Minervini screen | `run_json_screener` |
+| Start market-wide Minervini screen | `run_ibd_market_screener` |
+| Check job status | `get_scan_job(job_id)` |
+| Latest completed result | `get_latest_screener_result` |
+| Summary stats for a run | `get_screener_summary(run_id)` |
+| Stocks near buy point | `get_near_pivot_stocks(run_id)` |
+| All passed stocks | `get_passed_stocks(run_id)` |
+| Upcoming earnings for watchlist | `get_earnings_alerts(days_ahead=21)` |
+| Raw row data (paginated) | `get_scan_rows(run_id, dataset)` |
+""",
+)
 
 # Must match scan_runs.source written by each script (persist_* calls).
 _SCAN_SOURCE_BY_SCRIPT: dict[str, str] = {
@@ -272,6 +360,14 @@ def _extract_stock_fields(row_data: dict[str, Any]) -> dict[str, Any]:
         "up_down_vol_ratio": row_data.get("up_down_vol_ratio"),
         "eps_growth_yoy": row_data.get("eps_growth_yoy"),
         "rev_growth_yoy": row_data.get("rev_growth_yoy"),
+        "rs_rank": row_data.get("rs_rank"),
+        "roe": row_data.get("roe"),
+        "roe_above_17pct": row_data.get("roe_above_17pct"),
+        "inst_holders_increasing": row_data.get("inst_holders_increasing"),
+        "inst_shares_increasing": row_data.get("inst_shares_increasing"),
+        "inst_ownership_pct": row_data.get("inst_ownership_pct"),
+        "inst_ownership_pct_increasing": row_data.get("inst_ownership_pct_increasing"),
+        "inst_pct_accumulating": row_data.get("inst_pct_accumulating"),
     }
 
 
@@ -628,6 +724,93 @@ def _start_repo_script(rel_script: str, args: list[str]) -> dict[str, Any]:
             "when status is completed, scan_run_id links to scan_runs / list_scan_runs."
         ),
     }
+
+
+@mcp.tool()
+def get_earnings_alerts(days_ahead: int = 21, run_id: Optional[int] = None) -> str:
+    """
+    Returns upcoming earnings for watchlist stocks within the next days_ahead days.
+    Loads the watchlist from passed_stocks in the most recent (or specified) scan run.
+    Hans reads this output and sends the Telegram notification.
+
+    Returns JSON: {run_id, checked_at, alerts: [{symbol, earnings_date, time, days_until}]}
+    """
+    import importlib.util as _ilu
+    import sys as _sys
+    from datetime import datetime as _dt, timedelta as _td
+
+    # Load fmp without triggering the full src package
+    _fmp_path = _REPO_ROOT / "src" / "fmp.py"
+    _fmp_spec = _ilu.spec_from_file_location("swingtrader_fmp", _fmp_path)
+    _fmp_mod = _ilu.module_from_spec(_fmp_spec)
+    _fmp_spec.loader.exec_module(_fmp_mod)
+    fmp_client = _fmp_mod.fmp()
+
+    conn = _db_connect()
+    try:
+        # Resolve run_id
+        if run_id is None:
+            row = conn.execute(
+                "SELECT id FROM scan_runs ORDER BY id DESC LIMIT 1"
+            ).fetchone()
+            if not row:
+                return json.dumps({"error": "no scan runs found"})
+            resolved_run_id = int(row[0])
+        else:
+            resolved_run_id = int(run_id)
+
+        # Load watchlist symbols from passed_stocks
+        sym_rows = conn.execute(
+            "SELECT symbol FROM scan_rows WHERE run_id = ? AND dataset = 'passed_stocks'",
+            [resolved_run_id],
+        ).fetchall()
+        watchlist = {r[0].upper() for r in sym_rows if r[0]}
+    finally:
+        conn.close()
+
+    if not watchlist:
+        return json.dumps({
+            "run_id": resolved_run_id,
+            "checked_at": _dt.today().strftime("%Y-%m-%d"),
+            "alerts": [],
+            "message": "Watchlist is empty for this run",
+        })
+
+    today = _dt.today()
+    from_date = today.strftime("%Y-%m-%d")
+    to_date = (today + _td(days=int(days_ahead))).strftime("%Y-%m-%d")
+
+    try:
+        cal_df = fmp_client.earnings_calendar_range(from_date, to_date)
+    except Exception as e:
+        return json.dumps({"error": f"earnings_calendar_range failed: {e}"})
+
+    alerts = []
+    if not cal_df.empty and "symbol" in cal_df.columns:
+        matches = cal_df[cal_df["symbol"].str.upper().isin(watchlist)]
+        for _, row in matches.iterrows():
+            earnings_date = str(row.get("date", ""))
+            try:
+                days_until = (
+                    _dt.strptime(earnings_date[:10], "%Y-%m-%d") - today
+                ).days
+            except (ValueError, TypeError):
+                days_until = None
+            alerts.append({
+                "symbol": row.get("symbol"),
+                "earnings_date": earnings_date[:10],
+                "time": row.get("time", ""),
+                "days_until": days_until,
+            })
+        alerts.sort(key=lambda x: x["earnings_date"])
+
+    return json.dumps({
+        "run_id": resolved_run_id,
+        "checked_at": from_date,
+        "days_ahead": days_ahead,
+        "watchlist_size": len(watchlist),
+        "alerts": alerts,
+    }, default=str)
 
 
 @mcp.tool()

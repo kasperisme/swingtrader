@@ -228,21 +228,7 @@ def screen(ibd_file_path: str, lookback_days: int) -> dict:
             # ---- Institutional ownership (optional — skip if unavailable) ----
             inst_info = {}
             try:
-                df_inst = fund.fmp.institutional_ownership_summary(symbol)
-                if not df_inst.empty:
-                    df_inst = df_inst.sort_values("date")
-                    latest_inst = df_inst.iloc[-1]
-                    prior_inst = df_inst.iloc[-2] if len(df_inst) >= 2 else None
-                    inst_info = {
-                        "inst_holders": int(latest_inst.get("investorsHolding", 0)),
-                        "inst_holders_increasing": (
-                            bool(
-                                latest_inst.get("investorsHolding", 0)
-                                > prior_inst.get("investorsHolding", 0)
-                            )
-                            if prior_inst is not None else None
-                        ),
-                    }
+                inst_info = fund.get_institutional_flags(symbol)
             except Exception:
                 pass  # institutional data is supplementary — do not block
 
@@ -259,6 +245,7 @@ def screen(ibd_file_path: str, lookback_days: int) -> dict:
                 "PriceAbove25Percent52WeekLow": bool(ttd["PriceAbove25Percent52WeekLow"]),
                 "PriceWithin25Percent52WeekHigh": bool(ttd["PriceWithin25Percent52WeekHigh"]),
                 "RSOver70": bool(ttd["RSOver70"]),
+                "rs_rank": ttd.get("RS_Rank"),
                 # Volume
                 "avg_vol_50d": ttd.get("avg_vol_50d"),
                 "vol_ratio_today": ttd.get("vol_ratio_today"),
@@ -282,10 +269,20 @@ def screen(ibd_file_path: str, lookback_days: int) -> dict:
                 "rev_growth_yoy": fund_flags["rev_growth_yoy"],
                 "eps_accelerating": fund_flags["eps_accelerating"],
                 "three_yr_annual_eps_25pct": fund_flags["three_yr_annual_eps_25pct"],
+                "roe": fund_flags.get("roe"),
+                "roe_above_17pct": fund_flags.get("roe_above_17pct"),
                 # Sector leadership
                 **sector_info,
-                # Institutional (may be empty dict if unavailable)
-                **inst_info,
+                # Institutional ownership (QoQ analysis)
+                "inst_holders": inst_info.get("inst_holders"),
+                "inst_shares_held": inst_info.get("inst_shares_held"),
+                "inst_ownership_pct": inst_info.get("inst_ownership_pct"),
+                "inst_holders_increasing": inst_info.get("inst_holders_increasing"),
+                "inst_shares_increasing": inst_info.get("inst_shares_increasing"),
+                "inst_ownership_pct_increasing": inst_info.get("inst_ownership_pct_increasing"),
+                "inst_net_new_holders": inst_info.get("inst_net_new_holders"),
+                "inst_qoq_share_change_pct": inst_info.get("inst_qoq_share_change_pct"),
+                "inst_pct_accumulating": inst_info.get("inst_pct_accumulating"),
             })
 
         except Exception as e:

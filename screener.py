@@ -1,4 +1,5 @@
 from src import technical, logging
+from src.db import persist_market_wide_scan
 from datetime import datetime, timedelta
 import pandas as pd
 import time
@@ -99,3 +100,15 @@ with pd.ExcelWriter(f"./output/{index}_trend_template.xlsx") as writer:
     df_trend_template.to_excel(writer, sheet_name="trend_template")
     df_rs.to_excel(writer, sheet_name="rs_rating")
     df_quote.to_excel(writer, sheet_name="quote")
+
+try:
+    _rid = persist_market_wide_scan(
+        today.date(),
+        "screener",
+        df_trend_template,
+        df_rs,
+        df_quote,
+    )
+    logger.info("DuckDB scan saved (run_id=%s)", _rid)
+except Exception as e:
+    logger.warning("DuckDB persist failed: %s", e)

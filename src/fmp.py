@@ -82,6 +82,30 @@ class fmp:
 
         return self.__format_ticker_df(r)
 
+    def profile(self, tickers: list) -> pd.DataFrame:
+        """
+        Company profile (sector, industry, …) for one or many symbols.
+        Batched to respect URL length limits.
+        """
+        if not tickers:
+            return pd.DataFrame()
+        chunk_size = 80
+        frames = []
+        for i in range(0, len(tickers), chunk_size):
+            chunk = tickers[i : i + chunk_size]
+            joined = ",".join(chunk)
+            url = f"https://financialmodelingprep.com/api/v3/profile/{joined}"
+            r = requests.get(url, params={"apikey": self.APIKEY})
+            if r.status_code != 200:
+                raise RequestError(r.content)
+            data = r.json()
+            if not data:
+                continue
+            frames.append(pd.DataFrame(data))
+        if not frames:
+            return pd.DataFrame()
+        return pd.concat(frames, axis=0).reset_index(drop=True)
+
     def quote_price(self, tickers: list):
         joined_tickers = ",".join(tickers)
 
@@ -271,12 +295,12 @@ class fmp:
 
     def institutional_ownership_summary(self, ticker):
         """
-        Aggregate institutional ownership snapshot (number of holders,
-        total invested, ownership %) from 13-F filings.
-        Uses the stable positions-summary endpoint.
+        Individual institutional holder records from 13-F filings.
+        Returns one row per holder per reporting date (holder, shares, dateReported, change).
+        Caller should aggregate by quarter to compute totals and QoQ changes.
         """
-        url = "https://financialmodelingprep.com/stable/positions-summary"
-        r = requests.get(url, params={"apikey": self.APIKEY, "symbol": ticker})
+        url = f"https://financialmodelingprep.com/api/v3/institutional-holder/{ticker}"
+        r = requests.get(url, params={"apikey": self.APIKEY})
         if r.status_code != 200:
             raise RequestError(r.content)
         return self.__format_ticker_df(r)
@@ -292,3 +316,64 @@ class fmp:
         pt = response.json()
 
         return pt
+
+    def income_statement_quarterly(self, ticker: str, limit: int = 12) -> pd.DataFrame:
+        """Quarterly income statements (revenue, netIncome, eps, grossProfit) — last {limit} quarters."""
+        url = "https://financialmodelingprep.com/stable/income-statement"
+        r = requests.get(url, params={
+            "apikey": self.APIKEY,
+            "symbol": ticker,
+            "period": "quarter",
+            "limit": limit,
+        })
+        if r.status_code != 200:
+            raise RequestError(r.content)
+        data = r.json()
+        if not data:
+            return pd.DataFrame()
+        df = pd.DataFrame(data)
+        if not df.empty and "date" in df.columns:
+            df["date"] = pd.to_datetime(df["date"])
+            df = df.sort_values("date").reset_index(drop=True)
+        return df
+
+    def key_metrics_quarterly(self, ticker: str, limit: int = 4) -> pd.DataFrame:
+        """
+        Key fundamental metrics (returnOnEquity, roic, currentRatio, etc.) — last {limit} annual periods.
+        Note: quarterly period requires a premium FMP subscription; annual is used here.
+        """
+        url = "https://financialmodelingprep.com/stable/key-metrics"
+        r = requests.get(url, params={
+            "apikey": self.APIKEY,
+            "symbol": ticker,
+            "limit": limit,
+        })
+        if r.status_code != 200:
+            raise RequestError(r.content)
+        data = r.json()
+        if not data:
+            return pd.DataFrame()
+        df = pd.DataFrame(data)
+        if not df.empty and "date" in df.columns:
+            df["date"] = pd.to_datetime(df["date"])
+            df = df.sort_values("date").reset_index(drop=True)
+        return df
+
+    def earnings_calendar_range(self, from_date: str, to_date: str) -> pd.DataFrame:
+        """
+        Confirmed upcoming earnings calendar for a date range (all tickers).
+        from_date, to_date: 'YYYY-MM-DD' strings.
+        Returns: symbol, date, time (bmo/amc), epsEstimated, revenueEstimated.
+        """
+        url = "https://financialmodelingprep.com/stable/earnings-calendar-confirmed"
+        r = requests.get(url, params={
+            "apikey": self.APIKEY,
+            "from": from_date,
+            "to": to_date,
+        })
+        if r.status_code != 200:
+            raise RequestError(r.content)
+        data = r.json()
+        if not data:
+            return pd.DataFrame()
+        return pd.DataFrame(data)

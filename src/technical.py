@@ -82,6 +82,14 @@ class technical:
 
         self.df_rs["RS"] = (self.df_rs["Weighted_score"] / maxscore) * 100
 
+        # IBD-style 1-99 percentile rank across the full screened universe
+        self.df_rs["RS_Rank"] = (
+            self.df_rs["Weighted_score"]
+            .rank(pct=True, ascending=True)
+            .mul(98).add(1).round()
+            .clip(1, 99).astype(int)
+        )
+
         return self.df_rs
 
     def minervini_trend_template(
@@ -107,7 +115,11 @@ class technical:
             "SMA50AboveSMA150And200": self.data["SMA50"].iloc[-1]
             > self.data["SMA200"].iloc[-1]
             and self.data["SMA50"].iloc[-1] > self.data["SMA150"].iloc[-1],
-            "SMA200Slope": self.data["SMA200_slope_direction"].tail(20).sum() == 20,
+            "SMA200Slope": (
+                len(self.data) >= 22
+                and self.data["SMA200_slope_direction"].tail(20).sum() >= 18
+                and self.data["SMA200"].iloc[-1] > self.data["SMA200"].iloc[-21]
+            ),
             "PriceAbove25Percent52WeekLow": min(self.data[mask_remove_latest]["low"])
             * 1.25
             <= self.data["close"].iloc[-1],
@@ -117,6 +129,7 @@ class technical:
             and max(self.data[mask_remove_latest]["high"])
             >= self.data["close"].iloc[-1],
             "RSOver70": self.df_rs[mask_rs]["RS"].iloc[0] > 70,
+            "RS_Rank": int(self.df_rs[mask_rs]["RS_Rank"].iloc[0]) if len(self.df_rs[mask_rs]) > 0 else None,
         }
 
         self.trend_template_dict["Passed"] = (
@@ -489,46 +502,26 @@ class technical:
 
         return self.fig
 
-    def get_market_direction(self, lookback_days=365):
+    def _analyze_index(self, ticker: str, lookback_days: int) -> dict:
         """
-        Assesses overall market condition using the S&P 500 (^SPX).
-
-        Combines:
-        - SMA alignment (21 > 50 > 150 > 200) — Minervini / O'Neil market filter
-        - Distribution day count in last 25 sessions — O'Neil (≥5 = danger)
-        - OBV trend vs its 21-day SMA — from index_trend.py logic
-
-        Also populates self.spx_df so RS-line calculations can reuse the data.
-
-        Returns dict:
-            condition            : "uptrend" | "uptrend_under_pressure" |
-                                   "correction" | "downtrend"
-            is_confirmed_uptrend : bool — safe to take new positions
-            distribution_days    : int  — count of distribution days in last 25
-            sma_aligned          : bool — SMA21 > SMA50 > SMA150 > SMA200
-            price_above_sma200   : bool
-            price_above_sma50    : bool
-            sma50_rising         : bool — SMA50 trending up over last 10 sessions
-            obv_rising           : bool — OBV above its 21-day SMA
+        Runs SMA alignment + distribution day + OBV analysis on a single index ticker.
+        Returns a flat dict of condition flags plus the raw DataFrame under '_df'.
         """
         today = datetime.today()
         start = (today - timedelta(days=lookback_days)).strftime("%Y-%m-%d")
         end = today.strftime("%Y-%m-%d")
 
-        df = self.fmp.daily_chart("^SPX", start, end)
+        df = self.fmp.daily_chart(ticker, start, end)
         df = df.sort_values("date").reset_index(drop=True)
 
-        # SMAs computed locally — avoids extra API calls
         for p in [21, 50, 150, 200]:
             df[f"SMA{p}"] = df["close"].rolling(window=p).mean()
 
-        # OBV
         df["_price_chg"] = df["close"].diff()
         df["_obv_day"] = df["volume"] * ((df["_price_chg"] > 0).astype(int) * 2 - 1)
         df["OBV"] = df["_obv_day"].cumsum()
         df["OBV_SMA21"] = df["OBV"].rolling(window=21).mean()
 
-        # Distribution day: closes lower AND volume higher than previous session
         df["_down"] = df["close"] < df["close"].shift(1)
         df["_higher_vol"] = df["volume"] > df["volume"].shift(1)
         df["dist_day"] = (df["_down"] & df["_higher_vol"]).astype(int)
@@ -553,7 +546,7 @@ class technical:
                 is_confirmed = False
             elif distribution_days >= 3:
                 condition = "uptrend_under_pressure"
-                is_confirmed = True   # tradeable but cautious
+                is_confirmed = True
             else:
                 condition = "uptrend"
                 is_confirmed = True
@@ -563,9 +556,6 @@ class technical:
         else:
             condition = "downtrend"
             is_confirmed = False
-
-        # Store for RS-line calculations downstream
-        self.spx_df = df[["date", "close"]].copy()
 
         return {
             "condition": condition,
@@ -577,6 +567,80 @@ class technical:
             "price_above_sma200": price_above_sma200,
             "sma50_rising": sma50_rising,
             "obv_rising": obv_rising,
+            "_df": df,
+        }
+
+    def get_market_direction(self, lookback_days=365):
+        """
+        Assesses overall market condition using both S&P 500 (^SPX) and QQQ.
+
+        Combines:
+        - SMA alignment (21 > 50 > 150 > 200) — Minervini / O'Neil market filter
+        - Distribution day count in last 25 sessions — O'Neil (≥5 = danger)
+        - OBV trend vs its 21-day SMA
+
+        Both SPX and QQQ must confirm uptrend for is_confirmed_uptrend to be True.
+        Also populates self.spx_df so RS-line calculations can reuse the data.
+
+        Returns dict with original SPX keys (backward-compatible) plus new qqq_* keys:
+            condition            : "uptrend" | "uptrend_under_pressure" |
+                                   "correction" | "downtrend" | "qqq_lagging"
+            is_confirmed_uptrend : bool — True only when BOTH SPX and QQQ confirm
+            distribution_days    : int  — SPX distribution days in last 25
+            sma_aligned          : bool — SPX SMA21 > SMA50 > SMA150 > SMA200
+            price_above_sma200   : bool — SPX
+            price_above_sma50    : bool — SPX
+            sma50_rising         : bool — SPX SMA50 trending up over last 10 sessions
+            obv_rising           : bool — SPX OBV above its 21-day SMA
+            spx_condition        : str  — SPX-only condition
+            spx_confirmed        : bool — SPX-only uptrend flag
+            spx_distribution_days: int  — same as distribution_days
+            qqq_condition        : str  — QQQ condition
+            qqq_confirmed        : bool — QQQ uptrend flag
+            qqq_distribution_days: int
+            qqq_sma_aligned      : bool
+            qqq_price_above_sma200: bool
+            qqq_sma50_rising     : bool
+            qqq_obv_rising       : bool
+        """
+        spx = self._analyze_index("^SPX", lookback_days)
+        qqq = self._analyze_index("QQQ", lookback_days)
+
+        # Store SPX data for downstream RS-line calculations
+        self.spx_df = spx["_df"][["date", "close"]].copy()
+
+        both_confirmed = spx["is_confirmed_uptrend"] and qqq["is_confirmed_uptrend"]
+
+        if both_confirmed:
+            overall_condition = spx["condition"]
+        elif spx["condition"] == "uptrend" and qqq["condition"] in ("correction", "downtrend"):
+            overall_condition = "qqq_lagging"
+        else:
+            overall_condition = spx["condition"]
+
+        return {
+            # Original SPX keys — unchanged for backward compatibility
+            "condition": overall_condition,
+            "is_confirmed_uptrend": both_confirmed,
+            "distribution_days": spx["distribution_days"],
+            "sma_aligned": spx["sma_aligned"],
+            "price_above_sma50": spx["price_above_sma50"],
+            "price_above_sma150": spx["price_above_sma150"],
+            "price_above_sma200": spx["price_above_sma200"],
+            "sma50_rising": spx["sma50_rising"],
+            "obv_rising": spx["obv_rising"],
+            # Explicit SPX keys
+            "spx_condition": spx["condition"],
+            "spx_confirmed": spx["is_confirmed_uptrend"],
+            "spx_distribution_days": spx["distribution_days"],
+            # QQQ keys
+            "qqq_condition": qqq["condition"],
+            "qqq_confirmed": qqq["is_confirmed_uptrend"],
+            "qqq_distribution_days": qqq["distribution_days"],
+            "qqq_sma_aligned": qqq["sma_aligned"],
+            "qqq_price_above_sma200": qqq["price_above_sma200"],
+            "qqq_sma50_rising": qqq["sma50_rising"],
+            "qqq_obv_rising": qqq["obv_rising"],
         }
 
     # ------------------------------------------------------------------
