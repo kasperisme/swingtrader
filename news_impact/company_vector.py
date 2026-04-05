@@ -2,14 +2,17 @@
 Company vector builder — orchestrates FMPFetcher → DimensionCalculator → rank_normalise
 into a single clean interface.
 
-Caches each vector to disk as JSON keyed by {ticker}_{YYYY-MM-DD}.json.
-Cache expires after 24 hours.
+Caches each vector to disk as JSON keyed by {ticker}_{YYYY-MM-DD}.json and persists to
+Supabase after each batch so interrupted runs lose at most one batch of work.
+
+Cache expires after 24 hours. On restart with use_cache=True, tickers already in
+Supabase are loaded from there and skipped, resuming where the run left off.
 """
 
 import asyncio
 import json
 import logging
-from dataclasses import dataclass, asdict, field
+from dataclasses import dataclass, asdict
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from typing import Optional
@@ -29,9 +32,9 @@ _MAX_CONCURRENT = 5  # semaphore limit for concurrent FMP fetches
 @dataclass
 class CompanyVector:
     ticker: str
-    dimensions: dict[str, float]          # dimension_key → 0-1 rank score
-    raw: dict[str, Optional[float]]       # pre-normalisation values
-    metadata: dict                         # name, sector, industry, market_cap
+    dimensions: dict[str, float]        # dimension_key → 0-1 rank score
+    raw: dict[str, Optional[float]]     # pre-normalisation values
+    metadata: dict                       # name, sector, industry, market_cap
     fetched_at: datetime
 
     def to_json(self) -> dict:
@@ -55,10 +58,9 @@ def _cache_path(ticker: str, date: str) -> Path:
 
 
 def _load_cached(ticker: str) -> Optional[CompanyVector]:
-    """Check DB first, then fall back to disk cache."""
+    """Check Supabase first, then fall back to disk cache."""
     today = datetime.now(timezone.utc).date()
 
-    # Try DB
     try:
         client = get_supabase_client()
         ensure_schema()
@@ -99,12 +101,32 @@ def _load_cached(ticker: str) -> Optional[CompanyVector]:
 
 
 def _save_cache(cv: CompanyVector) -> None:
-    date = cv.fetched_at.strftime("%Y-%m-%d")
-    path = _cache_path(cv.ticker, date)
+    path = _cache_path(cv.ticker, cv.fetched_at.strftime("%Y-%m-%d"))
     try:
         path.write_text(json.dumps(cv.to_json(), indent=2))
     except Exception as exc:
         logger.warning("[cache] failed to write %s: %s", path, exc)
+
+
+def _persist_batch(vectors: list[CompanyVector]) -> None:
+    """Upsert a list of CompanyVectors to Supabase in one client session."""
+    if not vectors:
+        return
+    client = get_supabase_client()
+    ensure_schema()
+    for cv in vectors:
+        try:
+            upsert_company_vector(
+                client,
+                ticker=cv.ticker,
+                vector_date=cv.fetched_at.date(),
+                dimensions=cv.dimensions,
+                raw=cv.raw,
+                metadata=cv.metadata,
+                fetched_at=cv.fetched_at,
+            )
+        except Exception as exc:
+            logger.warning("[build_vectors] DB persist failed for %s: %s", cv.ticker, exc)
 
 
 # ---------------------------------------------------------------------------
@@ -117,31 +139,38 @@ async def _fetch_and_calculate(
     calc: DimensionCalculator,
     sem: asyncio.Semaphore,
     use_cache: bool,
+    counter: list[int],   # [done, total] — mutated in-place for progress reporting
 ) -> tuple[str, Optional[RawCompanyData], Optional[dict]]:
     """
-    Returns (ticker, raw_data, raw_dims) or (ticker, None, None) on failure.
-    raw_dims values may contain None for missing dimensions.
+    Returns (ticker, raw_data, raw_dims) or (ticker, None, cached_cv) on cache hit,
+    or (ticker, None, None) on failure.
     """
     if use_cache:
         cached = _load_cached(ticker)
         if cached:
-            logger.debug("[build_vectors] %s loaded from cache", ticker)
-            # Return sentinel so caller knows it came from cache
+            counter[0] += 1
+            print(f"    [{counter[0]}/{counter[1]}] {ticker:<8} cached", flush=True)
             return ticker, None, cached  # type: ignore[return-value]
 
     async with sem:
         try:
             raw = await fetcher.fetch_all(ticker)
         except Exception as exc:
-            logger.error("[build_vectors] fetch failed for %s: %s", ticker, exc)
+            counter[0] += 1
+            print(f"    [{counter[0]}/{counter[1]}] {ticker:<8} FETCH ERROR: {exc}", flush=True)
             return ticker, None, None
 
     try:
         raw_dims = calc.calculate(raw)
     except Exception as exc:
-        logger.error("[build_vectors] dimension calc failed for %s: %s", ticker, exc)
+        counter[0] += 1
+        print(f"    [{counter[0]}/{counter[1]}] {ticker:<8} CALC ERROR: {exc}", flush=True)
         return ticker, raw, None
 
+    missing = _count_missing(raw_dims)
+    counter[0] += 1
+    status = f"ok ({len(missing)} dims missing)" if missing else "ok"
+    print(f"    [{counter[0]}/{counter[1]}] {ticker:<8} fetched  {status}", flush=True)
     return ticker, raw, raw_dims
 
 
@@ -163,102 +192,110 @@ def _count_missing(raw_dims: dict) -> list[str]:
 async def build_vectors(
     tickers: list[str],
     use_cache: bool = True,
+    batch_size: int = 100,
 ) -> list[CompanyVector]:
     """
     Build rank-normalised company vectors for a list of tickers.
 
-    Steps:
-      1. Fetch raw FMP data (concurrently, max 5 at a time)
-      2. Calculate raw dimension values per ticker
-      3. Rank-normalise across the full universe in one pass
-      4. Cache each vector to disk
+    Processes tickers in batches of `batch_size`. Each batch is fetched
+    concurrently, rank-normalised within the batch, persisted to Supabase and
+    written to disk before the next batch starts — so an interrupted run loses
+    at most one batch of work.
 
-    Returns a list of CompanyVector — one per ticker that did not fail entirely.
-    Prints a progress summary on completion.
+    On restart with use_cache=True, tickers already in Supabase (fetched within
+    the last 24 hours) are loaded from there and skipped automatically.
     """
     fetcher = FMPFetcher()
     calc    = DimensionCalculator()
     sem     = asyncio.Semaphore(_MAX_CONCURRENT)
 
-    tasks = [
-        _fetch_and_calculate(t, fetcher, calc, sem, use_cache)
-        for t in tickers
-    ]
-    results = await asyncio.gather(*tasks)
+    all_vectors:  list[CompanyVector] = []
+    total_cached  = 0
+    total_fresh   = 0
+    total_partial = 0
+    total_failed  = 0
 
-    # Separate outcomes
-    cached_vectors:  list[CompanyVector]          = []
-    fresh_raw:       dict[str, RawCompanyData]    = {}   # ticker → RawCompanyData
-    fresh_dims:      dict[str, dict]              = {}   # ticker → raw dims
-    failed:          list[str]                    = []
-    partial_info:    dict[str, list[str]]         = {}   # ticker → missing keys
+    batches = [tickers[i:i + batch_size] for i in range(0, len(tickers), batch_size)]
+    n_batches = len(batches)
+    print(f"Processing {len(tickers)} tickers in {n_batches} batch(es) of up to {batch_size}", flush=True)
 
-    for ticker, raw, dims in results:
-        if isinstance(dims, CompanyVector):
-            # Came from cache
-            cached_vectors.append(dims)
-        elif dims is None:
-            failed.append(ticker)
-        else:
-            missing = _count_missing(dims)
-            if missing:
-                partial_info[ticker] = missing
-            fresh_raw[ticker]  = raw
-            fresh_dims[ticker] = dims
+    for batch_idx, batch in enumerate(batches, 1):
+        print(f"\nBatch {batch_idx}/{n_batches} — {len(batch)} tickers", flush=True)
 
-    # Rank-normalise fresh tickers together (so comparisons are cross-sectional)
-    vectors: list[CompanyVector] = list(cached_vectors)
+        counter = [0, len(batch)]
+        tasks = [_fetch_and_calculate(t, fetcher, calc, sem, use_cache, counter) for t in batch]
+        results = await asyncio.gather(*tasks)
 
-    if fresh_dims:
-        normalised = rank_normalise(fresh_dims)
-        today = datetime.now(timezone.utc)
+        cached_vectors: list[CompanyVector]       = []
+        fresh_raw:      dict[str, RawCompanyData] = {}
+        fresh_dims:     dict[str, dict]           = {}
+        failed:         list[str]                 = []
+        partial_info:   dict[str, list[str]]      = {}
 
-        for ticker, ranked in normalised.items():
-            raw      = fresh_raw[ticker]
-            metadata = _extract_metadata(raw)
-            cv = CompanyVector(
-                ticker=ticker,
-                dimensions=ranked,
-                raw=fresh_dims[ticker],
-                metadata=metadata,
-                fetched_at=raw.fetched_at,
-            )
-            vectors.append(cv)
-            _save_cache(cv)
-            # Persist to Supabase
-            try:
-                client = get_supabase_client()
-                ensure_schema()
-                upsert_company_vector(
-                    client,
+        for ticker, raw, dims in results:
+            if isinstance(dims, CompanyVector):
+                cached_vectors.append(dims)
+            elif dims is None:
+                failed.append(ticker)
+            else:
+                missing = _count_missing(dims)
+                if missing:
+                    partial_info[ticker] = missing
+                fresh_raw[ticker]  = raw
+                fresh_dims[ticker] = dims
+
+        # Rank-normalise fresh tickers within this batch, then persist
+        batch_vectors: list[CompanyVector] = list(cached_vectors)
+
+        if fresh_dims:
+            print(f"  Normalising {len(fresh_dims)} fresh vectors…", flush=True)
+            normalised = rank_normalise(fresh_dims)
+            fresh_cvs: list[CompanyVector] = []
+
+            for ticker, ranked in normalised.items():
+                raw      = fresh_raw[ticker]
+                metadata = _extract_metadata(raw)
+                cv = CompanyVector(
                     ticker=ticker,
-                    vector_date=raw.fetched_at.date(),
                     dimensions=ranked,
                     raw=fresh_dims[ticker],
                     metadata=metadata,
                     fetched_at=raw.fetched_at,
                 )
-            except Exception as exc:
-                logger.warning("[build_vectors] DB persist failed for %s: %s", ticker, exc)
+                _save_cache(cv)
+                fresh_cvs.append(cv)
 
-    # Progress summary
-    complete = [t for t in fresh_dims if t not in partial_info]
-    partial  = list(partial_info.keys())
+            print(f"  Persisting {len(fresh_cvs)} vectors to Supabase…", flush=True)
+            _persist_batch(fresh_cvs)
+            print(f"  Persisted.", flush=True)
+            batch_vectors.extend(fresh_cvs)
 
-    print(f"\nBuilt vectors for {len(tickers)} tickers")
-    print(f"  Complete:  {len(complete) + len(cached_vectors)}")
-    if partial:
-        partial_lines = ", ".join(
-            f"{t}: missing {', '.join(partial_info[t][:3])}{'…' if len(partial_info[t]) > 3 else ''}"
-            for t in partial
+        all_vectors.extend(batch_vectors)
+
+        total_cached  += len(cached_vectors)
+        total_fresh   += len(fresh_dims) - len(partial_info)
+        total_partial += len(partial_info)
+        total_failed  += len(failed)
+
+        summary = (
+            f"  Batch {batch_idx} done — "
+            f"cached: {len(cached_vectors)}  "
+            f"built: {len(fresh_dims)}  "
+            f"failed: {len(failed)}"
         )
-        print(f"  Partial:   {len(partial)}  ({partial_lines})")
-    if failed:
-        print(f"  Failed:    {len(failed)}  ({', '.join(failed)})")
-    else:
-        print(f"  Failed:    0")
+        if partial_info:
+            summary += f"  partial: {len(partial_info)}"
+        print(summary, flush=True)
 
-    return vectors
+    # Final summary
+    print(f"\nBuilt vectors for {len(tickers)} tickers")
+    print(f"  From cache:  {total_cached}")
+    print(f"  Built fresh: {total_fresh}")
+    if total_partial:
+        print(f"  Partial:     {total_partial}")
+    print(f"  Failed:      {total_failed}")
+
+    return all_vectors
 
 
 if __name__ == "__main__":

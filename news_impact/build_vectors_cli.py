@@ -2,23 +2,95 @@
 CLI entry point for the company vector builder.
 
 Usage:
+    # Individual tickers
     python -m news_impact.build_vectors_cli --tickers AAPL MSFT NVDA JPM XOM
+
+    # From a file (one ticker per line)
     python -m news_impact.build_vectors_cli --file tickers.txt
+
+    # Entire exchange — fetches all active, non-ETF/fund tickers via FMP screener
+    python -m news_impact.build_vectors_cli --exchange NASDAQ
+    python -m news_impact.build_vectors_cli --exchange NYSE NASDAQ
+
+    # Exchange with filters to keep only liquid large-caps
+    python -m news_impact.build_vectors_cli --exchange NASDAQ --min-mktcap 1e9 --min-price 5
+
+    # Show compact dimension table for each ticker after building
     python -m news_impact.build_vectors_cli --tickers AAPL MSFT --show
+
+    # Force fresh data (bypass disk cache)
     python -m news_impact.build_vectors_cli --tickers AAPL --no-cache
 """
 
 import argparse
 import asyncio
+import os
 import pathlib
 import sys
 
+import requests
 from dotenv import load_dotenv
 
 load_dotenv(pathlib.Path(__file__).parent.parent / ".env")
 
 from news_impact.company_vector import build_vectors, CompanyVector
-from news_impact.dimensions import CLUSTERS
+
+
+# ---------------------------------------------------------------------------
+# Exchange ticker fetching
+# ---------------------------------------------------------------------------
+
+def _fetch_exchange_tickers(
+    exchanges: list[str],
+    min_mktcap: float | None,
+    min_price: float | None,
+) -> list[str]:
+    """
+    Fetch all active non-ETF/fund tickers for the given exchanges via the
+    FMP company screener, then apply optional market-cap and price filters.
+    Returns a deduplicated, sorted list of ticker symbols.
+    """
+    import pandas as pd
+
+    apikey = os.environ.get("APIKEY")
+    if not apikey:
+        print("Error: APIKEY not set in .env", file=sys.stderr)
+        sys.exit(1)
+
+    frames: list[pd.DataFrame] = []
+    for exchange in exchanges:
+        url = (
+            f"https://financialmodelingprep.com/stable/company-screener"
+            f"?exchange={exchange}&isEtf=false&isFund=false&isActivelyTrading=true&limit=10000"
+        )
+        print(f"Fetching {exchange} tickers from FMP screener…")
+        r = requests.get(url, params={"apikey": apikey}, timeout=30)
+        if r.status_code != 200:
+            print(f"Error: FMP screener returned {r.status_code} for {exchange}", file=sys.stderr)
+            sys.exit(1)
+        data = r.json()
+        if not data:
+            print(f"Warning: no tickers returned for {exchange}")
+            continue
+        frames.append(pd.json_normalize(data))
+
+    if not frames:
+        print("Error: no tickers fetched from any exchange", file=sys.stderr)
+        sys.exit(1)
+
+    df = pd.concat(frames, ignore_index=True).drop_duplicates(subset="symbol")
+
+    total_before = len(df)
+
+    if min_mktcap is not None and "marketCap" in df.columns:
+        df = df[pd.to_numeric(df["marketCap"], errors="coerce").fillna(0) >= min_mktcap]
+
+    if min_price is not None and "price" in df.columns:
+        df = df[pd.to_numeric(df["price"], errors="coerce").fillna(0) >= min_price]
+
+    tickers = sorted(df["symbol"].dropna().str.upper().unique().tolist())
+    print(f"  {total_before} tickers fetched → {len(tickers)} after filters")
+    return tickers
 
 
 # ---------------------------------------------------------------------------
@@ -36,7 +108,6 @@ _CLUSTER_SHORT = {
     "MARKET_BEHAVIOUR":     "MARKET",
 }
 
-# Which dimension keys to show per cluster in the compact table
 _DISPLAY_KEYS: dict[str, list[tuple[str, str]]] = {
     "GROWTH_PROFILE": [
         ("revenue_growth_rate",      "rev_growth"),
@@ -100,25 +171,21 @@ def _fmt_mktcap(val) -> str:
 def _print_vector(cv: CompanyVector) -> None:
     width = 55
     sep = "━" * width
-    name    = cv.metadata.get("name", cv.ticker)
-    sector  = cv.metadata.get("sector", "")
-    mktcap  = _fmt_mktcap(cv.metadata.get("market_cap"))
+    name   = cv.metadata.get("name", cv.ticker)
+    sector = cv.metadata.get("sector", "")
+    mktcap = _fmt_mktcap(cv.metadata.get("market_cap"))
 
     print(f"\n{sep}")
     print(f"{cv.ticker}  {name}  |  {sector}  |  {mktcap}")
     print(sep)
 
     dims = cv.dimensions
-
     for cluster_name, pairs in _DISPLAY_KEYS.items():
         label = _CLUSTER_SHORT.get(cluster_name, cluster_name)
         parts = []
         for key, short in pairs:
             score = dims.get(key)
-            if score is not None:
-                parts.append(f"{short}: {score:.2f}")
-            else:
-                parts.append(f"{short}: n/a")
+            parts.append(f"{short}: {score:.2f}" if score is not None else f"{short}: n/a")
         print(f"{label:<12} {'  '.join(parts)}")
 
     print()
@@ -133,6 +200,7 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         prog="python -m news_impact.build_vectors_cli",
         description="Build rank-normalised company embedding vectors.",
     )
+
     source = parser.add_mutually_exclusive_group(required=True)
     source.add_argument(
         "--tickers", nargs="+", metavar="TICKER",
@@ -140,15 +208,33 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     source.add_argument(
         "--file", metavar="PATH",
-        help="Path to a text file with one ticker per line",
+        help="Text file with one ticker per line",
+    )
+    source.add_argument(
+        "--exchange", nargs="+", metavar="EXCHANGE",
+        help="Fetch all active tickers from one or more exchanges (e.g. NASDAQ NYSE)",
+    )
+
+    parser.add_argument(
+        "--min-mktcap", type=float, default=None, metavar="DOLLARS",
+        help="Skip tickers with market cap below this value (e.g. 1e9 for $1B). Exchange mode only.",
+    )
+    parser.add_argument(
+        "--min-price", type=float, default=None, metavar="DOLLARS",
+        help="Skip tickers priced below this value (e.g. 5). Exchange mode only.",
+    )
+    parser.add_argument(
+        "--batch-size", type=int, default=100, metavar="N",
+        help="Tickers per batch — vectors are persisted to Supabase after each batch "
+             "so interrupted runs lose at most one batch of work (default: 100)",
     )
     parser.add_argument(
         "--show", action="store_true",
-        help="Print a compact dimension table for each ticker",
+        help="Print a compact dimension table for each ticker after building",
     )
     parser.add_argument(
         "--no-cache", dest="no_cache", action="store_true",
-        help="Bypass disk cache and fetch fresh data",
+        help="Bypass disk/DB cache and fetch fresh data from FMP",
     )
     return parser.parse_args(argv)
 
@@ -158,8 +244,11 @@ def _load_tickers_from_file(path: str) -> list[str]:
     if not p.exists():
         print(f"Error: file not found: {path}", file=sys.stderr)
         sys.exit(1)
-    lines = p.read_text().splitlines()
-    tickers = [line.strip().upper() for line in lines if line.strip() and not line.startswith("#")]
+    tickers = [
+        line.strip().upper()
+        for line in p.read_text().splitlines()
+        if line.strip() and not line.startswith("#")
+    ]
     if not tickers:
         print(f"Error: no tickers found in {path}", file=sys.stderr)
         sys.exit(1)
@@ -171,15 +260,23 @@ async def _main(argv: list[str] | None = None) -> None:
 
     if args.tickers:
         tickers = [t.upper() for t in args.tickers]
-    else:
+    elif args.file:
         tickers = _load_tickers_from_file(args.file)
+    else:
+        tickers = _fetch_exchange_tickers(
+            [e.upper() for e in args.exchange],
+            min_mktcap=args.min_mktcap,
+            min_price=args.min_price,
+        )
 
-    use_cache = not args.no_cache
+    if not tickers:
+        print("No tickers to process.", file=sys.stderr)
+        sys.exit(1)
 
-    vectors = await build_vectors(tickers, use_cache=use_cache)
+    print(f"\nBuilding vectors for {len(tickers)} ticker(s)…\n")
+    vectors = await build_vectors(tickers, use_cache=not args.no_cache, batch_size=args.batch_size)
 
     if args.show:
-        # Sort by ticker for consistent output
         for cv in sorted(vectors, key=lambda x: x.ticker):
             _print_vector(cv)
 
