@@ -16,7 +16,20 @@ import httpx
 
 logger = logging.getLogger(__name__)
 
-_DELAY = 0.25  # seconds between requests
+_DELAY = 0.6          # seconds between request dispatches (global, shared across all concurrent fetchers)
+_MAX_RETRIES = 3      # max retries on 429
+_RETRY_DELAYS = (10.0, 30.0, 60.0)  # wait times between 429 retries
+
+# Module-level lock — ensures at most one FMP request is dispatched every _DELAY seconds
+# regardless of how many tickers are being fetched concurrently.
+_rate_lock: asyncio.Lock | None = None
+
+
+def _get_rate_lock() -> asyncio.Lock:
+    global _rate_lock
+    if _rate_lock is None:
+        _rate_lock = asyncio.Lock()
+    return _rate_lock
 
 
 @dataclass
@@ -58,27 +71,57 @@ class FMPFetcher:
         base_url: str | None = None,
     ) -> list | dict | None:
         """
-        Single async GET.  Returns parsed JSON or None on any failure.
-        A 0.25s sleep is applied before every request.
-        Pass base_url to override the stable base (e.g. for v3 endpoints).
+        Single async GET with global rate limiting and 429 retry/backoff.
+
+        A global asyncio.Lock serialises request dispatch so all concurrent
+        FMPFetcher calls share one _DELAY-second gap between sends.
+        On 429 the request is retried up to _MAX_RETRIES times with
+        increasing back-off delays.
         """
-        await asyncio.sleep(_DELAY)
         url = f"{base_url or self.base_url}/{endpoint.lstrip('/')}"
         params = {**params, "apikey": self.api_key}
-        try:
-            r = await client.get(url, params=params, timeout=30.0)
-            if r.status_code in (404, 204):
-                logger.warning("[FMPFetcher] %s → %s %s (no data)", endpoint, r.status_code, params.get("symbol", ""))
+        sym = params.get("symbol", endpoint)
+
+        for attempt in range(_MAX_RETRIES + 1):
+            # --- global throttle: wait _DELAY seconds between dispatches ---
+            async with _get_rate_lock():
+                await asyncio.sleep(_DELAY)
+                try:
+                    r = await client.get(url, params=params, timeout=30.0)
+                except Exception as exc:
+                    logger.warning("[FMPFetcher] %s failed for %s: %s", endpoint, sym, exc)
+                    return None
+
+            # --- handle response outside the lock ---
+            if r.status_code == 429:
+                if attempt < _MAX_RETRIES:
+                    wait = _RETRY_DELAYS[attempt]
+                    logger.warning(
+                        "[FMPFetcher] 429 on %s %s — retry %d/%d in %.0fs",
+                        endpoint, sym, attempt + 1, _MAX_RETRIES, wait,
+                    )
+                    await asyncio.sleep(wait)
+                    continue
+                logger.warning("[FMPFetcher] 429 on %s %s — giving up after %d retries", endpoint, sym, _MAX_RETRIES)
                 return None
-            r.raise_for_status()
+
+            if r.status_code in (404, 204):
+                logger.warning("[FMPFetcher] %s → %s %s (no data)", endpoint, r.status_code, sym)
+                return None
+
+            try:
+                r.raise_for_status()
+            except Exception as exc:
+                logger.warning("[FMPFetcher] %s failed for %s: %s", endpoint, sym, exc)
+                return None
+
             data = r.json()
             if not data:
-                logger.warning("[FMPFetcher] %s returned empty body for %s", endpoint, params.get("symbol", ""))
+                logger.warning("[FMPFetcher] %s returned empty body for %s", endpoint, sym)
                 return None
             return data
-        except Exception as exc:
-            logger.warning("[FMPFetcher] %s failed for %s: %s", endpoint, params.get("symbol", ""), exc)
-            return None
+
+        return None  # exhausted retries
 
     async def fetch_all(self, ticker: str) -> RawCompanyData:
         """
