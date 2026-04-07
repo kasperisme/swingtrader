@@ -45,7 +45,6 @@ def _load_db_module():
 
 
 _db = _load_db_module()
-ensure_schema: Callable = _db.ensure_schema
 
 
 def _as_json(val, default=None):
@@ -189,9 +188,7 @@ def _scan_source_for_script(rel_script: str) -> str:
 
 
 def _get_client():
-    client = get_supabase_client()
-    ensure_schema()
-    return client
+    return get_supabase_client()
 
 
 def _tbl(client, table: str):

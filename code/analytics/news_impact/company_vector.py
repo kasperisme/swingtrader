@@ -20,7 +20,7 @@ from typing import Optional
 from news_impact.fmp_fetcher import FMPFetcher, RawCompanyData
 from news_impact.dimension_calculator import DimensionCalculator
 from news_impact.normaliser import rank_normalise
-from src.db import get_supabase_client, ensure_schema, upsert_company_vector, load_company_vectors
+from src.db import get_supabase_client, upsert_company_vector, load_company_vectors
 
 logger = logging.getLogger(__name__)
 
@@ -63,7 +63,6 @@ def _load_cached(ticker: str) -> Optional[CompanyVector]:
 
     try:
         client = get_supabase_client()
-        ensure_schema()
         rows = load_company_vectors(client, tickers=[ticker])
         if rows:
             r = rows[0]
@@ -113,7 +112,6 @@ def _persist_batch(vectors: list[CompanyVector]) -> None:
     if not vectors:
         return
     client = get_supabase_client()
-    ensure_schema()
     for cv in vectors:
         try:
             upsert_company_vector(

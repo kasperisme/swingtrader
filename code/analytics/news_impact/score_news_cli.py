@@ -46,7 +46,7 @@ from news_impact.company_vector import build_vectors, CompanyVector
 from news_impact.fmp_fetcher import FMPFetcher
 from news_impact.impact_scorer import score_article, aggregate_heads, top_dimensions, HeadOutput, extract_tickers
 from news_impact.news_ingester import _sha256, _check_existing
-from src.db import get_supabase_client, get_schema, ensure_schema, save_article_tickers, _as_json
+from src.db import get_supabase_client, get_schema, save_article_tickers, _as_json
 
 
 def _heads_from_db(article_id: int) -> list[HeadOutput]:
@@ -176,6 +176,29 @@ def _print_results(
     else:
         console.print("\n[dim]No signals — article may not relate to any cluster.[/dim]")
 
+    # Per-ticker sentiment
+    sent_head = next((h for h in heads if h.cluster == "TICKER_SENTIMENT"), None)
+    if sent_head and sent_head.scores:
+        console.print(f"\n[bold]Ticker sentiment:[/bold]")
+        for ticker, score in sorted(sent_head.scores.items(), key=lambda x: x[1], reverse=True):
+            colour = "green" if score > 0 else ("red" if score < 0 else "dim")
+            sign   = "+" if score > 0 else ""
+            reason = sent_head.reasoning.get(ticker, "")
+            console.print(f"  [{colour}]{ticker:<6}  {sign}{score:.2f}[/{colour}]  [dim]{reason}[/dim]")
+
+    # Ticker relationships
+    rel_head = next((h for h in heads if h.cluster == "TICKER_RELATIONSHIPS"), None)
+    if rel_head and rel_head.scores:
+        console.print(f"\n[bold]Ticker relationships:[/bold]")
+        for key, strength in sorted(rel_head.scores.items(), key=lambda x: x[1], reverse=True):
+            parts = key.split("__")
+            if len(parts) == 3:
+                frm, to, rel_type = parts
+                note = rel_head.reasoning.get(key, "")
+                console.print(f"  [cyan]{frm}[/cyan] → [cyan]{to}[/cyan]  [{rel_type}]  strength={strength:.2f}")
+                if note:
+                    console.print(f"    [dim]{note}[/dim]")
+
     # Company scores (only printed when tickers were passed)
     if company_scores:
         tailwinds = [s for s in company_scores if s.score > 0]
@@ -293,7 +316,6 @@ async def _main(argv: list[str] | None = None) -> None:
         # Check for existing article before showing status message
         article_hash = _sha256(article_text)
         client = get_supabase_client()
-        ensure_schema()
         existing = _check_existing(client, article_hash)
 
         if existing is not None and not args.refresh:
@@ -325,7 +347,6 @@ async def _main(argv: list[str] | None = None) -> None:
         explicit_tickers_upper = [t.upper() for t in (args.tickers or [])]
         try:
             client = get_supabase_client()
-            ensure_schema()
             if extracted_tickers:
                 save_article_tickers(client, article_id, extracted_tickers, source="extracted")
             if explicit_tickers_upper:
@@ -371,11 +392,13 @@ async def _process_fmp_news(args: argparse.Namespace) -> None:
     console.print(f"\nFetched [bold]{len(articles)}[/bold] articles from FMP news\n")
 
     for i, article in enumerate(articles, 1):
-        summary = article.get("text", "").strip()
-        title   = article.get("title", "")
-        url     = article.get("url", "")
-        source  = article.get("site") or article.get("publisher") or "fmp"
-        symbol  = article.get("symbol", "")
+        summary      = article.get("text", "").strip()
+        title        = article.get("title", "")
+        url          = article.get("url", "")
+        source       = url
+        publisher    = article.get("publisher") or article.get("site") or None
+        symbol       = article.get("symbol", "")
+        published_at = article.get("publishedDate") or None
 
         if not summary and not url:
             console.print(f"[dim][{i}/{len(articles)}] {title[:60]} — skipped (no text or url)[/dim]")
@@ -416,7 +439,6 @@ async def _process_fmp_news(args: argparse.Namespace) -> None:
         if not args.no_persist:
             article_hash = _sha256(body)
             client = get_supabase_client()
-            ensure_schema()
             existing = _check_existing(client, article_hash)
 
             if existing is not None and not args.refresh:
@@ -427,9 +449,11 @@ async def _process_fmp_news(args: argparse.Namespace) -> None:
                 if existing and args.refresh:
                     _delete_heads_and_vector(client, existing[0])
                     article_id = _persist(client, body, article_hash, url, title, source, heads, impact,
-                                          existing_article_id=existing[0])
+                                          existing_article_id=existing[0], published_at=published_at,
+                                          publisher=publisher)
                 else:
-                    article_id = _persist(client, body, article_hash, url, title, source, heads, impact)
+                    article_id = _persist(client, body, article_hash, url, title, source, heads, impact,
+                                          published_at=published_at, publisher=publisher)
 
             if article_id >= 0 and extracted_tickers:
                 save_article_tickers(client, article_id, extracted_tickers, source="extracted")

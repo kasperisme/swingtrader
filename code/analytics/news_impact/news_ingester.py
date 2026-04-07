@@ -13,7 +13,7 @@ from typing import Optional
 
 from supabase import Client
 
-from src.db import get_supabase_client, get_schema, ensure_schema, _as_json
+from src.db import get_supabase_client, get_schema, _as_json
 from news_impact.impact_scorer import score_article, aggregate_heads, top_dimensions, HeadOutput
 
 __all__ = ["ingest_article", "_sha256", "_check_existing", "_persist"]
@@ -68,6 +68,8 @@ def _persist(
     heads: list[HeadOutput],
     impact: dict[str, float],
     existing_article_id: Optional[int] = None,
+    published_at: Optional[str] = None,
+    publisher: Optional[str] = None,
 ) -> int:
     """
     Insert (or re-use) article row, then insert heads and vector.
@@ -81,14 +83,19 @@ def _persist(
     if existing_article_id is not None:
         article_id = existing_article_id
     else:
-        art_res = _tbl(client, "news_articles").insert({
+        row = {
             "created_at": now,
             "url": url,
             "title": title,
             "body": body,
             "source": source,
             "article_hash": article_hash,
-        }).execute()
+        }
+        if published_at is not None:
+            row["published_at"] = published_at
+        if publisher is not None:
+            row["publisher"] = publisher
+        art_res = _tbl(client, "news_articles").insert(row).execute()
         article_id = int(art_res.data[0]["id"])
 
     # Insert one head row per cluster
@@ -127,6 +134,8 @@ async def ingest_article(
     source: Optional[str] = None,
     db_path: Optional[str] = None,  # kept for call-site compat, ignored
     refresh: bool = False,
+    published_at: Optional[str] = None,
+    publisher: Optional[str] = None,
 ) -> tuple[int, dict[str, float]]:
     """
     Full pipeline: article → 8 LLM heads → aggregate → persist → return
@@ -139,7 +148,6 @@ async def ingest_article(
     article_hash = _sha256(body)
 
     client = get_supabase_client()
-    ensure_schema()
     existing = _check_existing(client, article_hash)
 
     if existing is not None and not refresh:
@@ -169,9 +177,12 @@ async def ingest_article(
         article_id = _persist(
             client, body, article_hash, url, title, source, heads, impact,
             existing_article_id=existing_article_id,
+            published_at=published_at,
+            publisher=publisher,
         )
     else:
-        article_id = _persist(client, body, article_hash, url, title, source, heads, impact)
+        article_id = _persist(client, body, article_hash, url, title, source, heads, impact,
+                              published_at=published_at, publisher=publisher)
 
     logger.info("[news_ingester] persisted article_id=%d", article_id)
     return article_id, impact

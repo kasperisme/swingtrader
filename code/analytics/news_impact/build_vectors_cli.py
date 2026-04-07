@@ -299,7 +299,6 @@ def _fetch_tickers_from_db() -> list[str]:
     _spec.loader.exec_module(_mod)
 
     client = _mod.get_supabase_client()
-    _mod.ensure_schema()
     schema = _mod.get_schema()
 
     res = (
