@@ -14,9 +14,11 @@ Usage:
     # Fetch and embed latest news from FMP (market-wide)
     python -m news_impact.score_news_cli --fmp-news
     python -m news_impact.score_news_cli --fmp-news --limit 10
+    python -m news_impact.score_news_cli --fmp-news --from 2025-09-09 --to 2025-12-10
 
     # Fetch FMP news filtered to specific tickers
     python -m news_impact.score_news_cli --fmp-news --tickers AAPL MSFT NVDA
+    python -m news_impact.score_news_cli --fmp-news --tickers AAPL --from 2025-11-01 --to 2025-11-30
 
     # Embed + score companies
     python -m news_impact.score_news_cli --text "..." --tickers AAPL MSFT NVDA JPM XOM
@@ -237,11 +239,19 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
     parser.add_argument(
         "--limit", type=int, default=20,
-        help="Max articles to fetch with --fmp-news (default: 20)",
+        help="Max articles to fetch with --fmp-news (default: 20, max: 250)",
     )
     parser.add_argument(
         "--page", type=int, default=0,
-        help="Page offset for --fmp-news pagination (default: 0)",
+        help="Page offset for --fmp-news pagination (default: 0, max: 100)",
+    )
+    parser.add_argument(
+        "--from", dest="from_date", metavar="DATE",
+        help="Start date filter for --fmp-news (YYYY-MM-DD, e.g. 2025-09-09)",
+    )
+    parser.add_argument(
+        "--to", dest="to_date", metavar="DATE",
+        help="End date filter for --fmp-news (YYYY-MM-DD, e.g. 2025-12-10)",
     )
 
     parser.add_argument(
@@ -383,7 +393,13 @@ async def _process_fmp_news(args: argparse.Namespace) -> None:
     """Fetch articles from FMP and run each through the full pipeline."""
     fetcher   = FMPFetcher()
     tickers   = [t.upper() for t in args.tickers] if args.tickers else None
-    articles  = await fetcher.fetch_stock_news(tickers=tickers, limit=args.limit, page=args.page)
+    articles  = await fetcher.fetch_stock_news(
+        tickers=tickers,
+        limit=args.limit,
+        page=args.page,
+        from_date=getattr(args, "from_date", None),
+        to_date=getattr(args, "to_date", None),
+    )
 
     if not articles:
         console.print("[red]No articles returned from FMP.[/red]")

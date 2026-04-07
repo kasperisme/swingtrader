@@ -486,6 +486,12 @@ const MA_OPTIONS: Record<ViewMode, { label: string; value: number }[]> = {
 
 const DEFAULT_MA: Record<ViewMode, number> = { daily: 7, hourly: 6 };
 
+type QuickRange = "7d" | "30d" | "90d" | "all";
+
+function toDateInputValue(iso: string): string {
+  return iso.slice(0, 10);
+}
+
 export function NewsTrendsUI({ articles }: { articles: ArticleImpact[] }) {
   const [viewMode, setViewMode] = useState<ViewMode>("daily");
   const [maWindow, setMaWindow] = useState(7);
@@ -494,14 +500,51 @@ export function NewsTrendsUI({ articles }: { articles: ArticleImpact[] }) {
   );
   const [drilldownId, setDrilldownId] = useState<string | null>(null);
 
+  // Date range filter
+  const allDates = useMemo(
+    () => articles.map((a) => toDateInputValue(a.created_at)).sort(),
+    [articles],
+  );
+  const minDate = allDates[0] ?? "";
+  const maxDate = allDates[allDates.length - 1] ?? "";
+
+  const [dateFrom, setDateFrom] = useState<string>("");
+  const [dateTo, setDateTo] = useState<string>("");
+  const [quickRange, setQuickRange] = useState<QuickRange>("all");
+
+  function applyQuickRange(range: QuickRange) {
+    setQuickRange(range);
+    if (range === "all") {
+      setDateFrom("");
+      setDateTo("");
+    } else {
+      const days = range === "7d" ? 7 : range === "30d" ? 30 : 90;
+      const end = new Date(maxDate || new Date().toISOString().slice(0, 10));
+      const start = new Date(end);
+      start.setDate(start.getDate() - days);
+      setDateFrom(start.toISOString().slice(0, 10));
+      setDateTo(end.toISOString().slice(0, 10));
+    }
+  }
+
+  const filteredArticles = useMemo(() => {
+    if (!dateFrom && !dateTo) return articles;
+    return articles.filter((a) => {
+      const d = toDateInputValue(a.created_at);
+      if (dateFrom && d < dateFrom) return false;
+      if (dateTo && d > dateTo) return false;
+      return true;
+    });
+  }, [articles, dateFrom, dateTo]);
+
   function switchMode(mode: ViewMode) {
     setViewMode(mode);
     setMaWindow(DEFAULT_MA[mode]);
   }
 
   const daily = useMemo(
-    () => buildPeriodData(articles, viewMode),
-    [articles, viewMode],
+    () => buildPeriodData(filteredArticles, viewMode),
+    [filteredArticles, viewMode],
   );
   const chartData = useMemo(
     () => applyClusterMA(daily, maWindow),
@@ -623,6 +666,49 @@ export function NewsTrendsUI({ articles }: { articles: ArticleImpact[] }) {
         <span className="ml-auto text-xs text-muted-foreground">
           {totalArticles} articles · {dateRange}
         </span>
+      </div>
+
+      {/* Date range filter */}
+      <div className="flex flex-wrap items-center gap-3">
+        <span className="text-xs text-muted-foreground">Range:</span>
+        {(["7d", "30d", "90d", "all"] as QuickRange[]).map((r) => (
+          <button
+            key={r}
+            onClick={() => applyQuickRange(r)}
+            className={`text-xs px-2.5 py-1 rounded-md border transition-colors ${
+              quickRange === r
+                ? "bg-foreground text-background border-foreground"
+                : "bg-background text-muted-foreground border-border hover:border-foreground/40"
+            }`}
+          >
+            {r === "all" ? "All" : r}
+          </button>
+        ))}
+        <div className="flex items-center gap-1.5 ml-2">
+          <input
+            type="date"
+            value={dateFrom}
+            min={minDate}
+            max={dateTo || maxDate}
+            onChange={(e) => {
+              setDateFrom(e.target.value);
+              setQuickRange("all");
+            }}
+            className="text-xs px-2 py-1 rounded-md border border-border bg-background text-foreground"
+          />
+          <span className="text-xs text-muted-foreground">→</span>
+          <input
+            type="date"
+            value={dateTo}
+            min={dateFrom || minDate}
+            max={maxDate}
+            onChange={(e) => {
+              setDateTo(e.target.value);
+              setQuickRange("all");
+            }}
+            className="text-xs px-2 py-1 rounded-md border border-border bg-background text-foreground"
+          />
+        </div>
       </div>
 
       <div className="flex gap-6">

@@ -179,16 +179,20 @@ class FMPFetcher:
         tickers: list[str] | None = None,
         limit: int = 20,
         page: int = 0,
+        from_date: str | None = None,
+        to_date: str | None = None,
     ) -> list[dict]:
         """
         Fetch latest stock news from FMP.
 
         Parameters
         ----------
-        tickers : filter to these symbols (passed as comma-joined 'tickers' param).
-                  None = market-wide latest news.
-        limit   : max articles to return (FMP max per page: 50).
-        page    : pagination offset.
+        tickers   : filter to these symbols (passed as comma-joined 'tickers' param).
+                    None = market-wide latest news.
+        limit     : max articles to return (FMP max per page: 250).
+        page      : pagination offset (max 100).
+        from_date : start date filter in YYYY-MM-DD format (e.g. "2025-09-09").
+        to_date   : end date filter in YYYY-MM-DD format (e.g. "2025-12-10").
 
         Returns
         -------
@@ -198,6 +202,10 @@ class FMPFetcher:
         params: dict = {"page": page, "limit": limit}
         if tickers:
             params["tickers"] = ",".join(tickers)
+        if from_date:
+            params["from"] = from_date
+        if to_date:
+            params["to"] = to_date
 
         async with httpx.AsyncClient() as client:
             data = await self._get(client, "news/stock-latest", params)
