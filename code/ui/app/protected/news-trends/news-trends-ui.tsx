@@ -383,12 +383,14 @@ function DimensionDrilldown({
   maWindow,
   latestDimScores,
   mode,
+  chartHeight = 260,
 }: {
   clusterId: string;
   chartData: Array<{ date: string; [key: string]: number | string | null }>;
   maWindow: number;
   latestDimScores: Record<string, number | null>;
   mode: ViewMode;
+  chartHeight?: number;
 }) {
   const cluster = CLUSTERS.find((c) => c.id === clusterId);
   if (!cluster) return null;
@@ -423,7 +425,7 @@ function DimensionDrilldown({
       <div className="flex gap-6">
         {/* Dimension chart */}
         <div className="flex-1 min-w-0">
-          <ResponsiveContainer width="100%" height={260}>
+          <ResponsiveContainer width="100%" height={chartHeight}>
             <LineChart
               data={chartData}
               margin={{ top: 5, right: 10, left: 0, bottom: 5 }}
@@ -441,7 +443,8 @@ function DimensionDrilldown({
                 interval="preserveStartEnd"
               />
               <YAxis
-                domain={[-1, 1]}
+                domain={["auto", "auto"]}
+                allowDataOverflow={false}
                 tick={{ fontSize: 10, fill: "currentColor", opacity: 0.5 }}
                 tickLine={false}
                 axisLine={false}
@@ -539,7 +542,7 @@ function toDateInputValue(iso: string): string {
   return iso.slice(0, 10);
 }
 
-export function NewsTrendsUI({ articles }: { articles: ArticleImpact[] }) {
+export function NewsTrendsUI({ articles, chartHeight = 400 }: { articles: ArticleImpact[]; chartHeight?: number }) {
   const [viewMode, setViewMode] = useState<ViewMode>("daily");
   const [maWindow, setMaWindow] = useState(7);
   const [selected, setSelected] = useState<Set<string>>(
@@ -769,7 +772,7 @@ export function NewsTrendsUI({ articles }: { articles: ArticleImpact[] }) {
               show/hide · <ChevronRight size={10} className="inline" /> to drill
               into dimensions
             </p>
-            <ResponsiveContainer width="100%" height={400}>
+            <ResponsiveContainer width="100%" height={chartHeight}>
               <LineChart
                 data={chartData}
                 margin={{ top: 5, right: 10, left: 0, bottom: 5 }}
@@ -787,7 +790,8 @@ export function NewsTrendsUI({ articles }: { articles: ArticleImpact[] }) {
                   interval="preserveStartEnd"
                 />
                 <YAxis
-                  domain={[-1, 1]}
+                  domain={["auto", "auto"]}
+                allowDataOverflow={false}
                   tick={{ fontSize: 10, fill: "currentColor", opacity: 0.5 }}
                   tickLine={false}
                   axisLine={false}
@@ -847,6 +851,7 @@ export function NewsTrendsUI({ articles }: { articles: ArticleImpact[] }) {
           maWindow={maWindow}
           latestDimScores={latestDimScores}
           mode={viewMode}
+          chartHeight={Math.round(chartHeight * 0.65)}
         />
       )}
 

@@ -1,6 +1,6 @@
 import { Suspense } from "react";
 import { createClient } from "@/lib/supabase/server";
-import { ScreeningsUI, type ScanRun, type ScreeningRow } from "./screenings-ui";
+import { ScreeningsUI, type ScanRun, type ScreeningRow, type ScanRowNote } from "./screenings-ui";
 
 async function fetchRuns(): Promise<ScanRun[]> {
   const supabase = await createClient();
@@ -29,10 +29,13 @@ function asBool(v: unknown): boolean | null {
   return Boolean(v);
 }
 
-function parseRow(symbol: string, d: Record<string, unknown>): ScreeningRow {
+function parseRow(scanRowId: number, runId: number, symbol: string, d: Record<string, unknown>): ScreeningRow {
   return {
+    scan_row_id: scanRowId,
+    run_id: runId,
     symbol: symbol || String(d.ticker ?? d.symbol ?? ""),
-    sector: String(d.sector ?? ""),
+    sector: String(d.sector ?? d.sector_x ?? d.sector_y ?? ""),
+    industry: String(d.industry ?? d.subSector ?? ""),
     subSector: String(d.subSector ?? d.industry ?? ""),
     // Technical
     RS_Rank: asNum(d.RS_Rank ?? d.rs_rank),
@@ -81,13 +84,13 @@ async function fetchRows(runId: number): Promise<ScreeningRow[]> {
     supabase
       .schema("swingtrader")
       .from("scan_rows")
-      .select("symbol, row_data")
+      .select("id, run_id, symbol, row_data")
       .eq("run_id", runId)
       .eq("dataset", "trend_template"),
     supabase
       .schema("swingtrader")
       .from("scan_rows")
-      .select("symbol, row_data")
+      .select("id, run_id, symbol, row_data")
       .eq("run_id", runId)
       .eq("dataset", "passed_stocks"),
   ]);
@@ -95,25 +98,67 @@ async function fetchRows(runId: number): Promise<ScreeningRow[]> {
   // Prefer passed_stocks (richer data) if present, else fall back to trend_template
   const source = (psRes.data && psRes.data.length > 0) ? psRes.data : (ttRes.data ?? []);
 
-  return source.map(r => parseRow(r.symbol ?? "", r.row_data as Record<string, unknown>));
+  return source.map(r => parseRow(r.id, r.run_id, r.symbol ?? "", r.row_data as Record<string, unknown>));
 }
 
-async function fetchVectorTickers(): Promise<Set<string>> {
+async function fetchRowNotes(runId: number): Promise<ScanRowNote[]> {
+  const supabase = await createClient();
+  const { data } = await supabase
+    .schema("swingtrader")
+    .from("scan_row_notes")
+    .select("scan_row_id, run_id, ticker, status, highlighted, comment, stage, priority, tags, metadata_json, created_at, updated_at")
+    .eq("run_id", runId)
+    .order("updated_at", { ascending: false });
+  return (data ?? []) as ScanRowNote[];
+}
+
+async function fetchCompanyVectors(): Promise<{
+  tickers: Set<string>;
+  dimensions: Record<string, Record<string, number>>;
+}> {
   const supabase = await createClient();
   const { data } = await supabase
     .schema("swingtrader")
     .from("company_vectors")
-    .select("ticker");
-  return new Set((data ?? []).map((r) => r.ticker as string));
+    .select("ticker, dimensions_json, vector_date")
+    .order("ticker", { ascending: true })
+    .order("vector_date", { ascending: false });
+
+  const tickers = new Set<string>();
+  const dimensions: Record<string, Record<string, number>> = {};
+
+  // Keep only the latest vector per ticker
+  const seen = new Set<string>();
+  for (const row of data ?? []) {
+    const ticker = row.ticker as string;
+    if (seen.has(ticker)) continue;
+    seen.add(ticker);
+    tickers.add(ticker);
+    const raw = row.dimensions_json;
+    if (raw && typeof raw === "object") {
+      dimensions[ticker] = raw as Record<string, number>;
+    } else if (typeof raw === "string") {
+      try { dimensions[ticker] = JSON.parse(raw); } catch { dimensions[ticker] = {}; }
+    } else {
+      dimensions[ticker] = {};
+    }
+  }
+
+  return { tickers, dimensions };
 }
 
 async function ScreeningsData({ searchParams }: { searchParams: Promise<{ run?: string }> }) {
   const params = await searchParams;
   const runId = params.run ? parseInt(params.run, 10) : null;
 
-  const [runs, vectorTickers] = await Promise.all([fetchRuns(), fetchVectorTickers()]);
+  const [runs, { tickers: vectorTickers, dimensions: companyVectorDimensions }] = await Promise.all([
+    fetchRuns(),
+    fetchCompanyVectors(),
+  ]);
   const effectiveRunId = runId ?? runs[0]?.id ?? null;
-  const rows = effectiveRunId ? await fetchRows(effectiveRunId) : [];
+  const [rows, initialNotes] = effectiveRunId
+    ? await Promise.all([fetchRows(effectiveRunId), fetchRowNotes(effectiveRunId)])
+    : [[], []];
 
   return (
     <ScreeningsUI
@@ -121,6 +166,8 @@ async function ScreeningsData({ searchParams }: { searchParams: Promise<{ run?: 
       rows={rows}
       selectedRunId={effectiveRunId}
       vectorTickers={vectorTickers}
+      companyVectorDimensions={companyVectorDimensions}
+      initialNotes={initialNotes}
     />
   );
 }
