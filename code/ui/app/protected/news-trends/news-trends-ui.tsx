@@ -16,7 +16,7 @@ import { TrendingUp, TrendingDown, Minus, ChevronRight, X } from "lucide-react";
 import { CLUSTERS } from "../vectors/dimensions";
 
 export interface ArticleImpact {
-  created_at: string;
+  published_at: string;
   impact_json: Record<string, number>;
 }
 
@@ -76,7 +76,7 @@ function buildPeriodData(
 }> {
   const byDate = new Map<string, ArticleImpact[]>();
   for (const a of articles) {
-    const d = toBucket(a.created_at, mode);
+    const d = toBucket(a.published_at, mode);
     if (!byDate.has(d)) byDate.set(d, []);
     byDate.get(d)!.push(a);
   }
@@ -502,7 +502,7 @@ export function NewsTrendsUI({ articles }: { articles: ArticleImpact[] }) {
 
   // Date range filter
   const allDates = useMemo(
-    () => articles.map((a) => toDateInputValue(a.created_at)).sort(),
+    () => articles.map((a) => toDateInputValue(a.published_at)).sort(),
     [articles],
   );
   const minDate = allDates[0] ?? "";
@@ -530,7 +530,7 @@ export function NewsTrendsUI({ articles }: { articles: ArticleImpact[] }) {
   const filteredArticles = useMemo(() => {
     if (!dateFrom && !dateTo) return articles;
     return articles.filter((a) => {
-      const d = toDateInputValue(a.created_at);
+      const d = toDateInputValue(a.published_at);
       if (dateFrom && d < dateFrom) return false;
       if (dateTo && d > dateTo) return false;
       return true;

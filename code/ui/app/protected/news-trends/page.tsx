@@ -15,13 +15,16 @@ async function fetchImpactData(): Promise<ArticleImpact[]> {
     console.error("Failed to fetch news impact vectors:", error);
     return [];
   }
-  return data;
+
+  return data.map((row: any) => ({
+    impact_json: row.impact_json,
+    published_at: row.news_articles?.published_at ?? row.created_at,
+  }));
 }
 
 async function TrendsData() {
   const articles = await fetchImpactData();
 
-  console.log("articles", articles);
   return <NewsTrendsUI articles={articles} />;
 }
 
