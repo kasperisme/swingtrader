@@ -135,6 +135,53 @@ function buildPeriodData(
   });
 }
 
+/** Fill missing date/hour buckets in the range with null values */
+function fillDateGaps(
+  data: ReturnType<typeof buildPeriodData>,
+  mode: ViewMode,
+  startBucket: string,
+  endBucket: string,
+): ReturnType<typeof buildPeriodData> {
+  if (!startBucket || !endBucket) return data;
+
+  const allDimKeys = CLUSTERS.flatMap((c) => c.dimensions.map((d) => d.key));
+  const dataMap = new Map(data.map((d) => [d.date, d]));
+  const result: ReturnType<typeof buildPeriodData> = [];
+
+  const emptyEntry = (date: string) => {
+    const clusters: Record<string, number | null> = {};
+    for (const cluster of CLUSTERS) clusters[cluster.id] = null;
+    const dimensions: Record<string, number | null> = {};
+    for (const key of allDimKeys) dimensions[key] = null;
+    return { date, clusters, dimensions, count: 0 };
+  };
+
+  if (mode === "daily") {
+    let current = startBucket.slice(0, 10);
+    const end = endBucket.slice(0, 10);
+    while (current <= end) {
+      result.push(dataMap.get(current) ?? emptyEntry(current));
+      // advance by 1 day using UTC to avoid DST issues
+      const d = new Date(current + "T00:00:00Z");
+      d.setUTCDate(d.getUTCDate() + 1);
+      current = d.toISOString().slice(0, 10);
+    }
+  } else {
+    // hourly buckets: "2024-01-15T14"
+    let current = startBucket.slice(0, 13);
+    const end = endBucket.slice(0, 13);
+    while (current <= end) {
+      result.push(dataMap.get(current) ?? emptyEntry(current));
+      const [datePart, hourPart] = current.split("T");
+      const d = new Date(datePart + "T00:00:00Z");
+      d.setUTCHours(parseInt(hourPart) + 1);
+      current = d.toISOString().slice(0, 13);
+    }
+  }
+
+  return result;
+}
+
 /** Apply rolling window moving average to cluster data */
 function applyClusterMA(
   daily: ReturnType<typeof buildPeriodData>,
@@ -542,10 +589,12 @@ export function NewsTrendsUI({ articles }: { articles: ArticleImpact[] }) {
     setMaWindow(DEFAULT_MA[mode]);
   }
 
-  const daily = useMemo(
-    () => buildPeriodData(filteredArticles, viewMode),
-    [filteredArticles, viewMode],
-  );
+  const daily = useMemo(() => {
+    const raw = buildPeriodData(filteredArticles, viewMode);
+    const start = dateFrom || minDate;
+    const end = dateTo || maxDate;
+    return fillDateGaps(raw, viewMode, start, end);
+  }, [filteredArticles, viewMode, dateFrom, dateTo, minDate, maxDate]);
   const chartData = useMemo(
     () => applyClusterMA(daily, maWindow),
     [daily, maWindow],
