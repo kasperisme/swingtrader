@@ -24,6 +24,12 @@ export default function ProtectedLayout({
               >
                 Vectors
               </Link>
+              <Link
+                href={"/protected/news-trends"}
+                className="text-sm font-medium text-muted-foreground hover:text-foreground transition-colors"
+              >
+                News Trends
+              </Link>
               <div className="flex items-center gap-2">
                 <DeployButton />
               </div>
