@@ -8,25 +8,20 @@ async function fetchImpactData(): Promise<ArticleImpact[]> {
   const { data, error } = await supabase
     .schema("swingtrader")
     .from("news_impact_vectors")
-    .select("impact_json, created_at")
+    .select("impact_json, created_at, news_articles(published_at)")
     .order("created_at", { ascending: true });
 
   if (error) {
     console.error("Failed to fetch news impact vectors:", error);
     return [];
   }
-
-  return (data ?? []).map((row) => {
-    let impact: Record<string, number> = {};
-    try {
-      impact = JSON.parse(row.impact_json ?? "{}");
-    } catch {}
-    return { created_at: row.created_at as string, impact };
-  });
+  return data;
 }
 
 async function TrendsData() {
   const articles = await fetchImpactData();
+
+  console.log("articles", articles);
   return <NewsTrendsUI articles={articles} />;
 }
 
@@ -36,14 +31,16 @@ export default function NewsTrendsPage() {
       <div>
         <h1 className="text-2xl font-bold">News Dimension Trends</h1>
         <p className="text-sm text-muted-foreground mt-1">
-          Moving average of news impact scores across dimension clusters — track what narratives
-          are gaining or losing momentum.
+          Moving average of news impact scores across dimension clusters — track
+          what narratives are gaining or losing momentum.
         </p>
       </div>
 
       <Suspense
         fallback={
-          <div className="text-sm text-muted-foreground animate-pulse">Loading trends…</div>
+          <div className="text-sm text-muted-foreground animate-pulse">
+            Loading trends…
+          </div>
         }
       >
         <TrendsData />

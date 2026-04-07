@@ -30,6 +30,12 @@ export default function ProtectedLayout({
               >
                 News Trends
               </Link>
+              <Link
+                href={"/protected/screenings"}
+                className="text-sm font-medium text-muted-foreground hover:text-foreground transition-colors"
+              >
+                Screenings
+              </Link>
               <div className="flex items-center gap-2">
                 <DeployButton />
               </div>

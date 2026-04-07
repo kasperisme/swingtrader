@@ -12,6 +12,11 @@ Usage:
     python -m news_impact.build_vectors_cli --exchange NASDAQ
     python -m news_impact.build_vectors_cli --exchange NYSE NASDAQ
 
+    # From scan_rows table (all tickers in table, or filtered)
+    python -m news_impact.build_vectors_cli --from-scan
+    python -m news_impact.build_vectors_cli --from-scan --scan-run-id 42
+    python -m news_impact.build_vectors_cli --from-scan --scan-dataset my_scan --scan-date 2026-04-07
+
     # Exchange with filters to keep only liquid large-caps
     python -m news_impact.build_vectors_cli --exchange NASDAQ --min-mktcap 1e9 --min-price 5
 
@@ -248,6 +253,23 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--from-db", action="store_true",
         help="Refresh all tickers that already have a vector in Supabase",
     )
+    source.add_argument(
+        "--from-scan", action="store_true",
+        help="Use distinct tickers from swingtrader.scan_rows (optionally filtered by --scan-run-id, --scan-dataset, --scan-date)",
+    )
+
+    parser.add_argument(
+        "--scan-run-id", type=int, default=None, metavar="RUN_ID",
+        help="Filter scan_rows by run_id (--from-scan only)",
+    )
+    parser.add_argument(
+        "--scan-dataset", type=str, default=None, metavar="DATASET",
+        help="Filter scan_rows by dataset name (--from-scan only)",
+    )
+    parser.add_argument(
+        "--scan-date", type=str, default=None, metavar="YYYY-MM-DD",
+        help="Filter scan_rows by scan_date (--from-scan only)",
+    )
 
     parser.add_argument(
         "--min-mktcap", type=float, default=None, metavar="DOLLARS",
@@ -314,6 +336,52 @@ def _fetch_tickers_from_db() -> list[str]:
     return tickers
 
 
+def _fetch_tickers_from_scan(
+    run_id: int | None,
+    dataset: str | None,
+    scan_date: str | None,
+) -> list[str]:
+    """Return distinct non-null tickers from swingtrader.scan_rows with optional filters."""
+    import pathlib as _pl
+    _root = _pl.Path(__file__).resolve().parent.parent
+    import importlib.util as _ilu
+    _spec = _ilu.spec_from_file_location("swingtrader_db", _root / "src" / "db.py")
+    _mod = _ilu.module_from_spec(_spec)
+    _spec.loader.exec_module(_mod)
+
+    client = _mod.get_supabase_client()
+
+    query = client.schema("swingtrader").table("scan_rows").select("symbol")
+
+    if run_id is not None:
+        query = query.eq("run_id", run_id)
+    if dataset is not None:
+        query = query.eq("dataset", dataset)
+    if scan_date is not None:
+        query = query.eq("scan_date", scan_date)
+
+    res = query.execute()
+    tickers = sorted({
+        row["symbol"].upper()
+        for row in (res.data or [])
+        if row.get("symbol")
+    })
+    if not tickers:
+        print("No tickers found in scan_rows with the given filters.", file=sys.stderr)
+        sys.exit(1)
+
+    filters = []
+    if run_id is not None:
+        filters.append(f"run_id={run_id}")
+    if dataset is not None:
+        filters.append(f"dataset={dataset!r}")
+    if scan_date is not None:
+        filters.append(f"scan_date={scan_date}")
+    filter_str = f" ({', '.join(filters)})" if filters else ""
+    print(f"Found {len(tickers)} ticker(s) in scan_rows{filter_str}.")
+    return tickers
+
+
 async def _main(argv: list[str] | None = None) -> None:
     args = _parse_args(argv)
 
@@ -323,6 +391,12 @@ async def _main(argv: list[str] | None = None) -> None:
         tickers = _load_tickers_from_file(args.file)
     elif args.from_db:
         tickers = _fetch_tickers_from_db()
+    elif args.from_scan:
+        tickers = _fetch_tickers_from_scan(
+            run_id=args.scan_run_id,
+            dataset=args.scan_dataset,
+            scan_date=args.scan_date,
+        )
     else:
         tickers = _fetch_exchange_tickers(
             [e.upper() for e in args.exchange],

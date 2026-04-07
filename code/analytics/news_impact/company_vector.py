@@ -10,11 +10,9 @@ Supabase are loaded from there and skipped, resuming where the run left off.
 """
 
 import asyncio
-import json
 import logging
 from dataclasses import dataclass, asdict
 from datetime import datetime, timezone, timedelta
-from pathlib import Path
 from typing import Optional
 
 from news_impact.fmp_fetcher import FMPFetcher, RawCompanyData
@@ -24,7 +22,6 @@ from src.db import get_supabase_client, upsert_company_vector, load_company_vect
 
 logger = logging.getLogger(__name__)
 
-_CACHE_DIR = Path(__file__).parent / "cache"
 _CACHE_TTL = timedelta(hours=24)
 _MAX_CONCURRENT = 5  # semaphore limit for concurrent FMP fetches
 
@@ -52,15 +49,8 @@ class CompanyVector:
 # Cache helpers
 # ---------------------------------------------------------------------------
 
-def _cache_path(ticker: str, date: str) -> Path:
-    _CACHE_DIR.mkdir(parents=True, exist_ok=True)
-    return _CACHE_DIR / f"{ticker}_{date}.json"
-
-
 def _load_cached(ticker: str) -> Optional[CompanyVector]:
-    """Check Supabase first, then fall back to disk cache."""
-    today = datetime.now(timezone.utc).date()
-
+    """Load from Supabase DB cache if present and within TTL."""
     try:
         client = get_supabase_client()
         rows = load_company_vectors(client, tickers=[ticker])
@@ -81,30 +71,7 @@ def _load_cached(ticker: str) -> Optional[CompanyVector]:
             logger.debug("[cache] DB vector for %s expired (%.1fh)", ticker, age.total_seconds() / 3600)
     except Exception as exc:
         logger.warning("[cache] DB load failed for %s: %s", ticker, exc)
-
-    # Fall back to disk
-    path = _cache_path(ticker, today.strftime("%Y-%m-%d"))
-    if not path.exists():
-        return None
-    try:
-        data = json.loads(path.read_text())
-        cv = CompanyVector.from_json(data)
-        age = datetime.now(timezone.utc) - cv.fetched_at.replace(tzinfo=timezone.utc)
-        if age > _CACHE_TTL:
-            logger.debug("[cache] disk vector for %s expired (%.1fh)", ticker, age.total_seconds() / 3600)
-            return None
-        return cv
-    except Exception as exc:
-        logger.warning("[cache] disk load failed for %s: %s", path, exc)
-        return None
-
-
-def _save_cache(cv: CompanyVector) -> None:
-    path = _cache_path(cv.ticker, cv.fetched_at.strftime("%Y-%m-%d"))
-    try:
-        path.write_text(json.dumps(cv.to_json(), indent=2))
-    except Exception as exc:
-        logger.warning("[cache] failed to write %s: %s", path, exc)
+    return None
 
 
 def _persist_batch(vectors: list[CompanyVector]) -> None:
@@ -260,7 +227,6 @@ async def build_vectors(
                     metadata=metadata,
                     fetched_at=raw.fetched_at,
                 )
-                _save_cache(cv)
                 fresh_cvs.append(cv)
 
             print(f"  Persisting {len(fresh_cvs)} vectors to Supabase…", flush=True)
