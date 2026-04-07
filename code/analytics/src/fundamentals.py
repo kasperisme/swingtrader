@@ -34,7 +34,7 @@ class Fundamentals:
 
         self.ratio_ranked = None
 
-        self.ratio_logic = json.load(open(_ROOT / "input" / "ratio_logic.json", "r"))
+        self._ratio_logic = None  # lazy-loaded on first use
 
         self.tickerbaseurl = (
             "https://financialmodelingprep.com/api/{version}/{endpoint}"
@@ -42,6 +42,12 @@ class Fundamentals:
         self.rationbaseurl = (
             "https://financialmodelingprep.com/api/v3/ratios-ttm/{ticker}"
         )
+
+    @property
+    def ratio_logic(self):
+        if self._ratio_logic is None:
+            self._ratio_logic = json.load(open(_ROOT / "input" / "ratio_logic.json", "r"))
+        return self._ratio_logic
 
     def get_ratios(self):
         logger.info(f"Getting SP500 tickers")

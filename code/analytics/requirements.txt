@@ -8,4 +8,4 @@ openpyxl
 python-dotenv
 supabase
 psycopg2-binary
-mcp
+fastmcp
