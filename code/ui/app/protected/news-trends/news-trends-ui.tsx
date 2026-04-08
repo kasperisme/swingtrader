@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   LineChart,
   Line,
@@ -50,9 +50,46 @@ const DIM_PALETTE = [
 // ── helpers ──────────────────────────────────────────────────────────────────
 
 type ViewMode = "daily" | "hourly";
+type BenchmarkId = "none" | "sp500" | "nasdaq100";
+
+type OhlcPoint = {
+  date: string;
+  close: number;
+};
+
+const BENCHMARK_OPTIONS: Array<{ id: BenchmarkId; label: string; symbol: string | null }> = [
+  { id: "none", label: "No index", symbol: null },
+  { id: "sp500", label: "S&P 500 (^GSPC)", symbol: "^GSPC" },
+  { id: "nasdaq100", label: "Nasdaq 100 (QQQ)", symbol: "QQQ" },
+];
+
+// ── local-time bucket helpers ─────────────────────────────────────────────────
+// All bucketing uses the browser's local timezone so the X-axis matches the
+// user's wall clock, not UTC.
+
+const pad2 = (n: number) => String(n).padStart(2, "0");
+
+function localDateStr(d: Date): string {
+  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
+}
+
+function localBucket(d: Date, mode: ViewMode): string {
+  const base = localDateStr(d);
+  return mode === "hourly" ? `${base}T${pad2(d.getHours())}` : base;
+}
 
 function toBucket(iso: string, mode: ViewMode): string {
+  const d = new Date(iso);
+  if (!Number.isNaN(d.getTime())) return localBucket(d, mode);
+  // Fallback for plain date strings with no time component.
   return mode === "hourly" ? iso.slice(0, 13) : iso.slice(0, 10);
+}
+
+function normalizeToBucket(dateLike: string, mode: ViewMode): string | null {
+  if (!dateLike) return null;
+  const parsed = new Date(dateLike.replace(" ", "T"));
+  if (Number.isNaN(parsed.getTime())) return null;
+  return localBucket(parsed, mode);
 }
 
 function formatBucket(bucket: string, mode: ViewMode): string {
@@ -168,14 +205,14 @@ function fillDateGaps(
     const end = endBucket.slice(0, 10);
     while (current <= end) {
       result.push(dataMap.get(current) ?? emptyEntry(current));
-      // advance by 1 day using UTC to avoid DST issues
-      const d = new Date(current + "T00:00:00Z");
+      const [y, m, day] = current.split("-").map(Number);
+      const d = new Date(y, m - 1, day); // local midnight
+      d.setDate(d.getDate() + 1);
       if (Number.isNaN(d.getTime())) break;
-      d.setUTCDate(d.getUTCDate() + 1);
-      current = d.toISOString().slice(0, 10);
+      current = localDateStr(d);
     }
   } else {
-    // hourly buckets: "2024-01-15T14"
+    // hourly buckets: "2024-01-15T14" (local time)
     const normalizedStart = toHourlyBucket(startBucket, false);
     const normalizedEnd = toHourlyBucket(endBucket, true);
     if (!normalizedStart || !normalizedEnd) return data;
@@ -186,13 +223,13 @@ function fillDateGaps(
     while (current <= end) {
       result.push(dataMap.get(current) ?? emptyEntry(current));
       const [datePart, hourPart] = current.split("T");
+      const [y, m, day] = datePart.split("-").map(Number);
       const hour = Number.parseInt(hourPart, 10);
       if (Number.isNaN(hour)) break;
-
-      const d = new Date(datePart + "T00:00:00Z");
+      const d = new Date(y, m - 1, day, hour); // local time
+      d.setHours(d.getHours() + 1);
       if (Number.isNaN(d.getTime())) break;
-      d.setUTCHours(hour + 1);
-      current = d.toISOString().slice(0, 13);
+      current = localBucket(d, "hourly");
     }
   }
 
@@ -556,7 +593,8 @@ const DEFAULT_MA: Record<ViewMode, number> = { daily: 7, hourly: 6 };
 type QuickRange = "7d" | "30d" | "90d" | "all";
 
 function toDateInputValue(iso: string): string {
-  return iso.slice(0, 10);
+  const d = new Date(iso);
+  return Number.isNaN(d.getTime()) ? iso.slice(0, 10) : localDateStr(d);
 }
 
 export function NewsTrendsUI({ articles, chartHeight = 400 }: { articles: ArticleImpact[]; chartHeight?: number }) {
@@ -578,6 +616,8 @@ export function NewsTrendsUI({ articles, chartHeight = 400 }: { articles: Articl
   const [dateFrom, setDateFrom] = useState<string>("");
   const [dateTo, setDateTo] = useState<string>("");
   const [quickRange, setQuickRange] = useState<QuickRange>("all");
+  const [benchmark, setBenchmark] = useState<BenchmarkId>("none");
+  const [benchmarkData, setBenchmarkData] = useState<OhlcPoint[]>([]);
 
   function applyQuickRange(range: QuickRange) {
     setQuickRange(range);
@@ -586,11 +626,12 @@ export function NewsTrendsUI({ articles, chartHeight = 400 }: { articles: Articl
       setDateTo("");
     } else {
       const days = range === "7d" ? 7 : range === "30d" ? 30 : 90;
-      const end = new Date(maxDate || new Date().toISOString().slice(0, 10));
+      const [ey, em, ed] = (maxDate || localDateStr(new Date())).split("-").map(Number);
+      const end = new Date(ey, em - 1, ed); // local midnight
       const start = new Date(end);
       start.setDate(start.getDate() - days);
-      setDateFrom(start.toISOString().slice(0, 10));
-      setDateTo(end.toISOString().slice(0, 10));
+      setDateFrom(localDateStr(start));
+      setDateTo(localDateStr(end));
     }
   }
 
@@ -619,6 +660,80 @@ export function NewsTrendsUI({ articles, chartHeight = 400 }: { articles: Articl
     () => applyClusterMA(daily, maWindow),
     [daily, maWindow],
   );
+
+  useEffect(() => {
+    const symbol = BENCHMARK_OPTIONS.find((b) => b.id === benchmark)?.symbol;
+    if (!symbol) {
+      setBenchmarkData([]);
+      return;
+    }
+
+    let cancelled = false;
+    const interval = viewMode === "hourly" ? "1hour" : "1day";
+    fetch(`/api/fmp/ohlc?symbol=${encodeURIComponent(symbol)}&interval=${interval}`)
+      .then(async (res) => {
+        if (!res.ok) throw new Error("Failed benchmark fetch");
+        const raw = (await res.json()) as Array<{ date?: string; close?: number }>;
+        return raw
+          .map((r) => ({
+            date: String(r.date ?? ""),
+            close: Number(r.close),
+          }))
+          .filter((r) => r.date && Number.isFinite(r.close));
+      })
+      .then((rows) => {
+        if (!cancelled) setBenchmarkData(rows);
+      })
+      .catch(() => {
+        if (!cancelled) setBenchmarkData([]);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [benchmark, viewMode]);
+
+  const benchmarkByBucket = useMemo(() => {
+    if (benchmark === "none" || benchmarkData.length === 0 || daily.length === 0) {
+      return new Map<string, number>();
+    }
+
+    const startBucket = daily[0]?.date;
+    const endBucket = daily[daily.length - 1]?.date;
+    if (!startBucket || !endBucket) return new Map<string, number>();
+
+    const bucketValues = new Map<string, number>();
+    for (const p of benchmarkData) {
+      const bucket = normalizeToBucket(p.date, viewMode);
+      if (!bucket) continue;
+      if (bucket < startBucket || bucket > endBucket) continue;
+      bucketValues.set(bucket, p.close);
+    }
+
+    const sortedBuckets = Array.from(bucketValues.keys()).sort((a, b) => a.localeCompare(b));
+    if (sortedBuckets.length === 0) return new Map<string, number>();
+
+    const base = bucketValues.get(sortedBuckets[0]) ?? Number.NaN;
+    if (!Number.isFinite(base) || Math.abs(base) < 1e-9) return new Map<string, number>();
+
+    return new Map(
+      sortedBuckets.map((bucket) => {
+        const close = bucketValues.get(bucket)!;
+        return [bucket, (close - base) / base] as const;
+      }),
+    );
+  }, [benchmark, benchmarkData, daily, viewMode]);
+
+  const chartDataWithBenchmark = useMemo(() => {
+    if (benchmark === "none" || benchmarkByBucket.size === 0) return chartData;
+    return chartData.map((point) => {
+      const benchmarkValue = benchmarkByBucket.get(String(point.date)) ?? null;
+      return {
+        ...point,
+        __benchmark: benchmarkValue,
+      };
+    });
+  }, [benchmark, benchmarkByBucket, chartData]);
 
   // Drill-down: dimension MA data for the selected cluster
   const drilldownDims = useMemo(() => {
@@ -732,6 +847,18 @@ export function NewsTrendsUI({ articles, chartHeight = 400 }: { articles: Articl
             {opt.label}
           </button>
         ))}
+        <span className="text-xs text-muted-foreground ml-2">Overlay:</span>
+        <select
+          value={benchmark}
+          onChange={(e) => setBenchmark(e.target.value as BenchmarkId)}
+          className="text-xs border rounded-md px-2 py-1 bg-background focus:outline-none focus:ring-2 focus:ring-ring"
+        >
+          {BENCHMARK_OPTIONS.map((b) => (
+            <option key={b.id} value={b.id}>
+              {b.label}
+            </option>
+          ))}
+        </select>
         <span className="ml-auto text-xs text-muted-foreground">
           {totalArticles} articles · {dateRange}
         </span>
@@ -791,7 +918,7 @@ export function NewsTrendsUI({ articles, chartHeight = 400 }: { articles: Articl
             </p>
             <ResponsiveContainer width="100%" height={chartHeight}>
               <LineChart
-                data={chartData}
+                data={chartDataWithBenchmark}
                 margin={{ top: 5, right: 10, left: 0, bottom: 5 }}
               >
                 <CartesianGrid
@@ -808,7 +935,7 @@ export function NewsTrendsUI({ articles, chartHeight = 400 }: { articles: Articl
                 />
                 <YAxis
                   domain={["auto", "auto"]}
-                allowDataOverflow={false}
+                  allowDataOverflow={false}
                   tick={{ fontSize: 10, fill: "currentColor", opacity: 0.5 }}
                   tickLine={false}
                   axisLine={false}
@@ -817,6 +944,18 @@ export function NewsTrendsUI({ articles, chartHeight = 400 }: { articles: Articl
                   }
                   width={38}
                 />
+                {benchmark !== "none" && (
+                  <YAxis
+                    yAxisId="benchmark"
+                    orientation="right"
+                    domain={["auto", "auto"]}
+                    tick={{ fontSize: 10, fill: "currentColor", opacity: 0.5 }}
+                    tickLine={false}
+                    axisLine={false}
+                    tickFormatter={(v: number) => `${v >= 0 ? "+" : ""}${(v * 100).toFixed(0)}%`}
+                    width={44}
+                  />
+                )}
                 <ReferenceLine
                   y={0}
                   stroke="currentColor"
@@ -841,6 +980,21 @@ export function NewsTrendsUI({ articles, chartHeight = 400 }: { articles: Articl
                     connectNulls
                   />
                 ))}
+                {benchmark !== "none" && (
+                  <Line
+                    yAxisId="benchmark"
+                    type="monotone"
+                    dataKey="__benchmark"
+                    name={
+                      BENCHMARK_OPTIONS.find((b) => b.id === benchmark)?.label ?? "Benchmark"
+                    }
+                    stroke="#9ca3af"
+                    dot={false}
+                    strokeWidth={2}
+                    strokeDasharray="6 4"
+                    connectNulls
+                  />
+                )}
               </LineChart>
             </ResponsiveContainer>
           </div>

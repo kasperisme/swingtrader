@@ -31,6 +31,12 @@ python -m news_impact.score_news_cli --fmp-news --limit 30
 # Fetch FMP news filtered to specific tickers
 python -m news_impact.score_news_cli --fmp-news --tickers AAPL MSFT NVDA
 
+# Fetch FMP news for a date window (inclusive)
+python -m news_impact.score_news_cli --fmp-news --from 2025-11-01 --to 2025-11-30
+
+# Date window + ticker filter
+python -m news_impact.score_news_cli --fmp-news --tickers AAPL --from 2025-11-01 --to 2025-11-30
+
 # Paginate through older FMP news
 python -m news_impact.score_news_cli --fmp-news --limit 20 --page 2
 ```
@@ -52,7 +58,32 @@ python -m news_impact.score_news_cli --fmp-news --limit 20 --page 2
 |---|---|---|
 | `--limit N` | `20` | Max articles to fetch per call |
 | `--page N` | `0` | Page offset for pagination (0-indexed) |
+| `--from YYYY-MM-DD` | — | Start date filter for FMP fetch (inclusive) |
+| `--to YYYY-MM-DD` | — | End date filter for FMP fetch (inclusive) |
 | `--tickers` | — | Filter FMP news to these tickers only |
+
+### Date range filtering with `--from` / `--to`
+
+Use `--from` and `--to` with `--fmp-news` to constrain fetches to a specific date range.
+
+- Format: `YYYY-MM-DD` (for example: `2025-11-01`)
+- Can be used independently:
+  - `--from` only: fetch from that date onward
+  - `--to` only: fetch up to that date
+- Can be combined with `--tickers`, `--limit`, and `--page`
+
+Examples:
+
+```bash
+# Entire month window
+python -m news_impact.score_news_cli --fmp-news --from 2025-11-01 --to 2025-11-30
+
+# From a date onward
+python -m news_impact.score_news_cli --fmp-news --from 2025-11-01
+
+# Up to a date
+python -m news_impact.score_news_cli --fmp-news --to 2025-11-30
+```
 
 ### Scoring options
 

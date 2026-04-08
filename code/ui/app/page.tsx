@@ -1,280 +1,242 @@
-import { AuthButton } from "@/components/auth-button";
-import { EnvVarWarning } from "@/components/env-var-warning";
-import { ThemeSwitcher } from "@/components/theme-switcher";
-import { createClient } from "@/lib/supabase/server";
-import { hasEnvVars } from "@/lib/utils";
-import Image from "next/image";
 import Link from "next/link";
-import { Suspense } from "react";
-import { ArrowRight } from "lucide-react";
+import Image from "next/image";
+import { ArrowRight, BarChart3, Compass, Filter, Newspaper, Target, Workflow } from "lucide-react";
 
-type NewsArticle = {
-  id: number;
-  title: string | null;
-  url: string | null;
-  source: string | null;
-  created_at: string;
+type CardItem = {
+  title: string;
+  description: string;
+  icon: React.ComponentType<{ className?: string }>;
 };
 
-function articleImageUrl(article: NewsArticle): string | null {
-  if (!article.url) return null;
-  return `https://www.google.com/s2/favicons?sz=256&domain_url=${encodeURIComponent(article.url)}`;
-}
+const benefitCards: CardItem[] = [
+  {
+    title: "Spot market-moving narratives faster",
+    description:
+      "See the strongest stories and themes rising across the market, so you focus on what matters first.",
+    icon: Newspaper,
+  },
+  {
+    title: "Find stocks and sectors connected to those narratives",
+    description:
+      "Quickly connect each narrative to the companies and sectors with the highest likely exposure.",
+    icon: Target,
+  },
+  {
+    title: "Build a better daily research workflow",
+    description:
+      "Start your day with clearer direction, less noise, and a repeatable process for idea generation.",
+    icon: Workflow,
+  },
+];
 
-function formatArticleDate(iso: string): string {
-  const parsed = new Date(iso);
-  if (Number.isNaN(parsed.getTime())) return "Unknown date";
-  return new Intl.DateTimeFormat("en-GB", {
-    year: "numeric",
-    month: "short",
-    day: "2-digit",
-    timeZone: "UTC",
-  }).format(parsed);
-}
+const howItWorksSteps = [
+  "Track the strongest news narratives",
+  "See which sectors and stocks are most exposed",
+  "Screen for possible opportunities",
+];
 
-async function LatestNewsArticles() {
-  const supabase = await createClient();
-  const { data: articles, error } = await supabase
-    .schema("swingtrader")
-    .from("news_articles")
-    .select("id, title, url, source, created_at")
-    .order("created_at", { ascending: false })
-    .limit(8);
+const productValueItems: CardItem[] = [
+  {
+    title: "Narrative tracking",
+    description: "Follow the news themes gaining momentum so you can research with context, not guesswork.",
+    icon: BarChart3,
+  },
+  {
+    title: "Company and sector exposure",
+    description:
+      "Understand which tickers and groups are most tied to each narrative before the move is obvious.",
+    icon: Compass,
+  },
+  {
+    title: "Custom screening",
+    description: "Filter opportunities by the factors you care about and keep your process consistent.",
+    icon: Filter,
+  },
+];
 
-  const latestArticles: NewsArticle[] = articles ?? [];
+const trustItems = [
+  {
+    title: "Who it is for",
+    description:
+      "Built for traders, investors, and research-focused users who want to connect news to market opportunities faster.",
+  },
+  {
+    title: "How it is different",
+    description:
+      "A normal stock screener starts with static filters. News Impact Screener starts with live narratives and shows what they may influence.",
+  },
+  {
+    title: "Why it is useful",
+    description:
+      "It helps you move from headline overload to a clear watchlist and better daily research decisions.",
+  },
+];
 
-  if (error) {
-    return (
-      <p className="mt-4 text-sm text-muted-foreground">
-        Unable to load articles right now.
-      </p>
-    );
-  }
-
-  if (latestArticles.length === 0) {
-    return (
-      <p className="mt-4 text-sm text-muted-foreground">
-        No articles available yet.
-      </p>
-    );
-  }
-
+function IconTile({ icon: Icon }: { icon: React.ComponentType<{ className?: string }> }) {
   return (
-    <div className="mt-5 overflow-hidden [mask-image:linear-gradient(to_right,transparent,black_8%,black_92%,transparent)]">
-      <div className="flex w-max gap-4 animate-news-roll hover:[animation-play-state:paused]">
-        {[...latestArticles, ...latestArticles].map((article, idx) => (
-          <article
-            key={`${article.id}-${idx}`}
-            className="w-[290px] shrink-0 rounded-xl border bg-card overflow-hidden"
-          >
-            <div className="h-36 bg-muted flex items-center justify-center">
-              {articleImageUrl(article) ? (
-                <img
-                  src={articleImageUrl(article) ?? ""}
-                  alt={`${article.source || "Article"} logo`}
-                  className="h-full w-full object-cover p-6"
-                  loading="lazy"
-                />
-              ) : (
-                <span className="text-xs text-muted-foreground">No image</span>
-              )}
-            </div>
-            <div className="p-3">
-              <div className="flex items-center justify-between gap-3">
-                <p className="text-[11px] uppercase tracking-wide text-muted-foreground truncate">
-                  {article.source || "Unknown source"}
-                </p>
-                <time className="text-[11px] text-muted-foreground shrink-0">
-                  {formatArticleDate(article.created_at)}
-                </time>
-              </div>
-              {article.url ? (
-                <a
-                  href={article.url}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="mt-1.5 block text-sm font-medium leading-snug hover:underline line-clamp-2"
-                >
-                  {article.title || article.url}
-                </a>
-              ) : (
-                <p className="mt-1.5 text-sm font-medium leading-snug line-clamp-2">
-                  {article.title || "Untitled article"}
-                </p>
-              )}
-            </div>
-          </article>
-        ))}
-      </div>
+    <div className="inline-flex h-10 w-10 items-center justify-center rounded-lg border border-border bg-background">
+      <Icon className="h-5 w-5 text-foreground" />
     </div>
   );
 }
 
-async function LandingHeader() {
-  const supabase = await createClient();
-  const { data, error } = await supabase.auth.getClaims();
-  const isLoggedIn = !error && !!data?.claims;
-
-  return (
-    <nav className="w-full flex justify-center border-b border-b-foreground/10 h-16">
-      <div className="w-full max-w-7xl flex justify-between items-center p-3 px-5 text-sm">
-        <div className="flex gap-5 items-center font-semibold">
-          <Link href="/" className="inline-flex items-center gap-2">
-            <Image src="/icon.png" alt="newsimpactscreener logo" width={20} height={20} className="rounded-sm" />
-            newsimpactscreener
-          </Link>
-          {isLoggedIn && (
-            <>
-              <Link
-                href="/protected/vectors"
-                className="text-sm font-medium text-muted-foreground hover:text-foreground transition-colors"
-              >
-                Vectors
-              </Link>
-              <Link
-                href="/protected/news-trends"
-                className="text-sm font-medium text-muted-foreground hover:text-foreground transition-colors"
-              >
-                News Trends
-              </Link>
-              <Link
-                href="/protected/screenings"
-                className="text-sm font-medium text-muted-foreground hover:text-foreground transition-colors"
-              >
-                Screenings
-              </Link>
-            </>
-          )}
-        </div>
-        {!hasEnvVars ? (
-          <EnvVarWarning />
-        ) : (
-          <div className="flex items-center gap-4">
-            {!isLoggedIn && (
-              <Link
-                href="/auth/login"
-                className="text-muted-foreground hover:text-foreground transition-colors"
-              >
-                Login
-              </Link>
-            )}
-            <Suspense>
-              <AuthButton />
-            </Suspense>
-          </div>
-        )}
-      </div>
-    </nav>
-  );
-}
-
 export default function Home() {
-
   return (
-    <main className="min-h-screen flex flex-col items-center bg-background">
-      <div className="flex-1 w-full flex flex-col items-center">
-        <Suspense
-          fallback={
-            <nav className="w-full flex justify-center border-b border-b-foreground/10 h-16">
-              <div className="w-full max-w-7xl flex justify-between items-center p-3 px-5 text-sm">
-                <Link href="/" className="font-semibold inline-flex items-center gap-2">
-                  <Image src="/icon.png" alt="newsimpactscreener logo" width={20} height={20} className="rounded-sm" />
-                  newsimpactscreener
-                </Link>
-              </div>
-            </nav>
-          }
-        >
-          <LandingHeader />
-        </Suspense>
+    <main className="min-h-screen bg-background text-foreground">
+      <div className="mx-auto max-w-6xl px-6 lg:px-8">
+        <header className="flex items-center justify-between border-b border-border py-5">
+          <div className="flex items-center gap-2">
+            <Image
+              src="/icon.png"
+              alt="newsimpactscreener logo"
+              width={20}
+              height={20}
+              className="rounded-sm"
+            />
+            <p className="text-sm font-semibold tracking-tight">newsimpactscreener.com</p>
+          </div>
+          <div className="flex items-center gap-4">
+            <Link
+              href="/blog"
+              className="text-sm font-medium text-muted-foreground transition-colors hover:text-foreground"
+            >
+              Blog
+            </Link>
+            <Link
+              href="/auth/login"
+              className="rounded-md border border-border px-4 py-2 text-sm font-medium text-foreground transition-colors hover:bg-muted"
+            >
+              Sign in
+            </Link>
+          </div>
+        </header>
 
-        <section className="w-full max-w-7xl px-5 py-16 md:py-24">
-          <div className="max-w-3xl">
-            <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-4">
-              Quant Signals Platform
-            </p>
-            <h1 className="text-4xl md:text-5xl font-bold tracking-tight">
-              Discover market narratives, factor shifts, and screening signals.
+        <section className="grid gap-12 py-16 md:grid-cols-2 md:items-center md:py-24">
+          <div>
+            <p className="text-sm font-medium text-muted-foreground">For traders and investors</p>
+            <h1 className="mt-4 text-4xl font-semibold tracking-tight sm:text-5xl">
+              See which news stories are moving the market.
             </h1>
-            <p className="mt-5 text-base md:text-lg text-muted-foreground">
-              newsimpactscreener turns scored news and company vectors into an actionable daily view across
-              sectors, dimensions, and custom screens.
+            <p className="mt-5 max-w-xl text-base leading-7 text-muted-foreground sm:text-lg">
+              News Impact Screener helps traders and investors turn market news into clearer stock
+              ideas, sector signals, and faster research.
             </p>
             <div className="mt-8 flex flex-wrap gap-3">
               <Link
-                href="/protected/vectors"
-                className="inline-flex items-center gap-2 rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 transition-colors"
+                href="#final-cta"
+                className="inline-flex items-center gap-2 rounded-md bg-foreground px-5 py-3 text-sm font-semibold text-background transition-opacity hover:opacity-90"
               >
-                Open Dashboard
-                <ArrowRight size={14} />
+                Get Early Access
+                <ArrowRight className="h-4 w-4" />
               </Link>
               <Link
-                href="/auth/login"
-                className="inline-flex items-center gap-2 rounded-md border border-input bg-background px-4 py-2 text-sm font-medium hover:bg-accent hover:text-accent-foreground transition-colors"
+                href="#how-it-works"
+                className="inline-flex items-center rounded-md border border-border px-5 py-3 text-sm font-semibold text-foreground transition-colors hover:bg-muted"
               >
-                Sign in
+                See How It Works
               </Link>
+            </div>
+          </div>
+
+          <div className="rounded-2xl border border-border bg-card p-6 shadow-sm">
+            <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Live narrative snapshot</p>
+            <div className="mt-5 space-y-3">
+              {["AI infrastructure demand", "Rate-cut expectations", "Energy supply pressure"].map((item, index) => (
+                <div key={item} className="flex items-center justify-between rounded-lg border border-border bg-background px-4 py-3">
+                  <p className="text-sm font-medium">{item}</p>
+                  <span className="rounded-full bg-muted px-2.5 py-1 text-xs font-medium text-muted-foreground">
+                    #{index + 1}
+                  </span>
+                </div>
+              ))}
+            </div>
+            <div className="mt-5 rounded-lg border border-border bg-background p-4">
+              <p className="text-xs text-muted-foreground">Top exposed groups</p>
+              <p className="mt-2 text-sm font-medium">Semiconductors, Cloud, Utilities</p>
             </div>
           </div>
         </section>
 
-        <section className="w-full max-w-7xl px-5 pb-20 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-          <Link
-            href="/protected/vectors"
-            className="rounded-xl border p-5 hover:bg-muted/30 transition-colors"
-          >
-            <p className="text-sm font-semibold">Company Vectors</p>
-            <p className="mt-2 text-xs text-muted-foreground">
-              Inspect factor exposures and cluster-level sensitivity across the universe.
-            </p>
-          </Link>
-          <Link
-            href="/protected/news-trends"
-            className="rounded-xl border p-5 hover:bg-muted/30 transition-colors"
-          >
-            <p className="text-sm font-semibold">News Trends</p>
-            <p className="mt-2 text-xs text-muted-foreground">
-              Track rolling impact momentum by narrative dimension over time.
-            </p>
-          </Link>
-          <Link
-            href="/protected/screenings"
-            className="rounded-xl border p-5 hover:bg-muted/30 transition-colors"
-          >
-            <p className="text-sm font-semibold">Screenings</p>
-            <p className="mt-2 text-xs text-muted-foreground">
-              Filter and shortlist candidates based on your custom setup and risk profile.
-            </p>
-          </Link>
-        </section>
-
-        <section className="w-full max-w-7xl px-5 pb-20">
-          <div className="rounded-xl border p-5 md:p-6">
-            <div className="flex items-center justify-between gap-4">
-              <h2 className="text-lg font-semibold">Latest News Articles</h2>
-              <Link
-                href="/protected/news-trends"
-                className="text-xs text-muted-foreground hover:text-foreground transition-colors"
-              >
-                View trend analytics
-              </Link>
-            </div>
-            <Suspense
-              fallback={
-                <p className="mt-4 text-sm text-muted-foreground">
-                  Loading latest articles...
-                </p>
-              }
-            >
-              <LatestNewsArticles />
-            </Suspense>
+        <section className="border-t border-border py-16 md:py-20">
+          <div className="grid gap-4 md:grid-cols-3">
+            {benefitCards.map((card) => (
+              <article key={card.title} className="rounded-xl border border-border bg-card p-6 shadow-sm">
+                <IconTile icon={card.icon} />
+                <h2 className="mt-4 text-lg font-semibold tracking-tight">{card.title}</h2>
+                <p className="mt-2 text-sm leading-6 text-muted-foreground">{card.description}</p>
+              </article>
+            ))}
           </div>
         </section>
 
-        <footer className="w-full flex items-center justify-center border-t text-xs gap-8 py-10">
-          <span className="text-muted-foreground">Built for research-focused swing trading workflows.</span>
-          <ThemeSwitcher />
-        </footer>
+        <section id="how-it-works" className="border-t border-border py-16 md:py-20">
+          <h2 className="text-2xl font-semibold tracking-tight sm:text-3xl">How it works</h2>
+          <div className="mt-8 grid gap-4 md:grid-cols-3">
+            {howItWorksSteps.map((step, index) => (
+              <div key={step} className="rounded-xl border border-border bg-card p-6">
+                <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Step {index + 1}</p>
+                <p className="mt-3 text-base font-medium leading-7">{step}</p>
+              </div>
+            ))}
+          </div>
+        </section>
+
+        <section className="border-t border-border py-16 md:py-20">
+          <h2 className="text-2xl font-semibold tracking-tight sm:text-3xl">Why it is useful</h2>
+          <p className="mt-3 max-w-2xl text-sm leading-6 text-muted-foreground">
+            Keep research practical: follow narratives, understand exposure, and screen opportunities from one simple workflow.
+          </p>
+          <div className="mt-8 grid gap-4 md:grid-cols-3">
+            {productValueItems.map((item) => (
+              <article key={item.title} className="rounded-xl border border-border bg-card p-6">
+                <IconTile icon={item.icon} />
+                <h3 className="mt-4 text-base font-semibold">{item.title}</h3>
+                <p className="mt-2 text-sm leading-6 text-muted-foreground">{item.description}</p>
+              </article>
+            ))}
+          </div>
+        </section>
+
+        <section className="border-t border-border py-16 md:py-20">
+          <h2 className="text-2xl font-semibold tracking-tight sm:text-3xl">Quick clarity</h2>
+          <div className="mt-8 grid gap-4 md:grid-cols-3">
+            {trustItems.map((item) => (
+              <article key={item.title} className="rounded-xl border border-border bg-card p-6">
+                <h3 className="text-base font-semibold">{item.title}</h3>
+                <p className="mt-2 text-sm leading-6 text-muted-foreground">{item.description}</p>
+              </article>
+            ))}
+          </div>
+        </section>
+
+        <section id="final-cta" className="border-t border-border py-16 md:py-20">
+          <div className="rounded-2xl border border-border bg-card p-7 sm:p-10">
+            <h2 className="text-2xl font-semibold tracking-tight sm:text-3xl">
+              Turn daily news into clearer market opportunities.
+            </h2>
+            <p className="mt-3 max-w-2xl text-sm leading-6 text-muted-foreground">
+              Join the early access list to get updates and first access to News Impact Screener.
+            </p>
+            <form className="mt-7 flex flex-col gap-3 sm:flex-row">
+              <label htmlFor="email" className="sr-only">
+                Email address
+              </label>
+              <input
+                id="email"
+                type="email"
+                required
+                placeholder="Enter your email"
+                className="h-11 w-full rounded-md border border-border bg-background px-3 text-sm outline-none ring-0 transition focus-visible:border-foreground"
+              />
+              <button
+                type="submit"
+                className="inline-flex h-11 items-center justify-center rounded-md bg-foreground px-5 text-sm font-semibold text-background transition-opacity hover:opacity-90"
+              >
+                Get Early Access
+              </button>
+            </form>
+          </div>
+        </section>
       </div>
     </main>
   );

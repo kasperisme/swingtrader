@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import {
   CheckCircle, XCircle, Search, SlidersHorizontal, ChevronDown, ChevronUp,
   ChevronLeft, ChevronRight, BarChart2, List, TrendingUp, Loader2, Newspaper, Trash2, RotateCcw, Star, MessageSquare,
-  Activity, Copy,
+  Activity, Copy, Gauge,
 } from "lucide-react";
 import { CLUSTERS } from "../vectors/dimensions";
 import { NewsTrendsUI, type ArticleImpact } from "../news-trends/news-trends-ui";
@@ -167,7 +167,7 @@ const DEFAULT_FILTERS: Filters = {
 
 type SortKey = "symbol" | "RS_Rank" | "sector" | "eps_growth_yoy" | "rev_growth_yoy" | "roe" | "adr_pct";
 type SortDir = "asc" | "desc";
-type ViewTab = "results" | "quotes" | "charts" | "news" | "tradeMonitoring";
+type ViewTab = "results" | "quotes" | "charts" | "news" | "sentiment" | "tradeMonitoring";
 
 // ─── FilterPanel ─────────────────────────────────────────────────────────────
 
@@ -701,6 +701,7 @@ function CandlestickSvg({
   pivotMarker,
   onChartMetrics,
   onChartData,
+  onAutoPivot,
 }: {
   symbol: string;
   onPointChange?: (point: ChartPoint | null) => void;
@@ -708,6 +709,7 @@ function CandlestickSvg({
   /** Latest bar close for header pivot distance when crosshair is inactive */
   onChartMetrics?: (m: { lastClose: number } | null) => void;
   onChartData?: (rows: OhlcBar[]) => void;
+  onAutoPivot?: (point: ChartPoint) => void;
 }) {
   const [data, setData] = useState<OhlcBar[]>([]);
   const [loading, setLoading] = useState(false);
@@ -1283,6 +1285,69 @@ function CandlestickSvg({
           );
         })()}
       </svg>
+
+      {/* Selection-box toolbar — appears when box is locked */}
+      {selBox?.locked && (() => {
+        const toIdx = (x: number) =>
+          Math.max(0, Math.min(data.length - 1, Math.round((x - PAD_L - barStep / 2) / barStep)));
+        const x1 = Math.min(selBox.startX, selBox.endX);
+        const x2 = Math.max(selBox.startX, selBox.endX);
+        const y1 = Math.min(selBox.startY, selBox.endY);
+        const y2 = Math.max(selBox.startY, selBox.endY);
+        const minIdx = toIdx(x1);
+        const maxIdx = toIdx(x2);
+
+        // Position centered on box, above top edge; flip below if too close to top
+        const cx = (x1 + x2) / 2;
+        const leftPct = (cx / W) * 100;
+        const showBelow = y1 / H < 0.12;
+        const anchorPct = ((showBelow ? y2 : y1) / H) * 100;
+
+        function autoFindPivot() {
+          if (!onAutoPivot) return;
+          let bestIdx = minIdx;
+          for (let i = minIdx + 1; i <= maxIdx; i++) {
+            if ((data[i]?.high ?? 0) > (data[bestIdx]?.high ?? 0)) bestIdx = i;
+          }
+          const bar = data[bestIdx];
+          if (!bar) return;
+          onAutoPivot({
+            barIdx: bestIdx,
+            date: bar.date,
+            price: bar.high,
+            open: bar.open,
+            high: bar.high,
+            low: bar.low,
+            close: bar.close,
+          });
+          setSelBox(null);
+        }
+
+        return (
+          <div
+            className="absolute z-10 flex items-center bg-background border border-border rounded-md shadow-lg overflow-hidden"
+            style={{
+              left: `${leftPct}%`,
+              top: `${anchorPct}%`,
+              transform: `translate(-50%, ${showBelow ? "4px" : "calc(-100% - 4px)"})`,
+              pointerEvents: "auto",
+            }}
+          >
+            <span className="px-2 text-[10px] font-medium text-muted-foreground uppercase tracking-wide border-r border-border py-1.5">
+              Selection
+            </span>
+            {onAutoPivot && (
+              <button
+                type="button"
+                onClick={autoFindPivot}
+                className="px-3 py-1.5 text-xs font-medium hover:bg-muted transition-colors whitespace-nowrap"
+              >
+                Auto find pivot
+              </button>
+            )}
+          </div>
+        );
+      })()}
     </div>
   );
 }
@@ -1546,6 +1611,7 @@ function ChartsViewFinal({
           pivotMarker={pivotMarker}
           onChartMetrics={onChartMetrics}
           onChartData={onChartData}
+          onAutoPivot={(point) => onSetPivotMarker(symbol, point)}
         />
       </div>
 
@@ -1603,6 +1669,201 @@ function ChartsViewFinal({
       <p className="text-xs text-muted-foreground text-center">
         Use ← → arrow keys or buttons to navigate · right-click chart for pivot · {symbols.length} stocks in current filter
       </p>
+    </div>
+  );
+}
+
+// ─── SentimentView ───────────────────────────────────────────────────────────
+
+type SentimentSort = { key: "symbol" | "s7d" | "s30d" | "s90d"; dir: "asc" | "desc" };
+
+function computeStockSentiment(
+  articles: ArticleImpact[],
+  companyDims: Record<string, number>,
+  cutoffDate: string,
+): number {
+  let total = 0;
+  for (const article of articles) {
+    if (article.published_at.slice(0, 10) < cutoffDate) continue;
+    for (const [dim, impact] of Object.entries(article.impact_json)) {
+      total += impact * (companyDims[dim] ?? 0);
+    }
+  }
+  return total;
+}
+
+function SentimentScoreCell({ value, maxAbs }: { value: number; maxAbs: number }) {
+  const pct = maxAbs > 0 ? Math.abs(value) / maxAbs : 0;
+  const pos = value >= 0;
+  const negligible = Math.abs(value) < 0.01;
+  return (
+    <div className="flex items-center gap-2 min-w-[130px]">
+      <div className="relative flex-1 h-1.5 rounded-full bg-muted overflow-hidden">
+        <div className="absolute inset-y-0 left-1/2 w-px bg-border" />
+        <div
+          className={`absolute top-0 h-full rounded-full ${pos ? "bg-emerald-500 left-1/2" : "bg-rose-400 right-1/2"}`}
+          style={{ width: `${pct * 50}%` }}
+        />
+      </div>
+      <span className={`text-xs font-mono w-14 text-right tabular-nums ${negligible ? "text-muted-foreground" : pos ? "text-emerald-500" : "text-rose-400"}`}>
+        {value >= 0 ? "+" : ""}{value.toFixed(2)}
+      </span>
+    </div>
+  );
+}
+
+function SentimentTh({
+  col, sort, onSort, children, right,
+}: {
+  col: SentimentSort["key"];
+  sort: SentimentSort;
+  onSort: (col: SentimentSort["key"]) => void;
+  children: React.ReactNode;
+  right?: boolean;
+}) {
+  return (
+    <th
+      className={`px-3 py-2 text-xs font-medium text-muted-foreground uppercase tracking-wide cursor-pointer select-none hover:text-foreground whitespace-nowrap ${right ? "text-right" : "text-left"}`}
+      onClick={() => onSort(col)}
+    >
+      {children}
+      {sort.key === col && (sort.dir === "asc"
+        ? <ChevronUp className="w-3 h-3 inline ml-0.5" />
+        : <ChevronDown className="w-3 h-3 inline ml-0.5" />)}
+    </th>
+  );
+}
+
+function SentimentView({
+  symbols,
+  companyVectorDimensions,
+  selectedTicker,
+  onSelect,
+  getTickerMeta,
+}: {
+  symbols: string[];
+  companyVectorDimensions: Record<string, Record<string, number>>;
+  selectedTicker: string | null;
+  onSelect: (ticker: string) => void;
+  getTickerMeta: (ticker: string) => { sector: string; industry: string };
+}) {
+  const [articles, setArticles] = useState<ArticleImpact[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [sort, setSort] = useState<SentimentSort>({ key: "s7d", dir: "desc" });
+
+  useEffect(() => {
+    setLoading(true);
+    setError(null);
+    fetch("/api/screenings/news-impacts")
+      .then(r => r.json())
+      .then((data: ArticleImpact[]) => setArticles(data))
+      .catch(() => setError("Failed to load news data"))
+      .finally(() => setLoading(false));
+  }, []);
+
+  const cutoffs = useMemo(() => {
+    const now = new Date();
+    function daysAgo(n: number) {
+      const d = new Date(now);
+      d.setDate(d.getDate() - n);
+      return d.toISOString().slice(0, 10);
+    }
+    return { c7: daysAgo(7), c30: daysAgo(30), c90: daysAgo(90) };
+  }, []);
+
+  const rows = useMemo(() => {
+    return symbols
+      .filter(s => {
+        const d = companyVectorDimensions[s];
+        return d && Object.keys(d).length > 0;
+      })
+      .map(symbol => {
+        const dims = companyVectorDimensions[symbol];
+        const { sector, industry } = getTickerMeta(symbol);
+        return {
+          symbol,
+          sector,
+          industry,
+          s7d: computeStockSentiment(articles, dims, cutoffs.c7),
+          s30d: computeStockSentiment(articles, dims, cutoffs.c30),
+          s90d: computeStockSentiment(articles, dims, cutoffs.c90),
+        };
+      });
+  }, [symbols, companyVectorDimensions, articles, cutoffs, getTickerMeta]);
+
+  const maxAbs = useMemo(
+    () => Math.max(...rows.flatMap(r => [Math.abs(r.s7d), Math.abs(r.s30d), Math.abs(r.s90d)]), 0.01),
+    [rows],
+  );
+
+  const sorted = useMemo(() => {
+    const { key, dir } = sort;
+    return [...rows].sort((a, b) => {
+      const av = a[key];
+      const bv = b[key];
+      if (typeof av === "string" && typeof bv === "string") {
+        return dir === "asc" ? av.localeCompare(bv) : bv.localeCompare(av);
+      }
+      return dir === "asc" ? (av as number) - (bv as number) : (bv as number) - (av as number);
+    });
+  }, [rows, sort]);
+
+  function toggleSort(key: SentimentSort["key"]) {
+    setSort(prev =>
+      prev.key === key
+        ? { key, dir: prev.dir === "asc" ? "desc" : "asc" }
+        : { key, dir: key === "symbol" ? "asc" : "desc" }
+    );
+  }
+
+  if (loading) {
+    return (
+      <div className="flex items-center gap-2 text-sm text-muted-foreground py-8">
+        <Loader2 className="w-4 h-4 animate-spin" />
+        Loading sentiment data…
+      </div>
+    );
+  }
+  if (error) return <p className="text-sm text-rose-500 py-4">{error}</p>;
+  if (rows.length === 0) {
+    return (
+      <p className="text-sm text-muted-foreground py-8 text-center">
+        {articles.length === 0
+          ? "No news data available."
+          : "None of the filtered stocks have a company vector. Run the vector builder first."}
+      </p>
+    );
+  }
+
+  return (
+    <div className="overflow-x-auto rounded-lg border border-border">
+      <table className="w-full text-sm">
+        <thead className="bg-muted/40 border-b border-border">
+          <tr>
+            <SentimentTh col="symbol" sort={sort} onSort={toggleSort}>Symbol</SentimentTh>
+            <th className="px-3 py-2 text-left text-xs font-medium text-muted-foreground uppercase tracking-wide whitespace-nowrap">Sector</th>
+            <SentimentTh col="s7d" sort={sort} onSort={toggleSort} right>7-day</SentimentTh>
+            <SentimentTh col="s30d" sort={sort} onSort={toggleSort} right>30-day</SentimentTh>
+            <SentimentTh col="s90d" sort={sort} onSort={toggleSort} right>90-day</SentimentTh>
+          </tr>
+        </thead>
+        <tbody className="divide-y divide-border">
+          {sorted.map(row => (
+            <tr
+              key={row.symbol}
+              onClick={() => onSelect(row.symbol)}
+              className={`cursor-pointer transition-colors hover:bg-muted/30 ${selectedTicker === row.symbol ? "bg-foreground/10 ring-1 ring-inset ring-foreground/20" : ""}`}
+            >
+              <td className="px-3 py-2 font-mono font-semibold whitespace-nowrap">{row.symbol}</td>
+              <td className="px-3 py-2 text-xs text-muted-foreground whitespace-nowrap max-w-[140px] truncate" title={row.sector || undefined}>{row.sector || "—"}</td>
+              <td className="px-3 py-2"><SentimentScoreCell value={row.s7d} maxAbs={maxAbs} /></td>
+              <td className="px-3 py-2"><SentimentScoreCell value={row.s30d} maxAbs={maxAbs} /></td>
+              <td className="px-3 py-2"><SentimentScoreCell value={row.s90d} maxAbs={maxAbs} /></td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
     </div>
   );
 }
@@ -2533,6 +2794,7 @@ export function ScreeningsUI({
     { id: "quotes", label: "Quotes", icon: <TrendingUp className="w-3.5 h-3.5" /> },
     { id: "charts", label: "Charts", icon: <BarChart2 className="w-3.5 h-3.5" /> },
     { id: "news", label: "News Trend", icon: <Newspaper className="w-3.5 h-3.5" /> },
+    { id: "sentiment", label: "Sentiment", icon: <Gauge className="w-3.5 h-3.5" /> },
   ];
 
   const tradeMonitoringDisabled = !hasAnyPivotMarkers;
@@ -2809,6 +3071,14 @@ export function ScreeningsUI({
             onOpenWorkflowEditor={openTickerWorkflowEditor}
             getStatus={getTickerStatus}
             filteredSymbolSet={filteredSymbolSet}
+          />
+        ) : activeView === "sentiment" ? (
+          <SentimentView
+            symbols={filteredSymbols}
+            companyVectorDimensions={companyVectorDimensions}
+            selectedTicker={selectedTicker}
+            onSelect={setSelectedTicker}
+            getTickerMeta={getTickerMeta}
           />
         ) : (
           <StockNewsTrendView
