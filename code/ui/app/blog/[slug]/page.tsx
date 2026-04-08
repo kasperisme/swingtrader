@@ -15,8 +15,6 @@ function formatDate(date: string): string {
   }).format(parsed);
 }
 
-export const revalidate = 300;
-
 type Props = {
   params: Promise<{ slug: string }>;
 };

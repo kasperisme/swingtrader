@@ -14,8 +14,6 @@ function formatDate(date: string): string {
   }).format(parsed);
 }
 
-export const revalidate = 300;
-
 export default async function BlogPage() {
   if (!isSanityConfigured) {
     return (

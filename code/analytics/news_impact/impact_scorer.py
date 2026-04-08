@@ -139,6 +139,21 @@ def _extract_scores_partial(raw: str) -> dict:
         return {}
 
 
+def _extract_json_object(raw: str) -> str:
+    """
+    Best-effort normalization for LLM JSON responses:
+    - remove markdown fences
+    - strip illegal leading '+' on JSON numbers
+    - keep only text through the last closing brace to drop trailing commentary
+    """
+    cleaned = _FENCE_RE.sub("", raw).strip()
+    cleaned = _PLUS_RE.sub(r"\1", cleaned)
+    brace = cleaned.rfind("}")
+    if brace != -1:
+        cleaned = cleaned[: brace + 1]
+    return cleaned
+
+
 def _parse_head_response(raw: str, cluster: str) -> tuple[dict, dict, float]:
     """
     Parse JSON from LLM response.  Strips markdown fences, validates keys/ranges.
@@ -147,8 +162,7 @@ def _parse_head_response(raw: str, cluster: str) -> tuple[dict, dict, float]:
     If the full JSON is malformed (e.g. truncated mid-reasoning), falls back to
     regex extraction of the scores block so partial results are not lost.
     """
-    cleaned = _FENCE_RE.sub("", raw).strip()
-    cleaned = _PLUS_RE.sub(r'\1', cleaned)
+    cleaned = _extract_json_object(raw)
     try:
         data = json.loads(cleaned)
     except json.JSONDecodeError:
@@ -297,12 +311,7 @@ def _parse_relationship_response(raw: str) -> tuple[dict[str, float], dict[str, 
       "<FROM>__<TO>__<type>" → strength (float)
     and reasoning uses the same keys → notes (str).
     """
-    cleaned = _FENCE_RE.sub("", raw).strip()
-    cleaned = _PLUS_RE.sub(r'\1', cleaned)
-    # Strip any trailing text after the closing brace (models sometimes add commentary)
-    brace = cleaned.rfind("}")
-    if brace != -1:
-        cleaned = cleaned[:brace + 1]
+    cleaned = _extract_json_object(raw)
     data = json.loads(cleaned)
     if not isinstance(data, dict):
         raise ValueError(f"Expected JSON object, got {type(data).__name__}")
@@ -419,11 +428,7 @@ def _parse_sentiment_response(raw: str) -> tuple[dict[str, float], dict[str, str
     Parse the ticker-sentiment head response.
     Returns (scores, reasoning, confidence) where scores = {ticker: sentiment_float}.
     """
-    cleaned = _FENCE_RE.sub("", raw).strip()
-    cleaned = _PLUS_RE.sub(r'\1', cleaned)
-    brace = cleaned.rfind("}")
-    if brace != -1:
-        cleaned = cleaned[:brace + 1]
+    cleaned = _extract_json_object(raw)
     data = json.loads(cleaned)
     if not isinstance(data, dict):
         raise ValueError(f"Expected JSON object, got {type(data).__name__}")
@@ -522,7 +527,7 @@ async def extract_tickers(article_text: str) -> list[str]:
     try:
         async with _get_semaphore():
             raw, _ = await _chat(prompt=prompt, system=_EXTRACT_SYSTEM, model=model, timeout=timeout)
-        cleaned = _FENCE_RE.sub("", raw).strip()
+        cleaned = _extract_json_object(raw)
         data    = json.loads(cleaned)
         tickers = [str(t).upper().strip() for t in data.get("tickers", []) if t]
         tickers = [t for t in tickers if re.fullmatch(r"[A-Z0-9]{1,8}(\.[A-Z]{1,2})?", t)]
