@@ -26,6 +26,17 @@ function formatMarketCap(v: number | null): string {
   return `$${v.toFixed(0)}`;
 }
 
+function formatVectorDate(dateString: string): string {
+  const parsed = new Date(dateString);
+  if (Number.isNaN(parsed.getTime())) return "—";
+  return new Intl.DateTimeFormat("en-GB", {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    timeZone: "UTC",
+  }).format(parsed);
+}
+
 function ScoreBar({ score, higherIs }: { score: number | null; higherIs: "better" | "worse" }) {
   if (score == null) {
     return (
@@ -193,7 +204,7 @@ function TickerCard({ row }: { row: TickerRow }) {
           <div className="text-right shrink-0">
             <p className="text-xs font-mono font-medium">{formatMarketCap(row.metadata.market_cap)}</p>
             <p className="text-[10px] text-muted-foreground mt-0.5">
-              {new Date(row.vector_date).toLocaleDateString()}
+              {formatVectorDate(row.vector_date)}
             </p>
           </div>
         </div>

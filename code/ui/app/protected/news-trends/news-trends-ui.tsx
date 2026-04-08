@@ -156,6 +156,13 @@ function fillDateGaps(
     return { date, clusters, dimensions, count: 0 };
   };
 
+  const toHourlyBucket = (bucket: string, endOfDay: boolean): string | null => {
+    // Accept either "YYYY-MM-DD" or "YYYY-MM-DDTHH".
+    if (/^\d{4}-\d{2}-\d{2}T\d{2}$/.test(bucket)) return bucket;
+    if (/^\d{4}-\d{2}-\d{2}$/.test(bucket)) return `${bucket}T${endOfDay ? "23" : "00"}`;
+    return null;
+  };
+
   if (mode === "daily") {
     let current = startBucket.slice(0, 10);
     const end = endBucket.slice(0, 10);
@@ -163,18 +170,28 @@ function fillDateGaps(
       result.push(dataMap.get(current) ?? emptyEntry(current));
       // advance by 1 day using UTC to avoid DST issues
       const d = new Date(current + "T00:00:00Z");
+      if (Number.isNaN(d.getTime())) break;
       d.setUTCDate(d.getUTCDate() + 1);
       current = d.toISOString().slice(0, 10);
     }
   } else {
     // hourly buckets: "2024-01-15T14"
-    let current = startBucket.slice(0, 13);
-    const end = endBucket.slice(0, 13);
+    const normalizedStart = toHourlyBucket(startBucket, false);
+    const normalizedEnd = toHourlyBucket(endBucket, true);
+    if (!normalizedStart || !normalizedEnd) return data;
+
+    let current: string = normalizedStart;
+    const end: string = normalizedEnd;
+
     while (current <= end) {
       result.push(dataMap.get(current) ?? emptyEntry(current));
       const [datePart, hourPart] = current.split("T");
+      const hour = Number.parseInt(hourPart, 10);
+      if (Number.isNaN(hour)) break;
+
       const d = new Date(datePart + "T00:00:00Z");
-      d.setUTCHours(parseInt(hourPart) + 1);
+      if (Number.isNaN(d.getTime())) break;
+      d.setUTCHours(hour + 1);
       current = d.toISOString().slice(0, 13);
     }
   }
