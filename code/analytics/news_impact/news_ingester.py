@@ -2,7 +2,7 @@
 News article ingestion pipeline.
 
 Full flow: article text → 8 LLM heads → aggregate → persist to Supabase.
-Deduplicates by sha256(body) — already-ingested articles return immediately.
+Deduplicates by normalized URL when present, otherwise sha256(body).
 """
 
 import hashlib
@@ -10,13 +10,14 @@ import json
 import logging
 from datetime import datetime
 from typing import Optional
+from urllib.parse import urlsplit, urlunsplit
 
 from supabase import Client
 
-from src.db import get_supabase_client, get_schema, _as_json
+from src.db import get_supabase_client, get_schema, _as_json, patch_news_article_image_if_missing
 from news_impact.impact_scorer import score_article, aggregate_heads, top_dimensions, HeadOutput
 
-__all__ = ["ingest_article", "_sha256", "_check_existing", "_persist"]
+__all__ = ["ingest_article", "_sha256", "_normalize_url", "_check_existing", "_persist"]
 
 logger = logging.getLogger(__name__)
 
@@ -25,20 +26,29 @@ def _sha256(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
+def _normalize_url(url: Optional[str]) -> str:
+    """
+    Normalize a URL for stable dedupe: trim, strip fragment, lower-case host,
+    strip trailing slash on path, default https if scheme missing.
+    """
+    if not url or not str(url).strip():
+        return ""
+    raw = str(url).strip()
+    parts = urlsplit(raw)
+    if not parts.netloc:
+        return raw
+    scheme = (parts.scheme or "https").lower()
+    netloc = parts.netloc.lower()
+    path = (parts.path or "").rstrip("/") or "/"
+    query = parts.query
+    return urlunsplit((scheme, netloc, path, query, ""))
+
+
 def _tbl(client: Client, table: str):
     return client.schema(get_schema()).table(table)
 
 
-def _check_existing(client: Client, article_hash: str) -> Optional[tuple[int, dict]]:
-    """
-    Returns (article_id, impact_vector) if the article is already in the DB,
-    otherwise None.
-    """
-    art_res = _tbl(client, "news_articles").select("id").eq("article_hash", article_hash).limit(1).execute()
-    if not art_res.data:
-        return None
-
-    article_id = int(art_res.data[0]["id"])
+def _impact_for_article_id(client: Client, article_id: int) -> dict:
     vec_res = (
         _tbl(client, "news_impact_vectors")
         .select("impact_json")
@@ -47,9 +57,53 @@ def _check_existing(client: Client, article_hash: str) -> Optional[tuple[int, di
         .execute()
     )
     if vec_res.data:
-        impact = _as_json(vec_res.data[0]["impact_json"], default={})
-        return article_id, impact
-    return article_id, {}
+        return _as_json(vec_res.data[0]["impact_json"], default={})
+    return {}
+
+
+def _article_row_by_url(client: Client, url: str) -> Optional[int]:
+    """Return article id if a row exists with this exact url string."""
+    art_res = _tbl(client, "news_articles").select("id").eq("url", url).limit(1).execute()
+    if not art_res.data:
+        return None
+    return int(art_res.data[0]["id"])
+
+
+def _check_existing(
+    client: Client,
+    article_hash: str,
+    url: Optional[str] = None,
+) -> Optional[tuple[int, dict]]:
+    """
+    Returns (article_id, impact_vector) if the article is already in the DB.
+
+    When ``url`` is non-empty, matches on normalized URL first (and legacy raw URL),
+    then falls back to ``article_hash``.
+    """
+    url_norm = _normalize_url(url)
+    article_id: Optional[int] = None
+
+    if url_norm:
+        article_id = _article_row_by_url(client, url_norm)
+        if article_id is None:
+            raw = (url or "").strip()
+            if raw and raw != url_norm:
+                article_id = _article_row_by_url(client, raw)
+
+    if article_id is None:
+        art_res = (
+            _tbl(client, "news_articles")
+            .select("id")
+            .eq("article_hash", article_hash)
+            .limit(1)
+            .execute()
+        )
+        if not art_res.data:
+            return None
+        article_id = int(art_res.data[0]["id"])
+
+    impact = _impact_for_article_id(client, article_id)
+    return article_id, impact
 
 
 def _delete_heads_and_vector(client: Client, article_id: int) -> None:
@@ -70,6 +124,7 @@ def _persist(
     existing_article_id: Optional[int] = None,
     published_at: Optional[str] = None,
     publisher: Optional[str] = None,
+    image_url: Optional[str] = None,
 ) -> int:
     """
     Insert (or re-use) article row, then insert heads and vector.
@@ -82,10 +137,15 @@ def _persist(
 
     if existing_article_id is not None:
         article_id = existing_article_id
+        if image_url and str(image_url).strip():
+            _tbl(client, "news_articles").update({
+                "image_url": str(image_url).strip(),
+            }).eq("id", article_id).execute()
     else:
+        url_stored = _normalize_url(url) if url else None
         row = {
             "created_at": now,
-            "url": url,
+            "url": url_stored or url,
             "title": title,
             "body": body,
             "source": source,
@@ -95,6 +155,8 @@ def _persist(
             row["published_at"] = published_at
         if publisher is not None:
             row["publisher"] = publisher
+        if image_url and str(image_url).strip():
+            row["image_url"] = str(image_url).strip()
         art_res = _tbl(client, "news_articles").insert(row).execute()
         article_id = int(art_res.data[0]["id"])
 
@@ -136,25 +198,29 @@ async def ingest_article(
     refresh: bool = False,
     published_at: Optional[str] = None,
     publisher: Optional[str] = None,
+    image_url: Optional[str] = None,
 ) -> tuple[int, dict[str, float]]:
     """
     Full pipeline: article → 8 LLM heads → aggregate → persist → return
     (article_id, impact_vector).
 
-    Deduplicates by sha256(body). If the article already exists and
-    refresh=False, returns the cached result without LLM calls.
-    If refresh=True, re-scores and overwrites the stored heads and vector.
+    Deduplicates by normalized URL when present, otherwise sha256(body).
+    If the article already exists and refresh=False, returns the cached result
+    without LLM calls. If refresh=True, re-scores and overwrites the stored heads and vector.
     """
     article_hash = _sha256(body)
 
     client = get_supabase_client()
-    existing = _check_existing(client, article_hash)
+    existing = _check_existing(client, article_hash, url=url)
 
     if existing is not None and not refresh:
         article_id, impact = existing
+        patch_news_article_image_if_missing(client, article_id, image_url)
         logger.info(
-            "[news_ingester] duplicate article %s (id=%d) — returning cached result",
-            article_hash[:12], article_id,
+            "[news_ingester] duplicate article id=%d url=%r hash=%s… — returning cached result",
+            article_id,
+            _normalize_url(url) or "",
+            article_hash[:12],
         )
         return article_id, impact
 
@@ -179,10 +245,15 @@ async def ingest_article(
             existing_article_id=existing_article_id,
             published_at=published_at,
             publisher=publisher,
+            image_url=image_url,
         )
     else:
-        article_id = _persist(client, body, article_hash, url, title, source, heads, impact,
-                              published_at=published_at, publisher=publisher)
+        article_id = _persist(
+            client, body, article_hash, url, title, source, heads, impact,
+            published_at=published_at,
+            publisher=publisher,
+            image_url=image_url,
+        )
 
     logger.info("[news_ingester] persisted article_id=%d", article_id)
     return article_id, impact

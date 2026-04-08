@@ -197,7 +197,7 @@ class FMPFetcher:
         Returns
         -------
         List of dicts with keys: symbol, publishedDate, publisher, title,
-        site, text, url.  Empty list on failure.
+        site, text, url, image (thumbnail URL).  Empty list on failure.
         """
         params: dict = {"page": page, "limit": limit}
         if tickers:

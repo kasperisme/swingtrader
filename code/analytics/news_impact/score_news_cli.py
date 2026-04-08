@@ -47,8 +47,22 @@ from news_impact.company_scorer import score_companies, CompanyScore
 from news_impact.company_vector import build_vectors, CompanyVector
 from news_impact.fmp_fetcher import FMPFetcher
 from news_impact.impact_scorer import score_article, aggregate_heads, top_dimensions, HeadOutput, extract_tickers
-from news_impact.news_ingester import _sha256, _check_existing
-from src.db import get_supabase_client, get_schema, save_article_tickers, _as_json
+from news_impact.news_ingester import (
+    _check_existing,
+    _delete_heads_and_vector,
+    ingest_article,
+    _normalize_url,
+    _persist,
+    _sha256,
+)
+from src.db import (
+    _as_json,
+    get_schema,
+    get_supabase_client,
+    load_article_tickers,
+    patch_news_article_image_if_missing,
+    save_article_tickers,
+)
 
 
 def _heads_from_db(article_id: int) -> list[HeadOutput]:
@@ -74,6 +88,29 @@ def _heads_from_db(article_id: int) -> list[HeadOutput]:
             raw_response="",
         ))
     return heads
+
+
+def _fetch_published_at(article_id: int) -> Optional[str]:
+    """Return published_at from news_articles for display, if present."""
+    if article_id < 0:
+        return None
+    try:
+        client = get_supabase_client()
+        res = (
+            client.schema(get_schema())
+            .table("news_articles")
+            .select("published_at")
+            .eq("id", article_id)
+            .limit(1)
+            .execute()
+        )
+        if res.data:
+            val = res.data[0].get("published_at")
+            if val is not None and str(val).strip():
+                return str(val).strip()
+    except Exception as exc:
+        logger.debug("[score_news] published_at fetch failed: %s", exc)
+    return None
 
 logger  = logging.getLogger(__name__)
 console = Console()
@@ -148,6 +185,7 @@ def _print_results(
     company_scores: list[CompanyScore],
     title: Optional[str],
     extracted_tickers: Optional[list[str]] = None,
+    published_at: Optional[str] = None,
 ) -> None:
     sep = "━" * 52
     console.print(f"\n[bold]{sep}[/bold]")
@@ -156,6 +194,8 @@ def _print_results(
     console.print(f"[bold cyan]Article:[/bold cyan] {display_title}")
     if article_id >= 0:
         console.print(f"[dim]article_id={article_id}[/dim]")
+    if published_at:
+        console.print(f"[dim]published: {published_at}[/dim]")
     if extracted_tickers:
         console.print(f"[dim]Companies mentioned: {', '.join(extracted_tickers)}[/dim]")
 
@@ -256,13 +296,23 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
     parser.add_argument(
         "--tickers", nargs="+", metavar="TICKER", default=None,
-        help="Optional: score these tickers against the impact vector",
+        help="Optional: include explicit symbols (logged/persisted); scoring requires --score-companies",
+    )
+    parser.add_argument(
+        "--score-companies", action="store_true",
+        help="Build/load company vectors and score tailwinds/headwinds (off by default)",
     )
     parser.add_argument(
         "--use-cache", action="store_true",
         help="Load company vectors from disk cache (requires prior build_vectors_cli run)",
     )
     parser.add_argument("--title",  metavar="TITLE",  default=None, help="Article title")
+    parser.add_argument(
+        "--published-at",
+        metavar="ISO",
+        default=None,
+        help="Publication time for this article (stored and printed; e.g. 2026-04-08T14:30:00)",
+    )
     parser.add_argument("--source", metavar="SOURCE", default=None, help="Source label")
     parser.add_argument(
         "--top-n", type=int, default=6,
@@ -326,13 +376,13 @@ async def _main(argv: list[str] | None = None) -> None:
         # Check for existing article before showing status message
         article_hash = _sha256(article_text)
         client = get_supabase_client()
-        existing = _check_existing(client, article_hash)
+        existing = _check_existing(client, article_hash, url=args.url)
 
         if existing is not None and not args.refresh:
             article_id, impact = existing
             console.print(f"[dim]Article already in DB (id={article_id}) — using cached impact vector.[/dim]")
-            # Extract tickers only (no LLM scoring needed)
-            extracted_tickers = await extract_tickers(article_text)
+            # Load previously extracted tickers from DB (avoid extra LLM call)
+            extracted_tickers = load_article_tickers(client, article_id, source="extracted")
             # Reconstruct heads from DB for display
             heads = _heads_from_db(article_id)
         else:
@@ -343,13 +393,13 @@ async def _main(argv: list[str] | None = None) -> None:
                 extract_tickers(article_text),
             )
             impact = aggregate_heads(heads)
-            from news_impact.news_ingester import ingest_article as _ingest
-            article_id, impact = await _ingest(
+            article_id, impact = await ingest_article(
                 body=article_text,
                 url=args.url,
                 title=args.title,
                 source=args.source,
                 refresh=args.refresh,
+                published_at=args.published_at,
             )
 
     # 2b. Persist detected tickers to DB
@@ -364,16 +414,18 @@ async def _main(argv: list[str] | None = None) -> None:
         except Exception as exc:
             logger.warning("[score_news] failed to persist tickers: %s", exc)
 
-    # 3. Merge explicit --tickers with extracted ones, then score companies
+    # 3. Merge explicit --tickers with extracted ones
     explicit_tickers = [t.upper() for t in (args.tickers or [])]
     all_tickers = list(dict.fromkeys(explicit_tickers + extracted_tickers))  # dedupe, preserve order
 
     if extracted_tickers:
         auto_label = ", ".join(extracted_tickers)
         console.print(f"[dim]Extracted from article: {auto_label}[/dim]")
+    if all_tickers:
+        console.print(f"[dim]Symbols: {', '.join(all_tickers)}[/dim]")
 
     company_scores: list[CompanyScore] = []
-    if all_tickers:
+    if all_tickers and args.score_companies:
         if args.use_cache:
             console.print("[dim]Loading company vectors from cache…[/dim]")
             company_vectors = _load_cached_vectors(all_tickers)
@@ -384,9 +436,23 @@ async def _main(argv: list[str] | None = None) -> None:
             company_vectors = await build_vectors(all_tickers, use_cache=True)
         if company_vectors:
             company_scores = score_companies(impact, company_vectors, top_n=args.top_n)
+    elif all_tickers:
+        console.print("[dim]Skipping company vector build/scoring (use --score-companies to enable).[/dim]")
 
     # 4. Display
-    _print_results(article_text, article_id, heads, impact, company_scores, args.title, extracted_tickers)
+    published_display = args.published_at
+    if not published_display and article_id >= 0 and not args.no_persist:
+        published_display = _fetch_published_at(article_id)
+    _print_results(
+        article_text,
+        article_id,
+        heads,
+        impact,
+        company_scores,
+        args.title,
+        extracted_tickers,
+        published_at=published_display,
+    )
 
 
 async def _process_fmp_news(args: argparse.Namespace) -> None:
@@ -407,6 +473,10 @@ async def _process_fmp_news(args: argparse.Namespace) -> None:
 
     console.print(f"\nFetched [bold]{len(articles)}[/bold] articles from FMP news\n")
 
+    # Dedupe within this run: same normalized URL, or same body hash when no URL
+    seen_urls: set[str] = set()
+    seen_hashes: set[str] = set()
+
     for i, article in enumerate(articles, 1):
         summary      = article.get("text", "").strip()
         title        = article.get("title", "")
@@ -415,12 +485,15 @@ async def _process_fmp_news(args: argparse.Namespace) -> None:
         publisher    = article.get("publisher") or article.get("site") or None
         symbol       = article.get("symbol", "")
         published_at = article.get("publishedDate") or None
+        image_url = (article.get("image") or "").strip() or None
 
         if not summary and not url:
             console.print(f"[dim][{i}/{len(articles)}] {title[:60]} — skipped (no text or url)[/dim]")
             continue
 
         console.print(f"[bold cyan][{i}/{len(articles)}][/bold cyan] {title[:70]}")
+        if published_at:
+            console.print(f"  [dim]published: {published_at}[/dim]")
 
         # Fetch full article from URL; fall back to FMP summary on failure
         body = summary
@@ -439,54 +512,107 @@ async def _process_fmp_news(args: argparse.Namespace) -> None:
             console.print(f"  [dim]skipped (no content)[/dim]")
             continue
 
-        # Score + extract in parallel
-        heads, extracted_tickers = await asyncio.gather(
-            score_article(body),
-            extract_tickers(body),
-        )
-        impact = aggregate_heads(heads)
+        article_hash = _sha256(body)
+        url_norm = _normalize_url(url) if url else ""
+
+        if url_norm and url_norm in seen_urls:
+            console.print(
+                "  [dim]skipped — same URL already processed in this run[/dim]",
+            )
+            continue
+
+        if not url_norm and article_hash in seen_hashes:
+            console.print(
+                "  [dim]skipped — same article body already processed in this run[/dim]",
+            )
+            continue
+
+        client = None if args.no_persist else get_supabase_client()
+        existing = None if client is None else _check_existing(client, article_hash, url=url)
+        from_cache = existing is not None and not args.refresh
+
+        article_id = -1
+        heads: list[HeadOutput]
+        extracted_tickers: list[str]
+        impact: dict[str, float]
+
+        if from_cache:
+            assert existing is not None
+            article_id, impact = existing
+            patch_news_article_image_if_missing(client, article_id, image_url)
+            heads = _heads_from_db(article_id)
+            extracted_tickers = load_article_tickers(client, article_id, source="extracted")
+            console.print(
+                f"  [dim]already in DB (id={article_id}) — skipped LLM scoring[/dim]",
+            )
+        else:
+            heads, extracted_tickers = await asyncio.gather(
+                score_article(body),
+                extract_tickers(body),
+            )
+            impact = aggregate_heads(heads)
 
         # Always include the article's own symbol if present
         if symbol and symbol not in extracted_tickers:
             extracted_tickers = [symbol] + extracted_tickers
 
-        # Persist
-        article_id = -1
-        if not args.no_persist:
-            article_hash = _sha256(body)
-            client = get_supabase_client()
-            existing = _check_existing(client, article_hash)
-
-            if existing is not None and not args.refresh:
-                article_id = existing[0]
-                console.print(f"  [dim]already in DB (id={article_id})[/dim]")
+        # Persist new scores only (cached path already has rows in DB)
+        if client is not None and not from_cache:
+            if existing is not None and args.refresh:
+                _delete_heads_and_vector(client, existing[0])
+                article_id = _persist(
+                    client,
+                    body,
+                    article_hash,
+                    url,
+                    title,
+                    source,
+                    heads,
+                    impact,
+                    existing_article_id=existing[0],
+                    published_at=published_at,
+                    publisher=publisher,
+                    image_url=image_url,
+                )
             else:
-                from news_impact.news_ingester import _delete_heads_and_vector, _persist
-                if existing and args.refresh:
-                    _delete_heads_and_vector(client, existing[0])
-                    article_id = _persist(client, body, article_hash, url, title, source, heads, impact,
-                                          existing_article_id=existing[0], published_at=published_at,
-                                          publisher=publisher)
-                else:
-                    article_id = _persist(client, body, article_hash, url, title, source, heads, impact,
-                                          published_at=published_at, publisher=publisher)
+                article_id = _persist(
+                    client,
+                    body,
+                    article_hash,
+                    url,
+                    title,
+                    source,
+                    heads,
+                    impact,
+                    published_at=published_at,
+                    publisher=publisher,
+                    image_url=image_url,
+                )
 
-            if article_id >= 0 and extracted_tickers:
-                save_article_tickers(client, article_id, extracted_tickers, source="extracted")
-                explicit = [t.upper() for t in (args.tickers or [])]
-                if explicit:
-                    save_article_tickers(client, article_id, explicit, source="explicit")
+        if client is not None and article_id >= 0 and extracted_tickers:
+            save_article_tickers(client, article_id, extracted_tickers, source="extracted")
+            explicit = [t.upper() for t in (args.tickers or [])]
+            if explicit:
+                save_article_tickers(client, article_id, explicit, source="explicit")
+
+        if url_norm:
+            seen_urls.add(url_norm)
+        else:
+            seen_hashes.add(article_hash)
 
         # Compact summary line
         top = top_dimensions(impact, n=3)
         top_str = "  ".join(f"{d} {s:+.2f}" for d, s in top) if top else "no signals"
         mentioned = ", ".join(extracted_tickers[:5]) if extracted_tickers else "—"
-        console.print(f"  [dim]id={article_id}  mentioned={mentioned}[/dim]")
+        pub = published_at or "—"
+        console.print(f"  [dim]id={article_id}  published={pub}  mentioned={mentioned}[/dim]")
         console.print(f"  [dim]top signals: {top_str}[/dim]")
 
         # Optional company scoring
         all_tickers = list(dict.fromkeys(extracted_tickers + [t.upper() for t in (args.tickers or [])]))
-        if all_tickers and impact:
+        if all_tickers:
+            console.print(f"  [dim]symbols: {', '.join(all_tickers)}[/dim]")
+        if all_tickers and impact and args.score_companies:
             try:
                 company_vectors = await build_vectors(all_tickers, use_cache=True)
                 if company_vectors:
@@ -499,6 +625,8 @@ async def _process_fmp_news(args: argparse.Namespace) -> None:
                         console.print(f"  tailwinds: {tw_str or '—'}   headwinds: {hw_str or '—'}")
             except Exception as exc:
                 logger.warning("company scoring failed for article %d: %s", article_id, exc)
+        elif all_tickers:
+            console.print("  [dim]skipping company vector build/scoring (use --score-companies to enable)[/dim]")
 
         console.print()
 

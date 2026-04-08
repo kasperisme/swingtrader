@@ -1,7 +1,8 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
+  Brush,
   LineChart,
   Line,
   XAxis,
@@ -12,6 +13,7 @@ import {
   ReferenceLine,
   ResponsiveContainer,
 } from "recharts";
+import type { MouseHandlerDataParam } from "recharts";
 import { TrendingUp, TrendingDown, Minus, ChevronRight, X } from "lucide-react";
 import { CLUSTERS } from "../vectors/dimensions";
 
@@ -735,6 +737,62 @@ export function NewsTrendsUI({ articles, chartHeight = 400 }: { articles: Articl
     });
   }, [benchmark, benchmarkByBucket, chartData]);
 
+  /** X-axis zoom: Brush (below) + click-drag on chart; double-click resets */
+  const [brushRange, setBrushRange] = useState<{
+    startIndex: number;
+    endIndex: number;
+  } | null>(null);
+  const dragStartRef = useRef<number | null>(null);
+
+  const dataLen = chartDataWithBenchmark.length;
+  const lastIdx = Math.max(0, dataLen - 1);
+
+  const dataBoundsKey =
+    dataLen > 0
+      ? `${chartDataWithBenchmark[0].date}:${chartDataWithBenchmark[dataLen - 1].date}:${dataLen}`
+      : "";
+
+  useEffect(() => {
+    setBrushRange(null);
+  }, [dataBoundsKey]);
+
+  const brushStart = brushRange?.startIndex ?? 0;
+  const brushEnd = brushRange?.endIndex ?? lastIdx;
+
+  const handleBrushChange = (next: { startIndex: number; endIndex: number }) => {
+    if (next.startIndex === 0 && next.endIndex === lastIdx) {
+      setBrushRange(null);
+    } else {
+      setBrushRange(next);
+    }
+  };
+
+  const toTooltipIndex = (state: MouseHandlerDataParam): number | undefined => {
+    const idx = state.activeTooltipIndex ?? state.activeIndex;
+    return typeof idx === "number" ? idx : undefined;
+  };
+
+  const handleChartMouseDown = (state: MouseHandlerDataParam) => {
+    const idx = toTooltipIndex(state);
+    if (idx !== undefined) dragStartRef.current = idx;
+  };
+
+  const handleChartMouseUp = (state: MouseHandlerDataParam) => {
+    const start = dragStartRef.current;
+    dragStartRef.current = null;
+    const end = toTooltipIndex(state);
+    if (start === null || end === undefined) return;
+    if (start === end) return;
+    const lo = Math.min(start, end);
+    const hi = Math.max(start, end);
+    if (hi <= lo) return;
+    handleBrushChange({ startIndex: lo, endIndex: hi });
+  };
+
+  const handleChartDoubleClick = () => {
+    setBrushRange(null);
+  };
+
   // Drill-down: dimension MA data for the selected cluster
   const drilldownDims = useMemo(() => {
     if (!drilldownId) return null;
@@ -914,13 +972,18 @@ export function NewsTrendsUI({ articles, chartHeight = 400 }: { articles: Articl
             <p className="text-xs text-muted-foreground mb-4">
               Impact score −1 (bearish) → +1 (bullish) · Click score to
               show/hide · <ChevronRight size={10} className="inline" /> to drill
-              into dimensions
+              into dimensions · Drag on the chart or the range strip below to
+              zoom the time axis; double-click the chart to reset zoom
             </p>
-            <ResponsiveContainer width="100%" height={chartHeight}>
-              <LineChart
-                data={chartDataWithBenchmark}
-                margin={{ top: 5, right: 10, left: 0, bottom: 5 }}
-              >
+            <div className="select-none [&_.recharts-wrapper]:cursor-crosshair [&_.recharts-brush]:cursor-grab">
+              <ResponsiveContainer width="100%" height={chartHeight}>
+                <LineChart
+                  data={chartDataWithBenchmark}
+                  margin={{ top: 5, right: 10, left: 0, bottom: 8 }}
+                  onMouseDown={handleChartMouseDown}
+                  onMouseUp={handleChartMouseUp}
+                  onDoubleClick={handleChartDoubleClick}
+                >
                 <CartesianGrid
                   strokeDasharray="3 3"
                   stroke="currentColor"
@@ -995,8 +1058,22 @@ export function NewsTrendsUI({ articles, chartHeight = 400 }: { articles: Articl
                     connectNulls
                   />
                 )}
+                {dataLen > 1 ? (
+                  <Brush
+                    dataKey="date"
+                    height={32}
+                    stroke="hsl(var(--border))"
+                    fill="hsl(var(--muted))"
+                    travellerWidth={6}
+                    startIndex={brushStart}
+                    endIndex={brushEnd}
+                    onChange={handleBrushChange}
+                    tickFormatter={(v: string) => formatBucket(v, viewMode)}
+                  />
+                ) : null}
               </LineChart>
-            </ResponsiveContainer>
+              </ResponsiveContainer>
+            </div>
           </div>
         </div>
 

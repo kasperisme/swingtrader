@@ -184,6 +184,14 @@ def ensure_schema(client: Optional[Client] = None) -> None:
                 article_hash VARCHAR NOT NULL UNIQUE
             )
         """)
+        cur.execute(f"""
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_news_articles_url_unique
+            ON {schema}.news_articles (url)
+            WHERE url IS NOT NULL AND trim(url) <> ''
+        """)
+        cur.execute(
+            f"ALTER TABLE {schema}.news_articles ADD COLUMN IF NOT EXISTS image_url TEXT"
+        )
 
         cur.execute(f"""
             CREATE TABLE IF NOT EXISTS {schema}.news_impact_heads (
@@ -445,6 +453,55 @@ def save_article_tickers(
         ]).execute()
 
 
+def load_article_tickers(
+    client: Client,
+    article_id: int,
+    source: Optional[str] = "extracted",
+) -> list[str]:
+    """
+    Load ticker mentions for an article.
+    If source is provided, returns only that source (default: extracted).
+    """
+    q = _tbl(client, "news_article_tickers").select("ticker").eq("article_id", article_id)
+    if source is not None:
+        q = q.eq("source", source)
+    res = q.execute()
+    tickers = sorted({
+        str(row.get("ticker", "")).upper().strip()
+        for row in (res.data or [])
+        if row.get("ticker")
+    })
+    return tickers
+
+
+def patch_news_article_image_if_missing(
+    client: Client,
+    article_id: int,
+    image_url: Optional[str],
+) -> None:
+    """
+    Set ``image_url`` on ``news_articles`` only when the row has no image yet
+    (NULL or blank). Used when an article is skipped as a duplicate but the
+    API now provides a thumbnail URL.
+    """
+    url = (image_url or "").strip()
+    if not url or article_id < 0:
+        return
+    res = (
+        _tbl(client, "news_articles")
+        .select("image_url")
+        .eq("id", article_id)
+        .limit(1)
+        .execute()
+    )
+    if not res.data:
+        return
+    cur = res.data[0].get("image_url")
+    if cur is not None and str(cur).strip():
+        return
+    _tbl(client, "news_articles").update({"image_url": url}).eq("id", article_id).execute()
+
+
 # ---------------------------------------------------------------------------
 # Company vectors
 # ---------------------------------------------------------------------------
@@ -476,9 +533,12 @@ def load_company_vectors(
 ) -> list[dict]:
     """
     Load company vectors, returning the most-recent row per ticker when no date is given.
-    Uses a direct SQL query (DISTINCT ON) for the latest-per-ticker case.
+
+    Latest-per-ticker uses the PostgREST API only (same HTTPS path as writes). Direct
+    Postgres (port 5432) is not used here, so environments where REST works but
+    db.<project>.supabase.co is unreachable (e.g. IPv6 routing) still load cache.
     """
-    schema = get_schema()
+    _cols = "ticker,vector_date,dimensions_json,raw_json,metadata_json,fetched_at"
 
     if vector_date and tickers:
         # Simple filter — use table API
@@ -501,35 +561,50 @@ def load_company_vectors(
         rows_data = res.data or []
 
     else:
-        # Need DISTINCT ON (ticker) ORDER BY ticker, vector_date DESC — use psycopg2
-        conn = get_pg_connection()
-        try:
-            cur = conn.cursor()
-            if tickers:
-                placeholders = ",".join(["%s"] * len(tickers))
-                cur.execute(
-                    f"""
-                    SELECT DISTINCT ON (ticker)
-                        ticker, vector_date, dimensions_json, raw_json, metadata_json, fetched_at
-                    FROM {schema}.company_vectors
-                    WHERE ticker IN ({placeholders})
-                    ORDER BY ticker, vector_date DESC
-                    """,
-                    tickers,
+        # Latest row per ticker via PostgREST (no direct Postgres connection).
+        if tickers is not None and len(tickers) == 0:
+            rows_data = []
+        elif tickers:
+            rows_data = []
+            for t in tickers:
+                res = (
+                    _tbl(client, "company_vectors")
+                    .select(_cols)
+                    .eq("ticker", t)
+                    .order("vector_date", desc=True)
+                    .limit(1)
+                    .execute()
                 )
-            else:
-                cur.execute(
-                    f"""
-                    SELECT DISTINCT ON (ticker)
-                        ticker, vector_date, dimensions_json, raw_json, metadata_json, fetched_at
-                    FROM {schema}.company_vectors
-                    ORDER BY ticker, vector_date DESC
-                    """
+                if res.data:
+                    rows_data.append(res.data[0])
+        else:
+            # All tickers: paginate full table, keep max vector_date per ticker in memory.
+            rows_data = []
+            page_size = 1000
+            offset = 0
+            best: dict[str, dict] = {}
+            while True:
+                res = (
+                    _tbl(client, "company_vectors")
+                    .select(_cols)
+                    .range(offset, offset + page_size - 1)
+                    .execute()
                 )
-            cols = ["ticker", "vector_date", "dimensions_json", "raw_json", "metadata_json", "fetched_at"]
-            rows_data = [dict(zip(cols, row)) for row in cur.fetchall()]
-        finally:
-            conn.close()
+                batch = res.data or []
+                if not batch:
+                    break
+                for row in batch:
+                    t = row.get("ticker")
+                    if not t:
+                        continue
+                    vd = str(row.get("vector_date") or "")
+                    prev = best.get(t)
+                    if prev is None or vd > str(prev.get("vector_date") or ""):
+                        best[t] = row
+                if len(batch) < page_size:
+                    break
+                offset += page_size
+            rows_data = list(best.values())
 
     results = []
     for row in rows_data:
