@@ -23,6 +23,22 @@ _BACKEND = os.environ.get("NEWS_IMPACT_BACKEND", "ollama").lower()
 LLMError = OllamaError if _BACKEND != "anthropic" else AnthropicError
 
 
+def set_news_impact_backend(backend: str) -> None:
+    """
+    Override the LLM backend for this process (``ollama`` or ``anthropic``).
+
+    Updates ``os.environ[\"NEWS_IMPACT_BACKEND\"]`` so downstream code agrees.
+    Used by ``score_news_cli --news-impact-backend``.
+    """
+    global _BACKEND, LLMError
+    b = backend.strip().lower()
+    if b not in ("ollama", "anthropic"):
+        raise ValueError("NEWS_IMPACT_BACKEND must be 'ollama' or 'anthropic'")
+    os.environ["NEWS_IMPACT_BACKEND"] = b
+    _BACKEND = b
+    LLMError = OllamaError if _BACKEND != "anthropic" else AnthropicError
+
+
 async def _chat(prompt: str, system: str, model: Optional[str], timeout: float) -> tuple[str, int]:
     if _BACKEND == "anthropic":
         return await _anthropic_chat(prompt=prompt, system=system, model=model, timeout=timeout)

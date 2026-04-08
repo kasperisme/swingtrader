@@ -11,6 +11,9 @@ Usage:
     python -m news_impact.score_news_cli --url "https://..."
     python -m news_impact.score_news_cli --file article.txt
 
+    # Use Anthropic instead of Ollama for LLM heads (overrides NEWS_IMPACT_BACKEND)
+    python -m news_impact.score_news_cli --text "..." --news-impact-backend anthropic
+
     # Fetch and embed latest news from FMP (market-wide)
     python -m news_impact.score_news_cli --fmp-news
     python -m news_impact.score_news_cli --fmp-news --limit 10
@@ -48,7 +51,14 @@ from rich.console import Console
 from news_impact.company_scorer import score_companies, CompanyScore
 from news_impact.company_vector import build_vectors, CompanyVector
 from news_impact.fmp_fetcher import FMPFetcher
-from news_impact.impact_scorer import score_article, aggregate_heads, top_dimensions, HeadOutput, extract_tickers
+from news_impact.impact_scorer import (
+    score_article,
+    aggregate_heads,
+    top_dimensions,
+    HeadOutput,
+    extract_tickers,
+    set_news_impact_backend,
+)
 from news_impact.news_ingester import (
     _check_existing,
     _delete_heads_and_vector,
@@ -346,6 +356,14 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--refresh", action="store_true",
         help="Re-score even if article is already in DB, overwriting stored heads and vector",
     )
+    parser.add_argument(
+        "--news-impact-backend",
+        dest="news_impact_backend",
+        choices=["ollama", "anthropic"],
+        default=None,
+        metavar="BACKEND",
+        help="Override NEWS_IMPACT_BACKEND for this run (ollama or anthropic; default: env or ollama)",
+    )
     parser.add_argument("--verbose", "-v", action="store_true", help="Debug logging")
     return parser.parse_args(argv)
 
@@ -354,6 +372,9 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
 async def _main(argv: list[str] | None = None) -> None:
     args = _parse_args(argv)
+
+    if args.news_impact_backend is not None:
+        set_news_impact_backend(args.news_impact_backend)
 
     logging.basicConfig(level=logging.DEBUG if args.verbose else logging.WARNING)
 

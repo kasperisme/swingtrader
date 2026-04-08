@@ -96,9 +96,10 @@ python -m news_impact.score_news_cli --fmp-news --sparse-fill 30 10
 
 ### Other
 
-| Flag               | Description   |
-| ------------------ | ------------- |
-| `--verbose` / `-v` | Debug logging |
+| Flag                       | Description                                                                                    |
+| -------------------------- | ---------------------------------------------------------------------------------------------- |
+| `--news-impact-backend`    | `ollama` or `anthropic` — overrides `NEWS_IMPACT_BACKEND` for this run (default: env / ollama) |
+| `--verbose` / `-v`         | Debug logging                                                                                  |
 
 ### Date range filtering with `--from` / `--to`
 
@@ -131,6 +132,7 @@ python -m news_impact.score_news_cli --fmp-news --to 2025-11-30
 | `--fmp-news`                 | off     | Batch mode: fetch and score stock news from FMP.                        |
 | `--from DATE`                | —       | FMP: inclusive start date (`YYYY-MM-DD`).                               |
 | `--limit N`                  | `20`    | FMP: max articles per request (≤ 250).                                  |
+| `--news-impact-backend`      | —       | `ollama` or `anthropic`; overrides `NEWS_IMPACT_BACKEND` for this run. |
 | `--no-persist`               | off     | Do not write to Supabase.                                               |
 | `--page N`                   | `0`     | FMP: pagination index (≤ 100).                                          |
 | `--published-at ISO`         | —       | Stored publication timestamp.                                           |
@@ -201,15 +203,16 @@ TAILWINDS              HEADWINDS
 
 ## Environment variables
 
-| Variable              | Default                   | Description                                           |
-| --------------------- | ------------------------- | ----------------------------------------------------- |
-| `OLLAMA_IMPACT_MODEL` | `devstral`                | Ollama model name                                     |
-| `OLLAMA_BASE_URL`     | `http://localhost:11434`  | Ollama endpoint                                       |
-| `OLLAMA_CONCURRENCY`  | `1`                       | Concurrent Ollama requests (keep at 1 for single-GPU) |
-| `OLLAMA_TIMEOUT`      | `120`                     | Per-request timeout in seconds                        |
-| `OLLAMA_NUM_PREDICT`  | `1024`                    | Max tokens per LLM response                           |
-| `FMP_API_KEY`         | —                         | Required only when fetching company vectors           |
-| `HANS_DUCKDB_PATH`    | `data/swingtrader.duckdb` | DuckDB file path                                      |
+| Variable                 | Default                   | Description                                                                 |
+| ------------------------ | ------------------------- | --------------------------------------------------------------------------- |
+| `NEWS_IMPACT_BACKEND`    | `ollama`                  | `ollama` or `anthropic`. Per-run override: `--news-impact-backend BACKEND`. |
+| `OLLAMA_IMPACT_MODEL`    | `devstral`                | Ollama model name                                                           |
+| `OLLAMA_BASE_URL`        | `http://localhost:11434`  | Ollama endpoint                                                             |
+| `OLLAMA_CONCURRENCY`     | `1`                       | Concurrent Ollama requests (keep at 1 for single-GPU)                       |
+| `OLLAMA_TIMEOUT`         | `120`                     | Per-request timeout in seconds                                              |
+| `OLLAMA_NUM_PREDICT`     | `1024`                    | Max tokens per LLM response                                                 |
+| `FMP_API_KEY`            | —                         | Required only when fetching company vectors                                 |
+| `HANS_DUCKDB_PATH`       | `data/swingtrader.duckdb` | DuckDB file path                                                            |
 
 ## Pulling the default model
 
