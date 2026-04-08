@@ -1,6 +1,8 @@
 import { AuthButton } from "@/components/auth-button";
+import { EnvVarWarning } from "@/components/env-var-warning";
 import { ThemeSwitcher } from "@/components/theme-switcher";
 import { createClient } from "@/lib/supabase/server";
+import { hasEnvVars } from "@/lib/utils";
 import Image from "next/image";
 import Link from "next/link";
 import { Suspense } from "react";
@@ -13,6 +15,11 @@ type NewsArticle = {
   source: string | null;
   created_at: string;
 };
+
+function articleImageUrl(article: NewsArticle): string | null {
+  if (!article.url) return null;
+  return `https://www.google.com/s2/favicons?sz=256&domain_url=${encodeURIComponent(article.url)}`;
+}
 
 function formatArticleDate(iso: string): string {
   const parsed = new Date(iso);
@@ -53,34 +60,111 @@ async function LatestNewsArticles() {
   }
 
   return (
-    <div className="mt-4 grid gap-3">
-      {latestArticles.map((article) => (
-        <article key={article.id} className="rounded-lg border p-3">
-          <div className="flex items-center justify-between gap-3">
-            <p className="text-[11px] uppercase tracking-wide text-muted-foreground">
-              {article.source || "Unknown source"}
-            </p>
-            <time className="text-[11px] text-muted-foreground">
-              {formatArticleDate(article.created_at)}
-            </time>
-          </div>
-          {article.url ? (
-            <a
-              href={article.url}
-              target="_blank"
-              rel="noreferrer"
-              className="mt-1 block text-sm font-medium hover:underline"
-            >
-              {article.title || article.url}
-            </a>
-          ) : (
-            <p className="mt-1 text-sm font-medium">
-              {article.title || "Untitled article"}
-            </p>
-          )}
-        </article>
-      ))}
+    <div className="mt-5 overflow-hidden [mask-image:linear-gradient(to_right,transparent,black_8%,black_92%,transparent)]">
+      <div className="flex w-max gap-4 animate-news-roll hover:[animation-play-state:paused]">
+        {[...latestArticles, ...latestArticles].map((article, idx) => (
+          <article
+            key={`${article.id}-${idx}`}
+            className="w-[290px] shrink-0 rounded-xl border bg-card overflow-hidden"
+          >
+            <div className="h-36 bg-muted flex items-center justify-center">
+              {articleImageUrl(article) ? (
+                <img
+                  src={articleImageUrl(article) ?? ""}
+                  alt={`${article.source || "Article"} logo`}
+                  className="h-full w-full object-cover p-6"
+                  loading="lazy"
+                />
+              ) : (
+                <span className="text-xs text-muted-foreground">No image</span>
+              )}
+            </div>
+            <div className="p-3">
+              <div className="flex items-center justify-between gap-3">
+                <p className="text-[11px] uppercase tracking-wide text-muted-foreground truncate">
+                  {article.source || "Unknown source"}
+                </p>
+                <time className="text-[11px] text-muted-foreground shrink-0">
+                  {formatArticleDate(article.created_at)}
+                </time>
+              </div>
+              {article.url ? (
+                <a
+                  href={article.url}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="mt-1.5 block text-sm font-medium leading-snug hover:underline line-clamp-2"
+                >
+                  {article.title || article.url}
+                </a>
+              ) : (
+                <p className="mt-1.5 text-sm font-medium leading-snug line-clamp-2">
+                  {article.title || "Untitled article"}
+                </p>
+              )}
+            </div>
+          </article>
+        ))}
+      </div>
     </div>
+  );
+}
+
+async function LandingHeader() {
+  const supabase = await createClient();
+  const { data, error } = await supabase.auth.getClaims();
+  const isLoggedIn = !error && !!data?.claims;
+
+  return (
+    <nav className="w-full flex justify-center border-b border-b-foreground/10 h-16">
+      <div className="w-full max-w-7xl flex justify-between items-center p-3 px-5 text-sm">
+        <div className="flex gap-5 items-center font-semibold">
+          <Link href="/" className="inline-flex items-center gap-2">
+            <Image src="/icon.png" alt="newsimpactscreener logo" width={20} height={20} className="rounded-sm" />
+            newsimpactscreener
+          </Link>
+          {isLoggedIn && (
+            <>
+              <Link
+                href="/protected/vectors"
+                className="text-sm font-medium text-muted-foreground hover:text-foreground transition-colors"
+              >
+                Vectors
+              </Link>
+              <Link
+                href="/protected/news-trends"
+                className="text-sm font-medium text-muted-foreground hover:text-foreground transition-colors"
+              >
+                News Trends
+              </Link>
+              <Link
+                href="/protected/screenings"
+                className="text-sm font-medium text-muted-foreground hover:text-foreground transition-colors"
+              >
+                Screenings
+              </Link>
+            </>
+          )}
+        </div>
+        {!hasEnvVars ? (
+          <EnvVarWarning />
+        ) : (
+          <div className="flex items-center gap-4">
+            {!isLoggedIn && (
+              <Link
+                href="/auth/login"
+                className="text-muted-foreground hover:text-foreground transition-colors"
+              >
+                Login
+              </Link>
+            )}
+            <Suspense>
+              <AuthButton />
+            </Suspense>
+          </div>
+        )}
+      </div>
+    </nav>
   );
 }
 
@@ -89,25 +173,20 @@ export default function Home() {
   return (
     <main className="min-h-screen flex flex-col items-center bg-background">
       <div className="flex-1 w-full flex flex-col items-center">
-        <nav className="w-full flex justify-center border-b border-b-foreground/10 h-16">
-          <div className="w-full max-w-7xl flex justify-between items-center p-3 px-5 text-sm">
-            <Link href="/" className="font-semibold inline-flex items-center gap-2">
-              <Image src="/icon.png" alt="SwingTrader logo" width={20} height={20} className="rounded-sm" />
-              SwingTrader
-            </Link>
-            <div className="flex items-center gap-4">
-              <Link
-                href="/auth/login"
-                className="text-muted-foreground hover:text-foreground transition-colors"
-              >
-                Login
-              </Link>
-              <Suspense>
-                <AuthButton />
-              </Suspense>
-            </div>
-          </div>
-        </nav>
+        <Suspense
+          fallback={
+            <nav className="w-full flex justify-center border-b border-b-foreground/10 h-16">
+              <div className="w-full max-w-7xl flex justify-between items-center p-3 px-5 text-sm">
+                <Link href="/" className="font-semibold inline-flex items-center gap-2">
+                  <Image src="/icon.png" alt="newsimpactscreener logo" width={20} height={20} className="rounded-sm" />
+                  newsimpactscreener
+                </Link>
+              </div>
+            </nav>
+          }
+        >
+          <LandingHeader />
+        </Suspense>
 
         <section className="w-full max-w-7xl px-5 py-16 md:py-24">
           <div className="max-w-3xl">
@@ -118,7 +197,7 @@ export default function Home() {
               Discover market narratives, factor shifts, and screening signals.
             </h1>
             <p className="mt-5 text-base md:text-lg text-muted-foreground">
-              SwingTrader turns scored news and company vectors into an actionable daily view across
+              newsimpactscreener turns scored news and company vectors into an actionable daily view across
               sectors, dimensions, and custom screens.
             </p>
             <div className="mt-8 flex flex-wrap gap-3">

@@ -18,8 +18,8 @@ export default function ProtectedLayout({
           <div className="w-full max-w-7xl flex justify-between items-center p-3 px-5 text-sm">
             <div className="flex gap-5 items-center font-semibold">
               <Link href={"/"} className="inline-flex items-center gap-2">
-                <Image src="/icon.png" alt="SwingTrader logo" width={20} height={20} className="rounded-sm" />
-                SwingTrader
+                <Image src="/icon.png" alt="newsimpactscreener logo" width={20} height={20} className="rounded-sm" />
+                newsimpactscreener
               </Link>
               <Link
                 href={"/protected/vectors"}

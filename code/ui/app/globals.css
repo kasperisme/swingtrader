@@ -66,3 +66,18 @@
     @apply bg-background text-foreground;
   }
 }
+
+@keyframes news-roll {
+  0% {
+    transform: translateX(0);
+  }
+  100% {
+    transform: translateX(-50%);
+  }
+}
+
+@layer utilities {
+  .animate-news-roll {
+    animation: news-roll 40s linear infinite;
+  }
+}
