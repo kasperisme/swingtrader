@@ -2,6 +2,8 @@ import Link from "next/link";
 import Image from "next/image";
 import { ArrowRight, BarChart3, Compass, Filter, Newspaper, Target, Workflow } from "lucide-react";
 
+import { createClient } from "@/lib/supabase/server";
+
 type CardItem = {
   title: string;
   description: string;
@@ -80,7 +82,28 @@ function IconTile({ icon: Icon }: { icon: React.ComponentType<{ className?: stri
   );
 }
 
-export default function Home() {
+type LandingArticle = {
+  id: number;
+  title: string | null;
+  url: string | null;
+  image_url: string | null;
+};
+
+export default async function Home() {
+  let landingArticles: LandingArticle[] = [];
+  try {
+    const supabase = await createClient();
+    const { data } = await supabase
+      .schema("swingtrader")
+      .from("news_articles")
+      .select("id, title, url, image_url")
+      .order("created_at", { ascending: false })
+      .limit(4);
+    landingArticles = (data ?? []) as LandingArticle[];
+  } catch {
+    landingArticles = [];
+  }
+
   return (
     <main className="min-h-screen bg-background text-foreground">
       <div className="mx-auto max-w-6xl px-6 lg:px-8">
@@ -139,17 +162,61 @@ export default function Home() {
           </div>
 
           <div className="rounded-2xl border border-border bg-card p-6 shadow-sm">
-            <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Live narrative snapshot</p>
-            <div className="mt-5 space-y-3">
-              {["AI infrastructure demand", "Rate-cut expectations", "Energy supply pressure"].map((item, index) => (
-                <div key={item} className="flex items-center justify-between rounded-lg border border-border bg-background px-4 py-3">
-                  <p className="text-sm font-medium">{item}</p>
-                  <span className="rounded-full bg-muted px-2.5 py-1 text-xs font-medium text-muted-foreground">
-                    #{index + 1}
-                  </span>
-                </div>
-              ))}
-            </div>
+            <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+              {landingArticles.length > 0 ? "Latest scanned articles" : "Live narrative snapshot"}
+            </p>
+            {landingArticles.length > 0 ? (
+              <div className="mt-5 space-y-3">
+                {landingArticles.map((article) => (
+                  <div
+                    key={article.id}
+                    className="flex gap-3 rounded-lg border border-border bg-background p-3"
+                  >
+                    <div className="relative h-14 w-20 shrink-0 overflow-hidden rounded-md bg-muted">
+                      {article.image_url ? (
+                        <img
+                          src={article.image_url}
+                          alt=""
+                          className="h-full w-full object-cover"
+                          loading="lazy"
+                        />
+                      ) : (
+                        <div className="flex h-full w-full items-center justify-center text-[9px] text-muted-foreground">
+                          —
+                        </div>
+                      )}
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      {article.url ? (
+                        <Link
+                          href={article.url}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="text-sm font-medium leading-snug hover:underline"
+                        >
+                          {article.title || article.url}
+                        </Link>
+                      ) : (
+                        <p className="text-sm font-medium leading-snug">
+                          {article.title || "Untitled article"}
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="mt-5 space-y-3">
+                {["AI infrastructure demand", "Rate-cut expectations", "Energy supply pressure"].map((item, index) => (
+                  <div key={item} className="flex items-center justify-between rounded-lg border border-border bg-background px-4 py-3">
+                    <p className="text-sm font-medium">{item}</p>
+                    <span className="rounded-full bg-muted px-2.5 py-1 text-xs font-medium text-muted-foreground">
+                      #{index + 1}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
             <div className="mt-5 rounded-lg border border-border bg-background p-4">
               <p className="text-xs text-muted-foreground">Top exposed groups</p>
               <p className="mt-2 text-sm font-medium">Semiconductors, Cloud, Utilities</p>
