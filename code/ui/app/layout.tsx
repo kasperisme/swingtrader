@@ -12,7 +12,7 @@ export const metadata: Metadata = {
   metadataBase: new URL(defaultUrl),
   title: "newsimpactscreener",
   description:
-    "newsimpactscreener surfaces market narratives, factor shifts, and screening signals from scored news and company vectors.",
+    "News Impact Screener connects headlines to stocks and sectors for retail investors—themes, exposure, and screening without terminal noise.",
 };
 
 const geistSans = Geist({

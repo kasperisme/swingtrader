@@ -13,46 +13,48 @@ type CardItem = {
 
 const benefitCards: CardItem[] = [
   {
-    title: "Spot market-moving narratives faster",
+    title: "Spend time on news that actually moves your watchlist",
     description:
-      "See the strongest stories and themes rising across the market, so you focus on what matters first.",
+      "Cut through endless headlines. See which stories and themes are gaining traction so you know what to read first—without a terminal or a research team.",
     icon: Newspaper,
   },
   {
-    title: "Find stocks and sectors connected to those narratives",
+    title: "Link headlines to stocks and sectors you care about",
     description:
-      "Quickly connect each narrative to the companies and sectors with the highest likely exposure.",
+      "Turn “what’s everyone talking about?” into “what might affect the names in my brokerage or IRA?”—before the connection is obvious everywhere else.",
     icon: Target,
   },
   {
-    title: "Build a better daily research workflow",
+    title: "A simpler way to do your own homework",
     description:
-      "Start your day with clearer direction, less noise, and a repeatable process for idea generation.",
+      "Whether you check in daily or on weekends, get a steadier rhythm: less noise, clearer next steps, and fewer rabbit holes.",
     icon: Workflow,
   },
 ];
 
 const howItWorksSteps = [
-  "Track the strongest news narratives",
-  "See which sectors and stocks are most exposed",
-  "Screen for possible opportunities",
+  "Follow the news themes that are heating up",
+  "See which sectors and stocks are most tied to those themes",
+  "Narrow down ideas that match how you invest",
 ];
 
 const productValueItems: CardItem[] = [
   {
-    title: "Narrative tracking",
-    description: "Follow the news themes gaining momentum so you can research with context, not guesswork.",
+    title: "Themes, not just tickers",
+    description:
+      "Watch how narratives build over time so you’re not reacting to every single headline in isolation.",
     icon: BarChart3,
   },
   {
-    title: "Company and sector exposure",
+    title: "Exposure, in plain terms",
     description:
-      "Understand which tickers and groups are most tied to each narrative before the move is obvious.",
+      "Get a clearer picture of which companies and industries sit closest to a story—helpful context for any self-directed investor.",
     icon: Compass,
   },
   {
-    title: "Custom screening",
-    description: "Filter opportunities by the factors you care about and keep your process consistent.",
+    title: "Screen the way you think",
+    description:
+      "Focus on the factors that matter to you—growth, value, risk, sectors—and keep your process consistent without spreadsheets you maintain by hand.",
     icon: Filter,
   },
 ];
@@ -61,17 +63,17 @@ const trustItems = [
   {
     title: "Who it is for",
     description:
-      "Built for traders, investors, and research-focused users who want to connect news to market opportunities faster.",
+      "Retail and self-directed investors who manage their own accounts—taxable brokerage, IRA, or both—and want news tied to opportunities, not noise.",
   },
   {
     title: "How it is different",
     description:
-      "A normal stock screener starts with static filters. News Impact Screener starts with live narratives and shows what they may influence.",
+      "Most screeners start with static filters. News Impact Screener starts with what’s happening in the world and shows what it might push on in the market.",
   },
   {
-    title: "Why it is useful",
+    title: "Why it helps",
     description:
-      "It helps you move from headline overload to a clear watchlist and better daily research decisions.",
+      "Less doom-scrolling, fewer “what did I miss?” moments, and a shorter path from a headline to a watchlist you actually understand.",
   },
 ];
 
@@ -213,13 +215,16 @@ export default function Home() {
 
         <section className="grid gap-12 py-16 md:grid-cols-2 md:items-center md:py-24">
           <div>
-            <p className="text-sm font-medium text-muted-foreground">For traders and investors</p>
+            <p className="text-sm font-medium text-muted-foreground">
+              For retail and self-directed investors
+            </p>
             <h1 className="mt-4 text-4xl font-semibold tracking-tight sm:text-5xl">
-              See which news stories are moving the market.
+              News that matters—connected to stocks and sectors.
             </h1>
             <p className="mt-5 max-w-xl text-base leading-7 text-muted-foreground sm:text-lg">
-              News Impact Screener helps traders and investors turn market news into clearer stock
-              ideas, sector signals, and faster research.
+              News Impact Screener helps individual investors turn headlines into clearer ideas: what
+              themes are rising, what may be exposed, and what to research next in the accounts you
+              manage yourself.
             </p>
             <div className="mt-8 flex flex-wrap gap-3">
               <Link
@@ -252,7 +257,7 @@ export default function Home() {
               <LandingArticlesHeaderAndList />
             </Suspense>
             <div className="mt-5 rounded-lg border border-border bg-background p-4">
-              <p className="text-xs text-muted-foreground">Top exposed groups</p>
+              <p className="text-xs text-muted-foreground">Example themes you might track</p>
               <p className="mt-2 text-sm font-medium">Semiconductors, Cloud, Utilities</p>
             </div>
           </div>
@@ -283,9 +288,11 @@ export default function Home() {
         </section>
 
         <section className="border-t border-border py-16 md:py-20">
-          <h2 className="text-2xl font-semibold tracking-tight sm:text-3xl">Why it is useful</h2>
+          <h2 className="text-2xl font-semibold tracking-tight sm:text-3xl">Built for how retail investors research</h2>
           <p className="mt-3 max-w-2xl text-sm leading-6 text-muted-foreground">
-            Keep research practical: follow narratives, understand exposure, and screen opportunities from one simple workflow.
+            You don’t need a desk full of monitors. Follow themes, see exposure, and narrow ideas in
+            one place—whether you invest for the long haul or trade a smaller sleeve of your
+            portfolio.
           </p>
           <div className="mt-8 grid gap-4 md:grid-cols-3">
             {productValueItems.map((item) => (
@@ -299,7 +306,7 @@ export default function Home() {
         </section>
 
         <section className="border-t border-border py-16 md:py-20">
-          <h2 className="text-2xl font-semibold tracking-tight sm:text-3xl">Quick clarity</h2>
+          <h2 className="text-2xl font-semibold tracking-tight sm:text-3xl">Straight answers</h2>
           <div className="mt-8 grid gap-4 md:grid-cols-3">
             {trustItems.map((item) => (
               <article key={item.title} className="rounded-xl border border-border bg-card p-6">
@@ -313,10 +320,11 @@ export default function Home() {
         <section id="final-cta" className="border-t border-border py-16 md:py-20">
           <div className="rounded-2xl border border-border bg-card p-7 sm:p-10">
             <h2 className="text-2xl font-semibold tracking-tight sm:text-3xl">
-              Turn daily news into clearer market opportunities.
+              Smarter homework for your portfolio—starting with the news.
             </h2>
             <p className="mt-3 max-w-2xl text-sm leading-6 text-muted-foreground">
-              Join the early access list to get updates and first access to News Impact Screener.
+              Join the list for product updates and early access. Built for people who invest their
+              own money and want context, not chaos.
             </p>
             <form className="mt-7 flex flex-col gap-3 sm:flex-row">
               <label htmlFor="email" className="sr-only">
