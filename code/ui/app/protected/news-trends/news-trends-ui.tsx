@@ -256,6 +256,13 @@ function applyClusterMA(
       result[cluster.id] =
         vals.length > 0 ? vals.reduce((a, b) => a + b, 0) / vals.length : null;
     }
+    const clusterVals = CLUSTERS.map((c) => result[c.id] as number | null).filter(
+      (v): v is number => v != null,
+    );
+    result.__clusterMean =
+      clusterVals.length > 0
+        ? clusterVals.reduce((a, b) => a + b, 0) / clusterVals.length
+        : null;
     return result;
   });
 }
@@ -620,6 +627,7 @@ export function NewsTrendsUI({ articles, chartHeight = 400 }: { articles: Articl
   const [quickRange, setQuickRange] = useState<QuickRange>("all");
   const [benchmark, setBenchmark] = useState<BenchmarkId>("none");
   const [benchmarkData, setBenchmarkData] = useState<OhlcPoint[]>([]);
+  const [showClusterMean, setShowClusterMean] = useState(true);
 
   function applyQuickRange(range: QuickRange) {
     setQuickRange(range);
@@ -866,8 +874,12 @@ export function NewsTrendsUI({ articles, chartHeight = 400 }: { articles: Articl
 
   const totalArticles = daily.reduce((sum, d) => sum + d.count, 0);
 
-  const clusterLabelMap = Object.fromEntries(
-    CLUSTERS.map((c) => [c.id, c.label]),
+  const clusterLabelMap = useMemo(
+    () => ({
+      ...Object.fromEntries(CLUSTERS.map((c) => [c.id, c.label])),
+      __clusterMean: "Mean (all clusters)",
+    }),
+    [],
   );
 
   return (
@@ -917,6 +929,15 @@ export function NewsTrendsUI({ articles, chartHeight = 400 }: { articles: Articl
             </option>
           ))}
         </select>
+        <label className="flex items-center gap-1.5 text-xs text-muted-foreground cursor-pointer select-none">
+          <input
+            type="checkbox"
+            checked={showClusterMean}
+            onChange={(e) => setShowClusterMean(e.target.checked)}
+            className="rounded border-border"
+          />
+          Mean line
+        </label>
         <span className="ml-auto text-xs text-muted-foreground">
           {totalArticles} articles · {dateRange}
         </span>
@@ -970,10 +991,11 @@ export function NewsTrendsUI({ articles, chartHeight = 400 }: { articles: Articl
         <div className="flex-1 min-w-0">
           <div className="border rounded-xl p-4">
             <p className="text-xs text-muted-foreground mb-4">
-              Impact score −1 (bearish) → +1 (bullish) · Click score to
-              show/hide · <ChevronRight size={10} className="inline" /> to drill
-              into dimensions · Drag on the chart or the range strip below to
-              zoom the time axis; double-click the chart to reset zoom
+              Impact score −1 (bearish) → +1 (bullish) · Dashed line = average
+              of all cluster MAs per period · Click score to show/hide ·{" "}
+              <ChevronRight size={10} className="inline" /> to drill into
+              dimensions · Drag on the chart or the range strip below to zoom the
+              time axis; double-click the chart to reset zoom
             </p>
             <div className="select-none [&_.recharts-wrapper]:cursor-crosshair [&_.recharts-brush]:cursor-grab">
               <ResponsiveContainer width="100%" height={chartHeight}>
@@ -1028,6 +1050,18 @@ export function NewsTrendsUI({ articles, chartHeight = 400 }: { articles: Articl
                 <Tooltip
                   content={<CustomTooltip labelMap={clusterLabelMap} />}
                 />
+                {showClusterMean ? (
+                  <Line
+                    type="monotone"
+                    dataKey="__clusterMean"
+                    name="__clusterMean"
+                    stroke="hsl(var(--muted-foreground))"
+                    dot={false}
+                    strokeWidth={2}
+                    strokeDasharray="6 4"
+                    connectNulls
+                  />
+                ) : null}
                 {CLUSTERS.filter((c) => selected.has(c.id)).map((cluster) => (
                   <Line
                     key={cluster.id}
