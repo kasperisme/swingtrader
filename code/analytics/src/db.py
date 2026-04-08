@@ -27,7 +27,7 @@ from __future__ import annotations
 
 import json
 import os
-from datetime import date, datetime
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Optional
 
@@ -53,6 +53,41 @@ def get_supabase_client() -> Client:
 
 def get_schema() -> str:
     return os.environ.get("SUPABASE_SCHEMA", "swingtrader")
+
+
+def count_news_articles_per_calendar_day_utc(n_days: int) -> dict[date, int]:
+    """
+    Count stored news rows per UTC calendar day for the last ``n_days`` (inclusive of today).
+
+    Each row is bucketed by ``date_trunc('day', COALESCE(published_at, created_at))`` in UTC.
+    Days with no rows are included with count ``0``.
+    """
+    if n_days < 1:
+        raise ValueError("n_days must be >= 1")
+    today = datetime.now(timezone.utc).date()
+    start = today - timedelta(days=n_days - 1)
+    out: dict[date, int] = {start + timedelta(days=i): 0 for i in range(n_days)}
+    schema = get_schema()
+    sql = f"""
+        SELECT
+            ((COALESCE(published_at, created_at) AT TIME ZONE 'UTC')::date) AS d,
+            COUNT(*)::bigint AS c
+        FROM {schema}.news_articles
+        WHERE ((COALESCE(published_at, created_at) AT TIME ZONE 'UTC')::date)
+              BETWEEN %s AND %s
+        GROUP BY 1
+    """
+    conn = get_pg_connection()
+    try:
+        cur = conn.cursor()
+        cur.execute(sql, (start, today))
+        for row in cur.fetchall() or []:
+            d, c = row[0], int(row[1])
+            if d in out:
+                out[d] = c
+    finally:
+        conn.close()
+    return out
 
 
 def _tbl(client: Client, table: str):

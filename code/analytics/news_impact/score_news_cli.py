@@ -15,6 +15,7 @@ Usage:
     python -m news_impact.score_news_cli --fmp-news
     python -m news_impact.score_news_cli --fmp-news --limit 10
     python -m news_impact.score_news_cli --fmp-news --from 2025-09-09 --to 2025-12-10
+    python -m news_impact.score_news_cli --fmp-news --sparse-fill 30 10
 
     # Fetch FMP news filtered to specific tickers
     python -m news_impact.score_news_cli --fmp-news --tickers AAPL MSFT NVDA
@@ -34,6 +35,7 @@ import logging
 import pathlib
 import re
 import sys
+from datetime import date
 from typing import Optional
 
 from dotenv import load_dotenv
@@ -57,6 +59,7 @@ from news_impact.news_ingester import (
 )
 from src.db import (
     _as_json,
+    count_news_articles_per_calendar_day_utc,
     get_schema,
     get_supabase_client,
     load_article_tickers,
@@ -116,6 +119,10 @@ logger  = logging.getLogger(__name__)
 console = Console()
 
 _CACHE_DIR = pathlib.Path(__file__).parent / "cache"
+
+# FMP stock news API limits (see fmp_fetcher.fetch_stock_news)
+_FMP_NEWS_MAX_PAGE = 100
+_FMP_NEWS_MAX_LIMIT = 250
 
 # ── HTML stripping (stdlib only) ─────────────────────────────────────────────
 
@@ -293,6 +300,19 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--to", dest="to_date", metavar="DATE",
         help="End date filter for --fmp-news (YYYY-MM-DD, e.g. 2025-12-10)",
     )
+    parser.add_argument(
+        "--sparse-fill",
+        nargs=2,
+        type=int,
+        metavar=("N_DAYS", "M_NEW"),
+        default=None,
+        help=(
+            "With --fmp-news: find the UTC calendar day in the last N_DAYS with the fewest "
+            "rows in news_articles (by published_at/created_at), then fetch FMP for that day "
+            "until M_NEW new articles are inserted (or pages exhausted). Overrides --from, "
+            "--to, and --page. Requires DB (no --no-persist)."
+        ),
+    )
 
     parser.add_argument(
         "--tickers", nargs="+", metavar="TICKER", default=None,
@@ -320,7 +340,7 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument(
         "--no-persist", action="store_true",
-        help="Score without writing to DuckDB",
+        help="Score without writing to Supabase",
     )
     parser.add_argument(
         "--refresh", action="store_true",
@@ -337,9 +357,24 @@ async def _main(argv: list[str] | None = None) -> None:
 
     logging.basicConfig(level=logging.DEBUG if args.verbose else logging.WARNING)
 
+    if args.sparse_fill is not None:
+        if not args.fmp_news:
+            console.print("[red]--sparse-fill requires --fmp-news[/red]")
+            sys.exit(1)
+        if args.no_persist:
+            console.print("[red]--sparse-fill requires persistence (omit --no-persist)[/red]")
+            sys.exit(1)
+        n_days, m_new = args.sparse_fill
+        if n_days < 1 or m_new < 1:
+            console.print("[red]--sparse-fill requires N_DAYS >= 1 and M_NEW >= 1[/red]")
+            sys.exit(1)
+
     # FMP news batch mode — separate flow
     if args.fmp_news:
-        await _process_fmp_news(args)
+        if args.sparse_fill is not None:
+            await _process_fmp_sparse_fill(args)
+        else:
+            await _process_fmp_news(args)
         return
 
     # 1. Load article text
@@ -455,11 +490,183 @@ async def _main(argv: list[str] | None = None) -> None:
     )
 
 
+def _pick_sparsest_calendar_day(counts: dict[date, int]) -> date:
+    """Among days with the minimum article count, return the earliest UTC calendar day."""
+    min_c = min(counts.values())
+    candidates = [d for d, c in counts.items() if c == min_c]
+    return min(candidates)
+
+
+async def _process_one_fmp_article(
+    args: argparse.Namespace,
+    article: dict,
+    seen_urls: set[str],
+    seen_hashes: set[str],
+    *,
+    index: int,
+    batch_total: int,
+) -> bool:
+    """
+    Run one FMP article through the scoring pipeline.
+
+    Returns True if a new row was inserted into ``news_articles`` (not a cache hit / update).
+    """
+    summary = article.get("text", "").strip()
+    title = article.get("title", "")
+    url = article.get("url", "")
+    source = url
+    publisher = article.get("publisher") or article.get("site") or None
+    symbol = article.get("symbol", "")
+    published_at = article.get("publishedDate") or None
+    image_url = (article.get("image") or "").strip() or None
+
+    if not summary and not url:
+        console.print(f"[dim][{index}/{batch_total}] {title[:60]} — skipped (no text or url)[/dim]")
+        return False
+
+    console.print(f"[bold cyan][{index}/{batch_total}][/bold cyan] {title[:70]}")
+    if published_at:
+        console.print(f"  [dim]published: {published_at}[/dim]")
+
+    body = summary
+    if url:
+        try:
+            full = await _load_from_url(url)
+            if full and len(full) > len(summary):
+                body = full
+                console.print(f"  [dim]fetched full article ({len(body)} chars)[/dim]")
+            else:
+                console.print(f"  [dim]url returned no usable content — using summary[/dim]")
+        except Exception as exc:
+            console.print(f"  [dim]url fetch failed ({exc.__class__.__name__}) — using summary[/dim]")
+
+    if not body:
+        console.print(f"  [dim]skipped (no content)[/dim]")
+        return False
+
+    article_hash = _sha256(body)
+    url_norm = _normalize_url(url) if url else ""
+
+    if url_norm and url_norm in seen_urls:
+        console.print(
+            "  [dim]skipped — same URL already processed in this run[/dim]",
+        )
+        return False
+
+    if not url_norm and article_hash in seen_hashes:
+        console.print(
+            "  [dim]skipped — same article body already processed in this run[/dim]",
+        )
+        return False
+
+    client = None if args.no_persist else get_supabase_client()
+    existing = None if client is None else _check_existing(client, article_hash, url=url)
+    from_cache = existing is not None and not args.refresh
+
+    article_id = -1
+    heads: list[HeadOutput]
+    extracted_tickers: list[str]
+    impact: dict[str, float]
+
+    if from_cache:
+        assert existing is not None
+        article_id, impact = existing
+        patch_news_article_image_if_missing(client, article_id, image_url)
+        heads = _heads_from_db(article_id)
+        extracted_tickers = load_article_tickers(client, article_id, source="extracted")
+        console.print(
+            f"  [dim]already in DB (id={article_id}) — skipped LLM scoring[/dim]",
+        )
+    else:
+        heads, extracted_tickers = await asyncio.gather(
+            score_article(body),
+            extract_tickers(body),
+        )
+        impact = aggregate_heads(heads)
+
+    if symbol and symbol not in extracted_tickers:
+        extracted_tickers = [symbol] + extracted_tickers
+
+    if client is not None and not from_cache:
+        if existing is not None and args.refresh:
+            _delete_heads_and_vector(client, existing[0])
+            article_id = _persist(
+                client,
+                body,
+                article_hash,
+                url,
+                title,
+                source,
+                heads,
+                impact,
+                existing_article_id=existing[0],
+                published_at=published_at,
+                publisher=publisher,
+                image_url=image_url,
+            )
+        else:
+            article_id = _persist(
+                client,
+                body,
+                article_hash,
+                url,
+                title,
+                source,
+                heads,
+                impact,
+                published_at=published_at,
+                publisher=publisher,
+                image_url=image_url,
+            )
+
+    if client is not None and article_id >= 0 and extracted_tickers:
+        save_article_tickers(client, article_id, extracted_tickers, source="extracted")
+        explicit = [t.upper() for t in (args.tickers or [])]
+        if explicit:
+            save_article_tickers(client, article_id, explicit, source="explicit")
+
+    if url_norm:
+        seen_urls.add(url_norm)
+    else:
+        seen_hashes.add(article_hash)
+
+    top = top_dimensions(impact, n=3)
+    top_str = "  ".join(f"{d} {s:+.2f}" for d, s in top) if top else "no signals"
+    mentioned = ", ".join(extracted_tickers[:5]) if extracted_tickers else "—"
+    pub = published_at or "—"
+    console.print(f"  [dim]id={article_id}  published={pub}  mentioned={mentioned}[/dim]")
+    console.print(f"  [dim]top signals: {top_str}[/dim]")
+
+    all_tickers = list(dict.fromkeys(extracted_tickers + [t.upper() for t in (args.tickers or [])]))
+    if all_tickers:
+        console.print(f"  [dim]symbols: {', '.join(all_tickers)}[/dim]")
+    if all_tickers and impact and args.score_companies:
+        try:
+            company_vectors = await build_vectors(all_tickers, use_cache=True)
+            if company_vectors:
+                scores = score_companies(impact, company_vectors, top_n=4)
+                tw = [s for s in scores if s.score > 0]
+                hw = list(reversed([s for s in scores if s.score < 0]))
+                if tw or hw:
+                    tw_str = "  ".join(f"[green]{s.ticker} +{s.score:.2f}[/green]" for s in tw[:2])
+                    hw_str = "  ".join(f"[red]{s.ticker} {s.score:.2f}[/red]" for s in hw[:2])
+                    console.print(f"  tailwinds: {tw_str or '—'}   headwinds: {hw_str or '—'}")
+        except Exception as exc:
+            logger.warning("company scoring failed for article %d: %s", article_id, exc)
+    elif all_tickers:
+        console.print("  [dim]skipping company vector build/scoring (use --score-companies to enable)[/dim]")
+
+    console.print()
+
+    inserted_new = bool(client and not from_cache and existing is None)
+    return inserted_new
+
+
 async def _process_fmp_news(args: argparse.Namespace) -> None:
     """Fetch articles from FMP and run each through the full pipeline."""
-    fetcher   = FMPFetcher()
-    tickers   = [t.upper() for t in args.tickers] if args.tickers else None
-    articles  = await fetcher.fetch_stock_news(
+    fetcher = FMPFetcher()
+    tickers = [t.upper() for t in args.tickers] if args.tickers else None
+    articles = await fetcher.fetch_stock_news(
         tickers=tickers,
         limit=args.limit,
         page=args.page,
@@ -473,162 +680,88 @@ async def _process_fmp_news(args: argparse.Namespace) -> None:
 
     console.print(f"\nFetched [bold]{len(articles)}[/bold] articles from FMP news\n")
 
-    # Dedupe within this run: same normalized URL, or same body hash when no URL
     seen_urls: set[str] = set()
     seen_hashes: set[str] = set()
 
     for i, article in enumerate(articles, 1):
-        summary      = article.get("text", "").strip()
-        title        = article.get("title", "")
-        url          = article.get("url", "")
-        source       = url
-        publisher    = article.get("publisher") or article.get("site") or None
-        symbol       = article.get("symbol", "")
-        published_at = article.get("publishedDate") or None
-        image_url = (article.get("image") or "").strip() or None
+        await _process_one_fmp_article(
+            args, article, seen_urls, seen_hashes, index=i, batch_total=len(articles),
+        )
 
-        if not summary and not url:
-            console.print(f"[dim][{i}/{len(articles)}] {title[:60]} — skipped (no text or url)[/dim]")
-            continue
 
-        console.print(f"[bold cyan][{i}/{len(articles)}][/bold cyan] {title[:70]}")
-        if published_at:
-            console.print(f"  [dim]published: {published_at}[/dim]")
+async def _process_fmp_sparse_fill(args: argparse.Namespace) -> None:
+    """Pick sparsest UTC day in the last N days, then ingest until M new articles are inserted."""
+    assert args.sparse_fill is not None
+    n_days, m_new = args.sparse_fill
 
-        # Fetch full article from URL; fall back to FMP summary on failure
-        body = summary
-        if url:
-            try:
-                full = await _load_from_url(url)
-                if full and len(full) > len(summary):
-                    body = full
-                    console.print(f"  [dim]fetched full article ({len(body)} chars)[/dim]")
-                else:
-                    console.print(f"  [dim]url returned no usable content — using summary[/dim]")
-            except Exception as exc:
-                console.print(f"  [dim]url fetch failed ({exc.__class__.__name__}) — using summary[/dim]")
+    counts = count_news_articles_per_calendar_day_utc(n_days)
+    target_day = _pick_sparsest_calendar_day(counts)
+    min_count = counts[target_day]
 
-        if not body:
-            console.print(f"  [dim]skipped (no content)[/dim]")
-            continue
+    console.print(
+        f"\n[bold]Sparse fill[/bold]: last [cyan]{n_days}[/cyan] UTC day(s) — "
+        f"sparsest day [green]{target_day.isoformat()}[/green] "
+        f"([bold]{min_count}[/bold] article(s) in DB). "
+        f"Target: [bold]{m_new}[/bold] new insert(s).\n",
+    )
+    for d in sorted(counts.keys()):
+        bar = "█" if d == target_day else "░"
+        console.print(f"  {bar} {d.isoformat()}  {counts[d]:>4} articles")
 
-        article_hash = _sha256(body)
-        url_norm = _normalize_url(url) if url else ""
+    fetcher = FMPFetcher()
+    tickers = [t.upper() for t in args.tickers] if args.tickers else None
+    day_iso = target_day.isoformat()
+    page_limit = min(_FMP_NEWS_MAX_LIMIT, max(1, args.limit))
 
-        if url_norm and url_norm in seen_urls:
+    seen_urls: set[str] = set()
+    seen_hashes: set[str] = set()
+    added = 0
+    page = 0
+
+    while added < m_new and page <= _FMP_NEWS_MAX_PAGE:
+        articles = await fetcher.fetch_stock_news(
+            tickers=tickers,
+            limit=page_limit,
+            page=page,
+            from_date=day_iso,
+            to_date=day_iso,
+        )
+        if not articles:
             console.print(
-                "  [dim]skipped — same URL already processed in this run[/dim]",
+                f"[yellow]No articles returned from FMP for {day_iso} at page {page} — stopping.[/yellow]",
             )
-            continue
+            break
 
-        if not url_norm and article_hash in seen_hashes:
+        console.print(
+            f"\n[dim]Page {page}[/dim]: fetched [bold]{len(articles)}[/bold] articles from FMP "
+            f"({added}/{m_new} new so far)\n",
+        )
+
+        for i, article in enumerate(articles, 1):
+            is_new = await _process_one_fmp_article(
+                args, article, seen_urls, seen_hashes, index=i, batch_total=len(articles),
+            )
+            if is_new:
+                added += 1
+                if added >= m_new:
+                    break
+
+        if added >= m_new:
+            break
+        if len(articles) < page_limit:
             console.print(
-                "  [dim]skipped — same article body already processed in this run[/dim]",
+                "[dim]Last page had fewer than limit — no more pagination for this day.[/dim]",
             )
-            continue
+            break
+        page += 1
 
-        client = None if args.no_persist else get_supabase_client()
-        existing = None if client is None else _check_existing(client, article_hash, url=url)
-        from_cache = existing is not None and not args.refresh
-
-        article_id = -1
-        heads: list[HeadOutput]
-        extracted_tickers: list[str]
-        impact: dict[str, float]
-
-        if from_cache:
-            assert existing is not None
-            article_id, impact = existing
-            patch_news_article_image_if_missing(client, article_id, image_url)
-            heads = _heads_from_db(article_id)
-            extracted_tickers = load_article_tickers(client, article_id, source="extracted")
-            console.print(
-                f"  [dim]already in DB (id={article_id}) — skipped LLM scoring[/dim]",
-            )
-        else:
-            heads, extracted_tickers = await asyncio.gather(
-                score_article(body),
-                extract_tickers(body),
-            )
-            impact = aggregate_heads(heads)
-
-        # Always include the article's own symbol if present
-        if symbol and symbol not in extracted_tickers:
-            extracted_tickers = [symbol] + extracted_tickers
-
-        # Persist new scores only (cached path already has rows in DB)
-        if client is not None and not from_cache:
-            if existing is not None and args.refresh:
-                _delete_heads_and_vector(client, existing[0])
-                article_id = _persist(
-                    client,
-                    body,
-                    article_hash,
-                    url,
-                    title,
-                    source,
-                    heads,
-                    impact,
-                    existing_article_id=existing[0],
-                    published_at=published_at,
-                    publisher=publisher,
-                    image_url=image_url,
-                )
-            else:
-                article_id = _persist(
-                    client,
-                    body,
-                    article_hash,
-                    url,
-                    title,
-                    source,
-                    heads,
-                    impact,
-                    published_at=published_at,
-                    publisher=publisher,
-                    image_url=image_url,
-                )
-
-        if client is not None and article_id >= 0 and extracted_tickers:
-            save_article_tickers(client, article_id, extracted_tickers, source="extracted")
-            explicit = [t.upper() for t in (args.tickers or [])]
-            if explicit:
-                save_article_tickers(client, article_id, explicit, source="explicit")
-
-        if url_norm:
-            seen_urls.add(url_norm)
-        else:
-            seen_hashes.add(article_hash)
-
-        # Compact summary line
-        top = top_dimensions(impact, n=3)
-        top_str = "  ".join(f"{d} {s:+.2f}" for d, s in top) if top else "no signals"
-        mentioned = ", ".join(extracted_tickers[:5]) if extracted_tickers else "—"
-        pub = published_at or "—"
-        console.print(f"  [dim]id={article_id}  published={pub}  mentioned={mentioned}[/dim]")
-        console.print(f"  [dim]top signals: {top_str}[/dim]")
-
-        # Optional company scoring
-        all_tickers = list(dict.fromkeys(extracted_tickers + [t.upper() for t in (args.tickers or [])]))
-        if all_tickers:
-            console.print(f"  [dim]symbols: {', '.join(all_tickers)}[/dim]")
-        if all_tickers and impact and args.score_companies:
-            try:
-                company_vectors = await build_vectors(all_tickers, use_cache=True)
-                if company_vectors:
-                    scores = score_companies(impact, company_vectors, top_n=4)
-                    tw = [s for s in scores if s.score > 0]
-                    hw = list(reversed([s for s in scores if s.score < 0]))
-                    if tw or hw:
-                        tw_str = "  ".join(f"[green]{s.ticker} +{s.score:.2f}[/green]" for s in tw[:2])
-                        hw_str = "  ".join(f"[red]{s.ticker} {s.score:.2f}[/red]" for s in hw[:2])
-                        console.print(f"  tailwinds: {tw_str or '—'}   headwinds: {hw_str or '—'}")
-            except Exception as exc:
-                logger.warning("company scoring failed for article %d: %s", article_id, exc)
-        elif all_tickers:
-            console.print("  [dim]skipping company vector build/scoring (use --score-companies to enable)[/dim]")
-
-        console.print()
+    if added < m_new:
+        console.print(
+            f"\n[yellow]Sparse fill stopped at {added}/{m_new} new articles "
+            f"(FMP exhausted or page cap {_FMP_NEWS_MAX_PAGE}).[/yellow]",
+        )
+    else:
+        console.print(f"\n[green]Sparse fill complete: {added} new article(s) inserted.[/green]")
 
 
 def main(argv: list[str] | None = None) -> None:

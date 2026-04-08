@@ -12,16 +12,19 @@ python -m news_impact.score_news_cli --text "Fed raises rates 50bps..."
 python -m news_impact.score_news_cli --url "https://..."
 python -m news_impact.score_news_cli --file article.txt
 
-# Embed + score specific companies
-python -m news_impact.score_news_cli --text "..." --tickers AAPL MSFT NVDA JPM XOM
+# Embed + score specific companies (tailwinds/headwinds)
+python -m news_impact.score_news_cli --text "..." --tickers AAPL MSFT NVDA JPM XOM --score-companies
 
-# Use cached company vectors (no FMP refetch)
-python -m news_impact.score_news_cli --text "..." --tickers AAPL MSFT --use-cache
+# Optional metadata + debug logging (single-article mode)
+python -m news_impact.score_news_cli --text "..." --title "Headline" --source reuters --published-at "2026-01-15T12:00:00" -v
+
+# Use cached company vectors (from build_vectors_cli cache)
+python -m news_impact.score_news_cli --text "..." --tickers AAPL MSFT --use-cache --score-companies
 
 # Re-score an article already in the DB (overwrites stored heads + vector)
 python -m news_impact.score_news_cli --text "..." --refresh
 
-# Score without writing to DuckDB
+# Score without writing to Supabase
 python -m news_impact.score_news_cli --text "..." --no-persist
 
 # Fetch and score latest FMP stock news (market-wide)
@@ -39,28 +42,63 @@ python -m news_impact.score_news_cli --fmp-news --tickers AAPL --from 2025-11-01
 
 # Paginate through older FMP news
 python -m news_impact.score_news_cli --fmp-news --limit 20 --page 2
+
+# Pick the sparsest UTC calendar day in the last N days (by DB row counts), then ingest until M new rows exist
+#
+python -m news_impact.score_news_cli --fmp-news --sparse-fill N_DAYS M_NEW
+python -m news_impact.score_news_cli --fmp-news --sparse-fill 30 10
 ```
 
 ## Options
 
 ### Article source (mutually exclusive, one required)
 
-| Flag | Description |
-|---|---|
-| `--url URL` | Fetch article from a URL (fetches full article, falls back to summary) |
-| `--text TEXT` | Article text supplied inline |
-| `--file PATH` | Read article text from a local file |
-| `--fmp-news` | Fetch latest stock news from FMP and score each article |
+| Flag          | Description                                                            |
+| ------------- | ---------------------------------------------------------------------- |
+| `--url URL`   | Fetch article from a URL (fetches full article, falls back to summary) |
+| `--text TEXT` | Article text supplied inline                                           |
+| `--file PATH` | Read article text from a local file                                    |
+| `--fmp-news`  | Fetch latest stock news from FMP and score each article                |
 
 ### FMP news options (only with `--fmp-news`)
 
-| Flag | Default | Description |
-|---|---|---|
-| `--limit N` | `20` | Max articles to fetch per call |
-| `--page N` | `0` | Page offset for pagination (0-indexed) |
-| `--from YYYY-MM-DD` | — | Start date filter for FMP fetch (inclusive) |
-| `--to YYYY-MM-DD` | — | End date filter for FMP fetch (inclusive) |
-| `--tickers` | — | Filter FMP news to these tickers only |
+| Flag                         | Default | Description                                                                                                                                                                                                                                                                    |
+| ---------------------------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `--limit N`                  | `20`    | Max articles to fetch per FMP request (FMP max: `250`)                                                                                                                                                                                                                         |
+| `--page N`                   | `0`     | Page offset for pagination (0-indexed; FMP max: `100`)                                                                                                                                                                                                                         |
+| `--from YYYY-MM-DD`          | —       | Start date filter for FMP fetch (inclusive)                                                                                                                                                                                                                                    |
+| `--to YYYY-MM-DD`            | —       | End date filter for FMP fetch (inclusive)                                                                                                                                                                                                                                      |
+| `--sparse-fill N_DAYS M_NEW` | —       | Query `news_articles` for per-day counts (UTC); choose the day with the fewest rows (earliest day on ties); fetch that day from FMP and paginate until `M_NEW` **new inserts** or API exhaustion. Overrides `--from`, `--to`, and `--page`. Requires DB (omit `--no-persist`). |
+
+### Tickers and company scoring
+
+| Flag                   | Default | Description                                                                                                                                                                                                |
+| ---------------------- | ------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--tickers TICKER ...` | —       | **Non–FMP:** Explicit symbols (merged with LLM-extracted; persisted to `news_article_tickers`). **FMP:** Restrict the news feed to these symbols. Company tailwinds/headwinds require `--score-companies`. |
+| `--score-companies`    | off     | Build/load company vectors and print tailwinds/headwinds (otherwise only impact clusters and extracted tickers are shown).                                                                                 |
+| `--use-cache`          | off     | Load company vectors from the on-disk cache from `build_vectors_cli` (avoids refetching fundamentals from FMP where cached).                                                                               |
+| `--top-n N`            | `6`     | Max companies shown per side (tailwinds vs headwinds) when `--score-companies` is on.                                                                                                                      |
+
+### Article metadata (stored when persisting)
+
+| Flag                 | Description                                                      |
+| -------------------- | ---------------------------------------------------------------- |
+| `--title TITLE`      | Article title                                                    |
+| `--published-at ISO` | Publication time stored and printed (e.g. `2026-04-08T14:30:00`) |
+| `--source SOURCE`    | Source label (e.g. `bloomberg`, `fmp`)                           |
+
+### Persistence
+
+| Flag           | Description                                                                       |
+| -------------- | --------------------------------------------------------------------------------- |
+| `--no-persist` | Score without writing to Supabase (`news_articles`, heads, vectors, tickers).     |
+| `--refresh`    | Re-score even if the article already exists (overwrites stored heads and vector). |
+
+### Other
+
+| Flag               | Description   |
+| ------------------ | ------------- |
+| `--verbose` / `-v` | Debug logging |
 
 ### Date range filtering with `--from` / `--to`
 
@@ -85,28 +123,29 @@ python -m news_impact.score_news_cli --fmp-news --from 2025-11-01
 python -m news_impact.score_news_cli --fmp-news --to 2025-11-30
 ```
 
-### Scoring options
+### Complete option reference (every flag)
 
-| Flag | Description |
-|---|---|
-| `--tickers TICK ...` | Score these tickers against the impact vector (merged with auto-extracted) |
-| `--use-cache` | Load company vectors from disk/DB cache instead of re-fetching from FMP |
-| `--top-n N` | Max companies per side in tailwinds/headwinds output (default: `6`) |
-
-### Persistence options
-
-| Flag | Description |
-|---|---|
-| `--no-persist` | Score without writing anything to DuckDB |
-| `--refresh` | Re-score even if the article is already in the DB (overwrites stored heads and vector) |
-| `--title TITLE` | Article title for storage and display |
-| `--source SOURCE` | Source label stored with the article (e.g. `bloomberg`, `fmp`) |
-
-### Other
-
-| Flag | Description |
-|---|---|
-| `--verbose` / `-v` | Enable debug logging |
+| Flag                         | Default | Description                                                             |
+| ---------------------------- | ------- | ----------------------------------------------------------------------- |
+| `--file PATH`                | —       | Read article text from a file (source mode).                            |
+| `--fmp-news`                 | off     | Batch mode: fetch and score stock news from FMP.                        |
+| `--from DATE`                | —       | FMP: inclusive start date (`YYYY-MM-DD`).                               |
+| `--limit N`                  | `20`    | FMP: max articles per request (≤ 250).                                  |
+| `--no-persist`               | off     | Do not write to Supabase.                                               |
+| `--page N`                   | `0`     | FMP: pagination index (≤ 100).                                          |
+| `--published-at ISO`         | —       | Stored publication timestamp.                                           |
+| `--refresh`                  | off     | Re-score existing DB article.                                           |
+| `--score-companies`          | off     | Compute tailwinds/headwinds vs company vectors.                         |
+| `--sparse-fill N_DAYS M_NEW` | —       | FMP: fill sparsest UTC day in the last `N_DAYS` until `M_NEW` new rows. |
+| `--source SOURCE`            | —       | Stored source label.                                                    |
+| `--text TEXT`                | —       | Inline article body (source mode).                                      |
+| `--tickers TICK ...`         | —       | Symbols for FMP filter and/or company scoring (see above).              |
+| `--title TITLE`              | —       | Stored title.                                                           |
+| `--to DATE`                  | —       | FMP: inclusive end date (`YYYY-MM-DD`).                                 |
+| `--top-n N`                  | `6`     | Max companies per tailwind/headwind side.                               |
+| `--url URL`                  | —       | Fetch article from URL (source mode).                                   |
+| `--use-cache`                | off     | Prefer on-disk company vector cache.                                    |
+| `--verbose` / `-v`           | off     | Debug logging.                                                          |
 
 ## Output
 
@@ -149,28 +188,28 @@ TAILWINDS              HEADWINDS
 
 4. **Company scoring** — each company's score is the dot product of its dimension vector (0–1 rank) and the impact vector. Positive = tailwind, negative = headwind.
 
-5. **Persistence** — article, all 8 head responses, and the aggregated vector are stored in DuckDB. Duplicate articles (same sha256) return the cached result unless `--refresh` is passed.
+5. **Persistence** — article, all 8 head responses, and the aggregated vector are stored in Supabase. Duplicate articles (same sha256) return the cached result unless `--refresh` is passed.
 
-## DuckDB tables
+## Supabase tables (swingtrader schema)
 
-| Table | Contents |
-|---|---|
-| `news_articles` | One row per article (deduped by sha256 of body) |
-| `news_impact_heads` | 8 rows per article — one per cluster (scores, reasoning, confidence) |
-| `news_impact_vectors` | Aggregated impact vector per article (`impact_json`, `top_dimensions`) |
+| Table                  | Contents                                                                              |
+| ---------------------- | ------------------------------------------------------------------------------------- |
+| `news_articles`        | One row per article (deduped by sha256 of body)                                       |
+| `news_impact_heads`    | 8 rows per article — one per cluster (scores, reasoning, confidence)                  |
+| `news_impact_vectors`  | Aggregated impact vector per article (`impact_json`, `top_dimensions`)                |
 | `news_article_tickers` | Ticker mentions per article — `source` is `extracted` (LLM) or `explicit` (--tickers) |
 
 ## Environment variables
 
-| Variable | Default | Description |
-|---|---|---|
-| `OLLAMA_IMPACT_MODEL` | `devstral` | Ollama model name |
-| `OLLAMA_BASE_URL` | `http://localhost:11434` | Ollama endpoint |
-| `OLLAMA_CONCURRENCY` | `1` | Concurrent Ollama requests (keep at 1 for single-GPU) |
-| `OLLAMA_TIMEOUT` | `120` | Per-request timeout in seconds |
-| `OLLAMA_NUM_PREDICT` | `1024` | Max tokens per LLM response |
-| `FMP_API_KEY` | — | Required only when fetching company vectors |
-| `HANS_DUCKDB_PATH` | `data/swingtrader.duckdb` | DuckDB file path |
+| Variable              | Default                   | Description                                           |
+| --------------------- | ------------------------- | ----------------------------------------------------- |
+| `OLLAMA_IMPACT_MODEL` | `devstral`                | Ollama model name                                     |
+| `OLLAMA_BASE_URL`     | `http://localhost:11434`  | Ollama endpoint                                       |
+| `OLLAMA_CONCURRENCY`  | `1`                       | Concurrent Ollama requests (keep at 1 for single-GPU) |
+| `OLLAMA_TIMEOUT`      | `120`                     | Per-request timeout in seconds                        |
+| `OLLAMA_NUM_PREDICT`  | `1024`                    | Max tokens per LLM response                           |
+| `FMP_API_KEY`         | —                         | Required only when fetching company vectors           |
+| `HANS_DUCKDB_PATH`    | `data/swingtrader.duckdb` | DuckDB file path                                      |
 
 ## Pulling the default model
 
