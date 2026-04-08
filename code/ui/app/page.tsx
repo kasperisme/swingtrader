@@ -1,5 +1,6 @@
 import Link from "next/link";
 import Image from "next/image";
+import { Suspense } from "react";
 import { ArrowRight, BarChart3, Compass, Filter, Newspaper, Target, Workflow } from "lucide-react";
 
 import { createClient } from "@/lib/supabase/server";
@@ -89,7 +90,23 @@ type LandingArticle = {
   image_url: string | null;
 };
 
-export default async function Home() {
+function LandingSnapshotFallback() {
+  return (
+    <div className="mt-5 space-y-3 animate-pulse">
+      {[0, 1, 2, 3].map((i) => (
+        <div key={i} className="flex gap-3 rounded-lg border border-border bg-background p-3">
+          <div className="h-14 w-20 shrink-0 rounded-md bg-muted" />
+          <div className="flex-1 space-y-2 py-1">
+            <div className="h-3 w-4/5 rounded bg-muted" />
+            <div className="h-3 w-3/5 rounded bg-muted" />
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+async function LandingArticlesHeaderAndList() {
   let landingArticles: LandingArticle[] = [];
   try {
     const supabase = await createClient();
@@ -104,6 +121,66 @@ export default async function Home() {
     landingArticles = [];
   }
 
+  return (
+    <>
+      <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+        {landingArticles.length > 0 ? "Latest scanned articles" : "Live narrative snapshot"}
+      </p>
+      {landingArticles.length > 0 ? (
+        <div className="mt-5 space-y-3">
+          {landingArticles.map((article) => (
+            <div key={article.id} className="flex gap-3 rounded-lg border border-border bg-background p-3">
+              <div className="relative h-14 w-20 shrink-0 overflow-hidden rounded-md bg-muted">
+                {article.image_url ? (
+                  <img
+                    src={article.image_url}
+                    alt=""
+                    className="h-full w-full object-cover"
+                    loading="lazy"
+                  />
+                ) : (
+                  <div className="flex h-full w-full items-center justify-center text-[9px] text-muted-foreground">
+                    —
+                  </div>
+                )}
+              </div>
+              <div className="min-w-0 flex-1">
+                {article.url ? (
+                  <Link
+                    href={article.url}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="text-sm font-medium leading-snug hover:underline"
+                  >
+                    {article.title || article.url}
+                  </Link>
+                ) : (
+                  <p className="text-sm font-medium leading-snug">{article.title || "Untitled article"}</p>
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <div className="mt-5 space-y-3">
+          {["AI infrastructure demand", "Rate-cut expectations", "Energy supply pressure"].map((item, index) => (
+            <div
+              key={item}
+              className="flex items-center justify-between rounded-lg border border-border bg-background px-4 py-3"
+            >
+              <p className="text-sm font-medium">{item}</p>
+              <span className="rounded-full bg-muted px-2.5 py-1 text-xs font-medium text-muted-foreground">
+                #{index + 1}
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
+    </>
+  );
+}
+
+export default function Home() {
   return (
     <main className="min-h-screen bg-background text-foreground">
       <div className="mx-auto max-w-6xl px-6 lg:px-8">
@@ -162,61 +239,18 @@ export default async function Home() {
           </div>
 
           <div className="rounded-2xl border border-border bg-card p-6 shadow-sm">
-            <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-              {landingArticles.length > 0 ? "Latest scanned articles" : "Live narrative snapshot"}
-            </p>
-            {landingArticles.length > 0 ? (
-              <div className="mt-5 space-y-3">
-                {landingArticles.map((article) => (
-                  <div
-                    key={article.id}
-                    className="flex gap-3 rounded-lg border border-border bg-background p-3"
-                  >
-                    <div className="relative h-14 w-20 shrink-0 overflow-hidden rounded-md bg-muted">
-                      {article.image_url ? (
-                        <img
-                          src={article.image_url}
-                          alt=""
-                          className="h-full w-full object-cover"
-                          loading="lazy"
-                        />
-                      ) : (
-                        <div className="flex h-full w-full items-center justify-center text-[9px] text-muted-foreground">
-                          —
-                        </div>
-                      )}
-                    </div>
-                    <div className="min-w-0 flex-1">
-                      {article.url ? (
-                        <Link
-                          href={article.url}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="text-sm font-medium leading-snug hover:underline"
-                        >
-                          {article.title || article.url}
-                        </Link>
-                      ) : (
-                        <p className="text-sm font-medium leading-snug">
-                          {article.title || "Untitled article"}
-                        </p>
-                      )}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            ) : (
-              <div className="mt-5 space-y-3">
-                {["AI infrastructure demand", "Rate-cut expectations", "Energy supply pressure"].map((item, index) => (
-                  <div key={item} className="flex items-center justify-between rounded-lg border border-border bg-background px-4 py-3">
-                    <p className="text-sm font-medium">{item}</p>
-                    <span className="rounded-full bg-muted px-2.5 py-1 text-xs font-medium text-muted-foreground">
-                      #{index + 1}
-                    </span>
-                  </div>
-                ))}
-              </div>
-            )}
+            <Suspense
+              fallback={
+                <>
+                  <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                    Latest scanned articles
+                  </p>
+                  <LandingSnapshotFallback />
+                </>
+              }
+            >
+              <LandingArticlesHeaderAndList />
+            </Suspense>
             <div className="mt-5 rounded-lg border border-border bg-background p-4">
               <p className="text-xs text-muted-foreground">Top exposed groups</p>
               <p className="mt-2 text-sm font-medium">Semiconductors, Cloud, Utilities</p>
