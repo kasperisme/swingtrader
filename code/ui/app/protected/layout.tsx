@@ -2,6 +2,7 @@ import { EnvVarWarning } from "@/components/env-var-warning";
 import { AuthButton } from "@/components/auth-button";
 import { ThemeSwitcher } from "@/components/theme-switcher";
 import { hasEnvVars } from "@/lib/utils";
+import Image from "next/image";
 import Link from "next/link";
 import { Suspense } from "react";
 
@@ -16,7 +17,10 @@ export default function ProtectedLayout({
         <nav className="w-full flex justify-center border-b border-b-foreground/10 h-16">
           <div className="w-full max-w-7xl flex justify-between items-center p-3 px-5 text-sm">
             <div className="flex gap-5 items-center font-semibold">
-              <Link href={"/"}>SwingTrader</Link>
+              <Link href={"/"} className="inline-flex items-center gap-2">
+                <Image src="/icon.png" alt="SwingTrader logo" width={20} height={20} className="rounded-sm" />
+                SwingTrader
+              </Link>
               <Link
                 href={"/protected/vectors"}
                 className="text-sm font-medium text-muted-foreground hover:text-foreground transition-colors"

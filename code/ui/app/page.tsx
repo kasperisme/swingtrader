@@ -1,6 +1,7 @@
 import { AuthButton } from "@/components/auth-button";
 import { ThemeSwitcher } from "@/components/theme-switcher";
 import { createClient } from "@/lib/supabase/server";
+import Image from "next/image";
 import Link from "next/link";
 import { Suspense } from "react";
 import { ArrowRight } from "lucide-react";
@@ -90,7 +91,8 @@ export default function Home() {
       <div className="flex-1 w-full flex flex-col items-center">
         <nav className="w-full flex justify-center border-b border-b-foreground/10 h-16">
           <div className="w-full max-w-7xl flex justify-between items-center p-3 px-5 text-sm">
-            <Link href="/" className="font-semibold">
+            <Link href="/" className="font-semibold inline-flex items-center gap-2">
+              <Image src="/icon.png" alt="SwingTrader logo" width={20} height={20} className="rounded-sm" />
               SwingTrader
             </Link>
             <div className="flex items-center gap-4">
