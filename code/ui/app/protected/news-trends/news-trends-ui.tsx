@@ -298,12 +298,14 @@ function Leaderboard({
   drilldownId,
   onToggle,
   onDrilldown,
+  maOff,
 }: {
   latest: Record<string, number | null>;
   selected: Set<string>;
   drilldownId: string | null;
   onToggle: (id: string) => void;
   onDrilldown: (id: string) => void;
+  maOff: boolean;
 }) {
   const sorted = CLUSTERS.map((c) => ({
     cluster: c,
@@ -318,7 +320,7 @@ function Leaderboard({
   return (
     <div className="flex flex-col gap-1">
       <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-2">
-        Latest MA Score
+        {maOff ? "Latest score" : "Latest MA score"}
       </p>
       {sorted.map(({ cluster, score }) => {
         const color = CLUSTER_COLORS[cluster.id];
@@ -480,8 +482,9 @@ function DimensionDrilldown({
           {cluster.label} — Dimension Breakdown
         </p>
         <p className="text-xs text-muted-foreground mt-0.5">
-          {maWindow}{mode === "hourly" ? "h" : "d"} MA of individual dimension impact scores · {dims.length}{" "}
-          dimensions
+          {maWindow === 0
+            ? `Per-period dimension scores (no MA) · ${dims.length} dimensions`
+            : `${maWindow}${mode === "hourly" ? "h" : "d"} MA of individual dimension impact scores · ${dims.length} dimensions`}
         </p>
       </div>
 
@@ -584,12 +587,14 @@ function DimensionDrilldown({
 
 const MA_OPTIONS: Record<ViewMode, { label: string; value: number }[]> = {
   daily: [
+    { label: "Off", value: 0 },
     { label: "3d", value: 3 },
     { label: "7d", value: 7 },
     { label: "14d", value: 14 },
     { label: "30d", value: 30 },
   ],
   hourly: [
+    { label: "Off", value: 0 },
     { label: "3h", value: 3 },
     { label: "6h", value: 6 },
     { label: "12h", value: 12 },
@@ -657,7 +662,7 @@ export function NewsTrendsUI({ articles, chartHeight = 400 }: { articles: Articl
 
   function switchMode(mode: ViewMode) {
     setViewMode(mode);
-    setMaWindow(DEFAULT_MA[mode]);
+    setMaWindow((prev) => (prev === 0 ? 0 : DEFAULT_MA[mode]));
   }
 
   const daily = useMemo(() => {
@@ -666,9 +671,11 @@ export function NewsTrendsUI({ articles, chartHeight = 400 }: { articles: Articl
     const end = dateTo || maxDate;
     return fillDateGaps(raw, viewMode, start, end);
   }, [filteredArticles, viewMode, dateFrom, dateTo, minDate, maxDate]);
+  const effectiveMaWindow = maWindow === 0 ? 1 : maWindow;
+
   const chartData = useMemo(
-    () => applyClusterMA(daily, maWindow),
-    [daily, maWindow],
+    () => applyClusterMA(daily, effectiveMaWindow),
+    [daily, effectiveMaWindow],
   );
 
   useEffect(() => {
@@ -813,10 +820,10 @@ export function NewsTrendsUI({ articles, chartHeight = 400 }: { articles: Articl
     if (!drilldownDims) return [];
     return applyDimensionMA(
       daily,
-      maWindow,
+      effectiveMaWindow,
       drilldownDims.map((d) => d.key),
     );
-  }, [daily, maWindow, drilldownDims]);
+  }, [daily, effectiveMaWindow, drilldownDims]);
 
   // Latest dimension scores for the drilled-down cluster
   const latestDimScores = useMemo(() => {
@@ -991,8 +998,9 @@ export function NewsTrendsUI({ articles, chartHeight = 400 }: { articles: Articl
         <div className="flex-1 min-w-0">
           <div className="border rounded-xl p-4">
             <p className="text-xs text-muted-foreground mb-4">
-              Impact score −1 (bearish) → +1 (bullish) · Dashed line = average
-              of all cluster MAs per period · Click score to show/hide ·{" "}
+              Impact score −1 (bearish) → +1 (bullish) · Dashed line = cross-cluster
+              mean per period
+              {maWindow === 0 ? " (no MA smoothing)" : ""} · Click score to show/hide ·{" "}
               <ChevronRight size={10} className="inline" /> to drill into
               dimensions · Drag on the chart or the range strip below to zoom the
               time axis; double-click the chart to reset zoom
@@ -1120,6 +1128,7 @@ export function NewsTrendsUI({ articles, chartHeight = 400 }: { articles: Articl
               drilldownId={drilldownId}
               onToggle={toggleCluster}
               onDrilldown={toggleDrilldown}
+              maOff={maWindow === 0}
             />
           </div>
         </div>
