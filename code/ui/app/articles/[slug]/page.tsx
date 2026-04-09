@@ -2,6 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { Suspense } from "react";
 import { Lock } from "lucide-react";
+import { createClient as createSupabaseClient } from "@supabase/supabase-js";
 
 import { createClient } from "@/lib/supabase/server";
 import { CLUSTERS, DIMENSION_MAP } from "@/app/protected/vectors/dimensions";
@@ -71,6 +72,17 @@ function asStringMap(v: unknown): Record<string, string> {
     out[k] = String(raw ?? "");
   }
   return out;
+}
+
+async function createServerDataClient() {
+  const secretKey = process.env.SUPABASE_SECRET_KEY;
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  if (secretKey && supabaseUrl) {
+    return createSupabaseClient(supabaseUrl, secretKey, {
+      auth: { persistSession: false, autoRefreshToken: false },
+    });
+  }
+  return createClient();
 }
 
 function scoreClass(v: number): string {
@@ -151,6 +163,8 @@ function AnalyticsBlock({
   losers,
   tickerSentiment,
   tickerRelationships,
+  locked,
+  lockHref,
 }: {
   clusterProfile: Array<{ id: string; label: string; score: number; docSlug: string }>;
   topDimensions: Array<{ key: string; score: number }>;
@@ -158,13 +172,15 @@ function AnalyticsBlock({
   losers: RankedStock[];
   tickerSentiment: Array<{ ticker: string; score: number; reason: string }>;
   tickerRelationships: Array<{ from: string; to: string; relType: string; score: number; reason: string }>;
+  locked: boolean;
+  lockHref: string;
 }) {
   return (
     <>
       <section className="grid gap-4 lg:grid-cols-2">
-        <div className="rounded-xl border bg-card p-5">
+        <div className="relative rounded-xl border bg-card p-5">
           <h2 className="text-lg font-semibold">Analytical profile by cluster</h2>
-          <div className="mt-4 space-y-2">
+          <div className={locked ? "mt-4 space-y-2 blur-[2.5px] pointer-events-none select-none" : "mt-4 space-y-2"}>
             {clusterProfile.map((c) => (
               <div key={c.id} className="flex items-center justify-between text-sm">
                 <Link href={c.docSlug} className="hover:underline underline-offset-4">{c.label}</Link>
@@ -172,10 +188,18 @@ function AnalyticsBlock({
               </div>
             ))}
           </div>
+          {locked ? (
+            <Link href={lockHref} className="absolute inset-0 flex items-center justify-center">
+              <span className="inline-flex items-center gap-2 rounded-md border border-border bg-background/95 px-3 py-1.5 text-xs font-medium text-foreground shadow-sm">
+                <Lock size={14} />
+                Sign up to unlock
+              </span>
+            </Link>
+          ) : null}
         </div>
-        <div className="rounded-xl border bg-card p-5">
+        <div className="relative rounded-xl border bg-card p-5">
           <h2 className="text-lg font-semibold">Top impact dimensions</h2>
-          <div className="mt-4 space-y-2">
+          <div className={locked ? "mt-4 space-y-2 blur-[2.5px] pointer-events-none select-none" : "mt-4 space-y-2"}>
             {topDimensions.length === 0 ? (
               <p className="text-sm text-muted-foreground">No impact vector found for this article yet.</p>
             ) : topDimensions.map((d) => {
@@ -190,12 +214,20 @@ function AnalyticsBlock({
               );
             })}
           </div>
+          {locked ? (
+            <Link href={lockHref} className="absolute inset-0 flex items-center justify-center">
+              <span className="inline-flex items-center gap-2 rounded-md border border-border bg-background/95 px-3 py-1.5 text-xs font-medium text-foreground shadow-sm">
+                <Lock size={14} />
+                Sign up to unlock
+              </span>
+            </Link>
+          ) : null}
         </div>
       </section>
       <section className="mt-4 grid gap-4 lg:grid-cols-2">
-        <div className="rounded-xl border bg-card p-5">
+        <div className="relative rounded-xl border bg-card p-5">
           <h2 className="text-lg font-semibold">Most positively impacted stocks</h2>
-          <div className="mt-4 space-y-2">
+          <div className={locked ? "mt-4 space-y-2 blur-[2.5px] pointer-events-none select-none" : "mt-4 space-y-2"}>
             {winners.length === 0 ? <p className="text-sm text-muted-foreground">No stock impact ranking available yet.</p> : winners.map((s) => (
               <div key={s.ticker} className="flex items-center justify-between text-sm">
                 <span><span className="font-medium">{s.ticker}</span>{s.sector ? <span className="text-muted-foreground"> · {s.sector}</span> : null}</span>
@@ -203,10 +235,18 @@ function AnalyticsBlock({
               </div>
             ))}
           </div>
+          {locked ? (
+            <Link href={lockHref} className="absolute inset-0 flex items-center justify-center">
+              <span className="inline-flex items-center gap-2 rounded-md border border-border bg-background/95 px-3 py-1.5 text-xs font-medium text-foreground shadow-sm">
+                <Lock size={14} />
+                Sign up to unlock
+              </span>
+            </Link>
+          ) : null}
         </div>
-        <div className="rounded-xl border bg-card p-5">
+        <div className="relative rounded-xl border bg-card p-5">
           <h2 className="text-lg font-semibold">Most negatively impacted stocks</h2>
-          <div className="mt-4 space-y-2">
+          <div className={locked ? "mt-4 space-y-2 blur-[2.5px] pointer-events-none select-none" : "mt-4 space-y-2"}>
             {losers.length === 0 ? <p className="text-sm text-muted-foreground">No stock impact ranking available yet.</p> : losers.map((s) => (
               <div key={s.ticker} className="flex items-center justify-between text-sm">
                 <span><span className="font-medium">{s.ticker}</span>{s.sector ? <span className="text-muted-foreground"> · {s.sector}</span> : null}</span>
@@ -214,12 +254,20 @@ function AnalyticsBlock({
               </div>
             ))}
           </div>
+          {locked ? (
+            <Link href={lockHref} className="absolute inset-0 flex items-center justify-center">
+              <span className="inline-flex items-center gap-2 rounded-md border border-border bg-background/95 px-3 py-1.5 text-xs font-medium text-foreground shadow-sm">
+                <Lock size={14} />
+                Sign up to unlock
+              </span>
+            </Link>
+          ) : null}
         </div>
       </section>
       <section className="mt-4 grid gap-4 lg:grid-cols-2">
-        <div className="rounded-xl border bg-card p-5">
+        <div className="relative rounded-xl border bg-card p-5">
           <h2 className="text-lg font-semibold">Ticker sentiment in this article</h2>
-          <div className="mt-4 space-y-2">
+          <div className={locked ? "mt-4 space-y-2 blur-[2.5px] pointer-events-none select-none" : "mt-4 space-y-2"}>
             {tickerSentiment.length === 0 ? (
               <p className="text-sm text-muted-foreground">No ticker sentiment head found.</p>
             ) : tickerSentiment.map((row) => (
@@ -234,10 +282,18 @@ function AnalyticsBlock({
               </div>
             ))}
           </div>
+          {locked ? (
+            <Link href={lockHref} className="absolute inset-0 flex items-center justify-center">
+              <span className="inline-flex items-center gap-2 rounded-md border border-border bg-background/95 px-3 py-1.5 text-xs font-medium text-foreground shadow-sm">
+                <Lock size={14} />
+                Sign up to unlock
+              </span>
+            </Link>
+          ) : null}
         </div>
-        <div className="rounded-xl border bg-card p-5">
+        <div className="relative rounded-xl border bg-card p-5">
           <h2 className="text-lg font-semibold">Ticker relationships in this article</h2>
-          <div className="mt-4 space-y-2">
+          <div className={locked ? "mt-4 space-y-2 blur-[2.5px] pointer-events-none select-none" : "mt-4 space-y-2"}>
             {tickerRelationships.length === 0 ? (
               <p className="text-sm text-muted-foreground">No ticker relationship head found.</p>
             ) : tickerRelationships.map((row, idx) => (
@@ -254,6 +310,14 @@ function AnalyticsBlock({
               </div>
             ))}
           </div>
+          {locked ? (
+            <Link href={lockHref} className="absolute inset-0 flex items-center justify-center">
+              <span className="inline-flex items-center gap-2 rounded-md border border-border bg-background/95 px-3 py-1.5 text-xs font-medium text-foreground shadow-sm">
+                <Lock size={14} />
+                Sign up to unlock
+              </span>
+            </Link>
+          ) : null}
         </div>
       </section>
     </>
@@ -265,10 +329,11 @@ async function ArticleData({ params }: { params: Promise<{ slug?: string }> }) {
   const slug = String(resolvedParams?.slug ?? "").trim();
   if (!slug) return <ArticlePageFallback />;
 
-  const supabase = await createClient();
+  const authClient = await createClient();
+  const dataClient = await createServerDataClient();
   const [{ data: claims }, bySlug] = await Promise.all([
-    supabase.auth.getClaims(),
-    supabase
+    authClient.auth.getClaims(),
+    dataClient
       .schema("swingtrader")
       .from("news_articles")
       .select("id, slug, title, url, source, created_at, image_url")
@@ -277,8 +342,8 @@ async function ArticleData({ params }: { params: Promise<{ slug?: string }> }) {
   ]);
   const isAuthed = Boolean(claims?.claims);
   const article = bySlug.data;
-  if ((!article || bySlug.error) && isAuthed) notFound();
   if (!article || bySlug.error) {
+    if (isAuthed) notFound();
     return (
       <div className="mx-auto max-w-5xl px-4 py-8 sm:px-6 sm:py-10">
         <div className="rounded-xl border bg-card p-6">
@@ -296,13 +361,13 @@ async function ArticleData({ params }: { params: Promise<{ slug?: string }> }) {
   }
 
   const [vector, headsRes] = await Promise.all([
-    supabase
+    dataClient
       .schema("swingtrader")
       .from("news_impact_vectors")
       .select("impact_json")
       .eq("article_id", article.id)
       .single<{ impact_json: unknown }>(),
-    supabase
+    dataClient
       .schema("swingtrader")
       .from("news_impact_heads")
       .select("cluster, scores_json, reasoning_json")
@@ -315,7 +380,6 @@ async function ArticleData({ params }: { params: Promise<{ slug?: string }> }) {
     .slice(0, 12);
   const clusterProfile = computeClusterProfile(impact);
   const { winners, losers } = await fetchRankedStocks(impact);
-  const topStock = [winners[0], losers[0]].filter(Boolean).sort((a, b) => Math.abs((b as RankedStock).score) - Math.abs((a as RankedStock).score))[0] as RankedStock | undefined;
   const heads = (headsRes.data ?? []) as HeadRow[];
   const sentimentHead = heads.find((h) => h.cluster === "TICKER_SENTIMENT");
   const relationshipHead = heads.find((h) => h.cluster === "TICKER_RELATIONSHIPS");
@@ -350,33 +414,17 @@ async function ArticleData({ params }: { params: Promise<{ slug?: string }> }) {
         <div className="mt-4">{article.url ? <Link href={article.url} target="_blank" rel="noreferrer" className="text-sm font-medium underline-offset-4 hover:underline">Read original article →</Link> : <p className="text-sm text-muted-foreground">Original article URL not available.</p>}</div>
       </article>
 
-      {!isAuthed ? (
-        <section className="mt-6 grid gap-3 sm:grid-cols-3">
-          <div className="rounded-xl border bg-card p-5"><p className="text-xs uppercase tracking-wide text-muted-foreground">Most impacted cluster</p><p className="mt-2 text-sm font-semibold">{clusterProfile[0]?.label ?? "—"}</p></div>
-          <div className="rounded-xl border bg-card p-5"><p className="text-xs uppercase tracking-wide text-muted-foreground">Most impacted dimension</p><p className="mt-2 text-sm font-semibold break-words">{topDimensions[0]?.key ?? "—"}</p></div>
-          <div className="rounded-xl border bg-card p-5"><p className="text-xs uppercase tracking-wide text-muted-foreground">Most impacted stock</p><p className="mt-2 text-sm font-semibold">{topStock?.ticker ?? "—"}</p></div>
-        </section>
-      ) : null}
-
       <div className="relative mt-8">
-        <div className={!isAuthed ? "pointer-events-none blur-[2.5px] opacity-70" : ""}>
-          <AnalyticsBlock
-            clusterProfile={clusterProfile}
-            topDimensions={topDimensions}
-            winners={winners}
-            losers={losers}
-            tickerSentiment={tickerSentiment}
-            tickerRelationships={tickerRelationships}
-          />
-        </div>
-        {!isAuthed ? (
-          <div className="absolute inset-0 flex items-center justify-center">
-            <Link href={`/auth/login?next=/articles/${slug}`} className="inline-flex items-center gap-2 rounded-md border border-border bg-background/95 px-4 py-2 text-sm font-medium shadow-sm transition-colors hover:bg-background">
-              <Lock size={15} />
-              Unlock full overview
-            </Link>
-          </div>
-        ) : null}
+        <AnalyticsBlock
+          clusterProfile={clusterProfile}
+          topDimensions={topDimensions}
+          winners={winners}
+          losers={losers}
+          tickerSentiment={tickerSentiment}
+          tickerRelationships={tickerRelationships}
+          locked={!isAuthed}
+          lockHref={`/auth/sign-up?next=/articles/${slug}`}
+        />
       </div>
     </div>
   );

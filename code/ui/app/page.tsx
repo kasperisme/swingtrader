@@ -1,5 +1,7 @@
 import Link from "next/link";
 import { Suspense } from "react";
+import { unstable_noStore as noStore } from "next/cache";
+import { createClient as createSupabaseClient } from "@supabase/supabase-js";
 import { ArrowRight, BarChart3, Compass, Filter, Newspaper, Target, Workflow } from "lucide-react";
 
 import { createClient } from "@/lib/supabase/server";
@@ -109,9 +111,17 @@ function LandingSnapshotFallback() {
 }
 
 async function LandingArticlesHeaderAndList() {
+  // Ensure latest articles are fetched at request time for all visitors.
+  noStore();
   let landingArticles: LandingArticle[] = [];
   try {
-    const supabase = await createClient();
+    const secretKey = process.env.SUPABASE_SECRET_KEY;
+    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+    const supabase = secretKey && supabaseUrl
+      ? createSupabaseClient(supabaseUrl, secretKey, {
+          auth: { persistSession: false, autoRefreshToken: false },
+        })
+      : await createClient();
     const { data } = await supabase
       .schema("swingtrader")
       .from("news_articles")
