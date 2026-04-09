@@ -29,11 +29,15 @@ function asBool(v: unknown): boolean | null {
   return Boolean(v);
 }
 
+function normalizeTicker(v: unknown): string {
+  return String(v ?? "").trim().toUpperCase();
+}
+
 function parseRow(scanRowId: number, runId: number, symbol: string, d: Record<string, unknown>): ScreeningRow {
   return {
     scan_row_id: scanRowId,
     run_id: runId,
-    symbol: symbol || String(d.ticker ?? d.symbol ?? ""),
+    symbol: normalizeTicker(symbol || d.ticker || d.symbol),
     sector: String(d.sector ?? d.sector_x ?? d.sector_y ?? ""),
     industry: String(d.industry ?? d.subSector ?? ""),
     subSector: String(d.subSector ?? d.industry ?? ""),
@@ -98,7 +102,7 @@ async function fetchRows(runId: number): Promise<ScreeningRow[]> {
   // Prefer passed_stocks (richer data) if present, else fall back to trend_template
   const source = (psRes.data && psRes.data.length > 0) ? psRes.data : (ttRes.data ?? []);
 
-  return source.map(r => parseRow(r.id, r.run_id, r.symbol ?? "", r.row_data as Record<string, unknown>));
+  return source.map((r) => parseRow(r.id, r.run_id, r.symbol ?? "", r.row_data as Record<string, unknown>));
 }
 
 async function fetchRowNotes(runId: number): Promise<ScanRowNote[]> {
@@ -130,7 +134,8 @@ async function fetchCompanyVectors(): Promise<{
   // Keep only the latest vector per ticker
   const seen = new Set<string>();
   for (const row of data ?? []) {
-    const ticker = row.ticker as string;
+    const ticker = normalizeTicker(row.ticker);
+    if (!ticker) continue;
     if (seen.has(ticker)) continue;
     seen.add(ticker);
     tickers.add(ticker);

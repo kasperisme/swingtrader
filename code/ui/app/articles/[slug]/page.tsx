@@ -23,6 +23,11 @@ type CompanyVectorRow = {
 };
 
 type RankedStock = { ticker: string; score: number; sector: string };
+type HeadRow = {
+  cluster: string;
+  scores_json: unknown;
+  reasoning_json: unknown;
+};
 
 function clusterDocSlug(clusterId: string): string {
   return "/docs/cluster-" + clusterId.toLowerCase().replace(/_/g, "-");
@@ -57,6 +62,15 @@ function asObject(v: unknown): Record<string, unknown> {
   }
   if (typeof v !== "object") return {};
   return v as Record<string, unknown>;
+}
+
+function asStringMap(v: unknown): Record<string, string> {
+  const obj = asObject(v);
+  const out: Record<string, string> = {};
+  for (const [k, raw] of Object.entries(obj)) {
+    out[k] = String(raw ?? "");
+  }
+  return out;
 }
 
 function scoreClass(v: number): string {
@@ -135,11 +149,15 @@ function AnalyticsBlock({
   topDimensions,
   winners,
   losers,
+  tickerSentiment,
+  tickerRelationships,
 }: {
   clusterProfile: Array<{ id: string; label: string; score: number; docSlug: string }>;
   topDimensions: Array<{ key: string; score: number }>;
   winners: RankedStock[];
   losers: RankedStock[];
+  tickerSentiment: Array<{ ticker: string; score: number; reason: string }>;
+  tickerRelationships: Array<{ from: string; to: string; relType: string; score: number; reason: string }>;
 }) {
   return (
     <>
@@ -198,6 +216,46 @@ function AnalyticsBlock({
           </div>
         </div>
       </section>
+      <section className="mt-4 grid gap-4 lg:grid-cols-2">
+        <div className="rounded-xl border bg-card p-5">
+          <h2 className="text-lg font-semibold">Ticker sentiment in this article</h2>
+          <div className="mt-4 space-y-2">
+            {tickerSentiment.length === 0 ? (
+              <p className="text-sm text-muted-foreground">No ticker sentiment head found.</p>
+            ) : tickerSentiment.map((row) => (
+              <div key={row.ticker} className="text-sm">
+                <div className="flex items-center justify-between gap-3">
+                  <span className="font-medium">{row.ticker}</span>
+                  <span className={`font-mono ${scoreClass(row.score)}`}>
+                    {row.score >= 0 ? "+" : ""}{row.score.toFixed(2)}
+                  </span>
+                </div>
+                {row.reason ? <p className="mt-1 text-xs text-muted-foreground">{row.reason}</p> : null}
+              </div>
+            ))}
+          </div>
+        </div>
+        <div className="rounded-xl border bg-card p-5">
+          <h2 className="text-lg font-semibold">Ticker relationships in this article</h2>
+          <div className="mt-4 space-y-2">
+            {tickerRelationships.length === 0 ? (
+              <p className="text-sm text-muted-foreground">No ticker relationship head found.</p>
+            ) : tickerRelationships.map((row, idx) => (
+              <div key={`${row.from}-${row.to}-${row.relType}-${idx}`} className="text-sm">
+                <div className="flex items-center justify-between gap-3">
+                  <span className="font-medium">
+                    {row.from} {"->"} {row.to} <span className="text-muted-foreground">({row.relType})</span>
+                  </span>
+                  <span className={`font-mono ${scoreClass(row.score)}`}>
+                    {row.score >= 0 ? "+" : ""}{row.score.toFixed(2)}
+                  </span>
+                </div>
+                {row.reason ? <p className="mt-1 text-xs text-muted-foreground">{row.reason}</p> : null}
+              </div>
+            ))}
+          </div>
+        </div>
+      </section>
     </>
   );
 }
@@ -237,12 +295,19 @@ async function ArticleData({ params }: { params: Promise<{ slug?: string }> }) {
     );
   }
 
-  const vector = await supabase
-    .schema("swingtrader")
-    .from("news_impact_vectors")
-    .select("impact_json")
-    .eq("article_id", article.id)
-    .single<{ impact_json: unknown }>();
+  const [vector, headsRes] = await Promise.all([
+    supabase
+      .schema("swingtrader")
+      .from("news_impact_vectors")
+      .select("impact_json")
+      .eq("article_id", article.id)
+      .single<{ impact_json: unknown }>(),
+    supabase
+      .schema("swingtrader")
+      .from("news_impact_heads")
+      .select("cluster, scores_json, reasoning_json")
+      .eq("article_id", article.id),
+  ]);
   const impact = asNumberMap(vector.data?.impact_json ?? {});
   const topDimensions = Object.entries(impact)
     .map(([key, score]) => ({ key, score }))
@@ -251,6 +316,27 @@ async function ArticleData({ params }: { params: Promise<{ slug?: string }> }) {
   const clusterProfile = computeClusterProfile(impact);
   const { winners, losers } = await fetchRankedStocks(impact);
   const topStock = [winners[0], losers[0]].filter(Boolean).sort((a, b) => Math.abs((b as RankedStock).score) - Math.abs((a as RankedStock).score))[0] as RankedStock | undefined;
+  const heads = (headsRes.data ?? []) as HeadRow[];
+  const sentimentHead = heads.find((h) => h.cluster === "TICKER_SENTIMENT");
+  const relationshipHead = heads.find((h) => h.cluster === "TICKER_RELATIONSHIPS");
+
+  const sentimentScores = asNumberMap(sentimentHead?.scores_json ?? {});
+  const sentimentReasoning = asStringMap(sentimentHead?.reasoning_json ?? {});
+  const tickerSentiment = Object.entries(sentimentScores)
+    .map(([ticker, score]) => ({ ticker, score, reason: sentimentReasoning[ticker] ?? "" }))
+    .sort((a, b) => Math.abs(b.score) - Math.abs(a.score))
+    .slice(0, 12);
+
+  const relationshipScores = asNumberMap(relationshipHead?.scores_json ?? {});
+  const relationshipReasoning = asStringMap(relationshipHead?.reasoning_json ?? {});
+  const tickerRelationships = Object.entries(relationshipScores)
+    .map(([key, score]) => {
+      const [from = "", to = "", relType = "related"] = key.split("__");
+      return { from, to, relType, score, reason: relationshipReasoning[key] ?? "" };
+    })
+    .filter((r) => r.from && r.to)
+    .sort((a, b) => Math.abs(b.score) - Math.abs(a.score))
+    .slice(0, 16);
 
   return (
     <div className="mx-auto max-w-5xl px-4 py-8 sm:px-6 sm:py-10">
@@ -274,7 +360,14 @@ async function ArticleData({ params }: { params: Promise<{ slug?: string }> }) {
 
       <div className="relative mt-8">
         <div className={!isAuthed ? "pointer-events-none blur-[2.5px] opacity-70" : ""}>
-          <AnalyticsBlock clusterProfile={clusterProfile} topDimensions={topDimensions} winners={winners} losers={losers} />
+          <AnalyticsBlock
+            clusterProfile={clusterProfile}
+            topDimensions={topDimensions}
+            winners={winners}
+            losers={losers}
+            tickerSentiment={tickerSentiment}
+            tickerRelationships={tickerRelationships}
+          />
         </div>
         {!isAuthed ? (
           <div className="absolute inset-0 flex items-center justify-center">

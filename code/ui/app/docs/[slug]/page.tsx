@@ -10,9 +10,12 @@ type Props = {
 };
 
 export async function generateStaticParams() {
-  if (!isSanityConfigured) return [];
+  // Next.js Cache Components requires at least one static param.
+  const fallback = [{ slug: "getting-started" }];
+  if (!isSanityConfigured) return fallback;
   const pages = await sanityFetch<{ slug: string }[]>(docPageSlugListQuery);
-  return pages.map((p) => ({ slug: p.slug }));
+  const params = pages.map((p) => ({ slug: p.slug }));
+  return params.length > 0 ? params : fallback;
 }
 
 export async function generateMetadata({ params }: Props) {

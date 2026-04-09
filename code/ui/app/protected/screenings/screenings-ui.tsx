@@ -11,6 +11,10 @@ import { CLUSTERS } from "../vectors/dimensions";
 import { NewsTrendsUI, type ArticleImpact } from "../news-trends/news-trends-ui";
 import { getCachedQuotes, setCachedQuotes } from "@/lib/quote-cache";
 
+type SentimentArticleImpact = ArticleImpact & {
+  ticker_sentiment?: Record<string, number>;
+};
+
 export interface ScanRun {
   id: number;
   created_at: string;
@@ -167,7 +171,7 @@ const DEFAULT_FILTERS: Filters = {
 
 type SortKey = "symbol" | "RS_Rank" | "sector" | "eps_growth_yoy" | "rev_growth_yoy" | "roe" | "adr_pct";
 type SortDir = "asc" | "desc";
-type ViewTab = "results" | "quotes" | "charts" | "news" | "sentiment" | "tradeMonitoring";
+type ViewTab = "results" | "quotes" | "charts" | "news" | "sentiment" | "relationship" | "tradeMonitoring";
 
 // ─── FilterPanel ─────────────────────────────────────────────────────────────
 
@@ -1673,21 +1677,421 @@ function ChartsViewFinal({
   );
 }
 
+// ─── RelationshipMapView ─────────────────────────────────────────────────────
+
+interface TickerEdge {
+  from: string;
+  to: string;
+  rel_type: string;
+  strength: number;
+  count: number;
+  note: string;
+}
+
+const REL_COLORS: Record<string, string> = {
+  competitor: "#ef4444",
+  supplier:   "#22c55e",
+  customer:   "#3b82f6",
+  partner:    "#a855f7",
+  acquirer:   "#f97316",
+  subsidiary: "#14b8a6",
+};
+
+const REL_LABELS: Record<string, string> = {
+  competitor: "Competitor",
+  supplier:   "Supplier",
+  customer:   "Customer",
+  partner:    "Partner",
+  acquirer:   "Acquirer",
+  subsidiary: "Subsidiary",
+};
+
+const NODE_R = 18;
+const GW = 900;
+const GH = 520;
+const REPULSION = 6000;
+const SPRING_K = 0.04;
+const SPRING_REST = 110;
+const CENTER_K = 0.008;
+const DAMPING = 0.86;
+const SIM_STEPS = 400;
+
+function runForceLayout(
+  nodeIds: string[],
+  edges: { from: string; to: string; strength: number }[],
+): Record<string, { x: number; y: number }> {
+  const cx = GW / 2, cy = GH / 2;
+  const r0 = Math.min(GW, GH) * 0.32;
+  const pos: Record<string, { x: number; y: number; vx: number; vy: number }> = {};
+  nodeIds.forEach((id, i) => {
+    const angle = (2 * Math.PI * i) / nodeIds.length - Math.PI / 2;
+    pos[id] = { x: cx + r0 * Math.cos(angle), y: cy + r0 * Math.sin(angle), vx: 0, vy: 0 };
+  });
+  const active = edges.filter(e => e.from in pos && e.to in pos);
+  for (let step = 0; step < SIM_STEPS; step++) {
+    const cool = 1 - step / SIM_STEPS;
+    for (let i = 0; i < nodeIds.length; i++) {
+      for (let j = i + 1; j < nodeIds.length; j++) {
+        const a = pos[nodeIds[i]!]!;
+        const b = pos[nodeIds[j]!]!;
+        const dx = a.x - b.x || 0.01;
+        const dy = a.y - b.y || 0.01;
+        const dist2 = Math.max(1, dx * dx + dy * dy);
+        const dist = Math.sqrt(dist2);
+        const f = REPULSION / dist2;
+        const fx = (dx / dist) * f;
+        const fy = (dy / dist) * f;
+        a.vx += fx; a.vy += fy;
+        b.vx -= fx; b.vy -= fy;
+      }
+    }
+    for (const e of active) {
+      const a = pos[e.from]!;
+      const b = pos[e.to]!;
+      const dx = b.x - a.x;
+      const dy = b.y - a.y;
+      const dist = Math.sqrt(dx * dx + dy * dy) || 0.01;
+      const disp = dist - SPRING_REST * (1 / (0.3 + e.strength));
+      const f = SPRING_K * disp;
+      const fx = (dx / dist) * f;
+      const fy = (dy / dist) * f;
+      a.vx += fx; a.vy += fy;
+      b.vx -= fx; b.vy -= fy;
+    }
+    for (const id of nodeIds) {
+      const n = pos[id]!;
+      n.vx += (cx - n.x) * CENTER_K;
+      n.vy += (cy - n.y) * CENTER_K;
+      n.vx *= DAMPING;
+      n.vy *= DAMPING;
+      n.x += n.vx * cool;
+      n.y += n.vy * cool;
+      n.x = Math.max(NODE_R + 6, Math.min(GW - NODE_R - 6, n.x));
+      n.y = Math.max(NODE_R + 6, Math.min(GH - NODE_R - 6, n.y));
+    }
+  }
+  return Object.fromEntries(nodeIds.map(id => [id, { x: pos[id]!.x, y: pos[id]!.y }]));
+}
+
+function RelationshipMapView({
+  symbols,
+  selectedTicker,
+  onSelect,
+  getTickerMeta,
+}: {
+  symbols: string[];
+  selectedTicker: string | null;
+  onSelect: (ticker: string) => void;
+  getTickerMeta: (ticker: string) => { sector: string; industry: string };
+}) {
+  const [allEdges, setAllEdges] = useState<TickerEdge[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [hoveredEdge, setHoveredEdge] = useState<TickerEdge | null>(null);
+  const [hoveredNode, setHoveredNode] = useState<string | null>(null);
+
+  const symbolSet = useMemo(() => new Set(symbols), [symbols]);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    setError(null);
+    fetch("/api/screenings/ticker-relationships")
+      .then(r => r.json())
+      .then(data => { if (!cancelled) setAllEdges(Array.isArray(data) ? data : []); })
+      .catch(() => { if (!cancelled) setError("Failed to load relationship data"); })
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
+  }, []);
+
+  const visibleEdges = useMemo(
+    () => allEdges.filter(e => symbolSet.has(e.from) && symbolSet.has(e.to)),
+    [allEdges, symbolSet]
+  );
+
+  const edgesByPair = useMemo(() => {
+    const map = new Map<string, TickerEdge[]>();
+    for (const e of visibleEdges) {
+      const key = [e.from, e.to].sort().join("__");
+      if (!map.has(key)) map.set(key, []);
+      map.get(key)!.push(e);
+    }
+    return map;
+  }, [visibleEdges]);
+
+  const nodeIds = useMemo(() => [...symbols].sort(), [symbols]);
+
+  const positions = useMemo(() => {
+    if (nodeIds.length === 0) return {};
+    return runForceLayout(
+      nodeIds,
+      visibleEdges.map(e => ({ from: e.from, to: e.to, strength: e.strength }))
+    );
+  }, [nodeIds, visibleEdges]);
+
+  const idx = selectedTicker ? nodeIds.indexOf(selectedTicker) : -1;
+
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
+      if (e.key === "ArrowLeft" && idx > 0) onSelect(nodeIds[idx - 1]!);
+      if (e.key === "ArrowRight" && idx < nodeIds.length - 1) onSelect(nodeIds[idx + 1]!);
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [idx, nodeIds, onSelect]);
+
+  const symbol = selectedTicker ?? nodeIds[0] ?? null;
+  const displayIdx = symbol ? nodeIds.indexOf(symbol) : 0;
+  const selectedMeta = symbol ? getTickerMeta(symbol) : null;
+
+  const connectedSet = useMemo(() => {
+    if (!symbol) return new Set<string>();
+    const s = new Set<string>();
+    for (const e of visibleEdges) {
+      if (e.from === symbol) s.add(e.to);
+      if (e.to === symbol) s.add(e.from);
+    }
+    return s;
+  }, [symbol, visibleEdges]);
+
+  const selectedConnections = useMemo(() => {
+    if (!symbol) return [];
+    return visibleEdges
+      .filter(e => e.from === symbol || e.to === symbol)
+      .map(e => ({ ...e, peer: e.from === symbol ? e.to : e.from }))
+      .sort((a, b) => b.strength - a.strength);
+  }, [symbol, visibleEdges]);
+
+  if (loading) {
+    return (
+      <div className="flex items-center gap-2 text-sm text-muted-foreground py-8">
+        <Loader2 className="w-4 h-4 animate-spin" />
+        Loading relationship data…
+      </div>
+    );
+  }
+  if (error) return <p className="text-sm text-rose-500 py-8">{error}</p>;
+  if (symbols.length === 0) {
+    return <p className="text-sm text-muted-foreground py-8 text-center">No tickers in current filter set.</p>;
+  }
+
+  return (
+    <div className="flex flex-col gap-3">
+      {/* Navigation header */}
+      <div className="flex items-center gap-3 flex-wrap">
+        <button
+          onClick={() => displayIdx > 0 && onSelect(nodeIds[displayIdx - 1]!)}
+          disabled={displayIdx <= 0}
+          className="p-1.5 rounded-md border border-border hover:bg-muted disabled:opacity-30 transition-colors"
+          title="Previous (←)"
+        >
+          <ChevronLeft className="w-4 h-4" />
+        </button>
+        <select
+          value={symbol ?? ""}
+          onChange={e => onSelect(e.target.value)}
+          className="px-2 py-1 text-sm font-mono font-semibold rounded border border-input bg-background focus:outline-none focus:ring-1 focus:ring-ring"
+        >
+          {nodeIds.map(s => (
+            <option key={s} value={s}>{s}</option>
+          ))}
+        </select>
+        <button
+          onClick={() => displayIdx < nodeIds.length - 1 && onSelect(nodeIds[displayIdx + 1]!)}
+          disabled={displayIdx >= nodeIds.length - 1}
+          className="p-1.5 rounded-md border border-border hover:bg-muted disabled:opacity-30 transition-colors"
+          title="Next (→)"
+        >
+          <ChevronRight className="w-4 h-4" />
+        </button>
+        {selectedMeta && (selectedMeta.sector || selectedMeta.industry) && (
+          <span className="text-xs text-muted-foreground truncate max-w-[260px]">
+            {[selectedMeta.sector, selectedMeta.industry].filter(Boolean).join(" · ")}
+          </span>
+        )}
+        <span className="text-sm text-muted-foreground ml-auto">{displayIdx + 1} / {nodeIds.length}</span>
+      </div>
+
+      {/* Hover tooltip */}
+      {hoveredEdge && (
+        <div className="text-xs text-muted-foreground px-1 min-h-[1.25rem]">
+          <span className="font-mono font-semibold text-foreground">{hoveredEdge.from}</span>
+          {" → "}
+          <span className="font-mono font-semibold text-foreground">{hoveredEdge.to}</span>
+          {" "}
+          <span className="rounded px-1.5 py-0.5 text-white text-[10px] font-medium" style={{ background: REL_COLORS[hoveredEdge.rel_type] ?? "#888" }}>
+            {REL_LABELS[hoveredEdge.rel_type] ?? hoveredEdge.rel_type}
+          </span>
+          {" "}
+          <span className="tabular-nums">{(hoveredEdge.strength * 100).toFixed(0)}% strength</span>
+          {hoveredEdge.count > 1 && <span className="text-muted-foreground/60"> · {hoveredEdge.count} mentions</span>}
+          {hoveredEdge.note && <span className="ml-2 italic text-muted-foreground/70">{hoveredEdge.note.replace(/^\[.*?\]\s*/, "")}</span>}
+        </div>
+      )}
+
+      {/* Network graph */}
+      <div className="rounded-lg border border-border bg-background overflow-hidden">
+        <svg viewBox={`0 0 ${GW} ${GH}`} className="w-full" style={{ maxHeight: 520 }}>
+          {/* Edges */}
+          {Array.from(edgesByPair.entries()).map(([pairKey, edges]) => {
+            const primary = edges.reduce((best, e) => e.strength > best.strength ? e : best, edges[0]!);
+            const p0 = positions[primary.from];
+            const p1 = positions[primary.to];
+            if (!p0 || !p1) return null;
+            const isHighlighted = primary.from === symbol || primary.to === symbol;
+            const isHovered = hoveredEdge &&
+              ((hoveredEdge.from === primary.from && hoveredEdge.to === primary.to) ||
+               (hoveredEdge.from === primary.to && hoveredEdge.to === primary.from));
+            const color = REL_COLORS[primary.rel_type] ?? "#888";
+            const opacity = symbol ? (isHighlighted ? 0.85 : 0.1) : (isHovered ? 0.9 : 0.4);
+            const sw = 1 + primary.strength * 3 * (isHighlighted ? 1.5 : 1);
+            const mx = (p0.x + p1.x) / 2;
+            const my = (p0.y + p1.y) / 2;
+            return (
+              <g key={pairKey}>
+                <line
+                  x1={p0.x} y1={p0.y} x2={p1.x} y2={p1.y}
+                  stroke={color} strokeWidth={sw} strokeOpacity={opacity}
+                  className="cursor-pointer"
+                  onMouseEnter={() => setHoveredEdge(primary)}
+                  onMouseLeave={() => setHoveredEdge(null)}
+                />
+                {(isHighlighted || isHovered) && (
+                  <text x={mx} y={my - 4} textAnchor="middle" fontSize={9}
+                    fill={color} fillOpacity={0.9}
+                    className="select-none pointer-events-none">
+                    {REL_LABELS[primary.rel_type] ?? primary.rel_type}
+                  </text>
+                )}
+              </g>
+            );
+          })}
+
+          {/* Nodes */}
+          {nodeIds.map(sym => {
+            const p = positions[sym];
+            if (!p) return null;
+            const isSelected = sym === symbol;
+            const isConnected = connectedSet.has(sym);
+            const isHov = hoveredNode === sym;
+            const dimmed = symbol && !isSelected && !isConnected;
+            return (
+              <g key={sym} transform={`translate(${p.x},${p.y})`}
+                className="cursor-pointer"
+                onClick={() => onSelect(sym)}
+                onMouseEnter={() => setHoveredNode(sym)}
+                onMouseLeave={() => setHoveredNode(null)}
+                style={{ opacity: dimmed ? 0.3 : 1 }}
+              >
+                {(isSelected || isConnected || isHov) && (
+                  <circle r={NODE_R + 4} fill="none"
+                    stroke={isSelected ? "hsl(var(--foreground))" : "hsl(var(--foreground) / 0.3)"}
+                    strokeWidth={isSelected ? 2 : 1}
+                  />
+                )}
+                <circle r={NODE_R}
+                  fill={isSelected ? "hsl(var(--foreground))" : "hsl(var(--muted))"}
+                  stroke="hsl(var(--border))" strokeWidth={1}
+                />
+                <text textAnchor="middle" dominantBaseline="middle"
+                  fontSize={sym.length > 4 ? 8 : 9} fontWeight="600" fontFamily="monospace"
+                  fill={isSelected ? "hsl(var(--background))" : "hsl(var(--foreground))"}
+                  className="select-none pointer-events-none">
+                  {sym}
+                </text>
+              </g>
+            );
+          })}
+        </svg>
+      </div>
+
+      {/* Connections detail + legend */}
+      <div className="grid gap-4 md:grid-cols-2">
+        <div className="flex flex-col gap-2">
+          <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+            {symbol} — connections ({selectedConnections.length})
+          </p>
+          {selectedConnections.length === 0 ? (
+            <p className="text-xs text-muted-foreground">No relationships found in current filter set.</p>
+          ) : (
+            <div className="rounded-lg border border-border overflow-hidden">
+              <table className="w-full text-sm">
+                <tbody className="divide-y divide-border">
+                  {selectedConnections.map((c, i) => (
+                    <tr key={`${c.peer}-${c.rel_type}-${i}`}
+                      className="hover:bg-muted/30 cursor-pointer"
+                      onClick={() => onSelect(c.peer)}
+                    >
+                      <td className="px-3 py-2 font-mono font-semibold w-20">{c.peer}</td>
+                      <td className="px-3 py-2">
+                        <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium text-white"
+                          style={{ background: REL_COLORS[c.rel_type] ?? "#888" }}>
+                          {REL_LABELS[c.rel_type] ?? c.rel_type}
+                        </span>
+                      </td>
+                      <td className="px-3 py-2 tabular-nums text-xs text-muted-foreground">
+                        {(c.strength * 100).toFixed(0)}%
+                        {c.count > 1 && <span className="ml-1 text-muted-foreground/50">×{c.count}</span>}
+                      </td>
+                      <td className="px-3 py-2 text-xs text-muted-foreground/70 italic max-w-[200px] truncate" title={c.note}>
+                        {c.note.replace(/^\[.*?\]\s*/, "")}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+
+        <div className="flex flex-col gap-2">
+          <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Legend</p>
+          <div className="flex flex-wrap gap-3">
+            {Object.entries(REL_LABELS).map(([type, label]) => (
+              <div key={type} className="flex items-center gap-1.5">
+                <div className="w-3 h-1.5 rounded-sm" style={{ background: REL_COLORS[type] ?? "#888" }} />
+                <span className="text-xs text-muted-foreground">{label}</span>
+              </div>
+            ))}
+          </div>
+          <p className="text-xs text-muted-foreground mt-1">
+            Edge thickness = relationship strength · Only edges between tickers in current filter shown
+          </p>
+          {visibleEdges.length === 0 && allEdges.length > 0 && (
+            <p className="text-xs text-amber-600 dark:text-amber-400 mt-1">
+              No relationships between tickers in this filter. Try broadening your filter.
+            </p>
+          )}
+          {allEdges.length === 0 && !loading && (
+            <p className="text-xs text-muted-foreground/60 mt-1">
+              No data yet — relationships are scored automatically as articles are ingested.
+            </p>
+          )}
+        </div>
+      </div>
+
+      <p className="text-xs text-muted-foreground text-center">
+        Use ← → arrow keys or buttons to navigate · click a node to select · {nodeIds.length} stocks in current filter
+      </p>
+    </div>
+  );
+}
+
 // ─── SentimentView ───────────────────────────────────────────────────────────
 
 type SentimentSort = { key: "symbol" | "s7d" | "s30d" | "s90d"; dir: "asc" | "desc" };
 
 function computeStockSentiment(
-  articles: ArticleImpact[],
-  companyDims: Record<string, number>,
+  articles: SentimentArticleImpact[],
+  ticker: string,
   cutoffDate: string,
 ): number {
   let total = 0;
   for (const article of articles) {
     if (article.published_at.slice(0, 10) < cutoffDate) continue;
-    for (const [dim, impact] of Object.entries(article.impact_json)) {
-      total += impact * (companyDims[dim] ?? 0);
-    }
+    const score = article.ticker_sentiment?.[ticker];
+    if (typeof score === "number" && Number.isFinite(score)) total += score;
   }
   return total;
 }
@@ -1736,18 +2140,16 @@ function SentimentTh({
 
 function SentimentView({
   symbols,
-  companyVectorDimensions,
   selectedTicker,
   onSelect,
   getTickerMeta,
 }: {
   symbols: string[];
-  companyVectorDimensions: Record<string, Record<string, number>>;
   selectedTicker: string | null;
   onSelect: (ticker: string) => void;
   getTickerMeta: (ticker: string) => { sector: string; industry: string };
 }) {
-  const [articles, setArticles] = useState<ArticleImpact[]>([]);
+  const [articles, setArticles] = useState<SentimentArticleImpact[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [sort, setSort] = useState<SentimentSort>({ key: "s7d", dir: "desc" });
@@ -1757,7 +2159,7 @@ function SentimentView({
     setError(null);
     fetch("/api/screenings/news-impacts")
       .then(r => r.json())
-      .then((data: ArticleImpact[]) => setArticles(data))
+      .then((data: SentimentArticleImpact[]) => setArticles(data))
       .catch(() => setError("Failed to load news data"))
       .finally(() => setLoading(false));
   }, []);
@@ -1774,23 +2176,18 @@ function SentimentView({
 
   const rows = useMemo(() => {
     return symbols
-      .filter(s => {
-        const d = companyVectorDimensions[s];
-        return d && Object.keys(d).length > 0;
-      })
       .map(symbol => {
-        const dims = companyVectorDimensions[symbol];
         const { sector, industry } = getTickerMeta(symbol);
         return {
           symbol,
           sector,
           industry,
-          s7d: computeStockSentiment(articles, dims, cutoffs.c7),
-          s30d: computeStockSentiment(articles, dims, cutoffs.c30),
-          s90d: computeStockSentiment(articles, dims, cutoffs.c90),
+          s7d: computeStockSentiment(articles, symbol, cutoffs.c7),
+          s30d: computeStockSentiment(articles, symbol, cutoffs.c30),
+          s90d: computeStockSentiment(articles, symbol, cutoffs.c90),
         };
       });
-  }, [symbols, companyVectorDimensions, articles, cutoffs, getTickerMeta]);
+  }, [symbols, articles, cutoffs, getTickerMeta]);
 
   const maxAbs = useMemo(
     () => Math.max(...rows.flatMap(r => [Math.abs(r.s7d), Math.abs(r.s30d), Math.abs(r.s90d)]), 0.01),
@@ -1831,7 +2228,7 @@ function SentimentView({
       <p className="text-sm text-muted-foreground py-8 text-center">
         {articles.length === 0
           ? "No news data available."
-          : "None of the filtered stocks have a company vector. Run the vector builder first."}
+          : "No ticker sentiment data available for the filtered stocks."}
       </p>
     );
   }
@@ -2795,6 +3192,7 @@ export function ScreeningsUI({
     { id: "charts", label: "Charts", icon: <BarChart2 className="w-3.5 h-3.5" /> },
     { id: "news", label: "News Trend", icon: <Newspaper className="w-3.5 h-3.5" /> },
     { id: "sentiment", label: "Sentiment", icon: <Gauge className="w-3.5 h-3.5" /> },
+    { id: "relationship", label: "Relationships", icon: <Activity className="w-3.5 h-3.5" /> },
   ];
 
   const tradeMonitoringDisabled = !hasAnyPivotMarkers;
@@ -3075,7 +3473,13 @@ export function ScreeningsUI({
         ) : activeView === "sentiment" ? (
           <SentimentView
             symbols={filteredSymbols}
-            companyVectorDimensions={companyVectorDimensions}
+            selectedTicker={selectedTicker}
+            onSelect={setSelectedTicker}
+            getTickerMeta={getTickerMeta}
+          />
+        ) : activeView === "relationship" ? (
+          <RelationshipMapView
+            symbols={filteredSymbols}
             selectedTicker={selectedTicker}
             onSelect={setSelectedTicker}
             getTickerMeta={getTickerMeta}
