@@ -13,6 +13,7 @@ type ArticleRow = {
   title: string | null;
   url: string | null;
   source: string | null;
+  published_at: string | null;
   created_at: string;
   image_url: string | null;
 };
@@ -103,6 +104,21 @@ function formatUTC(iso: string): string {
     hour12: false,
     timeZone: "UTC",
   }).format(d);
+}
+
+function formatAgeSince(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "Unknown age";
+  const diffMs = Date.now() - d.getTime();
+  if (diffMs < 0) return "Just now";
+  const minute = 60_000;
+  const hour = 60 * minute;
+  const day = 24 * hour;
+  const week = 7 * day;
+  if (diffMs < hour) return `${Math.max(1, Math.floor(diffMs / minute))}m ago`;
+  if (diffMs < day) return `${Math.floor(diffMs / hour)}h ago`;
+  if (diffMs < week) return `${Math.floor(diffMs / day)}d ago`;
+  return `${Math.floor(diffMs / week)}w ago`;
 }
 
 function computeClusterProfile(impact: Record<string, number>) {
@@ -336,7 +352,7 @@ async function ArticleData({ params }: { params: Promise<{ slug?: string }> }) {
     dataClient
       .schema("swingtrader")
       .from("news_articles")
-      .select("id, slug, title, url, source, created_at, image_url")
+      .select("id, slug, title, url, source, published_at, created_at, image_url")
       .eq("slug", slug)
       .single<ArticleRow>(),
   ]);
@@ -409,6 +425,9 @@ async function ArticleData({ params }: { params: Promise<{ slug?: string }> }) {
       </div>
       <article className="rounded-xl border bg-card p-4 sm:p-6">
         <p className="text-xs uppercase tracking-wide text-muted-foreground">{article.source || "Unknown source"} · scanned {formatUTC(article.created_at)} UTC</p>
+        <p className="mt-1 text-xs text-muted-foreground">
+          Published {formatUTC(article.published_at ?? article.created_at)} UTC · {formatAgeSince(article.published_at ?? article.created_at)}
+        </p>
         <h1 className="mt-2 text-2xl font-semibold tracking-tight">{article.title || "Untitled article"}</h1>
         {article.image_url ? <div className="mt-4 overflow-hidden rounded-lg border"><img src={article.image_url} alt="" className="h-56 w-full object-cover" /></div> : null}
         <div className="mt-4">{article.url ? <Link href={article.url} target="_blank" rel="noreferrer" className="text-sm font-medium underline-offset-4 hover:underline">Read original article →</Link> : <p className="text-sm text-muted-foreground">Original article URL not available.</p>}</div>

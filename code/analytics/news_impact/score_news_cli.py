@@ -39,7 +39,8 @@ import logging
 import pathlib
 import re
 import sys
-from datetime import date
+from datetime import date, datetime, timezone
+from zoneinfo import ZoneInfo
 from typing import Optional
 
 from dotenv import load_dotenv
@@ -145,6 +146,49 @@ def _strip_html(html: str) -> str:
     text = _TAG_RE.sub(" ", html)
     text = _SPACE_RE.sub(" ", text)
     return text.strip()
+
+
+def _normalize_fmp_published_at(raw_value: Optional[str]) -> Optional[str]:
+    """
+    Normalize FMP publishedDate to UTC ISO-8601.
+
+    FMP news endpoint timestamps are treated as America/New_York when no
+    explicit timezone is present.
+    """
+    if raw_value is None:
+        return None
+    text = str(raw_value).strip()
+    if not text:
+        return None
+
+    # If timezone-aware already (Z or +/-hh:mm), parse directly.
+    try:
+        aware = datetime.fromisoformat(text.replace("Z", "+00:00"))
+        if aware.tzinfo is not None:
+            return aware.astimezone(timezone.utc).isoformat(timespec="seconds")
+    except Exception:
+        pass
+
+    # Naive timestamp from FMP: interpret as US Eastern time.
+    naive_candidates = (
+        "%Y-%m-%d %H:%M:%S",
+        "%Y-%m-%dT%H:%M:%S",
+        "%Y-%m-%d %H:%M",
+        "%Y-%m-%dT%H:%M",
+        "%Y-%m-%d",
+    )
+    naive_dt: Optional[datetime] = None
+    for fmt in naive_candidates:
+        try:
+            naive_dt = datetime.strptime(text, fmt)
+            break
+        except ValueError:
+            continue
+    if naive_dt is None:
+        return text
+
+    eastern = naive_dt.replace(tzinfo=ZoneInfo("America/New_York"))
+    return eastern.astimezone(timezone.utc).isoformat(timespec="seconds")
 
 
 # ── Article source loaders ───────────────────────────────────────────────────
@@ -564,7 +608,7 @@ async def _process_one_fmp_article(
     source = url
     publisher = article.get("publisher") or article.get("site") or None
     symbol = article.get("symbol", "")
-    published_at = article.get("publishedDate") or None
+    published_at = _normalize_fmp_published_at(article.get("publishedDate") or None)
     image_url = (article.get("image") or "").strip() or None
 
     if not summary and not url:

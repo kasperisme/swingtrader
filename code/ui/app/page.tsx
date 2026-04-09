@@ -92,7 +92,38 @@ type LandingArticle = {
   title: string | null;
   url: string | null;
   image_url: string | null;
+  published_at: string | null;
+  created_at: string;
 };
+
+function formatUTC(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "Unknown";
+  return new Intl.DateTimeFormat("en-GB", {
+    year: "numeric",
+    month: "short",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+    timeZone: "UTC",
+  }).format(d);
+}
+
+function formatAgeSince(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "Unknown age";
+  const diffMs = Date.now() - d.getTime();
+  if (diffMs < 0) return "Just now";
+  const minute = 60_000;
+  const hour = 60 * minute;
+  const day = 24 * hour;
+  const week = 7 * day;
+  if (diffMs < hour) return `${Math.max(1, Math.floor(diffMs / minute))}m ago`;
+  if (diffMs < day) return `${Math.floor(diffMs / hour)}h ago`;
+  if (diffMs < week) return `${Math.floor(diffMs / day)}d ago`;
+  return `${Math.floor(diffMs / week)}w ago`;
+}
 
 function LandingSnapshotFallback() {
   return (
@@ -125,7 +156,8 @@ async function LandingArticlesHeaderAndList() {
     const { data } = await supabase
       .schema("swingtrader")
       .from("news_articles")
-      .select("id, slug, title, url, image_url")
+      .select("id, slug, title, url, image_url, published_at, created_at")
+      .order("published_at", { ascending: false, nullsFirst: false })
       .order("created_at", { ascending: false })
       .limit(4);
     landingArticles = (data ?? []) as LandingArticle[];
@@ -136,7 +168,7 @@ async function LandingArticlesHeaderAndList() {
   return (
     <>
       <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-        {landingArticles.length > 0 ? "Latest scanned articles" : "Live narrative snapshot"}
+        {landingArticles.length > 0 ? "Latest articles" : "Live narrative snapshot"}
       </p>
       {landingArticles.length > 0 ? (
         <div className="mt-5 grid gap-3 sm:grid-cols-2">
@@ -163,6 +195,9 @@ async function LandingArticlesHeaderAndList() {
                 >
                   {article.title || article.url || "Untitled article"}
                 </Link>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  {formatAgeSince(article.published_at ?? article.created_at)}
+                </p>
               </div>
             </div>
           ))}
