@@ -98,6 +98,12 @@ export async function SiteHeader() {
             >
               Screenings
             </Link>
+            <Link
+              href="/protected/trades"
+              className="text-sm font-medium text-muted-foreground transition-colors hover:text-foreground"
+            >
+              Trades
+            </Link>
           </nav>
         ) : null}
       </div>
