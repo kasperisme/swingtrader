@@ -1,3 +1,17 @@
+export type DocPagePreview = {
+  _id: string;
+  title: string;
+  slug: string;
+  section: string | null;
+  order: number | null;
+  description: string;
+};
+
+export type DocPage = DocPagePreview & {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  body: any[];
+};
+
 export type BlogPostPreview = {
   _id: string;
   title: string;

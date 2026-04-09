@@ -227,6 +227,14 @@ def ensure_schema(client: Optional[Client] = None) -> None:
         cur.execute(
             f"ALTER TABLE {schema}.news_articles ADD COLUMN IF NOT EXISTS image_url TEXT"
         )
+        cur.execute(
+            f"ALTER TABLE {schema}.news_articles ADD COLUMN IF NOT EXISTS slug TEXT"
+        )
+        cur.execute(f"""
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_news_articles_slug_unique
+            ON {schema}.news_articles (slug)
+            WHERE slug IS NOT NULL AND trim(slug) <> ''
+        """)
 
         cur.execute(f"""
             CREATE TABLE IF NOT EXISTS {schema}.news_impact_heads (

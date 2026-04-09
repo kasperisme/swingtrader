@@ -47,6 +47,9 @@ python -m news_impact.score_news_cli --fmp-news --limit 20 --page 2
 #
 python -m news_impact.score_news_cli --fmp-news --sparse-fill N_DAYS M_NEW
 python -m news_impact.score_news_cli --fmp-news --sparse-fill 30 10
+
+# Same, but loop: fill the sparsest day, then the next sparsest, until every day in the window had a turn
+python -m news_impact.score_news_cli --fmp-news --sparse-fill 30 10 --sparse-fill-loop
 ```
 
 ## Options
@@ -69,6 +72,7 @@ python -m news_impact.score_news_cli --fmp-news --sparse-fill 30 10
 | `--from YYYY-MM-DD`          | —       | Start date filter for FMP fetch (inclusive)                                                                                                                                                                                                                                    |
 | `--to YYYY-MM-DD`            | —       | End date filter for FMP fetch (inclusive)                                                                                                                                                                                                                                      |
 | `--sparse-fill N_DAYS M_NEW` | —       | Query `news_articles` for per-day counts (UTC); choose the day with the fewest rows (earliest day on ties); fetch that day from FMP and paginate until `M_NEW` **new inserts** or API exhaustion. Overrides `--from`, `--to`, and `--page`. Requires DB (omit `--no-persist`). |
+| `--sparse-fill-loop`         | off     | With `--sparse-fill`: after each day’s run, re-query counts and process the **next** sparsest day (skipping days already done this run) until each day in the N-day window has had one pass. |
 
 ### Tickers and company scoring
 
@@ -139,6 +143,7 @@ python -m news_impact.score_news_cli --fmp-news --to 2025-11-30
 | `--refresh`                  | off     | Re-score existing DB article.                                           |
 | `--score-companies`          | off     | Compute tailwinds/headwinds vs company vectors.                         |
 | `--sparse-fill N_DAYS M_NEW` | —       | FMP: fill sparsest UTC day in the last `N_DAYS` until `M_NEW` new rows. |
+| `--sparse-fill-loop`         | off     | After each sparse day, continue with the next sparsest (see FMP options). |
 | `--source SOURCE`            | —       | Stored source label.                                                    |
 | `--text TEXT`                | —       | Inline article body (source mode).                                      |
 | `--tickers TICK ...`         | —       | Symbols for FMP filter and/or company scoring (see above).              |

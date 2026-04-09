@@ -1,5 +1,4 @@
 import Link from "next/link";
-import Image from "next/image";
 import { Suspense } from "react";
 import { ArrowRight, BarChart3, Compass, Filter, Newspaper, Target, Workflow } from "lucide-react";
 
@@ -129,10 +128,10 @@ async function LandingArticlesHeaderAndList() {
         {landingArticles.length > 0 ? "Latest scanned articles" : "Live narrative snapshot"}
       </p>
       {landingArticles.length > 0 ? (
-        <div className="mt-5 space-y-3">
+        <div className="mt-5 grid gap-3 sm:grid-cols-2">
           {landingArticles.map((article) => (
-            <div key={article.id} className="flex gap-3 rounded-lg border border-border bg-background p-3">
-              <div className="relative h-14 w-20 shrink-0 overflow-hidden rounded-md bg-muted">
+            <div key={article.id} className="rounded-lg border border-border bg-background p-3">
+              <div className="relative h-36 w-full overflow-hidden rounded-md bg-muted">
                 {article.image_url ? (
                   <img
                     src={article.image_url}
@@ -146,19 +145,13 @@ async function LandingArticlesHeaderAndList() {
                   </div>
                 )}
               </div>
-              <div className="min-w-0 flex-1">
-                {article.url ? (
-                  <Link
-                    href={article.url}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="text-sm font-medium leading-snug hover:underline"
-                  >
-                    {article.title || article.url}
-                  </Link>
-                ) : (
-                  <p className="text-sm font-medium leading-snug">{article.title || "Untitled article"}</p>
-                )}
+              <div className="mt-3 min-w-0">
+                <Link
+                  href={`/articles/${article.id}`}
+                  className="line-clamp-2 text-sm font-medium leading-snug hover:underline"
+                >
+                  {article.title || article.url || "Untitled article"}
+                </Link>
               </div>
             </div>
           ))}
@@ -187,21 +180,12 @@ export default function Home() {
     <main className="min-h-screen bg-background text-foreground">
       <div className="mx-auto max-w-6xl px-6 lg:px-8">
         <header className="flex items-center justify-between border-b border-border py-5">
-          <div className="flex items-center gap-2">
-            <Image
-              src="/icon.png"
-              alt="newsimpactscreener logo"
-              width={20}
-              height={20}
-              className="rounded-sm"
-            />
-            <p className="text-sm font-semibold tracking-tight">newsimpactscreener.com</p>
-          </div>
-          <div className="flex items-center gap-4">
-            <Link
-              href="/blog"
-              className="text-sm font-medium text-muted-foreground transition-colors hover:text-foreground"
-            >
+          <p className="text-sm font-semibold tracking-tight">newsimpactscreener.com</p>
+          <nav className="flex items-center gap-4">
+            <Link href="/docs" className="text-sm font-medium text-muted-foreground transition-colors hover:text-foreground">
+              Docs
+            </Link>
+            <Link href="/blog" className="text-sm font-medium text-muted-foreground transition-colors hover:text-foreground">
               Blog
             </Link>
             <Link
@@ -210,7 +194,7 @@ export default function Home() {
             >
               Sign in
             </Link>
-          </div>
+          </nav>
         </header>
 
         <section className="grid gap-12 py-16 md:grid-cols-2 md:items-center md:py-24">
@@ -243,7 +227,7 @@ export default function Home() {
             </div>
           </div>
 
-          <div className="rounded-2xl border border-border bg-card p-6 shadow-sm">
+          <div className="rounded-2xl bg-card p-6 shadow-sm">
             <Suspense
               fallback={
                 <>

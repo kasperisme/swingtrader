@@ -19,6 +19,7 @@ Usage:
     python -m news_impact.score_news_cli --fmp-news --limit 10
     python -m news_impact.score_news_cli --fmp-news --from 2025-09-09 --to 2025-12-10
     python -m news_impact.score_news_cli --fmp-news --sparse-fill 30 10
+    python -m news_impact.score_news_cli --fmp-news --sparse-fill 30 10 --sparse-fill-loop
 
     # Fetch FMP news filtered to specific tickers
     python -m news_impact.score_news_cli --fmp-news --tickers AAPL MSFT NVDA
@@ -323,6 +324,15 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
             "--to, and --page. Requires DB (no --no-persist)."
         ),
     )
+    parser.add_argument(
+        "--sparse-fill-loop",
+        action="store_true",
+        help=(
+            "With --sparse-fill: after each day finishes (M_NEW inserts or FMP exhausted), "
+            "re-query counts and take the next sparsest UTC day in the window, excluding days "
+            "already processed this run, until every day in the window has had one pass."
+        ),
+    )
 
     parser.add_argument(
         "--tickers", nargs="+", metavar="TICKER", default=None,
@@ -389,6 +399,9 @@ async def _main(argv: list[str] | None = None) -> None:
         if n_days < 1 or m_new < 1:
             console.print("[red]--sparse-fill requires N_DAYS >= 1 and M_NEW >= 1[/red]")
             sys.exit(1)
+    if args.sparse_fill_loop and args.sparse_fill is None:
+        console.print("[red]--sparse-fill-loop requires --sparse-fill N_DAYS M_NEW[/red]")
+        sys.exit(1)
 
     # FMP news batch mode — separate flow
     if args.fmp_news:
@@ -516,6 +529,19 @@ def _pick_sparsest_calendar_day(counts: dict[date, int]) -> date:
     min_c = min(counts.values())
     candidates = [d for d, c in counts.items() if c == min_c]
     return min(candidates)
+
+
+def _pick_sparsest_calendar_day_excluding(
+    counts: dict[date, int],
+    excluded: set[date],
+) -> date | None:
+    """Like `_pick_sparsest_calendar_day` but ignoring days in ``excluded``. None if none left."""
+    candidates = {d: c for d, c in counts.items() if d not in excluded}
+    if not candidates:
+        return None
+    min_c = min(candidates.values())
+    tie = [d for d, c in candidates.items() if c == min_c]
+    return min(tie)
 
 
 async def _process_one_fmp_article(
@@ -710,32 +736,18 @@ async def _process_fmp_news(args: argparse.Namespace) -> None:
         )
 
 
-async def _process_fmp_sparse_fill(args: argparse.Namespace) -> None:
-    """Pick sparsest UTC day in the last N days, then ingest until M new articles are inserted."""
-    assert args.sparse_fill is not None
-    n_days, m_new = args.sparse_fill
-
-    counts = count_news_articles_per_calendar_day_utc(n_days)
-    target_day = _pick_sparsest_calendar_day(counts)
-    min_count = counts[target_day]
-
-    console.print(
-        f"\n[bold]Sparse fill[/bold]: last [cyan]{n_days}[/cyan] UTC day(s) — "
-        f"sparsest day [green]{target_day.isoformat()}[/green] "
-        f"([bold]{min_count}[/bold] article(s) in DB). "
-        f"Target: [bold]{m_new}[/bold] new insert(s).\n",
-    )
-    for d in sorted(counts.keys()):
-        bar = "█" if d == target_day else "░"
-        console.print(f"  {bar} {d.isoformat()}  {counts[d]:>4} articles")
-
-    fetcher = FMPFetcher()
-    tickers = [t.upper() for t in args.tickers] if args.tickers else None
+async def _run_sparse_fill_for_day(
+    args: argparse.Namespace,
+    fetcher: FMPFetcher,
+    tickers: list[str] | None,
+    target_day: date,
+    m_new: int,
+    seen_urls: set[str],
+    seen_hashes: set[str],
+) -> int:
+    """Fetch/score FMP news for ``target_day`` until ``m_new`` new rows or FMP exhausted. Returns insert count."""
     day_iso = target_day.isoformat()
     page_limit = min(_FMP_NEWS_MAX_LIMIT, max(1, args.limit))
-
-    seen_urls: set[str] = set()
-    seen_hashes: set[str] = set()
     added = 0
     page = 0
 
@@ -778,11 +790,75 @@ async def _process_fmp_sparse_fill(args: argparse.Namespace) -> None:
 
     if added < m_new:
         console.print(
-            f"\n[yellow]Sparse fill stopped at {added}/{m_new} new articles "
+            f"\n[yellow]This day stopped at {added}/{m_new} new articles "
             f"(FMP exhausted or page cap {_FMP_NEWS_MAX_PAGE}).[/yellow]",
         )
     else:
-        console.print(f"\n[green]Sparse fill complete: {added} new article(s) inserted.[/green]")
+        console.print(f"\n[green]Day complete: {added} new article(s) inserted.[/green]")
+    return added
+
+
+async def _process_fmp_sparse_fill(args: argparse.Namespace) -> None:
+    """Pick sparsest UTC day(s) in the last N days, then ingest until M new articles per pass (optional loop)."""
+    assert args.sparse_fill is not None
+    n_days, m_new = args.sparse_fill
+    loop = bool(getattr(args, "sparse_fill_loop", False))
+
+    fetcher = FMPFetcher()
+    tickers = [t.upper() for t in args.tickers] if args.tickers else None
+    seen_urls: set[str] = set()
+    seen_hashes: set[str] = set()
+    excluded: set[date] = set()
+    round_idx = 0
+
+    while True:
+        counts = count_news_articles_per_calendar_day_utc(n_days)
+        if loop:
+            target_day = _pick_sparsest_calendar_day_excluding(counts, excluded)
+            if target_day is None:
+                console.print(
+                    "\n[dim]Sparse-fill loop: no remaining days in window (all processed).[/dim]",
+                )
+                break
+        else:
+            target_day = _pick_sparsest_calendar_day(counts)
+
+        min_count = counts[target_day]
+        round_idx += 1
+
+        if loop:
+            console.print(
+                f"\n[bold]Sparse fill[/bold] round [cyan]{round_idx}[/cyan] / up to [cyan]{n_days}[/cyan] — "
+                f"next sparsest day [green]{target_day.isoformat()}[/green] "
+                f"([bold]{min_count}[/bold] article(s) in DB). "
+                f"Target: [bold]{m_new}[/bold] new insert(s).\n",
+            )
+        else:
+            console.print(
+                f"\n[bold]Sparse fill[/bold]: last [cyan]{n_days}[/cyan] UTC day(s) — "
+                f"sparsest day [green]{target_day.isoformat()}[/green] "
+                f"([bold]{min_count}[/bold] article(s) in DB). "
+                f"Target: [bold]{m_new}[/bold] new insert(s).\n",
+            )
+
+        for d in sorted(counts.keys()):
+            bar = "█" if d == target_day else "░"
+            ex = " (done)" if d in excluded else ""
+            console.print(f"  {bar} {d.isoformat()}  {counts[d]:>4} articles{ex}")
+
+        await _run_sparse_fill_for_day(
+            args, fetcher, tickers, target_day, m_new, seen_urls, seen_hashes,
+        )
+
+        if not loop:
+            break
+
+        excluded.add(target_day)
+        if len(excluded) >= n_days:
+            console.print(
+                f"\n[dim]Sparse-fill loop finished: processed [cyan]{len(excluded)}[/cyan] day(s).[/dim]",
+            )
+            break
 
 
 def main(argv: list[str] | None = None) -> None:

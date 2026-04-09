@@ -53,6 +53,7 @@ const DIM_PALETTE = [
 
 type ViewMode = "daily" | "hourly";
 type BenchmarkId = "none" | "sp500" | "nasdaq100";
+type AggregationMode = "period" | "cumulative";
 
 type OhlcPoint = {
   date: string;
@@ -290,6 +291,27 @@ function applyDimensionMA(
   });
 }
 
+function accumulateSeries(
+  data: Array<{ date: string; [key: string]: number | string | null }>,
+  keys: string[],
+): Array<{ date: string; [key: string]: number | string | null }> {
+  const running: Record<string, number> = Object.fromEntries(keys.map((k) => [k, 0]));
+  const seen: Record<string, boolean> = Object.fromEntries(keys.map((k) => [k, false]));
+
+  return data.map((point) => {
+    const next: { date: string; [key: string]: number | string | null } = { date: point.date };
+    for (const key of keys) {
+      const raw = point[key];
+      if (typeof raw === "number" && Number.isFinite(raw)) {
+        running[key] += raw;
+        seen[key] = true;
+      }
+      next[key] = seen[key] ? running[key] : null;
+    }
+    return next;
+  });
+}
+
 // ── sub-components ───────────────────────────────────────────────────────────
 
 function Leaderboard({
@@ -299,6 +321,7 @@ function Leaderboard({
   onToggle,
   onDrilldown,
   maOff,
+  cumulative,
 }: {
   latest: Record<string, number | null>;
   selected: Set<string>;
@@ -306,6 +329,7 @@ function Leaderboard({
   onToggle: (id: string) => void;
   onDrilldown: (id: string) => void;
   maOff: boolean;
+  cumulative: boolean;
 }) {
   const sorted = CLUSTERS.map((c) => ({
     cluster: c,
@@ -320,7 +344,11 @@ function Leaderboard({
   return (
     <div className="flex flex-col gap-1">
       <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-2">
-        {maOff ? "Latest score" : "Latest MA score"}
+        {cumulative
+          ? "Latest cumulative score"
+          : maOff
+            ? "Latest score"
+            : "Latest MA score"}
       </p>
       {sorted.map(({ cluster, score }) => {
         const color = CLUSTER_COLORS[cluster.id];
@@ -614,6 +642,7 @@ function toDateInputValue(iso: string): string {
 export function NewsTrendsUI({ articles, chartHeight = 400 }: { articles: ArticleImpact[]; chartHeight?: number }) {
   const [viewMode, setViewMode] = useState<ViewMode>("daily");
   const [maWindow, setMaWindow] = useState(7);
+  const [aggregationMode, setAggregationMode] = useState<AggregationMode>("period");
   const [selected, setSelected] = useState<Set<string>>(
     new Set(CLUSTERS.map((c) => c.id)),
   );
@@ -673,10 +702,17 @@ export function NewsTrendsUI({ articles, chartHeight = 400 }: { articles: Articl
   }, [filteredArticles, viewMode, dateFrom, dateTo, minDate, maxDate]);
   const effectiveMaWindow = maWindow === 0 ? 1 : maWindow;
 
-  const chartData = useMemo(
+  const chartDataBase = useMemo(
     () => applyClusterMA(daily, effectiveMaWindow),
     [daily, effectiveMaWindow],
   );
+  const chartData = useMemo(() => {
+    if (aggregationMode === "period") return chartDataBase;
+    return accumulateSeries(
+      chartDataBase,
+      [...CLUSTERS.map((c) => c.id), "__clusterMean"],
+    );
+  }, [aggregationMode, chartDataBase]);
 
   useEffect(() => {
     const symbol = BENCHMARK_OPTIONS.find((b) => b.id === benchmark)?.symbol;
@@ -816,7 +852,7 @@ export function NewsTrendsUI({ articles, chartHeight = 400 }: { articles: Articl
     return cluster.dimensions;
   }, [drilldownId]);
 
-  const dimensionChartData = useMemo(() => {
+  const dimensionChartDataBase = useMemo(() => {
     if (!drilldownDims) return [];
     return applyDimensionMA(
       daily,
@@ -824,6 +860,10 @@ export function NewsTrendsUI({ articles, chartHeight = 400 }: { articles: Articl
       drilldownDims.map((d) => d.key),
     );
   }, [daily, effectiveMaWindow, drilldownDims]);
+  const dimensionChartData = useMemo(() => {
+    if (aggregationMode === "period" || !drilldownDims) return dimensionChartDataBase;
+    return accumulateSeries(dimensionChartDataBase, drilldownDims.map((d) => d.key));
+  }, [aggregationMode, dimensionChartDataBase, drilldownDims]);
 
   // Latest dimension scores for the drilled-down cluster
   const latestDimScores = useMemo(() => {
@@ -924,6 +964,29 @@ export function NewsTrendsUI({ articles, chartHeight = 400 }: { articles: Articl
             {opt.label}
           </button>
         ))}
+        <span className="text-xs text-muted-foreground ml-2">Series:</span>
+        <div className="flex rounded-md border border-border overflow-hidden text-xs">
+          <button
+            onClick={() => setAggregationMode("period")}
+            className={`px-2.5 py-1 transition-colors ${
+              aggregationMode === "period"
+                ? "bg-foreground text-background"
+                : "bg-background text-muted-foreground hover:text-foreground"
+            }`}
+          >
+            Period
+          </button>
+          <button
+            onClick={() => setAggregationMode("cumulative")}
+            className={`px-2.5 py-1 transition-colors ${
+              aggregationMode === "cumulative"
+                ? "bg-foreground text-background"
+                : "bg-background text-muted-foreground hover:text-foreground"
+            }`}
+          >
+            Cumulative
+          </button>
+        </div>
         <span className="text-xs text-muted-foreground ml-2">Overlay:</span>
         <select
           value={benchmark}
@@ -998,8 +1061,11 @@ export function NewsTrendsUI({ articles, chartHeight = 400 }: { articles: Articl
         <div className="flex-1 min-w-0">
           <div className="border rounded-xl p-4">
             <p className="text-xs text-muted-foreground mb-4">
-              Impact score −1 (bearish) → +1 (bullish) · Dashed line = cross-cluster
-              mean per period
+              {aggregationMode === "cumulative"
+                ? "Cumulative impact over time"
+                : "Impact score −1 (bearish) → +1 (bullish)"}{" "}
+              · Dashed line = cross-cluster
+              {aggregationMode === "cumulative" ? " cumulative mean" : " mean per period"}
               {maWindow === 0 ? " (no MA smoothing)" : ""} · Click score to show/hide ·{" "}
               <ChevronRight size={10} className="inline" /> to drill into
               dimensions · Drag on the chart or the range strip below to zoom the
@@ -1129,6 +1195,7 @@ export function NewsTrendsUI({ articles, chartHeight = 400 }: { articles: Articl
               onToggle={toggleCluster}
               onDrilldown={toggleDrilldown}
               maOff={maWindow === 0}
+              cumulative={aggregationMode === "cumulative"}
             />
           </div>
         </div>
