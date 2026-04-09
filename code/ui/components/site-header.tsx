@@ -7,8 +7,16 @@ import { LogoutButton } from "@/components/logout-button";
 function Logo() {
   return (
     <Link href="/" className="inline-flex items-center gap-2">
-      <Image src="/icon.png" alt="newsimpactscreener logo" width={20} height={20} className="rounded-sm" />
-      <span className="text-sm font-semibold tracking-tight">newsimpactscreener.com</span>
+      <Image
+        src="/icon.png"
+        alt="newsimpactscreener logo"
+        width={20}
+        height={20}
+        className="rounded-sm"
+      />
+      <span className="text-sm font-semibold tracking-tight">
+        newsimpactscreener
+      </span>
     </Link>
   );
 }
@@ -96,7 +104,9 @@ export async function SiteHeader() {
 
       {isAuthed ? (
         <div className="flex items-center gap-3">
-          <span className="hidden text-sm text-muted-foreground md:inline">{String(user?.email ?? "")}</span>
+          <span className="hidden text-sm text-muted-foreground md:inline">
+            {String(user?.email ?? "")}
+          </span>
           <LogoutButton />
         </div>
       ) : (

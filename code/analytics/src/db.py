@@ -235,6 +235,50 @@ def ensure_schema(client: Optional[Client] = None) -> None:
             ON {schema}.news_articles (slug)
             WHERE slug IS NOT NULL AND trim(slug) <> ''
         """)
+        cur.execute(f"""
+            CREATE OR REPLACE FUNCTION {schema}.set_news_article_slug()
+            RETURNS trigger
+            LANGUAGE plpgsql
+            AS $fn$
+            DECLARE
+                base_slug text;
+                candidate text;
+                suffix int := 2;
+            BEGIN
+                IF NEW.slug IS NOT NULL AND btrim(NEW.slug) <> '' THEN
+                    RETURN NEW;
+                END IF;
+
+                base_slug := regexp_replace(lower(COALESCE(NEW.title, '')), '[^a-z0-9]+', '-', 'g');
+                base_slug := btrim(base_slug, '-');
+                IF base_slug = '' THEN
+                    base_slug := 'article-' || left(COALESCE(NEW.article_hash, md5(random()::text)), 10);
+                END IF;
+
+                candidate := base_slug;
+                WHILE EXISTS (
+                    SELECT 1
+                    FROM {schema}.news_articles na
+                    WHERE na.slug = candidate
+                      AND (NEW.id IS NULL OR na.id <> NEW.id)
+                ) LOOP
+                    candidate := base_slug || '-' || suffix::text;
+                    suffix := suffix + 1;
+                END LOOP;
+
+                NEW.slug := candidate;
+                RETURN NEW;
+            END;
+            $fn$;
+        """)
+        cur.execute(f"DROP TRIGGER IF EXISTS trg_set_news_article_slug ON {schema}.news_articles")
+        cur.execute(f"""
+            CREATE TRIGGER trg_set_news_article_slug
+            BEFORE INSERT OR UPDATE OF title, article_hash, slug
+            ON {schema}.news_articles
+            FOR EACH ROW
+            EXECUTE FUNCTION {schema}.set_news_article_slug()
+        """)
 
         cur.execute(f"""
             CREATE TABLE IF NOT EXISTS {schema}.news_impact_heads (

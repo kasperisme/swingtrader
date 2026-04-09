@@ -86,6 +86,7 @@ function IconTile({ icon: Icon }: { icon: React.ComponentType<{ className?: stri
 
 type LandingArticle = {
   id: number;
+  slug: string | null;
   title: string | null;
   url: string | null;
   image_url: string | null;
@@ -114,7 +115,7 @@ async function LandingArticlesHeaderAndList() {
     const { data } = await supabase
       .schema("swingtrader")
       .from("news_articles")
-      .select("id, title, url, image_url")
+      .select("id, slug, title, url, image_url")
       .order("created_at", { ascending: false })
       .limit(4);
     landingArticles = (data ?? []) as LandingArticle[];
@@ -147,7 +148,7 @@ async function LandingArticlesHeaderAndList() {
               </div>
               <div className="mt-3 min-w-0">
                 <Link
-                  href={`/articles/${article.id}`}
+                  href={article.slug ? `/articles/${article.slug}` : `/articles/${article.id}`}
                   className="line-clamp-2 text-sm font-medium leading-snug hover:underline"
                 >
                   {article.title || article.url || "Untitled article"}
@@ -178,31 +179,13 @@ async function LandingArticlesHeaderAndList() {
 export default function Home() {
   return (
     <main className="min-h-screen bg-background text-foreground">
-      <div className="mx-auto max-w-6xl px-6 lg:px-8">
-        <header className="flex items-center justify-between border-b border-border py-5">
-          <p className="text-sm font-semibold tracking-tight">newsimpactscreener.com</p>
-          <nav className="flex items-center gap-4">
-            <Link href="/docs" className="text-sm font-medium text-muted-foreground transition-colors hover:text-foreground">
-              Docs
-            </Link>
-            <Link href="/blog" className="text-sm font-medium text-muted-foreground transition-colors hover:text-foreground">
-              Blog
-            </Link>
-            <Link
-              href="/auth/login"
-              className="rounded-md border border-border px-4 py-2 text-sm font-medium text-foreground transition-colors hover:bg-muted"
-            >
-              Sign in
-            </Link>
-          </nav>
-        </header>
-
-        <section className="grid gap-12 py-16 md:grid-cols-2 md:items-center md:py-24">
+      <div className="mx-auto max-w-6xl px-4 sm:px-6 lg:px-8">
+        <section className="grid gap-10 py-12 md:grid-cols-2 md:items-center md:gap-12 md:py-24">
           <div>
             <p className="text-sm font-medium text-muted-foreground">
               For retail and self-directed investors
             </p>
-            <h1 className="mt-4 text-4xl font-semibold tracking-tight sm:text-5xl">
+            <h1 className="mt-4 text-3xl font-semibold tracking-tight sm:text-4xl lg:text-5xl">
               News that matters—connected to stocks and sectors.
             </h1>
             <p className="mt-5 max-w-xl text-base leading-7 text-muted-foreground sm:text-lg">
@@ -247,8 +230,8 @@ export default function Home() {
           </div>
         </section>
 
-        <section className="border-t border-border py-16 md:py-20">
-          <div className="grid gap-4 md:grid-cols-3">
+        <section className="border-t border-border py-12 md:py-20">
+          <div className="grid gap-4 sm:grid-cols-2 md:grid-cols-3">
             {benefitCards.map((card) => (
               <article key={card.title} className="rounded-xl border border-border bg-card p-6 shadow-sm">
                 <IconTile icon={card.icon} />
@@ -259,9 +242,9 @@ export default function Home() {
           </div>
         </section>
 
-        <section id="how-it-works" className="border-t border-border py-16 md:py-20">
+        <section id="how-it-works" className="border-t border-border py-12 md:py-20">
           <h2 className="text-2xl font-semibold tracking-tight sm:text-3xl">How it works</h2>
-          <div className="mt-8 grid gap-4 md:grid-cols-3">
+          <div className="mt-6 grid gap-4 md:grid-cols-3">
             {howItWorksSteps.map((step, index) => (
               <div key={step} className="rounded-xl border border-border bg-card p-6">
                 <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Step {index + 1}</p>
@@ -271,14 +254,14 @@ export default function Home() {
           </div>
         </section>
 
-        <section className="border-t border-border py-16 md:py-20">
+        <section className="border-t border-border py-12 md:py-20">
           <h2 className="text-2xl font-semibold tracking-tight sm:text-3xl">Built for how retail investors research</h2>
           <p className="mt-3 max-w-2xl text-sm leading-6 text-muted-foreground">
             You don’t need a desk full of monitors. Follow themes, see exposure, and narrow ideas in
             one place—whether you invest for the long haul or trade a smaller sleeve of your
             portfolio.
           </p>
-          <div className="mt-8 grid gap-4 md:grid-cols-3">
+          <div className="mt-6 grid gap-4 sm:grid-cols-2 md:grid-cols-3">
             {productValueItems.map((item) => (
               <article key={item.title} className="rounded-xl border border-border bg-card p-6">
                 <IconTile icon={item.icon} />
@@ -289,9 +272,9 @@ export default function Home() {
           </div>
         </section>
 
-        <section className="border-t border-border py-16 md:py-20">
+        <section className="border-t border-border py-12 md:py-20">
           <h2 className="text-2xl font-semibold tracking-tight sm:text-3xl">Straight answers</h2>
-          <div className="mt-8 grid gap-4 md:grid-cols-3">
+          <div className="mt-6 grid gap-4 sm:grid-cols-2 md:grid-cols-3">
             {trustItems.map((item) => (
               <article key={item.title} className="rounded-xl border border-border bg-card p-6">
                 <h3 className="text-base font-semibold">{item.title}</h3>

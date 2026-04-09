@@ -8,7 +8,6 @@ Deduplicates by normalized URL when present, otherwise sha256(body).
 import hashlib
 import json
 import logging
-import re
 from datetime import datetime
 from typing import Optional
 from urllib.parse import urlsplit, urlunsplit
@@ -47,40 +46,6 @@ def _normalize_url(url: Optional[str]) -> str:
 
 def _tbl(client: Client, table: str):
     return client.schema(get_schema()).table(table)
-
-
-_SLUG_NON_ALNUM_RE = re.compile(r"[^a-z0-9]+")
-
-
-def _slugify_title(title: Optional[str]) -> str:
-    """
-    Convert title text to a URL-friendly slug (lowercase ASCII-ish).
-    Returns empty string when no usable title is present.
-    """
-    if not title:
-        return ""
-    s = str(title).strip().lower()
-    s = _SLUG_NON_ALNUM_RE.sub("-", s).strip("-")
-    return s
-
-
-def _slug_exists(client: Client, slug: str) -> bool:
-    res = _tbl(client, "news_articles").select("id").eq("slug", slug).limit(1).execute()
-    return bool(res.data)
-
-
-def _build_unique_slug(client: Client, title: Optional[str], article_hash: str) -> str:
-    """
-    Build a unique slug for news_articles.
-    Preferred base: slugified title. Fallback: article-{hashprefix}.
-    """
-    base = _slugify_title(title) or f"article-{article_hash[:10]}"
-    candidate = base
-    suffix = 2
-    while _slug_exists(client, candidate):
-        candidate = f"{base}-{suffix}"
-        suffix += 1
-    return candidate
 
 
 def _impact_for_article_id(client: Client, article_id: int) -> dict:
@@ -178,11 +143,9 @@ def _persist(
             }).eq("id", article_id).execute()
     else:
         url_stored = _normalize_url(url) if url else None
-        slug = _build_unique_slug(client, title, article_hash)
         row = {
             "created_at": now,
             "url": url_stored or url,
-            "slug": slug,
             "title": title,
             "body": body,
             "source": source,

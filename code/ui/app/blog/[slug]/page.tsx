@@ -39,7 +39,7 @@ export default async function BlogPostPage({ params }: Props) {
   }
 
   return (
-    <div className="mx-auto max-w-3xl px-6 py-14 md:py-20">
+    <div className="mx-auto max-w-3xl px-4 py-10 sm:px-6 md:py-20">
       <article className="mt-6">
         <p className="text-xs text-muted-foreground">{formatDate(post.publishedAt)}</p>
         <h1 className="mt-3 text-3xl font-semibold tracking-tight md:text-4xl">{post.title}</h1>

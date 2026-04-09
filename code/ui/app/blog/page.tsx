@@ -30,7 +30,7 @@ export default async function BlogPage() {
   const posts = await sanityFetch<BlogPostPreview[]>(blogPostPreviewsQuery);
 
   return (
-    <div className="mx-auto max-w-4xl px-6 py-14 md:py-20">
+    <div className="mx-auto max-w-4xl px-4 py-10 sm:px-6 md:py-20">
       <div className="flex items-center justify-between gap-3">
         <h1 className="text-3xl font-semibold tracking-tight">Blog</h1>
       </div>
@@ -40,7 +40,7 @@ export default async function BlogPage() {
       ) : (
         <div className="mt-8 space-y-4">
           {posts.map((post) => (
-            <article key={post._id} className="rounded-xl border border-border bg-card p-6">
+            <article key={post._id} className="rounded-xl border border-border bg-card p-4 sm:p-6">
               <p className="text-xs text-muted-foreground">{formatDate(post.publishedAt)}</p>
               <h2 className="mt-2 text-xl font-semibold tracking-tight">
                 <Link href={`/blog/${post.slug}`} className="transition-colors hover:text-primary">

@@ -1,4 +1,5 @@
 import { notFound } from "next/navigation";
+import { Suspense } from "react";
 import { PortableText } from "next-sanity";
 import { isSanityConfigured, sanityFetch } from "@/lib/sanity/client";
 import { docPageBySlugQuery, docPageSlugListQuery } from "@/lib/sanity/queries";
@@ -15,17 +16,13 @@ export async function generateStaticParams() {
 }
 
 export async function generateMetadata({ params }: Props) {
-  if (!isSanityConfigured) return {};
   const { slug } = await params;
-  const page = await sanityFetch<DocPage | null>(docPageBySlugQuery, { slug });
-  if (!page) return {};
   return {
-    title: `${page.title} | Docs | News Impact Screener`,
-    description: page.description || undefined,
+    title: `${slug} | Docs | News Impact Screener`,
   };
 }
 
-export default async function DocPageDetail({ params }: Props) {
+async function DocPageDetailData({ params }: Props) {
   if (!isSanityConfigured) {
     return (
       <div className="max-w-2xl">
@@ -65,5 +62,19 @@ export default async function DocPageDetail({ params }: Props) {
         <p className="mt-10 text-sm text-muted-foreground">Content coming soon.</p>
       )}
     </article>
+  );
+}
+
+export default function DocPageDetail({ params }: Props) {
+  return (
+    <Suspense
+      fallback={
+        <div className="max-w-2xl text-sm text-muted-foreground animate-pulse">
+          Loading doc page...
+        </div>
+      }
+    >
+      <DocPageDetailData params={params} />
+    </Suspense>
   );
 }
