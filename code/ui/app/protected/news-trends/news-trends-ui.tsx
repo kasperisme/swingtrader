@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import type { MouseEvent as ReactMouseEvent } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Brush,
   LineChart,
@@ -10,11 +11,12 @@ import {
   CartesianGrid,
   Tooltip,
   Legend,
+  ReferenceArea,
   ReferenceLine,
   ResponsiveContainer,
 } from "recharts";
 import type { MouseHandlerDataParam } from "recharts";
-import { TrendingUp, TrendingDown, Minus, ChevronRight, X } from "lucide-react";
+import { TrendingUp, TrendingDown, Minus, ChevronRight, Sparkles, X } from "lucide-react";
 import { CLUSTERS } from "../vectors/dimensions";
 import { fmpGetOhlc } from "@/app/actions/fmp";
 import { ArticlesGrid } from "@/components/articles-grid";
@@ -111,6 +113,41 @@ function formatBucket(bucket: string, mode: ViewMode): string {
     return `${datePart.slice(5)} ${hourPart}h`;
   }
   return bucket.slice(5); // "2024-01-15" → "01-15"
+}
+
+/** Articles whose time bucket falls in [startBucket, endBucket] (inclusive), using the same bucketing as the chart. */
+function articlesInBucketRange(
+  rows: ArticleImpact[],
+  startBucket: string,
+  endBucket: string,
+  mode: ViewMode,
+): ArticleImpact[] {
+  const lo = startBucket <= endBucket ? startBucket : endBucket;
+  const hi = startBucket <= endBucket ? endBucket : startBucket;
+  return rows.filter((a) => {
+    const b = toBucket(a.published_at, mode);
+    return b >= lo && b <= hi;
+  });
+}
+
+/**
+ * Recharts 3 does not run tooltip/mouse-sync on mousedown, so activeTooltipIndex is often
+ * undefined when the user clicks without a prior mousemove. Map clientX into band index using
+ * the wrapper rect and approximate plot gutters (Y-axis left, optional benchmark Y right).
+ */
+function clientXToDataIndex(
+  clientX: number,
+  chartRect: DOMRect,
+  dataLen: number,
+  plotLeftPx: number,
+  plotRightPx: number,
+): number {
+  if (dataLen < 2) return 0;
+  const innerW = Math.max(1, chartRect.width - plotLeftPx - plotRightPx);
+  const xRel = clientX - chartRect.left - plotLeftPx;
+  const t = xRel / innerW;
+  const clamped = Math.max(0, Math.min(1, t));
+  return Math.round(clamped * (dataLen - 1));
 }
 
 /** Compute per-period average impact per cluster and dimension */
@@ -837,15 +874,31 @@ export function NewsTrendsUI({ articles, chartHeight = 400 }: { articles: Articl
 
   const modalArticles = articleModalDate ? (articlesByBucket.get(articleModalDate) ?? []) : [];
 
-  /** X-axis zoom: Brush (below) + click-drag on chart; double-click resets */
+  /** X-axis zoom: Brush strip below the chart */
   const [brushRange, setBrushRange] = useState<{
     startIndex: number;
     endIndex: number;
   } | null>(null);
-  const dragStartRef = useRef<number | null>(null);
+
+  /** Click-drag on the chart: highlight a period (separate from brush zoom) */
+  const [rangeSelectDrag, setRangeSelectDrag] = useState<{
+    start: number;
+    cur: number;
+  } | null>(null);
+  const [periodSelection, setPeriodSelection] = useState<{
+    start: number;
+    end: number;
+  } | null>(null);
+  const [periodZeitgeistOpen, setPeriodZeitgeistOpen] = useState(false);
+  const rangeDragRef = useRef<{ start: number; cur: number } | null>(null);
+  const brushBlockRef = useRef(false);
+  /** Outer chart stack (plot uses full width); used with clientX for stable index mapping. */
+  const chartSelectAreaRef = useRef<HTMLDivElement>(null);
 
   const dataLen = chartDataWithBenchmark.length;
   const lastIdx = Math.max(0, dataLen - 1);
+  const plotLeftGutterPx = 40;
+  const plotRightGutterPx = benchmark !== "none" ? 56 : 12;
 
   const dataBoundsKey =
     dataLen > 0
@@ -854,6 +907,10 @@ export function NewsTrendsUI({ articles, chartHeight = 400 }: { articles: Articl
 
   useEffect(() => {
     setBrushRange(null);
+    setPeriodSelection(null);
+    setRangeSelectDrag(null);
+    rangeDragRef.current = null;
+    setPeriodZeitgeistOpen(false);
   }, [dataBoundsKey]);
 
   const brushStart = brushRange?.startIndex ?? 0;
@@ -867,35 +924,142 @@ export function NewsTrendsUI({ articles, chartHeight = 400 }: { articles: Articl
     }
   };
 
-  const toTooltipIndex = (state: MouseHandlerDataParam): number | undefined => {
-    const idx = state.activeTooltipIndex ?? state.activeIndex;
-    return typeof idx === "number" ? idx : undefined;
+  const applyRangeDragClientX = useCallback(
+    (clientX: number) => {
+      const d = rangeDragRef.current;
+      if (!d) return;
+      const node = chartSelectAreaRef.current;
+      if (!node || dataLen < 2) return;
+      const idx = clientXToDataIndex(
+        clientX,
+        node.getBoundingClientRect(),
+        dataLen,
+        plotLeftGutterPx,
+        plotRightGutterPx,
+      );
+      rangeDragRef.current = { start: d.start, cur: idx };
+      setRangeSelectDrag((prev) => (prev ? { start: prev.start, cur: idx } : null));
+    },
+    [dataLen, plotLeftGutterPx, plotRightGutterPx],
+  );
+
+  const finishRangeDrag = useCallback(() => {
+    const d = rangeDragRef.current;
+    if (!d) return;
+    rangeDragRef.current = null;
+    setRangeSelectDrag(null);
+    if (d.start === d.cur) {
+      setPeriodSelection(null);
+      setPeriodZeitgeistOpen(false);
+      return;
+    }
+    const lo = Math.min(d.start, d.cur);
+    const hi = Math.max(d.start, d.cur);
+    setPeriodSelection({ start: lo, end: hi });
+  }, []);
+
+  useEffect(() => {
+    window.addEventListener("mouseup", finishRangeDrag);
+    return () => window.removeEventListener("mouseup", finishRangeDrag);
+  }, [finishRangeDrag]);
+
+  useEffect(() => {
+    const onMove = (e: MouseEvent) => {
+      if (!rangeDragRef.current) return;
+      applyRangeDragClientX(e.clientX);
+    };
+    window.addEventListener("mousemove", onMove);
+    return () => window.removeEventListener("mousemove", onMove);
+  }, [applyRangeDragClientX]);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      if (periodZeitgeistOpen) {
+        setPeriodZeitgeistOpen(false);
+        return;
+      }
+      setPeriodSelection(null);
+      setRangeSelectDrag(null);
+      rangeDragRef.current = null;
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [periodZeitgeistOpen]);
+
+  const handleChartMouseDown = (
+    _state: MouseHandlerDataParam,
+    event?: ReactMouseEvent<SVGGraphicsElement>,
+  ) => {
+    if (brushBlockRef.current) {
+      brushBlockRef.current = false;
+      return;
+    }
+    if (dataLen < 2 || !event) return;
+    const node = chartSelectAreaRef.current;
+    if (!node) return;
+    const idx = clientXToDataIndex(
+      event.clientX,
+      node.getBoundingClientRect(),
+      dataLen,
+      plotLeftGutterPx,
+      plotRightGutterPx,
+    );
+    rangeDragRef.current = { start: idx, cur: idx };
+    setRangeSelectDrag({ start: idx, cur: idx });
   };
 
-  const handleChartMouseDown = (state: MouseHandlerDataParam) => {
-    const idx = toTooltipIndex(state);
-    if (idx !== undefined) dragStartRef.current = idx;
-  };
-
-  const handleChartMouseUp = (state: MouseHandlerDataParam) => {
-    const start = dragStartRef.current;
-    dragStartRef.current = null;
-    const end = toTooltipIndex(state);
-    if (start === null || end === undefined) return;
-    if (start === end) return;
-    const lo = Math.min(start, end);
-    const hi = Math.max(start, end);
-    if (hi <= lo) return;
-    handleBrushChange({ startIndex: lo, endIndex: hi });
+  const handleChartMouseMove = (
+    _state: MouseHandlerDataParam,
+    event?: ReactMouseEvent<SVGGraphicsElement>,
+  ) => {
+    if (!rangeDragRef.current || !event) return;
+    applyRangeDragClientX(event.clientX);
   };
 
   const handleChartDoubleClick = (state: MouseHandlerDataParam) => {
     setBrushRange(null);
-    const label = (state as any)?.activeLabel;
+    const label = (state as { activeLabel?: unknown })?.activeLabel;
     if (typeof label === "string") {
       setArticleModalDate(label);
     }
   };
+
+  const highlightLoHi = useMemo(() => {
+    if (rangeSelectDrag) {
+      return {
+        lo: Math.min(rangeSelectDrag.start, rangeSelectDrag.cur),
+        hi: Math.max(rangeSelectDrag.start, rangeSelectDrag.cur),
+      };
+    }
+    if (periodSelection) {
+      return {
+        lo: Math.min(periodSelection.start, periodSelection.end),
+        hi: Math.max(periodSelection.start, periodSelection.end),
+      };
+    }
+    return null;
+  }, [rangeSelectDrag, periodSelection]);
+
+  const periodArticles = useMemo(() => {
+    if (!periodSelection || chartDataWithBenchmark.length === 0) return [];
+    const lo = Math.min(periodSelection.start, periodSelection.end);
+    const hi = Math.max(periodSelection.start, periodSelection.end);
+    const startBucket = String(chartDataWithBenchmark[lo]?.date ?? "");
+    const endBucket = String(chartDataWithBenchmark[hi]?.date ?? "");
+    if (!startBucket || !endBucket) return [];
+    return articlesInBucketRange(filteredArticles, startBucket, endBucket, viewMode)
+      .slice()
+      .sort(
+        (a, b) =>
+          new Date(b.published_at).getTime() - new Date(a.published_at).getTime(),
+      );
+  }, [periodSelection, chartDataWithBenchmark, filteredArticles, viewMode]);
+
+  const explainIconIndex =
+    periodSelection && !rangeSelectDrag
+      ? Math.max(periodSelection.start, periodSelection.end)
+      : null;
 
   // Drill-down: dimension MA data for the selected cluster
   const drilldownDims = useMemo(() => {
@@ -1130,16 +1294,69 @@ export function NewsTrendsUI({ articles, chartHeight = 400 }: { articles: Articl
               {aggregationMode === "cumulative" ? " cumulative mean" : " mean per period"}
               {maWindow === 0 ? " (no MA smoothing)" : ""} · Click score to show/hide ·{" "}
               <ChevronRight size={10} className="inline" /> to drill into
-              dimensions · Drag on the chart or the range strip below to zoom the
-              time axis; double-click a point to view articles for that period
+              dimensions · Drag on the chart to select a time range (highlight); use
+              the strip below to zoom · Click the{" "}
+              <Sparkles size={10} className="inline text-primary" /> icon on the
+              selection for articles in that range (AI period summary later) ·
+              Double-click a point to view articles for that bucket
             </p>
-            <div className="select-none [&_.recharts-wrapper]:cursor-crosshair [&_.recharts-brush]:cursor-grab">
+            <div
+              ref={chartSelectAreaRef}
+              className="relative select-none [&_.recharts-wrapper]:cursor-crosshair [&_.recharts-brush]:cursor-grab"
+              onMouseDownCapture={(e) => {
+                const t = e.target as HTMLElement | null;
+                brushBlockRef.current = !!t?.closest?.(".recharts-brush");
+              }}
+            >
+              {explainIconIndex !== null &&
+                dataLen > 1 &&
+                !Number.isNaN(explainIconIndex) && (
+                  <div
+                    className="pointer-events-none absolute z-10"
+                    style={{
+                      top: 6,
+                      bottom: 42,
+                      left: 0,
+                      right: 0,
+                    }}
+                  >
+                    <div
+                      className="pointer-events-auto absolute top-1 flex items-center gap-0.5"
+                      style={{
+                        left: `calc(${plotLeftGutterPx}px + (100% - ${plotLeftGutterPx + plotRightGutterPx}px) * ${explainIconIndex / Math.max(1, dataLen - 1)})`,
+                        transform: "translateX(-50%)",
+                      }}
+                    >
+                      <button
+                        type="button"
+                        className="rounded-full border border-border bg-background/95 p-1.5 shadow-sm text-primary hover:bg-muted transition-colors"
+                        title="Period context — articles in this range (AI zeitgeist summary coming later)"
+                        aria-label="Open articles for selected period"
+                        onClick={() => setPeriodZeitgeistOpen(true)}
+                      >
+                        <Sparkles className="h-3.5 w-3.5" aria-hidden />
+                      </button>
+                      <button
+                        type="button"
+                        className="rounded-full border border-border bg-background/95 p-1 shadow-sm text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+                        title="Clear selection"
+                        aria-label="Clear period selection"
+                        onClick={() => {
+                          setPeriodSelection(null);
+                          setPeriodZeitgeistOpen(false);
+                        }}
+                      >
+                        <X className="h-3 w-3" aria-hidden />
+                      </button>
+                    </div>
+                  </div>
+                )}
               <ResponsiveContainer width="100%" height={chartHeight}>
                 <LineChart
                   data={chartDataWithBenchmark}
                   margin={{ top: 5, right: 10, left: 0, bottom: 8 }}
                   onMouseDown={handleChartMouseDown}
-                  onMouseUp={handleChartMouseUp}
+                  onMouseMove={handleChartMouseMove}
                   onDoubleClick={handleChartDoubleClick}
                 >
                 <CartesianGrid
@@ -1183,6 +1400,21 @@ export function NewsTrendsUI({ articles, chartHeight = 400 }: { articles: Articl
                   strokeOpacity={0.3}
                   strokeWidth={1}
                 />
+                {highlightLoHi &&
+                dataLen > 1 &&
+                chartDataWithBenchmark[highlightLoHi.lo]?.date != null &&
+                chartDataWithBenchmark[highlightLoHi.hi]?.date != null ? (
+                  <ReferenceArea
+                    x1={chartDataWithBenchmark[highlightLoHi.lo]!.date}
+                    x2={chartDataWithBenchmark[highlightLoHi.hi]!.date}
+                    stroke="hsl(var(--primary) / 0.4)"
+                    strokeWidth={1}
+                    fill="hsl(var(--primary) / 0.1)"
+                    fillOpacity={1}
+                    ifOverflow="visible"
+                    zIndex={0}
+                  />
+                ) : null}
                 <Tooltip
                   content={<CustomTooltip labelMap={clusterLabelMap} />}
                 />
@@ -1329,6 +1561,83 @@ export function NewsTrendsUI({ articles, chartHeight = 400 }: { articles: Articl
                   created_at: a.created_at ?? a.published_at,
                 }))}
               />
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Selected period — article list (placeholder for future AI zeitgeist + citations) */}
+      {periodZeitgeistOpen && periodSelection && chartDataWithBenchmark.length > 0 && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
+          onClick={() => setPeriodZeitgeistOpen(false)}
+        >
+          <div
+            className="bg-background border rounded-xl shadow-xl w-full max-w-2xl max-h-[80vh] flex flex-col mx-4"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between px-5 py-4 border-b shrink-0 gap-3">
+              <div className="min-w-0 flex-1">
+                <h2 className="font-semibold text-sm flex items-center gap-2">
+                  <Sparkles className="h-4 w-4 shrink-0 text-primary" aria-hidden />
+                  Period context
+                </h2>
+                <p className="text-xs text-muted-foreground mt-1">
+                  {formatBucket(
+                    String(
+                      chartDataWithBenchmark[
+                        Math.min(periodSelection.start, periodSelection.end)
+                      ]?.date ?? "",
+                    ),
+                    viewMode,
+                  )}
+                  {" → "}
+                  {formatBucket(
+                    String(
+                      chartDataWithBenchmark[
+                        Math.max(periodSelection.start, periodSelection.end)
+                      ]?.date ?? "",
+                    ),
+                    viewMode,
+                  )}
+                  {" · "}
+                  {periodArticles.length} article
+                  {periodArticles.length !== 1 ? "s" : ""}
+                </p>
+                <p className="text-[11px] text-muted-foreground/90 mt-2 leading-snug">
+                  For now this lists headlines in the selected range. Later, an AI
+                  summary of the period&apos;s zeitgeist will appear here with links back
+                  to these articles.
+                </p>
+              </div>
+              <button
+                onClick={() => setPeriodZeitgeistOpen(false)}
+                className="text-muted-foreground hover:text-foreground transition-colors shrink-0"
+                aria-label="Close"
+              >
+                <X size={16} />
+              </button>
+            </div>
+            <div className="overflow-y-auto p-4">
+              {periodArticles.length === 0 ? (
+                <p className="text-sm text-muted-foreground text-center py-8">
+                  No articles in this period (try a wider range or different date
+                  filters).
+                </p>
+              ) : (
+                <ArticlesGrid
+                  articles={periodArticles.map((a) => ({
+                    id: a.id ?? 0,
+                    slug: a.slug ?? null,
+                    title: a.title ?? null,
+                    url: a.url ?? null,
+                    image_url: a.image_url ?? null,
+                    source: a.source ?? null,
+                    published_at: a.published_at,
+                    created_at: a.created_at ?? a.published_at,
+                  }))}
+                />
+              )}
             </div>
           </div>
         </div>
