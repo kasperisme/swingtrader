@@ -12,6 +12,7 @@ from datetime import datetime
 from typing import Optional
 from urllib.parse import urlsplit, urlunsplit
 
+from postgrest.exceptions import APIError
 from supabase import Client
 
 from src.db import get_supabase_client, get_schema, _as_json, patch_news_article_image_if_missing
@@ -157,8 +158,25 @@ def _persist(
             row["publisher"] = publisher
         if image_url and str(image_url).strip():
             row["image_url"] = str(image_url).strip()
-        art_res = _tbl(client, "news_articles").insert(row).execute()
-        article_id = int(art_res.data[0]["id"])
+        try:
+            art_res = _tbl(client, "news_articles").insert(row).execute()
+            article_id = int(art_res.data[0]["id"])
+        except APIError as exc:
+            # Same body under another URL, race, or missed cache — reuse row and refresh heads.
+            if exc.code != "23505":
+                raise
+            combined = f"{exc.message or ''} {exc.details or ''}".lower()
+            if "article_hash" not in combined:
+                raise
+            existing_row = _check_existing(client, article_hash, url=url)
+            if existing_row is None:
+                raise
+            article_id = existing_row[0]
+            _delete_heads_and_vector(client, article_id)
+            if image_url and str(image_url).strip():
+                _tbl(client, "news_articles").update({
+                    "image_url": str(image_url).strip(),
+                }).eq("id", article_id).execute()
 
     # Insert one head row per cluster
     if heads:

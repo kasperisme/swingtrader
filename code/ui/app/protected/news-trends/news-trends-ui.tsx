@@ -17,10 +17,18 @@ import type { MouseHandlerDataParam } from "recharts";
 import { TrendingUp, TrendingDown, Minus, ChevronRight, X } from "lucide-react";
 import { CLUSTERS } from "../vectors/dimensions";
 import { fmpGetOhlc } from "@/app/actions/fmp";
+import { ArticlesGrid } from "@/components/articles-grid";
 
 export interface ArticleImpact {
   published_at: string;
   impact_json: Record<string, number>;
+  id?: number | null;
+  title?: string | null;
+  url?: string | null;
+  source?: string | null;
+  slug?: string | null;
+  image_url?: string | null;
+  created_at?: string | null;
 }
 
 // ── cluster palette ──────────────────────────────────────────────────────────
@@ -320,6 +328,7 @@ function Leaderboard({
   selected,
   drilldownId,
   onToggle,
+  onFocus,
   onDrilldown,
   maOff,
   cumulative,
@@ -328,6 +337,7 @@ function Leaderboard({
   selected: Set<string>;
   drilldownId: string | null;
   onToggle: (id: string) => void;
+  onFocus: (id: string) => void;
   onDrilldown: (id: string) => void;
   maOff: boolean;
   cumulative: boolean;
@@ -368,8 +378,9 @@ function Leaderboard({
             {/* Toggle visibility */}
             <button
               onClick={() => onToggle(cluster.id)}
+              onDoubleClick={(e) => { e.preventDefault(); onFocus(cluster.id); }}
               className={`flex items-center gap-2 flex-1 text-left min-w-0 ${!isSelected ? "opacity-50" : ""}`}
-              title="Toggle visibility in chart"
+              title="Click to toggle · Double-click to focus"
             >
               <span
                 className="w-2.5 h-2.5 rounded-full shrink-0"
@@ -492,6 +503,25 @@ function DimensionDrilldown({
   const dims = cluster.dimensions;
   const clusterColor = CLUSTER_COLORS[clusterId];
 
+  const allDimKeys = new Set(dims.map((d) => d.key));
+  const [selectedDims, setSelectedDims] = useState<Set<string>>(allDimKeys);
+
+  function toggleDim(key: string) {
+    setSelectedDims((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) { if (next.size > 1) next.delete(key); }
+      else next.add(key);
+      return next;
+    });
+  }
+
+  function focusDim(key: string) {
+    setSelectedDims((prev) => {
+      if (prev.size === 1 && prev.has(key)) return allDimKeys;
+      return new Set([key]);
+    });
+  }
+
   // Sort dimensions by latest score (desc)
   const sortedDims = [...dims].sort((a, b) => {
     const sa = latestDimScores[a.key] ?? 0;
@@ -564,6 +594,7 @@ function DimensionDrilldown({
                   stroke={DIM_PALETTE[i % DIM_PALETTE.length]}
                   dot={false}
                   strokeWidth={1.5}
+                  strokeOpacity={selectedDims.has(dim.key) ? 1 : 0.15}
                   connectNulls
                 />
               ))}
@@ -580,11 +611,14 @@ function DimensionDrilldown({
             const score = latestDimScores[dim.key];
             const isPos = score != null && score > 0.05;
             const isNeg = score != null && score < -0.05;
+            const isSelected = selectedDims.has(dim.key);
             return (
-              <div
+              <button
                 key={dim.key}
-                className="flex items-center gap-2 px-2 py-1 rounded text-xs"
-                title={dim.description}
+                onClick={() => toggleDim(dim.key)}
+                onDoubleClick={(e) => { e.preventDefault(); focusDim(dim.key); }}
+                className={`flex items-center gap-2 px-2 py-1 rounded text-xs w-full text-left transition-opacity hover:bg-muted/50 ${!isSelected ? "opacity-40" : ""}`}
+                title={`${dim.description} · Click to toggle · Double-click to focus`}
               >
                 <span
                   className="w-2 h-2 rounded-full shrink-0"
@@ -603,7 +637,7 @@ function DimensionDrilldown({
                     ? (score >= 0 ? "+" : "") + score.toFixed(2)
                     : "—"}
                 </span>
-              </div>
+              </button>
             );
           })}
         </div>
@@ -789,6 +823,20 @@ export function NewsTrendsUI({ articles, chartHeight = 400 }: { articles: Articl
     });
   }, [benchmark, benchmarkByBucket, chartData]);
 
+  const [articleModalDate, setArticleModalDate] = useState<string | null>(null);
+
+  const articlesByBucket = useMemo(() => {
+    const map = new Map<string, ArticleImpact[]>();
+    for (const a of articles) {
+      const bucket = toBucket(a.published_at, viewMode);
+      if (!map.has(bucket)) map.set(bucket, []);
+      map.get(bucket)!.push(a);
+    }
+    return map;
+  }, [articles, viewMode]);
+
+  const modalArticles = articleModalDate ? (articlesByBucket.get(articleModalDate) ?? []) : [];
+
   /** X-axis zoom: Brush (below) + click-drag on chart; double-click resets */
   const [brushRange, setBrushRange] = useState<{
     startIndex: number;
@@ -841,8 +889,12 @@ export function NewsTrendsUI({ articles, chartHeight = 400 }: { articles: Articl
     handleBrushChange({ startIndex: lo, endIndex: hi });
   };
 
-  const handleChartDoubleClick = () => {
+  const handleChartDoubleClick = (state: MouseHandlerDataParam) => {
     setBrushRange(null);
+    const label = (state as any)?.activeLabel;
+    if (typeof label === "string") {
+      setArticleModalDate(label);
+    }
   };
 
   // Drill-down: dimension MA data for the selected cluster
@@ -882,6 +934,15 @@ export function NewsTrendsUI({ articles, chartHeight = 400 }: { articles: Articl
       CLUSTERS.map((c) => [c.id, last[c.id] as number | null]),
     );
   }, [chartData]);
+
+  function focusCluster(id: string) {
+    setSelected((prev) => {
+      const allIds = new Set(CLUSTERS.map((c) => c.id));
+      // If already focused on this one, restore all
+      if (prev.size === 1 && prev.has(id)) return allIds;
+      return new Set([id]);
+    });
+  }
 
   function toggleCluster(id: string) {
     setSelected((prev) => {
@@ -1070,7 +1131,7 @@ export function NewsTrendsUI({ articles, chartHeight = 400 }: { articles: Articl
               {maWindow === 0 ? " (no MA smoothing)" : ""} · Click score to show/hide ·{" "}
               <ChevronRight size={10} className="inline" /> to drill into
               dimensions · Drag on the chart or the range strip below to zoom the
-              time axis; double-click the chart to reset zoom
+              time axis; double-click a point to view articles for that period
             </p>
             <div className="select-none [&_.recharts-wrapper]:cursor-crosshair [&_.recharts-brush]:cursor-grab">
               <ResponsiveContainer width="100%" height={chartHeight}>
@@ -1194,6 +1255,7 @@ export function NewsTrendsUI({ articles, chartHeight = 400 }: { articles: Articl
               selected={selected}
               drilldownId={drilldownId}
               onToggle={toggleCluster}
+              onFocus={focusCluster}
               onDrilldown={toggleDrilldown}
               maOff={maWindow === 0}
               cumulative={aggregationMode === "cumulative"}
@@ -1228,6 +1290,49 @@ export function NewsTrendsUI({ articles, chartHeight = 400 }: { articles: Articl
           is a headwind for this dimension
         </span>
       </div>
+
+      {/* Articles modal */}
+      {articleModalDate && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
+          onClick={() => setArticleModalDate(null)}
+        >
+          <div
+            className="bg-background border rounded-xl shadow-xl w-full max-w-2xl max-h-[80vh] flex flex-col mx-4"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between px-5 py-4 border-b shrink-0">
+              <h2 className="font-semibold text-sm">
+                Articles · {formatBucket(articleModalDate, viewMode)}
+              </h2>
+              <span className="text-xs text-muted-foreground mr-auto ml-3">
+                {modalArticles.length} article{modalArticles.length !== 1 ? "s" : ""}
+              </span>
+              <button
+                onClick={() => setArticleModalDate(null)}
+                className="text-muted-foreground hover:text-foreground transition-colors"
+                aria-label="Close"
+              >
+                <X size={16} />
+              </button>
+            </div>
+            <div className="overflow-y-auto p-4">
+              <ArticlesGrid
+                articles={modalArticles.map((a) => ({
+                  id: a.id ?? 0,
+                  slug: a.slug ?? null,
+                  title: a.title ?? null,
+                  url: a.url ?? null,
+                  image_url: a.image_url ?? null,
+                  source: a.source ?? null,
+                  published_at: a.published_at,
+                  created_at: a.created_at ?? a.published_at,
+                }))}
+              />
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

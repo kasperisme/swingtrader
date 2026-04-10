@@ -16,53 +16,87 @@ from typing import Optional
 from news_impact.dimensions import CLUSTERS, DIMENSION_MAP
 from news_impact.ollama_client import chat as _ollama_chat, OllamaError
 from news_impact.anthropic_client import chat as _anthropic_chat, AnthropicError
+from news_impact.do_agent_client import chat as _do_agent_chat, GenAIAgentError
 
-# Select backend via NEWS_IMPACT_BACKEND=ollama (default) | anthropic
-_BACKEND = os.environ.get("NEWS_IMPACT_BACKEND", "ollama").lower()
+# NEWS_IMPACT_BACKEND=ollama (default) | anthropic | do_agent
+_raw_backend = os.environ.get("NEWS_IMPACT_BACKEND", "ollama").lower()
+_BACKEND = _raw_backend if _raw_backend in ("ollama", "anthropic", "do_agent") else "ollama"
 
-LLMError = OllamaError if _BACKEND != "anthropic" else AnthropicError
+
+def _llm_error_class() -> type[Exception]:
+    if _BACKEND == "anthropic":
+        return AnthropicError
+    if _BACKEND == "do_agent":
+        return GenAIAgentError
+    return OllamaError
+
+
+LLMError = _llm_error_class()
+
+
+def _sync_concurrency_from_backend() -> None:
+    """Reset head concurrency and semaphore when backend or env changes."""
+    global _CONCURRENCY, _sem
+    _sem = None
+    if _BACKEND == "anthropic":
+        _CONCURRENCY = int(
+            os.environ.get("ANTHROPIC_CONCURRENCY", os.environ.get("OLLAMA_CONCURRENCY", "8"))
+        )
+    elif _BACKEND == "do_agent":
+        _CONCURRENCY = int(os.environ.get("DO_GENAI_AGENT_CONCURRENCY", "4"))
+    else:
+        _CONCURRENCY = int(os.environ.get("OLLAMA_CONCURRENCY", "1"))
 
 
 def set_news_impact_backend(backend: str) -> None:
     """
-    Override the LLM backend for this process (``ollama`` or ``anthropic``).
+    Override the LLM backend for this process (``ollama``, ``anthropic``, or ``do_agent``).
 
     Updates ``os.environ[\"NEWS_IMPACT_BACKEND\"]`` so downstream code agrees.
     Used by ``score_news_cli --news-impact-backend``.
     """
     global _BACKEND, LLMError
     b = backend.strip().lower()
-    if b not in ("ollama", "anthropic"):
-        raise ValueError("NEWS_IMPACT_BACKEND must be 'ollama' or 'anthropic'")
+    if b not in ("ollama", "anthropic", "do_agent"):
+        raise ValueError(
+            "NEWS_IMPACT_BACKEND must be 'ollama', 'anthropic', or 'do_agent'"
+        )
     os.environ["NEWS_IMPACT_BACKEND"] = b
     _BACKEND = b
-    LLMError = OllamaError if _BACKEND != "anthropic" else AnthropicError
+    LLMError = _llm_error_class()
+    _sync_concurrency_from_backend()
 
 
 async def _chat(prompt: str, system: str, model: Optional[str], timeout: float) -> tuple[str, int]:
     if _BACKEND == "anthropic":
         return await _anthropic_chat(prompt=prompt, system=system, model=model, timeout=timeout)
+    if _BACKEND == "do_agent":
+        return await _do_agent_chat(prompt=prompt, system=system, model=model, timeout=timeout)
     return await _ollama_chat(prompt=prompt, system=system, model=model, timeout=timeout)
 
 
 def _default_model() -> str:
     if _BACKEND == "anthropic":
         return os.environ.get("ANTHROPIC_IMPACT_MODEL", "claude-haiku-4-5-20251001")
+    if _BACKEND == "do_agent":
+        return os.environ.get("DO_GENAI_AGENT_MODEL", "do-agent")
     return os.environ.get("OLLAMA_IMPACT_MODEL", "devstral")
 
 
 def _default_timeout() -> float:
     if _BACKEND == "anthropic":
         return float(os.environ.get("ANTHROPIC_TIMEOUT", "60"))
+    if _BACKEND == "do_agent":
+        return float(os.environ.get("DO_GENAI_AGENT_TIMEOUT", os.environ.get("OLLAMA_TIMEOUT", "120")))
     return float(os.environ.get("OLLAMA_TIMEOUT", "120"))
+
 
 logger = logging.getLogger(__name__)
 
-# Ollama processes one request at a time on a single GPU. Running all 8 heads
-# in parallel fills the queue and causes later ones to time out.
-# Limit concurrency to 1 (sequential) by default; raise via OLLAMA_CONCURRENCY.
-_CONCURRENCY = int(os.environ.get("OLLAMA_CONCURRENCY", "1"))
-_sem: asyncio.Semaphore | None = None   # created lazily inside the running loop
+# Concurrency: Ollama defaults to 1 (single GPU); cloud backends allow higher defaults.
+_CONCURRENCY = 1
+_sem: asyncio.Semaphore | None = None  # created lazily inside the running loop
+_sync_concurrency_from_backend()
 
 
 def _get_semaphore() -> asyncio.Semaphore:
@@ -106,7 +140,7 @@ Dimensions:
 Article:
 {article}
 
-Return ONLY valid JSON, no markdown, no explanation outside the JSON:
+Return ONLY valid JSON, no markdown, no preamble, no chain-of-thought — start your reply with {{ and end with }}.
 {{
   "scores": {{"dimension_key": float}},
   "reasoning": {{"dimension_key": "one sentence"}},
@@ -118,6 +152,43 @@ If the article is unrelated to this cluster, return confidence: 0.0 and empty sc
 
 _FENCE_RE   = re.compile(r"^```(?:json)?\s*|\s*```$", re.MULTILINE)
 _PLUS_RE    = re.compile(r'(?<!["\w])\+(\d)')   # strip leading + from JSON numbers
+
+
+def _slice_outer_json_object(s: str) -> str | None:
+    """
+    Find the first top-level JSON object in ``s`` using brace depth, ignoring
+    braces inside quoted strings. Returns None if there is no balanced object.
+    """
+    start = s.find("{")
+    if start < 0:
+        return None
+    depth = 0
+    i = start
+    in_string = False
+    escape = False
+    while i < len(s):
+        c = s[i]
+        if in_string:
+            if escape:
+                escape = False
+            elif c == "\\":
+                escape = True
+            elif c == '"':
+                in_string = False
+            i += 1
+            continue
+        if c == '"':
+            in_string = True
+            i += 1
+            continue
+        if c == "{":
+            depth += 1
+        elif c == "}":
+            depth -= 1
+            if depth == 0:
+                return s[start : i + 1]
+        i += 1
+    return None
 
 
 @dataclass
@@ -160,13 +231,19 @@ def _extract_json_object(raw: str) -> str:
     Best-effort normalization for LLM JSON responses:
     - remove markdown fences
     - strip illegal leading '+' on JSON numbers
-    - keep only text through the last closing brace to drop trailing commentary
+    - isolate the first balanced ``{...}`` object (skips reasoning preamble before JSON)
+    - else fall back to substring from first ``{`` through last ``}``
     """
     cleaned = _FENCE_RE.sub("", raw).strip()
     cleaned = _PLUS_RE.sub(r"\1", cleaned)
-    brace = cleaned.rfind("}")
-    if brace != -1:
-        cleaned = cleaned[: brace + 1]
+    balanced = _slice_outer_json_object(cleaned)
+    if balanced is not None:
+        return _PLUS_RE.sub(r"\1", balanced)
+    first = cleaned.find("{")
+    if first >= 0:
+        last = cleaned.rfind("}")
+        if last > first:
+            return _PLUS_RE.sub(r"\1", cleaned[first : last + 1])
     return cleaned
 
 
@@ -182,8 +259,8 @@ def _parse_head_response(raw: str, cluster: str) -> tuple[dict, dict, float]:
     try:
         data = json.loads(cleaned)
     except json.JSONDecodeError:
-        # Try to salvage scores from truncated response
-        partial_scores = _extract_scores_partial(cleaned)
+        # Try to salvage scores from truncated response (search full raw too — preamble may confuse slice)
+        partial_scores = _extract_scores_partial(cleaned) or _extract_scores_partial(raw)
         if partial_scores:
             logger.debug("[impact_scorer] %s: truncated JSON — recovered scores via regex", cluster)
             data = {"scores": partial_scores, "reasoning": {}, "confidence": 0.5}

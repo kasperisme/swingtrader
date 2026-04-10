@@ -11,8 +11,9 @@ Usage:
     python -m news_impact.score_news_cli --url "https://..."
     python -m news_impact.score_news_cli --file article.txt
 
-    # Use Anthropic instead of Ollama for LLM heads (overrides NEWS_IMPACT_BACKEND)
+    # Use Anthropic or DigitalOcean GenAI Agent instead of Ollama (overrides NEWS_IMPACT_BACKEND)
     python -m news_impact.score_news_cli --text "..." --news-impact-backend anthropic
+    python -m news_impact.score_news_cli --text "..." --news-impact-backend do_agent
 
     # Fetch and embed latest news from FMP (market-wide)
     python -m news_impact.score_news_cli --fmp-news
@@ -424,10 +425,10 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--news-impact-backend",
         dest="news_impact_backend",
-        choices=["ollama", "anthropic"],
+        choices=["ollama", "anthropic", "do_agent"],
         default=None,
         metavar="BACKEND",
-        help="Override NEWS_IMPACT_BACKEND for this run (ollama or anthropic; default: env or ollama)",
+        help="Override NEWS_IMPACT_BACKEND (ollama, anthropic, do_agent; default: env or ollama)",
     )
     parser.add_argument("--verbose", "-v", action="store_true", help="Debug logging")
     return parser.parse_args(argv)
@@ -663,7 +664,9 @@ async def _process_one_fmp_article(
         )
         return False
 
-    if not url_norm and article_hash in seen_hashes:
+    # Same body can appear under multiple URLs in one FMP batch; always dedupe by hash
+    # in-memory (not only when url is missing) to avoid unique violations on article_hash.
+    if article_hash in seen_hashes:
         console.print(
             "  [dim]skipped — same article body already processed in this run[/dim]",
         )
@@ -737,8 +740,7 @@ async def _process_one_fmp_article(
 
     if url_norm:
         seen_urls.add(url_norm)
-    else:
-        seen_hashes.add(article_hash)
+    seen_hashes.add(article_hash)
 
     top = top_dimensions(impact, n=3)
     top_str = "  ".join(f"{d} {s:+.2f}" for d, s in top) if top else "no signals"

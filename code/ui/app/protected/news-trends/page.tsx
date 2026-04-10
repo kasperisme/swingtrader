@@ -13,7 +13,7 @@ async function fetchImpactData(): Promise<ArticleImpact[]> {
     const { data, error } = await supabase
       .schema("swingtrader")
       .from("news_impact_vectors")
-      .select("impact_json, created_at, news_articles(published_at)")
+      .select("impact_json, created_at, news_articles(id, published_at, title, url, source, slug, image_url, created_at)")
       .order("created_at", { ascending: true })
       .range(from, to);
 
@@ -32,7 +32,14 @@ async function fetchImpactData(): Promise<ArticleImpact[]> {
 
   return allRows.map((row: any) => ({
     impact_json: row.impact_json,
+    id: row.news_articles?.id ?? null,
     published_at: row.news_articles?.published_at ?? row.created_at,
+    title: row.news_articles?.title ?? null,
+    url: row.news_articles?.url ?? null,
+    source: row.news_articles?.source ?? null,
+    slug: row.news_articles?.slug ?? null,
+    image_url: row.news_articles?.image_url ?? null,
+    created_at: row.news_articles?.created_at ?? row.created_at,
   }));
 }
 

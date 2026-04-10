@@ -102,7 +102,7 @@ python -m news_impact.score_news_cli --fmp-news --sparse-fill 30 10 --sparse-fil
 
 | Flag                       | Description                                                                                    |
 | -------------------------- | ---------------------------------------------------------------------------------------------- |
-| `--news-impact-backend`    | `ollama` or `anthropic` — overrides `NEWS_IMPACT_BACKEND` for this run (default: env / ollama) |
+| `--news-impact-backend`    | `ollama`, `anthropic`, or `do_agent` — overrides `NEWS_IMPACT_BACKEND` (default: env / ollama) |
 | `--verbose` / `-v`         | Debug logging                                                                                  |
 
 ### Date range filtering with `--from` / `--to`
@@ -136,7 +136,7 @@ python -m news_impact.score_news_cli --fmp-news --to 2025-11-30
 | `--fmp-news`                 | off     | Batch mode: fetch and score stock news from FMP.                        |
 | `--from DATE`                | —       | FMP: inclusive start date (`YYYY-MM-DD`).                               |
 | `--limit N`                  | `20`    | FMP: max articles per request (≤ 250).                                  |
-| `--news-impact-backend`      | —       | `ollama` or `anthropic`; overrides `NEWS_IMPACT_BACKEND` for this run. |
+| `--news-impact-backend`      | —       | `ollama`, `anthropic`, or `do_agent`; overrides `NEWS_IMPACT_BACKEND`.   |
 | `--no-persist`               | off     | Do not write to Supabase.                                               |
 | `--page N`                   | `0`     | FMP: pagination index (≤ 100).                                          |
 | `--published-at ISO`         | —       | Stored publication timestamp.                                           |
@@ -210,14 +210,28 @@ TAILWINDS              HEADWINDS
 
 | Variable                 | Default                   | Description                                                                 |
 | ------------------------ | ------------------------- | --------------------------------------------------------------------------- |
-| `NEWS_IMPACT_BACKEND`    | `ollama`                  | `ollama` or `anthropic`. Per-run override: `--news-impact-backend BACKEND`. |
+| `NEWS_IMPACT_BACKEND`    | `ollama`                  | `ollama`, `anthropic`, or `do_agent`. Override: `--news-impact-backend`.   |
 | `OLLAMA_IMPACT_MODEL`    | `devstral`                | Ollama model name                                                           |
 | `OLLAMA_BASE_URL`        | `http://localhost:11434`  | Ollama endpoint                                                             |
 | `OLLAMA_CONCURRENCY`     | `1`                       | Concurrent Ollama requests (keep at 1 for single-GPU)                       |
-| `OLLAMA_TIMEOUT`         | `120`                     | Per-request timeout in seconds                                              |
+| `OLLAMA_TIMEOUT`         | `120`                     | Per-request timeout (Ollama; fallback for `do_agent` if unset)              |
 | `OLLAMA_NUM_PREDICT`     | `1024`                    | Max tokens per LLM response                                                 |
+| `DO_GENAI_AGENT_BASE_URL`| see `do_agent_client`     | DigitalOcean GenAI Agent base URL (no trailing slash)                       |
+| `DO_GENAI_AGENT_API_KEY` | —                         | Bearer token for `/api/v1/chat/completions`                                |
+| `DO_GENAI_AGENT_TIMEOUT` | `120`                     | Per-request timeout for GenAI Agent                                         |
+| `DO_GENAI_AGENT_MAX_TOKENS` | `4096`                 | Max completion tokens (reasoning models often need ≥4k to finish JSON)      |
+| `DO_GENAI_AGENT_MODEL`   | `do-agent`                | Label stored in head rows (agent picks model server-side)                   |
+| `DO_GENAI_AGENT_CONCURRENCY` | `4`                   | Parallel head requests against GenAI Agent                                  |
+| `DO_GENAI_AGENT_RETRIEVAL` | `none`                  | `none` \| `rewrite` \| `step_back` \| `sub_queries` (RAG behaviour)         |
+| `DO_GENAI_AGENT_LOG_FULL_RESPONSE` | off             | Set to `1` / `true` / `yes` to print each raw HTTP body to **stderr** (debug). |
+| `ANTHROPIC_API_KEY`      | —                         | Required when `NEWS_IMPACT_BACKEND=anthropic`                                 |
+| `ANTHROPIC_IMPACT_MODEL` | `claude-haiku-4-5-...`    | Anthropic model id                                                          |
+| `ANTHROPIC_CONCURRENCY`  | `8`                       | Parallel heads (anthropic); falls back to `OLLAMA_CONCURRENCY` if set      |
+| `ANTHROPIC_TIMEOUT`      | `60`                      | Per-request timeout (anthropic)                                              |
 | `FMP_API_KEY`            | —                         | Required only when fetching company vectors                                 |
 | `HANS_DUCKDB_PATH`       | `data/swingtrader.duckdb` | DuckDB file path                                                            |
+
+For GenAI Agent: models such as Qwen3 may leave `content` empty and put text in `reasoning_content`; the client uses that as a fallback. If JSON responses truncate, increase `DO_GENAI_AGENT_MAX_TOKENS`.
 
 ## Pulling the default model
 
@@ -226,3 +240,7 @@ ollama pull devstral
 ```
 
 Faster alternatives (lower quality): `qwen2.5:7b`, `llama3.2:3b`
+
+### DigitalOcean GenAI Agent (`do_agent`)
+
+The scorer calls `POST /api/v1/chat/completions` with Bearer auth (OpenAI-style `messages`, `stream: false`). Discover parameters on your deployment via `https://<agent-host>/openapi.json`. Set `NEWS_IMPACT_BACKEND=do_agent`, `DO_GENAI_AGENT_API_KEY`, and `DO_GENAI_AGENT_BASE_URL` if not using the default in `do_agent_client.py`. Use `DO_GENAI_AGENT_RETRIEVAL=none` for scoring without knowledge-base retrieval (default).
