@@ -16,6 +16,7 @@ import {
 import type { MouseHandlerDataParam } from "recharts";
 import { TrendingUp, TrendingDown, Minus, ChevronRight, X } from "lucide-react";
 import { CLUSTERS } from "../vectors/dimensions";
+import { fmpGetOhlc } from "@/app/actions/fmp";
 
 export interface ArticleImpact {
   published_at: string;
@@ -723,10 +724,10 @@ export function NewsTrendsUI({ articles, chartHeight = 400 }: { articles: Articl
 
     let cancelled = false;
     const interval = viewMode === "hourly" ? "1hour" : "1day";
-    fetch(`/api/fmp/ohlc?symbol=${encodeURIComponent(symbol)}&interval=${interval}`)
-      .then(async (res) => {
+    fmpGetOhlc(symbol, interval)
+      .then((res) => {
         if (!res.ok) throw new Error("Failed benchmark fetch");
-        const raw = (await res.json()) as Array<{ date?: string; close?: number }>;
+        const raw = res.data;
         return raw
           .map((r) => ({
             date: String(r.date ?? ""),

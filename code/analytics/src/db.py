@@ -386,11 +386,12 @@ def create_scan_job(
     args: list[str],
     stdout_log: str,
     stderr_log: str,
+    user_id: Optional[str] = None,
 ) -> int:
     """Insert a scan_jobs row with status='running'. Returns the generated job id."""
     client = get_supabase_client()
     now = datetime.now().isoformat()
-    result = _tbl(client, "scan_jobs").insert({
+    row: dict[str, Any] = {
         "created_at": now,
         "started_at": now,
         "status": "running",
@@ -399,18 +400,21 @@ def create_scan_job(
         "args_json": args,
         "stdout_log": stdout_log,
         "stderr_log": stderr_log,
-    }).execute()
+    }
+    if user_id is not None:
+        row["user_id"] = user_id
+    result = _tbl(client, "user_scan_jobs").insert(row).execute()
     return result.data[0]["id"]
 
 
 def update_scan_job_pid(job_id: int, pid: int) -> None:
     client = get_supabase_client()
-    _tbl(client, "scan_jobs").update({"pid": pid}).eq("id", job_id).execute()
+    _tbl(client, "user_scan_jobs").update({"pid": pid}).eq("id", job_id).execute()
 
 
 def update_scan_job_progress(job_id: int, message: str) -> None:
     client = get_supabase_client()
-    _tbl(client, "scan_jobs").update({"progress_message": message}).eq("id", job_id).execute()
+    _tbl(client, "user_scan_jobs").update({"progress_message": message}).eq("id", job_id).execute()
 
 
 def finish_scan_job(
@@ -421,7 +425,7 @@ def finish_scan_job(
     """Mark job completed (exit_code==0) or failed; links scan_run_id when done."""
     client = get_supabase_client()
 
-    job_res = _tbl(client, "scan_jobs").select("scan_source,started_at").eq("id", job_id).single().execute()
+    job_res = _tbl(client, "user_scan_jobs").select("scan_source,started_at").eq("id", job_id).single().execute()
     if not job_res.data:
         return
 
@@ -432,7 +436,7 @@ def finish_scan_job(
     scan_run_id = None
     if status == "completed":
         r2 = (
-            _tbl(client, "scan_runs")
+            _tbl(client, "user_scan_runs")
             .select("id")
             .eq("source", scan_source)
             .gte("created_at", started_at)
@@ -443,7 +447,7 @@ def finish_scan_job(
         if r2.data:
             scan_run_id = r2.data[0]["id"]
 
-    _tbl(client, "scan_jobs").update({
+    _tbl(client, "user_scan_jobs").update({
         "finished_at": datetime.now().isoformat(),
         "status": status,
         "exit_code": exit_code,
@@ -462,14 +466,18 @@ def insert_scan_run(
     source: str,
     market_json: Optional[dict] = None,
     result_json: Optional[dict] = None,
+    user_id: Optional[str] = None,
 ) -> int:
     """Insert a new scan_runs row; returns the auto-generated run_id."""
-    result = _tbl(client, "scan_runs").insert({
+    row: dict[str, Any] = {
         "scan_date": scan_date.isoformat(),
         "source": source,
         "market_json": market_json,
         "result_json": result_json,
-    }).execute()
+    }
+    if user_id is not None:
+        row["user_id"] = user_id
+    result = _tbl(client, "user_scan_runs").insert(row).execute()
     return result.data[0]["id"]
 
 
@@ -493,6 +501,7 @@ def append_scan_rows(
     scan_date: date,
     dataset: str,
     df: Any,  # pandas.DataFrame
+    user_id: Optional[str] = None,
 ) -> int:
     """Batch-insert each row of df as JSONB in scan_rows. Returns number of rows inserted."""
     if df is None or df.empty:
@@ -508,16 +517,19 @@ def append_scan_rows(
                 sym = str(cleaned[k]).strip()
                 break
 
-        rows.append({
+        row: dict[str, Any] = {
             "run_id": run_id,
             "scan_date": scan_date.isoformat(),
             "dataset": dataset,
             "symbol": sym,
             "row_data": cleaned,
-        })
+        }
+        if user_id is not None:
+            row["user_id"] = user_id
+        rows.append(row)
 
     if rows:
-        _tbl(client, "scan_rows").insert(rows).execute()
+        _tbl(client, "user_scan_rows").insert(rows).execute()
     return len(rows)
 
 
@@ -528,19 +540,21 @@ def persist_market_wide_scan(
     rs_rating: Any,
     quote: Any,
     market_json: Optional[str] = None,
+    user_id: Optional[str] = None,
 ) -> int:
     """Store outputs from ibd_screener / market-wide scans. Returns run_id."""
     client = get_supabase_client()
-    run_id = insert_scan_run(client, scan_date, source, market_json=market_json)
-    append_scan_rows(client, run_id, scan_date, "trend_template", trend_template)
-    append_scan_rows(client, run_id, scan_date, "rs_rating", rs_rating)
-    append_scan_rows(client, run_id, scan_date, "quote", quote)
+    run_id = insert_scan_run(client, scan_date, source, market_json=market_json, user_id=user_id)
+    append_scan_rows(client, run_id, scan_date, "trend_template", trend_template, user_id=user_id)
+    append_scan_rows(client, run_id, scan_date, "rs_rating", rs_rating, user_id=user_id)
+    append_scan_rows(client, run_id, scan_date, "quote", quote, user_id=user_id)
     return run_id
 
 
 def persist_screener_json_result(
     result: dict[str, Any],
     source: str = "run_screener",
+    user_id: Optional[str] = None,
 ) -> Optional[int]:
     """Store a run_screener result dict. Returns run_id or None."""
     run_date = result.get("run_date")
@@ -554,12 +568,13 @@ def persist_screener_json_result(
         client, scan_date, source,
         market_json=result.get("market") or {},
         result_json=result,
+        user_id=user_id,
     )
 
     passed = result.get("passed_stocks") or []
     if passed:
         import pandas as pd
-        append_scan_rows(client, run_id, scan_date, "passed_stocks", pd.DataFrame(passed))
+        append_scan_rows(client, run_id, scan_date, "passed_stocks", pd.DataFrame(passed), user_id=user_id)
 
     return run_id
 

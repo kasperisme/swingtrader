@@ -1,12 +1,17 @@
 import { Suspense } from "react";
 import { createClient } from "@/lib/supabase/server";
-import { ScreeningsUI, type ScanRun, type ScreeningRow, type ScanRowNote } from "./screenings-ui";
+import {
+  ScreeningsUI,
+  type ScanRun,
+  type ScreeningRow,
+  type ScanRowNote,
+} from "./screenings-ui";
 
 async function fetchRuns(): Promise<ScanRun[]> {
   const supabase = await createClient();
   const { data, error } = await supabase
     .schema("swingtrader")
-    .from("scan_runs")
+    .from("user_scan_runs")
     .select("id, created_at, scan_date, source")
     .order("created_at", { ascending: false })
     .limit(50);
@@ -30,10 +35,17 @@ function asBool(v: unknown): boolean | null {
 }
 
 function normalizeTicker(v: unknown): string {
-  return String(v ?? "").trim().toUpperCase();
+  return String(v ?? "")
+    .trim()
+    .toUpperCase();
 }
 
-function parseRow(scanRowId: number, runId: number, symbol: string, d: Record<string, unknown>): ScreeningRow {
+function parseRow(
+  scanRowId: number,
+  runId: number,
+  symbol: string,
+  d: Record<string, unknown>,
+): ScreeningRow {
   return {
     scan_row_id: scanRowId,
     run_id: runId,
@@ -43,15 +55,15 @@ function parseRow(scanRowId: number, runId: number, symbol: string, d: Record<st
     subSector: String(d.subSector ?? d.industry ?? ""),
     // Technical
     RS_Rank: asNum(d.RS_Rank ?? d.rs_rank),
-    Passed: !!(d.Passed),
-    PASSED_FUNDAMENTALS: !!(d.PASSED_FUNDAMENTALS),
-    PriceOverSMA150And200: !!(d.PriceOverSMA150And200),
-    SMA150AboveSMA200: !!(d.SMA150AboveSMA200),
-    SMA50AboveSMA150And200: !!(d.SMA50AboveSMA150And200),
-    SMA200Slope: !!(d.SMA200Slope),
-    PriceAbove25Percent52WeekLow: !!(d.PriceAbove25Percent52WeekLow),
-    PriceWithin25Percent52WeekHigh: !!(d.PriceWithin25Percent52WeekHigh),
-    RSOver70: !!(d.RSOver70),
+    Passed: !!d.Passed,
+    PASSED_FUNDAMENTALS: !!d.PASSED_FUNDAMENTALS,
+    PriceOverSMA150And200: !!d.PriceOverSMA150And200,
+    SMA150AboveSMA200: !!d.SMA150AboveSMA200,
+    SMA50AboveSMA150And200: !!d.SMA50AboveSMA150And200,
+    SMA200Slope: !!d.SMA200Slope,
+    PriceAbove25Percent52WeekLow: !!d.PriceAbove25Percent52WeekLow,
+    PriceWithin25Percent52WeekHigh: !!d.PriceWithin25Percent52WeekHigh,
+    RSOver70: !!d.RSOver70,
     // Volume / price action
     adr_pct: asNum(d.adr_pct),
     vol_ratio_today: asNum(d.vol_ratio_today),
@@ -61,8 +73,8 @@ function parseRow(scanRowId: number, runId: number, symbol: string, d: Record<st
     within_buy_range: asBool(d.within_buy_range),
     extended: asBool(d.extended),
     // Fundamentals
-    increasing_eps: !!(d.increasing_eps),
-    beat_estimate: !!(d.beat_estimate),
+    increasing_eps: !!d.increasing_eps,
+    beat_estimate: !!d.beat_estimate,
     eps_growth_yoy: asNum(d.eps_growth_yoy),
     rev_growth_yoy: asNum(d.rev_growth_yoy),
     eps_accelerating: asBool(d.eps_accelerating),
@@ -87,30 +99,40 @@ async function fetchRows(runId: number): Promise<ScreeningRow[]> {
   const [ttRes, psRes] = await Promise.all([
     supabase
       .schema("swingtrader")
-      .from("scan_rows")
+      .from("user_scan_rows")
       .select("id, run_id, symbol, row_data")
       .eq("run_id", runId)
       .eq("dataset", "trend_template"),
     supabase
       .schema("swingtrader")
-      .from("scan_rows")
+      .from("user_scan_rows")
       .select("id, run_id, symbol, row_data")
       .eq("run_id", runId)
       .eq("dataset", "passed_stocks"),
   ]);
 
   // Prefer passed_stocks (richer data) if present, else fall back to trend_template
-  const source = (psRes.data && psRes.data.length > 0) ? psRes.data : (ttRes.data ?? []);
+  const source =
+    psRes.data && psRes.data.length > 0 ? psRes.data : (ttRes.data ?? []);
 
-  return source.map((r) => parseRow(r.id, r.run_id, r.symbol ?? "", r.row_data as Record<string, unknown>));
+  return source.map((r) =>
+    parseRow(
+      r.id,
+      r.run_id,
+      r.symbol ?? "",
+      r.row_data as Record<string, unknown>,
+    ),
+  );
 }
 
 async function fetchRowNotes(runId: number): Promise<ScanRowNote[]> {
   const supabase = await createClient();
   const { data } = await supabase
     .schema("swingtrader")
-    .from("scan_row_notes")
-    .select("scan_row_id, run_id, ticker, status, highlighted, comment, stage, priority, tags, metadata_json, created_at, updated_at")
+    .from("user_scan_row_notes")
+    .select(
+      "scan_row_id, run_id, ticker, user_id, status, highlighted, comment, stage, priority, tags, metadata_json, created_at, updated_at",
+    )
     .eq("run_id", runId)
     .order("updated_at", { ascending: false });
   return (data ?? []) as ScanRowNote[];
@@ -143,7 +165,11 @@ async function fetchCompanyVectors(): Promise<{
     if (raw && typeof raw === "object") {
       dimensions[ticker] = raw as Record<string, number>;
     } else if (typeof raw === "string") {
-      try { dimensions[ticker] = JSON.parse(raw); } catch { dimensions[ticker] = {}; }
+      try {
+        dimensions[ticker] = JSON.parse(raw);
+      } catch {
+        dimensions[ticker] = {};
+      }
     } else {
       dimensions[ticker] = {};
     }
@@ -152,17 +178,24 @@ async function fetchCompanyVectors(): Promise<{
   return { tickers, dimensions };
 }
 
-async function ScreeningsData({ searchParams }: { searchParams: Promise<{ run?: string }> }) {
+async function ScreeningsData({
+  searchParams,
+}: {
+  searchParams: Promise<{ run?: string }>;
+}) {
   const params = await searchParams;
   const runId = params.run ? parseInt(params.run, 10) : null;
 
-  const [runs, { tickers: vectorTickers, dimensions: companyVectorDimensions }] = await Promise.all([
-    fetchRuns(),
-    fetchCompanyVectors(),
-  ]);
+  const [
+    runs,
+    { tickers: vectorTickers, dimensions: companyVectorDimensions },
+  ] = await Promise.all([fetchRuns(), fetchCompanyVectors()]);
   const effectiveRunId = runId ?? runs[0]?.id ?? null;
   const [rows, initialNotes] = effectiveRunId
-    ? await Promise.all([fetchRows(effectiveRunId), fetchRowNotes(effectiveRunId)])
+    ? await Promise.all([
+        fetchRows(effectiveRunId),
+        fetchRowNotes(effectiveRunId),
+      ])
     : [[], []];
 
   return (
@@ -193,7 +226,9 @@ export default function ScreeningsPage({
 
       <Suspense
         fallback={
-          <div className="text-sm text-muted-foreground animate-pulse">Loading screenings…</div>
+          <div className="text-sm text-muted-foreground animate-pulse">
+            Loading screenings…
+          </div>
         }
       >
         <ScreeningsData searchParams={searchParams} />

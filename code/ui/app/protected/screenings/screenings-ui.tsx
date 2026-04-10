@@ -10,6 +10,12 @@ import {
 import { CLUSTERS } from "../vectors/dimensions";
 import { NewsTrendsUI, type ArticleImpact } from "../news-trends/news-trends-ui";
 import { getCachedQuotes, setCachedQuotes } from "@/lib/quote-cache";
+import { fmpGetOhlc, fmpGetQuote } from "@/app/actions/fmp";
+import {
+  screeningsGetNewsImpacts,
+  screeningsGetTickerRelationships,
+  screeningsUpsertDismissNote,
+} from "@/app/actions/screenings";
 
 type SentimentArticleImpact = ArticleImpact & {
   ticker_sentiment?: Record<string, number>;
@@ -73,6 +79,7 @@ export interface ScanRowNote {
   scan_row_id: number;
   run_id: number;
   ticker: string;
+  user_id: string;
   status: NoteStatus;
   highlighted: boolean;
   comment: string | null;
@@ -458,9 +465,9 @@ function QuotesView({
         await Promise.all(
           chunk.map(async (sym) => {
             try {
-              const res = await fetch(`/api/fmp/quote?symbol=${encodeURIComponent(sym)}`);
+              const res = await fmpGetQuote(sym);
               if (!res.ok) { fresh[sym] = null; return; }
-              const data = await res.json();
+              const data = res.data;
               fresh[sym] = Array.isArray(data) ? (data[0] ?? null) : null;
             } catch {
               fresh[sym] = null;
@@ -727,9 +734,14 @@ function CandlestickSvg({
     setLoading(true);
     setError(null);
     setData([]);
-    fetch(`/api/fmp/ohlc?symbol=${encodeURIComponent(symbol)}`)
-      .then(r => r.json())
-      .then(setData)
+    fmpGetOhlc(symbol)
+      .then((r) => {
+        if (!r.ok) {
+          setError("Failed to load chart data");
+          return;
+        }
+        setData(r.data);
+      })
       .catch(() => setError("Failed to load chart data"))
       .finally(() => setLoading(false));
   }, [symbol]);
@@ -1796,9 +1808,14 @@ function RelationshipMapView({
     let cancelled = false;
     setLoading(true);
     setError(null);
-    fetch("/api/screenings/ticker-relationships")
-      .then(r => r.json())
-      .then(data => { if (!cancelled) setAllEdges(Array.isArray(data) ? data : []); })
+    screeningsGetTickerRelationships()
+      .then((res) => {
+        if (!res.ok) {
+          if (!cancelled) setError("Failed to load relationship data");
+          return;
+        }
+        if (!cancelled) setAllEdges(Array.isArray(res.data) ? res.data : []);
+      })
       .catch(() => { if (!cancelled) setError("Failed to load relationship data"); })
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
@@ -2157,9 +2174,14 @@ function SentimentView({
   useEffect(() => {
     setLoading(true);
     setError(null);
-    fetch("/api/screenings/news-impacts")
-      .then(r => r.json())
-      .then((data: SentimentArticleImpact[]) => setArticles(data))
+    screeningsGetNewsImpacts()
+      .then((res) => {
+        if (!res.ok) {
+          setError("Failed to load news data");
+          return;
+        }
+        setArticles(res.data as SentimentArticleImpact[]);
+      })
       .catch(() => setError("Failed to load news data"))
       .finally(() => setLoading(false));
   }, []);
@@ -2351,9 +2373,14 @@ function StockNewsTrendView({
   useEffect(() => {
     setLoading(true);
     setError(null);
-    fetch("/api/screenings/news-impacts")
-      .then(r => r.json())
-      .then(setArticles)
+    screeningsGetNewsImpacts()
+      .then((res) => {
+        if (!res.ok) {
+          setError("Failed to load news data");
+          return;
+        }
+        setArticles(res.data);
+      })
       .catch(() => setError("Failed to load news data"))
       .finally(() => setLoading(false));
   }, []);
@@ -2569,12 +2596,12 @@ function TradeMonitoringView({
       await Promise.all(
         missing.map(async sym => {
           try {
-            const res = await fetch(`/api/fmp/quote?symbol=${encodeURIComponent(sym)}`);
+            const res = await fmpGetQuote(sym);
             if (!res.ok) {
               fresh[sym] = null;
               return;
             }
-            const data = await res.json();
+            const data = res.data;
             fresh[sym] = Array.isArray(data) ? (data[0] ?? null) : null;
           } catch {
             fresh[sym] = null;
@@ -2904,6 +2931,7 @@ export function ScreeningsUI({
       scan_row_id: row.scan_row_id,
       run_id: row.run_id,
       ticker: row.symbol,
+      user_id: prev?.user_id ?? "",
       status: patch.status ?? prev?.status ?? "active",
       highlighted: patch.highlighted ?? prev?.highlighted ?? false,
       comment: patch.comment !== undefined ? patch.comment : (prev?.comment ?? null),
@@ -2917,19 +2945,16 @@ export function ScreeningsUI({
 
     setRowNotes(prevMap => new Map(prevMap).set(row.scan_row_id, next));
     try {
-      await fetch("/api/screenings/dismiss", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          scanRowId: row.scan_row_id,
-          runId: row.run_id,
-          ticker: row.symbol,
-          status: next.status,
-          highlighted: next.highlighted,
-          comment: next.comment,
-          metadataJson: next.metadata_json,
-        }),
+      const res = await screeningsUpsertDismissNote({
+        scanRowId: row.scan_row_id,
+        runId: row.run_id,
+        ticker: row.symbol,
+        status: next.status,
+        highlighted: next.highlighted,
+        comment: next.comment,
+        metadataJson: next.metadata_json,
       });
+      if (!res.ok) throw new Error(res.error);
     } catch {
       setRowNotes(prevMap => {
         const m = new Map(prevMap);

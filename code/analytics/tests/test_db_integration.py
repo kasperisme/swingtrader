@@ -53,7 +53,7 @@ def _check_schema_accessible() -> str | None:
     """Return an error message if the swingtrader schema is not accessible, else None."""
     try:
         c = get_supabase_client()
-        _tbl(c, "scan_runs").select("id").limit(1).execute()
+        _tbl(c, "user_scan_runs").select("id").limit(1).execute()
         return None
     except APIError as e:
         return str(e)
@@ -89,13 +89,13 @@ def cleanup(client):
     yield
     schema = get_schema()
     # Jobs
-    _tbl(client, "scan_jobs").delete().eq("scan_source", _TEST_SOURCE).execute()
+    _tbl(client, "user_scan_jobs").delete().eq("scan_source", _TEST_SOURCE).execute()
     # Rows + runs
-    runs = _tbl(client, "scan_runs").select("id").eq("source", _TEST_SOURCE).execute()
+    runs = _tbl(client, "user_scan_runs").select("id").eq("source", _TEST_SOURCE).execute()
     run_ids = [r["id"] for r in (runs.data or [])]
     for rid in run_ids:
-        _tbl(client, "scan_rows").delete().eq("run_id", rid).execute()
-    _tbl(client, "scan_runs").delete().eq("source", _TEST_SOURCE).execute()
+        _tbl(client, "user_scan_rows").delete().eq("run_id", rid).execute()
+    _tbl(client, "user_scan_runs").delete().eq("source", _TEST_SOURCE).execute()
     # Company vectors (test ticker)
     _tbl(client, "company_vectors").delete().eq("ticker", "PYTEST").execute()
     # Article tickers / articles (test hash prefix is not feasible so use title)
@@ -122,7 +122,7 @@ class TestEnsureSchema:
     def test_tables_exist(self, client):
         """All expected tables are queryable via the table API."""
         tables = [
-            "scan_runs", "scan_rows", "scan_jobs",
+            "user_scan_runs", "user_scan_rows", "user_scan_jobs",
             "news_articles", "news_impact_heads", "news_impact_vectors",
             "company_vectors", "news_article_tickers",
         ]
@@ -148,7 +148,7 @@ class TestScanRuns:
             market_json='{"condition":"uptrend"}',
             result_json='{"passed_count":5}',
         )
-        res = _tbl(client, "scan_runs").select("*").eq("id", run_id).single().execute()
+        res = _tbl(client, "user_scan_runs").select("*").eq("id", run_id).single().execute()
         row = res.data
         assert row["source"] == _TEST_SOURCE
         assert row["market_json"] == '{"condition":"uptrend"}'
@@ -156,7 +156,7 @@ class TestScanRuns:
 
     def test_scan_date_stored_correctly(self, client):
         run_id = insert_scan_run(client, date(2025, 6, 15), _TEST_SOURCE)
-        res = _tbl(client, "scan_runs").select("scan_date").eq("id", run_id).single().execute()
+        res = _tbl(client, "user_scan_runs").select("scan_date").eq("id", run_id).single().execute()
         assert res.data["scan_date"] == "2025-06-15"
 
 
@@ -181,7 +181,7 @@ class TestScanRows:
         append_scan_rows(client, run_id, _TEST_DATE, "trend_template", df)
 
         res = (
-            _tbl(client, "scan_rows")
+            _tbl(client, "user_scan_rows")
             .select("symbol,dataset,row_data")
             .eq("run_id", run_id)
             .execute()
@@ -199,7 +199,7 @@ class TestScanRows:
         df = pd.DataFrame([{"symbol": "XYZ", "price": float("nan"), "rs_rank": None}])
         append_scan_rows(client, run_id, _TEST_DATE, "passed_stocks", df)
 
-        res = _tbl(client, "scan_rows").select("row_data").eq("run_id", run_id).single().execute()
+        res = _tbl(client, "user_scan_rows").select("row_data").eq("run_id", run_id).single().execute()
         parsed = json.loads(res.data["row_data"])
         assert parsed["price"] is None
         assert parsed["rs_rank"] is None
@@ -234,7 +234,7 @@ class TestPersistMarketWideScan:
         # Check datasets were written
         datasets = {
             r["dataset"]
-            for r in _tbl(client, "scan_rows").select("dataset").eq("run_id", run_id).execute().data
+            for r in _tbl(client, "user_scan_rows").select("dataset").eq("run_id", run_id).execute().data
         }
         assert datasets == {"trend_template", "rs_rating", "quote"}
 
@@ -266,11 +266,11 @@ class TestPersistScreenerJsonResult:
         assert isinstance(run_id, int)
 
         client = get_supabase_client()
-        run_res = _tbl(client, "scan_runs").select("result_json").eq("id", run_id).single().execute()
+        run_res = _tbl(client, "user_scan_runs").select("result_json").eq("id", run_id).single().execute()
         stored = json.loads(run_res.data["result_json"])
         assert stored["passed_count"] == 3
 
-        rows_res = _tbl(client, "scan_rows").select("symbol").eq("run_id", run_id).execute()
+        rows_res = _tbl(client, "user_scan_rows").select("symbol").eq("run_id", run_id).execute()
         symbols = {r["symbol"] for r in rows_res.data}
         assert symbols == {"AAPL", "MSFT", "NVDA"}
 
@@ -296,23 +296,23 @@ class TestScanJobs:
         client = get_supabase_client()
 
         # Verify initial state
-        res = _tbl(client, "scan_jobs").select("status,pid,progress_message").eq("id", job_id).single().execute()
+        res = _tbl(client, "user_scan_jobs").select("status,pid,progress_message").eq("id", job_id).single().execute()
         assert res.data["status"] == "running"
         assert res.data["pid"] is None
 
         # Update PID
         update_scan_job_pid(job_id, 12345)
-        res = _tbl(client, "scan_jobs").select("pid").eq("id", job_id).single().execute()
+        res = _tbl(client, "user_scan_jobs").select("pid").eq("id", job_id).single().execute()
         assert res.data["pid"] == 12345
 
         # Update progress
         update_scan_job_progress(job_id, "Step 2/4: filtering")
-        res = _tbl(client, "scan_jobs").select("progress_message").eq("id", job_id).single().execute()
+        res = _tbl(client, "user_scan_jobs").select("progress_message").eq("id", job_id).single().execute()
         assert res.data["progress_message"] == "Step 2/4: filtering"
 
         # Finish successfully
         finish_scan_job(job_id, exit_code=0)
-        res = _tbl(client, "scan_jobs").select("status,exit_code,finished_at").eq("id", job_id).single().execute()
+        res = _tbl(client, "user_scan_jobs").select("status,exit_code,finished_at").eq("id", job_id).single().execute()
         assert res.data["status"] == "completed"
         assert res.data["exit_code"] == 0
         assert res.data["finished_at"] is not None
@@ -325,7 +325,7 @@ class TestScanJobs:
         finish_scan_job(job_id, exit_code=1, error_message="something went wrong")
 
         client = get_supabase_client()
-        res = _tbl(client, "scan_jobs").select("status,error_message").eq("id", job_id).single().execute()
+        res = _tbl(client, "user_scan_jobs").select("status,error_message").eq("id", job_id).single().execute()
         assert res.data["status"] == "failed"
         assert res.data["error_message"] == "something went wrong"
 

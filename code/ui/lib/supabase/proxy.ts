@@ -48,16 +48,21 @@ export async function updateSession(request: NextRequest) {
   const user = data?.claims;
 
   const pathname = request.nextUrl.pathname;
+  // /docs and /blog are public marketing/reference; do not require Supabase session.
   const isPublicPath =
     pathname === "/" ||
     pathname.startsWith("/auth") ||
     pathname.startsWith("/login") ||
     pathname.startsWith("/docs") ||
     pathname.startsWith("/blog") ||
-    pathname.startsWith("/articles");
+    pathname.startsWith("/articles") ||
+    pathname.startsWith("/api/v1");  // public API — uses its own Bearer auth
 
   if (!user && !isPublicPath) {
-    // no user, potentially respond by redirecting the user to the login page
+    // For API routes return 401 instead of redirecting to the login page
+    if (pathname.startsWith("/api/")) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
     const url = request.nextUrl.clone();
     url.pathname = "/auth/login";
     return NextResponse.redirect(url);

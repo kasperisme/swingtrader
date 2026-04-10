@@ -5,6 +5,7 @@ import { createClient as createSupabaseClient } from "@supabase/supabase-js";
 import { ArrowRight, BarChart3, Compass, Filter, Newspaper, Target, Workflow } from "lucide-react";
 
 import { createClient } from "@/lib/supabase/server";
+import { ArticlesGrid, ArticlesGridFallback, type ArticleGridItem } from "@/components/articles-grid";
 
 type CardItem = {
   title: string;
@@ -86,16 +87,6 @@ function IconTile({ icon: Icon }: { icon: React.ComponentType<{ className?: stri
   );
 }
 
-type LandingArticle = {
-  id: number;
-  slug: string | null;
-  title: string | null;
-  url: string | null;
-  image_url: string | null;
-  published_at: string | null;
-  created_at: string;
-};
-
 function formatUTC(iso: string): string {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return "Unknown";
@@ -110,49 +101,19 @@ function formatUTC(iso: string): string {
   }).format(d);
 }
 
-function formatAgeSince(iso: string): string {
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return "Unknown age";
-  const diffMs = Date.now() - d.getTime();
-  if (diffMs < 0) return "Just now";
-  const minute = 60_000;
-  const hour = 60 * minute;
-  const day = 24 * hour;
-  const week = 7 * day;
-  if (diffMs < hour) return `${Math.max(1, Math.floor(diffMs / minute))}m ago`;
-  if (diffMs < day) return `${Math.floor(diffMs / hour)}h ago`;
-  if (diffMs < week) return `${Math.floor(diffMs / day)}d ago`;
-  return `${Math.floor(diffMs / week)}w ago`;
-}
-
-function LandingSnapshotFallback() {
-  return (
-    <div className="mt-5 space-y-3 animate-pulse">
-      {[0, 1, 2, 3].map((i) => (
-        <div key={i} className="flex gap-3 rounded-lg border border-border bg-background p-3">
-          <div className="h-14 w-20 shrink-0 rounded-md bg-muted" />
-          <div className="flex-1 space-y-2 py-1">
-            <div className="h-3 w-4/5 rounded bg-muted" />
-            <div className="h-3 w-3/5 rounded bg-muted" />
-          </div>
-        </div>
-      ))}
-    </div>
-  );
-}
-
 async function LandingArticlesHeaderAndList() {
   // Ensure latest articles are fetched at request time for all visitors.
   noStore();
-  let landingArticles: LandingArticle[] = [];
+  let landingArticles: ArticleGridItem[] = [];
   try {
     const secretKey = process.env.SUPABASE_SECRET_KEY;
     const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-    const supabase = secretKey && supabaseUrl
-      ? createSupabaseClient(supabaseUrl, secretKey, {
-          auth: { persistSession: false, autoRefreshToken: false },
-        })
-      : await createClient();
+    const supabase =
+      secretKey && supabaseUrl
+        ? createSupabaseClient(supabaseUrl, secretKey, {
+            auth: { persistSession: false, autoRefreshToken: false },
+          })
+        : await createClient();
     const { data } = await supabase
       .schema("swingtrader")
       .from("news_articles")
@@ -160,7 +121,7 @@ async function LandingArticlesHeaderAndList() {
       .order("published_at", { ascending: false, nullsFirst: false })
       .order("created_at", { ascending: false })
       .limit(4);
-    landingArticles = (data ?? []) as LandingArticle[];
+    landingArticles = (data ?? []) as ArticleGridItem[];
   } catch {
     landingArticles = [];
   }
@@ -170,53 +131,27 @@ async function LandingArticlesHeaderAndList() {
       <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
         {landingArticles.length > 0 ? "Latest articles" : "Live narrative snapshot"}
       </p>
-      {landingArticles.length > 0 ? (
-        <div className="mt-5 grid gap-3 sm:grid-cols-2">
-          {landingArticles.map((article) => (
-            <div key={article.id} className="rounded-lg border border-border bg-background p-3">
-              <div className="relative h-36 w-full overflow-hidden rounded-md bg-muted">
-                {article.image_url ? (
-                  <img
-                    src={article.image_url}
-                    alt=""
-                    className="h-full w-full object-cover"
-                    loading="lazy"
-                  />
-                ) : (
-                  <div className="flex h-full w-full items-center justify-center text-[9px] text-muted-foreground">
-                    —
-                  </div>
-                )}
-              </div>
-              <div className="mt-3 min-w-0">
-                <Link
-                  href={article.slug ? `/articles/${article.slug}` : `/articles/${article.id}`}
-                  className="line-clamp-2 text-sm font-medium leading-snug hover:underline"
+      <div className="mt-5">
+        {landingArticles.length > 0 ? (
+          <ArticlesGrid articles={landingArticles} />
+        ) : (
+          <div className="space-y-3">
+            {["AI infrastructure demand", "Rate-cut expectations", "Energy supply pressure"].map(
+              (item, index) => (
+                <div
+                  key={item}
+                  className="flex items-center justify-between rounded-lg border border-border bg-background px-4 py-3"
                 >
-                  {article.title || article.url || "Untitled article"}
-                </Link>
-                <p className="mt-1 text-xs text-muted-foreground">
-                  {formatAgeSince(article.published_at ?? article.created_at)}
-                </p>
-              </div>
-            </div>
-          ))}
-        </div>
-      ) : (
-        <div className="mt-5 space-y-3">
-          {["AI infrastructure demand", "Rate-cut expectations", "Energy supply pressure"].map((item, index) => (
-            <div
-              key={item}
-              className="flex items-center justify-between rounded-lg border border-border bg-background px-4 py-3"
-            >
-              <p className="text-sm font-medium">{item}</p>
-              <span className="rounded-full bg-muted px-2.5 py-1 text-xs font-medium text-muted-foreground">
-                #{index + 1}
-              </span>
-            </div>
-          ))}
-        </div>
-      )}
+                  <p className="text-sm font-medium">{item}</p>
+                  <span className="rounded-full bg-muted px-2.5 py-1 text-xs font-medium text-muted-foreground">
+                    #{index + 1}
+                  </span>
+                </div>
+              ),
+            )}
+          </div>
+        )}
+      </div>
     </>
   );
 }
@@ -262,7 +197,9 @@ export default function Home() {
                   <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
                     Latest scanned articles
                   </p>
-                  <LandingSnapshotFallback />
+                  <div className="mt-5">
+                    <ArticlesGridFallback />
+                  </div>
                 </>
               }
             >

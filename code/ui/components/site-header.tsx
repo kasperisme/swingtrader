@@ -3,6 +3,7 @@ import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import { Button } from "@/components/ui/button";
 import { LogoutButton } from "@/components/logout-button";
+import { SiteHeaderMobileNav } from "@/components/site-header-mobile-nav";
 
 function Logo() {
   return (
@@ -21,6 +22,9 @@ function Logo() {
   );
 }
 
+const headerNavLinkClass =
+  "text-sm font-medium text-muted-foreground transition-colors hover:text-foreground";
+
 function HeaderShell({ children }: { children: React.ReactNode }) {
   return (
     <header className="w-full border-b border-border">
@@ -35,15 +39,18 @@ export function SiteHeaderFallback() {
   return (
     <HeaderShell>
       <Logo />
-      <div className="flex items-center gap-3">
-        <Link
-          href="/blog"
-          className="text-sm font-medium text-muted-foreground transition-colors hover:text-foreground"
-        >
+      <div className="flex shrink-0 items-center gap-3">
+        <Link href="/docs" className={headerNavLinkClass}>
+          Docs
+        </Link>
+        <Link href="/blog" className={headerNavLinkClass}>
           Blog
         </Link>
         <Button asChild size="sm" variant="outline">
           <Link href="/auth/login">Sign in</Link>
+        </Button>
+        <Button asChild size="sm">
+          <Link href="/auth/sign-up">Sign up</Link>
         </Button>
       </div>
     </HeaderShell>
@@ -52,56 +59,33 @@ export function SiteHeaderFallback() {
 
 export async function SiteHeader() {
   const supabase = await createClient();
-  const { data } = await supabase.auth.getClaims();
-  const user = data?.claims;
+  // Use getUser() (not getClaims) so protected links only show after Auth validates
+  // the session; stale JWTs in cookies must not reveal /protected nav when logged out.
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
   const isAuthed = Boolean(user);
 
   return (
     <HeaderShell>
-      <div className="flex items-center gap-6">
+      <div className="flex min-w-0 flex-1 items-center gap-3 md:gap-6">
         <Logo />
+        {isAuthed ? <SiteHeaderMobileNav userEmail={user?.email} /> : null}
         {isAuthed ? (
-          <nav className="hidden items-center gap-4 md:flex">
-            <Link
-              href="/docs"
-              className="text-sm font-medium text-muted-foreground transition-colors hover:text-foreground"
-            >
-              Docs
-            </Link>
-            <Link
-              href="/blog"
-              className="text-sm font-medium text-muted-foreground transition-colors hover:text-foreground"
-            >
-              Blog
-            </Link>
-            <Link
-              href="/protected"
-              className="text-sm font-medium text-muted-foreground transition-colors hover:text-foreground"
-            >
+          <nav className="hidden min-w-0 items-center gap-4 md:flex">
+            <Link href="/protected" className={headerNavLinkClass}>
               Articles
             </Link>
-            <Link
-              href="/protected/news-trends"
-              className="text-sm font-medium text-muted-foreground transition-colors hover:text-foreground"
-            >
+            <Link href="/protected/news-trends" className={headerNavLinkClass}>
               News Trends
             </Link>
-            <Link
-              href="/protected/vectors"
-              className="text-sm font-medium text-muted-foreground transition-colors hover:text-foreground"
-            >
+            <Link href="/protected/vectors" className={headerNavLinkClass}>
               Vectors
             </Link>
-            <Link
-              href="/protected/screenings"
-              className="text-sm font-medium text-muted-foreground transition-colors hover:text-foreground"
-            >
+            <Link href="/protected/screenings" className={headerNavLinkClass}>
               Screenings
             </Link>
-            <Link
-              href="/protected/trades"
-              className="text-sm font-medium text-muted-foreground transition-colors hover:text-foreground"
-            >
+            <Link href="/protected/trades" className={headerNavLinkClass}>
               Trades
             </Link>
           </nav>
@@ -109,18 +93,27 @@ export async function SiteHeader() {
       </div>
 
       {isAuthed ? (
-        <div className="flex items-center gap-3">
-          <span className="hidden text-sm text-muted-foreground md:inline">
-            {String(user?.email ?? "")}
-          </span>
+        <div className="flex shrink-0 items-center gap-2 sm:gap-3">
+          <Link href="/docs" className={`${headerNavLinkClass} hidden md:inline`}>
+            Docs
+          </Link>
+          <Link href="/blog" className={`${headerNavLinkClass} hidden md:inline`}>
+            Blog
+          </Link>
+          <Link
+            href="/protected/profile"
+            className="hidden text-sm text-muted-foreground hover:text-foreground transition-colors md:inline"
+          >
+            {user?.email ?? ""}
+          </Link>
           <LogoutButton />
         </div>
       ) : (
-        <div className="flex items-center gap-2">
-          <Link
-            href="/blog"
-            className="text-sm font-medium text-muted-foreground transition-colors hover:text-foreground"
-          >
+        <div className="flex shrink-0 items-center gap-2">
+          <Link href="/docs" className={headerNavLinkClass}>
+            Docs
+          </Link>
+          <Link href="/blog" className={headerNavLinkClass}>
             Blog
           </Link>
           <Button asChild size="sm" variant="outline">

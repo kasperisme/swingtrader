@@ -197,7 +197,7 @@ def _tbl(client, table: str):
 
 def _resolve_passed_dataset(client, run_id: int) -> tuple[str, Optional[str]]:
     """Return (dataset_name, passed_flag_field) for a run."""
-    res = _tbl(client, "scan_rows").select("dataset").eq("run_id", run_id).execute()
+    res = _tbl(client, "user_scan_rows").select("dataset").eq("run_id", run_id).execute()
     datasets = {r["dataset"] for r in (res.data or [])}
     if "passed_stocks" in datasets:
         return "passed_stocks", None
@@ -245,7 +245,7 @@ def get_scan_jobs(limit: int = 25) -> str:
     limit = max(1, min(int(limit), 200))
     client = _get_client()
     res = (
-        _tbl(client, "scan_jobs")
+        _tbl(client, "user_scan_jobs")
         .select(
             "id,created_at,started_at,finished_at,status,scan_source,script_rel,"
             "args_json,pid,exit_code,scan_run_id,stdout_log,stderr_log,error_message,progress_message"
@@ -262,7 +262,7 @@ def get_scan_job(job_id: int) -> str:
     """Single scan_jobs row by id."""
     client = _get_client()
     res = (
-        _tbl(client, "scan_jobs")
+        _tbl(client, "user_scan_jobs")
         .select(
             "id,created_at,started_at,finished_at,status,scan_source,script_rel,"
             "args_json,pid,exit_code,scan_run_id,stdout_log,stderr_log,error_message,progress_message"
@@ -282,7 +282,7 @@ def list_scan_runs(limit: int = 20) -> str:
     limit = max(1, min(int(limit), 200))
     client = _get_client()
     res = (
-        _tbl(client, "scan_runs")
+        _tbl(client, "user_scan_runs")
         .select("id,created_at,scan_date,source,market_json,result_json")
         .order("id", desc=True)
         .limit(limit)
@@ -307,7 +307,7 @@ def get_run_detail(run_id: int) -> str:
     """Return one scan_runs row including market_json and result_json."""
     client = _get_client()
     res = (
-        _tbl(client, "scan_runs")
+        _tbl(client, "user_scan_runs")
         .select("id,created_at,scan_date,source,market_json,result_json")
         .eq("id", run_id)
         .single()
@@ -334,7 +334,7 @@ def get_scan_rows(
     offset = max(0, int(offset))
     client = _get_client()
 
-    q = _tbl(client, "scan_rows").select("run_id,scan_date,dataset,symbol,row_data", count="exact").eq("run_id", run_id)
+    q = _tbl(client, "user_scan_rows").select("run_id,scan_date,dataset,symbol,row_data", count="exact").eq("run_id", run_id)
     if dataset:
         q = q.eq("dataset", dataset)
     if symbol:
@@ -359,7 +359,7 @@ def get_screener_summary(run_id: int) -> str:
     """
     client = _get_client()
 
-    src_res = _tbl(client, "scan_runs").select("source,scan_date,result_json").eq("id", run_id).single().execute()
+    src_res = _tbl(client, "user_scan_runs").select("source,scan_date,result_json").eq("id", run_id).single().execute()
     if not src_res.data:
         return json.dumps({"error": "run_id not found", "run_id": run_id})
 
@@ -407,7 +407,7 @@ def get_screener_summary(run_id: int) -> str:
         return json.dumps({"error": "no usable dataset in scan_rows", "run_id": run_id})
 
     rows_res = (
-        _tbl(client, "scan_rows")
+        _tbl(client, "user_scan_rows")
         .select("symbol,row_data")
         .eq("run_id", run_id)
         .eq("dataset", dataset)
@@ -470,7 +470,7 @@ def get_passed_stocks(
         return json.dumps({"error": "no usable dataset in scan_rows", "run_id": run_id})
 
     res = (
-        _tbl(client, "scan_rows")
+        _tbl(client, "user_scan_rows")
         .select("symbol,row_data")
         .eq("run_id", run_id)
         .eq("dataset", dataset)
@@ -512,7 +512,7 @@ def get_near_pivot_stocks(
         return json.dumps({"error": "no usable dataset in scan_rows", "run_id": run_id})
 
     res = (
-        _tbl(client, "scan_rows")
+        _tbl(client, "user_scan_rows")
         .select("symbol,row_data")
         .eq("run_id", run_id)
         .eq("dataset", dataset)
@@ -553,7 +553,7 @@ def get_latest_screener_result() -> str:
     client = _get_client()
 
     job_res = (
-        _tbl(client, "scan_jobs")
+        _tbl(client, "user_scan_jobs")
         .select("scan_run_id,scan_source,finished_at")
         .eq("status", "completed")
         .not_.is_("scan_run_id", "null")
@@ -565,7 +565,7 @@ def get_latest_screener_result() -> str:
     if job_res.data:
         run_id = int(job_res.data[0]["scan_run_id"])
     else:
-        run_res = _tbl(client, "scan_runs").select("id").order("id", desc=True).limit(1).execute()
+        run_res = _tbl(client, "user_scan_runs").select("id").order("id", desc=True).limit(1).execute()
         if not run_res.data:
             return json.dumps({"error": "no completed screening runs found"})
         run_id = int(run_res.data[0]["id"])
@@ -658,7 +658,7 @@ def get_earnings_alerts(days_ahead: int = 21, run_id: Optional[int] = None) -> s
     client = _get_client()
 
     if run_id is None:
-        row = _tbl(client, "scan_runs").select("id").order("id", desc=True).limit(1).execute()
+        row = _tbl(client, "user_scan_runs").select("id").order("id", desc=True).limit(1).execute()
         if not row.data:
             return json.dumps({"error": "no scan runs found"})
         resolved_run_id = int(row.data[0]["id"])
@@ -666,7 +666,7 @@ def get_earnings_alerts(days_ahead: int = 21, run_id: Optional[int] = None) -> s
         resolved_run_id = int(run_id)
 
     sym_res = (
-        _tbl(client, "scan_rows")
+        _tbl(client, "user_scan_rows")
         .select("symbol")
         .eq("run_id", resolved_run_id)
         .eq("dataset", "passed_stocks")

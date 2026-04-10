@@ -351,7 +351,7 @@ def _fetch_tickers_from_scan(
 
     client = _mod.get_supabase_client()
 
-    query = client.schema("swingtrader").table("scan_rows").select("symbol")
+    query = client.schema("swingtrader").table("user_scan_rows").select("symbol")
 
     if run_id is not None:
         query = query.eq("run_id", run_id)

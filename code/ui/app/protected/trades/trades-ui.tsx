@@ -5,6 +5,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { Briefcase, Loader2, Plus, Trash2 } from "lucide-react";
 import { buildPortfolioFromTrades, type PortfolioPosition } from "./portfolio-from-trades";
+import { fmpGetPriceAtDate, fmpGetQuote, fmpSearchSymbol } from "@/app/actions/fmp";
 
 type FmpSymbolHit = {
   symbol: string;
@@ -68,23 +69,14 @@ function TickerSearchInput(props: {
     setLoading(true);
     setHint(null);
     try {
-      const res = await fetch(`/api/fmp/search-symbol?query=${encodeURIComponent(trimmed)}`);
-      const body: unknown = await res.json();
+      const res = await fmpSearchSymbol(trimmed);
       if (id !== reqId.current) return;
       if (!res.ok) {
-        const err =
-          typeof body === "object" && body !== null && "error" in body && typeof (body as { error: unknown }).error === "string"
-            ? (body as { error: string }).error
-            : "Search failed";
         setHits([]);
-        setHint(err);
+        setHint(res.error);
         return;
       }
-      if (!Array.isArray(body)) {
-        setHits([]);
-        setHint("Unexpected response");
-        return;
-      }
+      const body = res.data;
       const parsed = body.filter(isFmpSymbolHit).slice(0, MAX_SUGGESTIONS);
       setHits(parsed);
       setHint(parsed.length === 0 ? "No matches" : null);
@@ -274,12 +266,12 @@ function PortfolioSection({ trades }: { trades: UserTradeRow[] }) {
       const next: Record<string, number | null> = {};
       for (const sym of syms) {
         try {
-          const res = await fetch(`/api/fmp/quote?symbol=${encodeURIComponent(sym)}`);
+          const res = await fmpGetQuote(sym);
           if (!res.ok) {
             next[sym] = null;
             continue;
           }
-          const data: unknown = await res.json();
+          const data: unknown = res.data;
           const row = Array.isArray(data) ? data[0] : null;
           const price =
             row && typeof row === "object" && row !== null && typeof (row as { price?: unknown }).price === "number"
@@ -491,34 +483,14 @@ export function TradesUI({ initialTrades }: { initialTrades: UserTradeRow[] }) {
         setPriceAutoStatus("loading");
         setPriceAutoNote(null);
         try {
-          const res = await fetch(
-            `/api/fmp/price-at-date?symbol=${encodeURIComponent(sym)}&date=${encodeURIComponent(calendarDate)}`,
-          );
-          const body: unknown = await res.json();
+          const res = await fmpGetPriceAtDate(sym, calendarDate);
           if (id !== priceFetchGen.current) return;
           if (!res.ok) {
             setPriceAutoStatus("error");
-            const msg =
-              typeof body === "object" &&
-              body !== null &&
-              "error" in body &&
-              typeof (body as { error: unknown }).error === "string"
-                ? (body as { error: string }).error
-                : "Could not load price";
-            setPriceAutoNote(msg);
+            setPriceAutoNote(res.error);
             return;
           }
-          if (
-            typeof body !== "object" ||
-            body === null ||
-            typeof (body as { price: unknown }).price !== "number" ||
-            !Number.isFinite((body as { price: number }).price)
-          ) {
-            setPriceAutoStatus("error");
-            setPriceAutoNote("Bad response");
-            return;
-          }
-          const parsed = body as { price: number; source: "historical" | "quote"; asOfDate: string };
+          const parsed = res.data;
           if (priceDirtyRef.current) {
             setPriceAutoStatus("idle");
             return;
