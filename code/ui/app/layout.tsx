@@ -4,6 +4,7 @@ import { ThemeProvider } from "next-themes";
 import { Suspense } from "react";
 import "./globals.css";
 import { Analytics } from "@vercel/analytics/next";
+import { SiteFooter, SITE_X_PROFILE_URL } from "@/components/site-footer";
 import { SiteHeader, SiteHeaderFallback } from "@/components/site-header";
 
 const defaultUrl = process.env.VERCEL_URL
@@ -15,6 +16,22 @@ export const metadata: Metadata = {
   title: "newsimpactscreener",
   description:
     "News Impact Screener connects headlines to stocks and sectors for retail investors—themes, exposure, and screening without terminal noise.",
+  twitter: {
+    card: "summary",
+    site: "@newsimpactscrnr",
+    creator: "@newsimpactscrnr",
+  },
+  openGraph: {
+    type: "website",
+    url: defaultUrl,
+    title: "newsimpactscreener",
+    description:
+      "News Impact Screener connects headlines to stocks and sectors for retail investors—themes, exposure, and screening without terminal noise.",
+  },
+  other: {
+    "social:x": SITE_X_PROFILE_URL,
+    "social:twitter": SITE_X_PROFILE_URL,
+  },
 };
 
 const geistSans = Geist({
@@ -42,6 +59,7 @@ export default function RootLayout({
             <SiteHeader />
           </Suspense>
           {children}
+          <SiteFooter />
         </ThemeProvider>
       </body>
     </html>

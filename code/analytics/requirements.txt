@@ -10,3 +10,4 @@ supabase
 psycopg2-binary
 anthropic
 fastmcp
+xdk

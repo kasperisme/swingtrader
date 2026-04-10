@@ -25,6 +25,10 @@ Usage:
     python -m news_impact.score_news_cli --fmp-news --tickers AAPL MSFT NVDA
     python -m news_impact.score_news_cli --fmp-news --tickers AAPL --from 2025-11-01 --to 2025-11-30
 
+    # Fetch recent X (Twitter) posts mentioning stock cashtags
+    python -m news_impact.score_news_cli --x-news --tickers AAPL MSFT NVDA
+    python -m news_impact.score_news_cli --x-news --tickers TSLA --x-limit 50
+
     # Embed + score companies
     python -m news_impact.score_news_cli --text "..." --tickers AAPL MSFT NVDA JPM XOM
     python -m news_impact.score_news_cli --url "..." --tickers AAPL MSFT --use-cache
@@ -53,6 +57,7 @@ from rich.console import Console
 from news_impact.company_scorer import score_companies, CompanyScore
 from news_impact.company_vector import build_vectors, CompanyVector
 from news_impact.fmp_fetcher import FMPFetcher
+from news_impact.x_fetcher import XFetcher
 from news_impact.impact_scorer import (
     score_article,
     aggregate_heads,
@@ -338,6 +343,8 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     source.add_argument("--file",     metavar="PATH", help="Read article from file")
     source.add_argument("--fmp-news", action="store_true",
                         help="Fetch latest stock news from FMP (filterable by --tickers)")
+    source.add_argument("--x-news", action="store_true",
+                        help="Fetch recent X posts mentioning stock cashtags (requires --tickers)")
 
     parser.add_argument(
         "--limit", type=int, default=20,
@@ -346,6 +353,10 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--page", type=int, default=0,
         help="Page offset for --fmp-news pagination (default: 0, max: 100)",
+    )
+    parser.add_argument(
+        "--x-limit", type=int, default=50,
+        help="Max X posts to fetch with --x-news (default: 50, max: 100)",
     )
     parser.add_argument(
         "--from", dest="from_date", metavar="DATE",
@@ -453,6 +464,14 @@ async def _main(argv: list[str] | None = None) -> None:
             await _process_fmp_sparse_fill(args)
         else:
             await _process_fmp_news(args)
+        return
+
+    # X (Twitter) posts batch mode — separate flow
+    if args.x_news:
+        if not args.tickers:
+            console.print("[red]--x-news requires --tickers TICKER [TICKER …][/red]")
+            sys.exit(1)
+        await _process_x_news(args)
         return
 
     # 1. Load article text
@@ -751,6 +770,163 @@ async def _process_one_fmp_article(
 
     inserted_new = bool(client and not from_cache and existing is None)
     return inserted_new
+
+
+async def _process_one_x_post(
+    args: argparse.Namespace,
+    post: dict,
+    seen_ids: set[str],
+    seen_hashes: set[str],
+    *,
+    index: int,
+    batch_total: int,
+) -> bool:
+    """
+    Run one X post through the scoring pipeline.
+
+    Returns True if a new row was inserted into ``news_articles``.
+    """
+    text = post.get("text", "").strip()
+    title = post.get("title", text[:80])
+    url = post.get("url", "")
+    published_at = post.get("published_at")
+    publisher = post.get("publisher") or "x.com"
+    symbol = post.get("symbol", "")
+    post_id = post.get("post_id", "")
+    metrics = post.get("public_metrics", {})
+
+    if not text:
+        console.print(f"[dim][{index}/{batch_total}] skipped (empty text)[/dim]")
+        return False
+
+    if post_id and post_id in seen_ids:
+        console.print(f"[dim][{index}/{batch_total}] skipped (duplicate post_id)[/dim]")
+        return False
+
+    console.print(f"[bold cyan][{index}/{batch_total}][/bold cyan] {title[:70]}")
+    if published_at:
+        console.print(f"  [dim]published: {published_at}[/dim]")
+    if metrics:
+        likes = metrics.get("like_count", 0)
+        rts   = metrics.get("retweet_count", 0)
+        console.print(f"  [dim]likes={likes}  retweets={rts}[/dim]")
+
+    article_hash = _sha256(text)
+    if article_hash in seen_hashes:
+        console.print("  [dim]skipped — duplicate content already processed in this run[/dim]")
+        return False
+
+    client = None if args.no_persist else get_supabase_client()
+    existing = None if client is None else _check_existing(client, article_hash, url=url)
+    from_cache = existing is not None and not args.refresh
+
+    article_id = -1
+    heads: list[HeadOutput]
+    extracted_tickers: list[str]
+    impact: dict[str, float]
+
+    if from_cache:
+        assert existing is not None
+        article_id, impact = existing
+        heads = _heads_from_db(article_id)
+        extracted_tickers = load_article_tickers(client, article_id, source="extracted")
+        console.print(f"  [dim]already in DB (id={article_id}) — skipped LLM scoring[/dim]")
+    else:
+        heads, extracted_tickers = await asyncio.gather(
+            score_article(text),
+            extract_tickers(text),
+        )
+        impact = aggregate_heads(heads)
+
+    if symbol and symbol not in extracted_tickers:
+        extracted_tickers = [symbol] + extracted_tickers
+
+    if client is not None and not from_cache:
+        if existing is not None and args.refresh:
+            _delete_heads_and_vector(client, existing[0])
+            article_id = _persist(
+                client, text, article_hash, url, title, "x.com",
+                heads, impact, existing_article_id=existing[0],
+                published_at=published_at, publisher=publisher,
+            )
+        else:
+            article_id = _persist(
+                client, text, article_hash, url, title, "x.com",
+                heads, impact,
+                published_at=published_at, publisher=publisher,
+            )
+
+    if client is not None and article_id >= 0 and extracted_tickers:
+        save_article_tickers(client, article_id, extracted_tickers, source="extracted")
+        explicit = [t.upper() for t in (args.tickers or [])]
+        if explicit:
+            save_article_tickers(client, article_id, explicit, source="explicit")
+
+    if post_id:
+        seen_ids.add(post_id)
+    seen_hashes.add(article_hash)
+
+    top = top_dimensions(impact, n=3)
+    top_str = "  ".join(f"{d} {s:+.2f}" for d, s in top) if top else "no signals"
+    mentioned = ", ".join(extracted_tickers[:5]) if extracted_tickers else "—"
+    pub = published_at or "—"
+    console.print(f"  [dim]id={article_id}  published={pub}  mentioned={mentioned}[/dim]")
+    console.print(f"  [dim]top signals: {top_str}[/dim]")
+
+    all_tickers = list(dict.fromkeys(extracted_tickers + [t.upper() for t in (args.tickers or [])]))
+    if all_tickers and impact and args.score_companies:
+        try:
+            company_vectors = await build_vectors(all_tickers, use_cache=True)
+            if company_vectors:
+                scores = score_companies(impact, company_vectors, top_n=4)
+                tw = [s for s in scores if s.score > 0]
+                hw = list(reversed([s for s in scores if s.score < 0]))
+                if tw or hw:
+                    tw_str = "  ".join(f"[green]{s.ticker} +{s.score:.2f}[/green]" for s in tw[:2])
+                    hw_str = "  ".join(f"[red]{s.ticker} {s.score:.2f}[/red]" for s in hw[:2])
+                    console.print(f"  tailwinds: {tw_str or '—'}   headwinds: {hw_str or '—'}")
+        except Exception as exc:
+            logger.warning("company scoring failed for X post %d: %s", article_id, exc)
+    elif all_tickers:
+        console.print("  [dim]skipping company vector build/scoring (use --score-companies to enable)[/dim]")
+
+    console.print()
+
+    inserted_new = bool(client and not from_cache and existing is None)
+    return inserted_new
+
+
+async def _process_x_news(args: argparse.Namespace) -> None:
+    """Fetch recent X posts for the given tickers and run each through the pipeline."""
+    tickers = [t.upper() for t in args.tickers]
+    x_limit = min(getattr(args, "x_limit", 50), 100)
+
+    console.print(
+        f"\nFetching up to [bold]{x_limit}[/bold] X posts "
+        f"for [cyan]{', '.join(tickers)}[/cyan]…\n"
+    )
+
+    try:
+        fetcher = XFetcher()
+    except RuntimeError as exc:
+        console.print(f"[red]{exc}[/red]")
+        return
+
+    posts = fetcher.fetch_stock_posts(tickers=tickers, max_results=x_limit)
+
+    if not posts:
+        console.print("[yellow]No X posts returned (check X_BEARER_TOKEN and tickers).[/yellow]")
+        return
+
+    console.print(f"Fetched [bold]{len(posts)}[/bold] X posts\n")
+
+    seen_ids: set[str] = set()
+    seen_hashes: set[str] = set()
+
+    for i, post in enumerate(posts, 1):
+        await _process_one_x_post(
+            args, post, seen_ids, seen_hashes, index=i, batch_total=len(posts),
+        )
 
 
 async def _process_fmp_news(args: argparse.Namespace) -> None:
