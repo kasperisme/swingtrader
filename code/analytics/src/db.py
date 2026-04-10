@@ -28,6 +28,7 @@ from __future__ import annotations
 import json
 import os
 from datetime import date, datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 from pathlib import Path
 from typing import Any, Optional
 
@@ -74,6 +75,47 @@ def count_news_articles_per_calendar_day_utc(n_days: int) -> dict[date, int]:
             COUNT(*)::bigint AS c
         FROM {schema}.news_articles
         WHERE ((COALESCE(published_at, created_at) AT TIME ZONE 'UTC')::date)
+              BETWEEN %s AND %s
+        GROUP BY 1
+    """
+    conn = get_pg_connection()
+    try:
+        cur = conn.cursor()
+        cur.execute(sql, (start, today))
+        for row in cur.fetchall() or []:
+            d, c = row[0], int(row[1])
+            if d in out:
+                out[d] = c
+    finally:
+        conn.close()
+    return out
+
+
+_EASTERN = ZoneInfo("America/New_York")
+
+
+def count_news_articles_per_calendar_day_eastern(n_days: int) -> dict[date, int]:
+    """
+    Count stored news rows per US Eastern calendar day for the last ``n_days`` (inclusive of today ET).
+
+    Each row is bucketed by the US Eastern date of ``COALESCE(published_at, created_at)``.
+    Days with no rows are included with count ``0``.
+
+    Use this instead of the UTC variant when the consumer uses Eastern-time date parameters
+    (e.g. the FMP stock-news API).
+    """
+    if n_days < 1:
+        raise ValueError("n_days must be >= 1")
+    today = datetime.now(_EASTERN).date()
+    start = today - timedelta(days=n_days - 1)
+    out: dict[date, int] = {start + timedelta(days=i): 0 for i in range(n_days)}
+    schema = get_schema()
+    sql = f"""
+        SELECT
+            ((COALESCE(published_at, created_at) AT TIME ZONE 'America/New_York')::date) AS d,
+            COUNT(*)::bigint AS c
+        FROM {schema}.news_articles
+        WHERE ((COALESCE(published_at, created_at) AT TIME ZONE 'America/New_York')::date)
               BETWEEN %s AND %s
         GROUP BY 1
     """

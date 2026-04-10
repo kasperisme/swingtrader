@@ -71,7 +71,7 @@ from news_impact.news_ingester import (
 )
 from src.db import (
     _as_json,
-    count_news_articles_per_calendar_day_utc,
+    count_news_articles_per_calendar_day_eastern,
     get_schema,
     get_supabase_client,
     load_article_tickers,
@@ -362,7 +362,7 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         metavar=("N_DAYS", "M_NEW"),
         default=None,
         help=(
-            "With --fmp-news: find the UTC calendar day in the last N_DAYS with the fewest "
+            "With --fmp-news: find the US Eastern calendar day in the last N_DAYS with the fewest "
             "rows in news_articles (by published_at/created_at), then fetch FMP for that day "
             "until M_NEW new articles are inserted (or pages exhausted). Overrides --from, "
             "--to, and --page. Requires DB (no --no-persist)."
@@ -373,7 +373,7 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         action="store_true",
         help=(
             "With --sparse-fill: after each day finishes (M_NEW inserts or FMP exhausted), "
-            "re-query counts and take the next sparsest UTC day in the window, excluding days "
+            "re-query counts and take the next sparsest ET day in the window, excluding days "
             "already processed this run, until every day in the window has had one pass."
         ),
     )
@@ -569,7 +569,7 @@ async def _main(argv: list[str] | None = None) -> None:
 
 
 def _pick_sparsest_calendar_day(counts: dict[date, int]) -> date:
-    """Among days with the minimum article count, return the earliest UTC calendar day."""
+    """Among days with the minimum article count, return the earliest US Eastern calendar day."""
     min_c = min(counts.values())
     candidates = [d for d, c in counts.items() if c == min_c]
     return min(candidates)
@@ -856,7 +856,7 @@ async def _process_fmp_sparse_fill(args: argparse.Namespace) -> None:
     round_idx = 0
 
     while True:
-        counts = count_news_articles_per_calendar_day_utc(n_days)
+        counts = count_news_articles_per_calendar_day_eastern(n_days)
         if loop:
             target_day = _pick_sparsest_calendar_day_excluding(counts, excluded)
             if target_day is None:
@@ -879,7 +879,7 @@ async def _process_fmp_sparse_fill(args: argparse.Namespace) -> None:
             )
         else:
             console.print(
-                f"\n[bold]Sparse fill[/bold]: last [cyan]{n_days}[/cyan] UTC day(s) — "
+                f"\n[bold]Sparse fill[/bold]: last [cyan]{n_days}[/cyan] ET day(s) — "
                 f"sparsest day [green]{target_day.isoformat()}[/green] "
                 f"([bold]{min_count}[/bold] article(s) in DB). "
                 f"Target: [bold]{m_new}[/bold] new insert(s).\n",
