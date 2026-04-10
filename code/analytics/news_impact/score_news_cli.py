@@ -15,6 +15,9 @@ Usage:
     python -m news_impact.score_news_cli --text "..." --news-impact-backend anthropic
     python -m news_impact.score_news_cli --text "..." --news-impact-backend do_agent
 
+    # Ollama: override model for this run (otherwise OLLAMA_IMPACT_MODEL / default devstral)
+    python -m news_impact.score_news_cli --text "..." --ollama-impact-model qwen2.5:7b
+
     # Fetch and embed latest news from FMP (market-wide)
     python -m news_impact.score_news_cli --fmp-news
     python -m news_impact.score_news_cli --fmp-news --limit 10
@@ -41,6 +44,7 @@ import argparse
 import asyncio
 import json
 import logging
+import os
 import pathlib
 import re
 import sys
@@ -430,6 +434,13 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         metavar="BACKEND",
         help="Override NEWS_IMPACT_BACKEND (ollama, anthropic, do_agent; default: env or ollama)",
     )
+    parser.add_argument(
+        "--ollama-impact-model",
+        dest="ollama_impact_model",
+        metavar="MODEL",
+        default=None,
+        help="Override OLLAMA_IMPACT_MODEL for this run (only used when backend is ollama)",
+    )
     parser.add_argument("--verbose", "-v", action="store_true", help="Debug logging")
     return parser.parse_args(argv)
 
@@ -441,6 +452,9 @@ async def _main(argv: list[str] | None = None) -> None:
 
     if args.news_impact_backend is not None:
         set_news_impact_backend(args.news_impact_backend)
+
+    if args.ollama_impact_model:
+        os.environ["OLLAMA_IMPACT_MODEL"] = args.ollama_impact_model.strip()
 
     logging.basicConfig(level=logging.DEBUG if args.verbose else logging.WARNING)
 

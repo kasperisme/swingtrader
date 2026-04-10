@@ -103,6 +103,7 @@ python -m news_impact.score_news_cli --fmp-news --sparse-fill 30 10 --sparse-fil
 | Flag                       | Description                                                                                    |
 | -------------------------- | ---------------------------------------------------------------------------------------------- |
 | `--news-impact-backend`    | `ollama`, `anthropic`, or `do_agent` — overrides `NEWS_IMPACT_BACKEND` (default: env / ollama) |
+| `--ollama-impact-model`    | Overrides `OLLAMA_IMPACT_MODEL` for this run when using the Ollama backend.                    |
 | `--verbose` / `-v`         | Debug logging                                                                                  |
 
 ### Date range filtering with `--from` / `--to`
@@ -137,6 +138,7 @@ python -m news_impact.score_news_cli --fmp-news --to 2025-11-30
 | `--from DATE`                | —       | FMP: inclusive start date (`YYYY-MM-DD`).                               |
 | `--limit N`                  | `20`    | FMP: max articles per request (≤ 250).                                  |
 | `--news-impact-backend`      | —       | `ollama`, `anthropic`, or `do_agent`; overrides `NEWS_IMPACT_BACKEND`.   |
+| `--ollama-impact-model`      | —       | Ollama model name; overrides `OLLAMA_IMPACT_MODEL` for this run.        |
 | `--no-persist`               | off     | Do not write to Supabase.                                               |
 | `--page N`                   | `0`     | FMP: pagination index (≤ 100).                                          |
 | `--published-at ISO`         | —       | Stored publication timestamp.                                           |
