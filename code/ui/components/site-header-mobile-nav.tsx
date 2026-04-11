@@ -43,10 +43,30 @@ type Props = {
 
 export function SiteHeaderMobileNav({ isAuthed, userEmail }: Props) {
   const [open, setOpen] = useState(false);
+  const [isLoggedIn, setIsLoggedIn] = useState(isAuthed);
+  const [email, setEmail] = useState(userEmail);
   const panelId = useId();
   const router = useRouter();
 
   const close = () => setOpen(false);
+
+  // Keep auth state in sync client-side so protected links always reflect
+  // the real session (handles client-side logins/logouts and stale SSR props).
+  useEffect(() => {
+    const supabase = createClient();
+
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      setIsLoggedIn(Boolean(session?.user));
+      setEmail(session?.user?.email ?? null);
+    });
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_, session) => {
+      setIsLoggedIn(Boolean(session?.user));
+      setEmail(session?.user?.email ?? null);
+    });
+
+    return () => subscription.unsubscribe();
+  }, []);
 
   useEffect(() => {
     if (!open) return;
@@ -84,7 +104,7 @@ export function SiteHeaderMobileNav({ isAuthed, userEmail }: Props) {
       </button>
 
       {open && (
-        <div className="fixed inset-0 z-[100] md:hidden">
+        <div className="fixed inset-0 z-[10000] md:hidden">
           {/* Backdrop */}
           <button
             type="button"
@@ -119,7 +139,7 @@ export function SiteHeaderMobileNav({ isAuthed, userEmail }: Props) {
 
             {/* Nav content */}
             <nav className="min-h-0 flex-1 overflow-y-auto p-4 space-y-6">
-              {isAuthed ? (
+              {isLoggedIn ? (
                 <>
                   <div>
                     <p className={sectionLabelClass}>App</p>
@@ -154,10 +174,10 @@ export function SiteHeaderMobileNav({ isAuthed, userEmail }: Props) {
 
             {/* Drawer footer */}
             <div className="shrink-0 border-t border-border p-4">
-              {isAuthed ? (
+              {isLoggedIn ? (
                 <div className="space-y-2">
-                  {userEmail && (
-                    <p className="truncate px-3 text-xs text-muted-foreground">{userEmail}</p>
+                  {email && (
+                    <p className="truncate px-3 text-xs text-muted-foreground">{email}</p>
                   )}
                   <button
                     type="button"
