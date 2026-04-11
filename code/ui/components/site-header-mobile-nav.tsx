@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useId, useState } from "react";
+import { createPortal } from "react-dom";
 import Link from "next/link";
 import { Menu, X, LogOut } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
@@ -103,8 +104,8 @@ export function SiteHeaderMobileNav({ isAuthed, userEmail }: Props) {
         <Menu className="h-4 w-4" aria-hidden />
       </button>
 
-      {open && (
-        <div className="fixed inset-0 z-[10000] md:hidden">
+      {open && createPortal(
+        <div className="fixed inset-0 z-[10000]">
           {/* Backdrop */}
           <button
             type="button"
@@ -211,7 +212,8 @@ export function SiteHeaderMobileNav({ isAuthed, userEmail }: Props) {
               )}
             </div>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
     </>
   );
