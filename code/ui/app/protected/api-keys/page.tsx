@@ -23,25 +23,32 @@ async function ApiKeysContent() {
   return (
     <div className="flex flex-col gap-6 w-full">
       <div>
-        <h1 className="text-2xl font-bold">API Keys</h1>
-        <p className="text-sm text-muted-foreground mt-1">
+        <p className="text-xs font-semibold uppercase tracking-widest text-amber-500">Developer</p>
+        <h1 className="mt-1 text-2xl font-bold tracking-tight">API Keys</h1>
+        <p className="mt-1 text-sm text-muted-foreground">
           Use API keys to query the public REST API from your own scripts or applications.
         </p>
       </div>
 
       {/* Quick-start */}
-      <div className="rounded-lg border bg-muted/40 p-4 text-sm space-y-2">
-        <p className="font-medium">Quick start</p>
-        <p className="text-muted-foreground">
-          Pass your key as a Bearer token in the{" "}
-          <code className="font-mono text-xs bg-muted rounded px-1">Authorization</code> header:
-        </p>
-        <pre className="text-xs bg-muted rounded p-3 overflow-x-auto">{`curl https://<your-domain>/api/v1/news/impact-heads \\
+      <div className="rounded-2xl border border-border bg-card overflow-hidden">
+        <div className="border-b border-border px-5 py-3">
+          <p className="text-xs font-semibold uppercase tracking-widest text-amber-500">Quick start</p>
+        </div>
+        <div className="px-5 py-4 space-y-3 text-sm">
+          <p className="text-muted-foreground">
+            Pass your key as a Bearer token in the{" "}
+            <code className="font-mono text-xs bg-muted rounded px-1.5 py-0.5">Authorization</code>{" "}
+            header:
+          </p>
+          <pre className="text-xs bg-background rounded-xl border border-border p-4 overflow-x-auto text-muted-foreground">{`curl https://<your-domain>/api/v1/news/impact-heads \\
   -H "Authorization: Bearer st_live_<your_key>" \\
   -G -d "limit=10" -d "min_confidence=0.8"`}</pre>
-        <p className="text-muted-foreground">
-          Rate limit: <strong>60 requests / minute</strong> per key.
-        </p>
+          <p className="text-muted-foreground">
+            Rate limit:{" "}
+            <span className="font-semibold text-foreground">60 requests / minute</span> per key.
+          </p>
+        </div>
       </div>
 
       <ApiKeysUI initialKeys={keys ?? []} />

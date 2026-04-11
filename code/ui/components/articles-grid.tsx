@@ -32,9 +32,9 @@ export function ArticlesGridFallback() {
       {[0, 1, 2, 3].map((i) => (
         <div
           key={i}
-          className="animate-pulse rounded-lg border border-border bg-background p-3"
+          className="animate-pulse rounded-xl border border-border bg-card p-3"
         >
-          <div className="h-36 w-full rounded-md bg-muted" />
+          <div className="h-36 w-full rounded-lg bg-muted" />
           <div className="mt-3 space-y-2">
             <div className="h-3 w-4/5 rounded bg-muted" />
             <div className="h-3 w-2/5 rounded bg-muted" />
@@ -48,7 +48,7 @@ export function ArticlesGridFallback() {
 export function ArticlesGrid({ articles }: { articles: ArticleGridItem[] }) {
   if (articles.length === 0) {
     return (
-      <div className="rounded-md border p-4 text-sm text-muted-foreground">
+      <div className="rounded-xl border border-border bg-card p-6 text-sm text-muted-foreground">
         No articles found.
       </div>
     );
@@ -59,35 +59,35 @@ export function ArticlesGrid({ articles }: { articles: ArticleGridItem[] }) {
       {articles.map((article) => (
         <div
           key={article.id}
-          className="rounded-lg border border-border bg-background p-3"
+          className="group rounded-xl border border-border bg-card p-3 transition-all duration-200 hover:border-amber-500/30 hover:shadow-md hover:shadow-amber-500/5"
         >
-          <div className="relative h-36 w-full overflow-hidden rounded-md bg-muted">
+          <div className="relative h-36 w-full overflow-hidden rounded-lg bg-muted">
             {article.image_url ? (
               <img
                 src={article.image_url}
                 alt=""
-                className="h-full w-full object-cover"
+                className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-[1.02]"
                 loading="lazy"
               />
             ) : (
-              <div className="flex h-full w-full items-center justify-center text-[9px] text-muted-foreground">
-                —
+              <div className="flex h-full w-full items-center justify-center">
+                <span className="text-[9px] text-muted-foreground">—</span>
               </div>
             )}
           </div>
           <div className="mt-3 min-w-0">
             {article.source && (
-              <p className="mb-1 text-[11px] uppercase tracking-wide text-muted-foreground">
+              <p className="mb-1 text-[10px] font-semibold uppercase tracking-widest text-amber-500/70">
                 {article.source}
               </p>
             )}
             <Link
               href={article.slug ? `/articles/${article.slug}` : `/articles/${article.id}`}
-              className="line-clamp-2 text-sm font-medium leading-snug hover:underline"
+              className="line-clamp-2 text-sm font-medium leading-snug hover:text-amber-400 transition-colors cursor-pointer"
             >
               {article.title || article.url || "Untitled article"}
             </Link>
-            <p className="mt-1 text-xs text-muted-foreground">
+            <p className="mt-1.5 text-xs text-muted-foreground">
               {formatAgeSince(article.published_at ?? article.created_at)}
             </p>
           </div>
