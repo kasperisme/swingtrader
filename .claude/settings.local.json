@@ -1,7 +1,8 @@
 {
   "permissions": {
     "allow": [
-      "Bash(python3 -c \"import json,sys; d=json.load\\(sys.stdin\\); mcp=d.get\\('mcpServers',{}\\); [print\\(k,json.dumps\\(v,indent=2\\)\\) for k,v in mcp.items\\(\\) if 'swingtrader' in str\\(v\\)]\")"
+      "Bash(python3 -c \"import json,sys; d=json.load\\(sys.stdin\\); mcp=d.get\\('mcpServers',{}\\); [print\\(k,json.dumps\\(v,indent=2\\)\\) for k,v in mcp.items\\(\\) if 'swingtrader' in str\\(v\\)]\")",
+      "mcp__claude_ai_Sanity__get_schema"
     ]
   }
 }
