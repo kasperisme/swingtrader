@@ -7,7 +7,7 @@ import { SiteHeaderMobileNav } from "@/components/site-header-mobile-nav";
 
 function Logo() {
   return (
-    <Link href="/" className="inline-flex items-center gap-2">
+    <Link href="/" className="inline-flex items-center gap-2 shrink-0 cursor-pointer">
       <Image
         src="/icon.png"
         alt="newsimpactscreener logo"
@@ -22,12 +22,12 @@ function Logo() {
   );
 }
 
-const headerNavLinkClass =
+const navLinkClass =
   "text-sm font-medium text-muted-foreground transition-colors hover:text-foreground cursor-pointer";
 
 function HeaderShell({ children }: { children: React.ReactNode }) {
   return (
-    <header className="sticky top-0 z-50 px-4 pt-4 pb-0">
+    <header className="sticky top-0 z-50 px-4 pt-4 pb-2">
       <div className="mx-auto flex h-14 w-full max-w-7xl items-center justify-between rounded-2xl border border-border bg-background/80 px-4 shadow-lg backdrop-blur-md lg:px-6">
         {children}
       </div>
@@ -38,18 +38,19 @@ function HeaderShell({ children }: { children: React.ReactNode }) {
 export function SiteHeaderFallback() {
   return (
     <HeaderShell>
-      <Logo />
-      <div className="flex shrink-0 items-center gap-3">
-        <Link href="/docs" className={headerNavLinkClass}>
-          Docs
-        </Link>
-        <Link href="/blog" className={headerNavLinkClass}>
-          Blog
-        </Link>
-        <Button asChild size="sm" variant="outline">
+      <div className="flex min-w-0 flex-1 items-center gap-3">
+        <Logo />
+        {/* Fallback hamburger placeholder — same size, invisible */}
+        <div className="h-8 w-8 md:hidden" />
+      </div>
+      <div className="flex shrink-0 items-center gap-2">
+        {/* Desktop-only inline links */}
+        <Link href="/docs" className={`${navLinkClass} hidden md:inline`}>Docs</Link>
+        <Link href="/blog" className={`${navLinkClass} hidden md:inline`}>Blog</Link>
+        <Button asChild size="sm" variant="outline" className="hidden md:inline-flex">
           <Link href="/auth/login">Sign in</Link>
         </Button>
-        <Button asChild size="sm">
+        <Button asChild size="sm" className="hidden md:inline-flex">
           <Link href="/auth/sign-up">Sign up</Link>
         </Button>
       </div>
@@ -59,8 +60,6 @@ export function SiteHeaderFallback() {
 
 export async function SiteHeader() {
   const supabase = await createClient();
-  // Use getUser() (not getClaims) so protected links only show after Auth validates
-  // the session; stale JWTs in cookies must not reveal /protected nav when logged out.
   const {
     data: { user },
   } = await supabase.auth.getUser();
@@ -70,52 +69,39 @@ export async function SiteHeader() {
     <HeaderShell>
       <div className="flex min-w-0 flex-1 items-center gap-3 md:gap-6">
         <Logo />
-        {isAuthed ? <SiteHeaderMobileNav userEmail={user?.email} /> : null}
-        {isAuthed ? (
+
+        {/* Hamburger — always visible on mobile, handles both authed + unauthed */}
+        <SiteHeaderMobileNav isAuthed={isAuthed} userEmail={user?.email} />
+
+        {/* Desktop authenticated nav */}
+        {isAuthed && (
           <nav className="hidden min-w-0 items-center gap-4 md:flex">
-            <Link href="/protected" className={headerNavLinkClass}>
-              Articles
-            </Link>
-            <Link href="/protected/news-trends" className={headerNavLinkClass}>
-              News Trends
-            </Link>
-            <Link href="/protected/vectors" className={headerNavLinkClass}>
-              Vectors
-            </Link>
-            <Link href="/protected/screenings" className={headerNavLinkClass}>
-              Screenings
-            </Link>
-            <Link href="/protected/trades" className={headerNavLinkClass}>
-              Trades
-            </Link>
+            <Link href="/protected" className={navLinkClass}>Articles</Link>
+            <Link href="/protected/news-trends" className={navLinkClass}>News Trends</Link>
+            <Link href="/protected/vectors" className={navLinkClass}>Vectors</Link>
+            <Link href="/protected/screenings" className={navLinkClass}>Screenings</Link>
+            <Link href="/protected/trades" className={navLinkClass}>Trades</Link>
           </nav>
-        ) : null}
+        )}
       </div>
 
+      {/* Right side — desktop only */}
       {isAuthed ? (
-        <div className="flex shrink-0 items-center gap-2 sm:gap-3">
-          <Link href="/docs" className={`${headerNavLinkClass} hidden md:inline`}>
-            Docs
-          </Link>
-          <Link href="/blog" className={`${headerNavLinkClass} hidden md:inline`}>
-            Blog
-          </Link>
+        <div className="hidden shrink-0 items-center gap-3 md:flex">
+          <Link href="/docs" className={navLinkClass}>Docs</Link>
+          <Link href="/blog" className={navLinkClass}>Blog</Link>
           <Link
             href="/protected/profile"
-            className="hidden text-sm text-muted-foreground hover:text-foreground transition-colors md:inline cursor-pointer"
+            className="text-sm text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
           >
             {user?.email ?? ""}
           </Link>
           <LogoutButton />
         </div>
       ) : (
-        <div className="flex shrink-0 items-center gap-2">
-          <Link href="/docs" className={headerNavLinkClass}>
-            Docs
-          </Link>
-          <Link href="/blog" className={headerNavLinkClass}>
-            Blog
-          </Link>
+        <div className="hidden shrink-0 items-center gap-2 md:flex">
+          <Link href="/docs" className={navLinkClass}>Docs</Link>
+          <Link href="/blog" className={navLinkClass}>Blog</Link>
           <Button asChild size="sm" variant="outline">
             <Link href="/auth/login">Sign in</Link>
           </Button>
