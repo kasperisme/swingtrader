@@ -7,7 +7,7 @@ const BOT_USERNAME = process.env.TELEGRAM_BOT_USERNAME ?? "";
 
 // ── POST /api/user/telegram ───────────────────────────────────────────────────
 // Generate a one-time link token and return the Telegram deep link.
-// The bot script resolves the token → user_id mapping when the user clicks start.
+// The webhook resolves the token → user_id mapping when the user taps /start.
 export async function POST() {
   const supabase = await createClient();
   const { data: { user }, error: authErr } = await supabase.auth.getUser();
@@ -23,16 +23,11 @@ export async function POST() {
   const token = randomBytes(18).toString("base64url"); // 24-char URL-safe token
   const expiresAt = new Date(Date.now() + TOKEN_TTL_MINUTES * 60 * 1000).toISOString();
 
-  // Upsert preferences row — create it if this user hasn't set prefs yet
   const { error } = await supabase
     .schema("swingtrader")
-    .from("user_narrative_preferences")
+    .from("user_telegram_connections")
     .upsert(
-      {
-        user_id: user.id,
-        telegram_link_token: token,
-        telegram_link_expires_at: expiresAt,
-      },
+      { user_id: user.id, link_token: token, link_expires_at: expiresAt },
       { onConflict: "user_id" },
     );
 
@@ -54,29 +49,25 @@ export async function GET() {
 
   const { data, error } = await supabase
     .schema("swingtrader")
-    .from("user_narrative_preferences")
-    .select("telegram_chat_id, delivery_method, is_enabled, delivery_time, lookback_hours")
+    .from("user_telegram_connections")
+    .select("chat_id, connected_at")
     .eq("user_id", user.id)
     .limit(1)
     .single();
 
   if (error && error.code !== "PGRST116") {
-    // PGRST116 = no rows found — user simply hasn't set prefs yet
     return NextResponse.json({ error: "Failed to fetch status" }, { status: 500 });
   }
 
   return NextResponse.json({
-    connected: Boolean(data?.telegram_chat_id),
-    chat_id: data?.telegram_chat_id ?? null,
-    delivery_method: data?.delivery_method ?? "in_app",
-    is_enabled: data?.is_enabled ?? true,
-    delivery_time: data?.delivery_time ?? "08:30:00",
-    lookback_hours: data?.lookback_hours ?? 24,
+    connected: Boolean(data?.chat_id),
+    chat_id: data?.chat_id ?? null,
+    connected_at: data?.connected_at ?? null,
   });
 }
 
 // ── DELETE /api/user/telegram ─────────────────────────────────────────────────
-// Disconnect Telegram — clears chat_id and reverts delivery_method to in_app.
+// Disconnect — clears chat_id so no further messages are sent.
 export async function DELETE() {
   const supabase = await createClient();
   const { data: { user }, error: authErr } = await supabase.auth.getUser();
@@ -84,17 +75,9 @@ export async function DELETE() {
 
   const { error } = await supabase
     .schema("swingtrader")
-    .from("user_narrative_preferences")
-    .upsert(
-      {
-        user_id: user.id,
-        telegram_chat_id: null,
-        telegram_link_token: null,
-        telegram_link_expires_at: null,
-        delivery_method: "in_app",
-      },
-      { onConflict: "user_id" },
-    );
+    .from("user_telegram_connections")
+    .update({ chat_id: null, link_token: null, link_expires_at: null })
+    .eq("user_id", user.id);
 
   if (error) return NextResponse.json({ error: "Failed to disconnect" }, { status: 500 });
   return NextResponse.json({ ok: true });

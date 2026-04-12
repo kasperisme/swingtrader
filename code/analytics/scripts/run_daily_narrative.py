@@ -185,7 +185,7 @@ def _deliver_if_needed(user_id: str, narrative: dict, narrative_date: str) -> No
     prefs_res = (
         client.schema(schema)
         .table("user_narrative_preferences")
-        .select("delivery_method,is_enabled,telegram_chat_id")
+        .select("delivery_method,is_enabled")
         .eq("user_id", user_id)
         .limit(1)
         .execute()
@@ -200,7 +200,16 @@ def _deliver_if_needed(user_id: str, narrative: dict, narrative_date: str) -> No
         logger.debug("[delivery] user=%s method=%s — skipping Telegram", user_id, method)
         return
 
-    chat_id = prefs.get("telegram_chat_id")
+    # chat_id lives in user_telegram_connections, not user_narrative_preferences
+    tg_res = (
+        client.schema(schema)
+        .table("user_telegram_connections")
+        .select("chat_id")
+        .eq("user_id", user_id)
+        .limit(1)
+        .execute()
+    )
+    chat_id = ((tg_res.data or [{}])[0]).get("chat_id")
     if not chat_id:
         logger.warning(
             "[telegram] user=%s has no telegram_chat_id — skipping. "

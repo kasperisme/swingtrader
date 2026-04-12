@@ -1,9 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createServiceClient } from "@/lib/supabase/service";
 
-// Telegram sends this header when a secret_token was set during setWebhook.
-// Set TELEGRAM_WEBHOOK_SECRET to any random string in Vercel env vars,
-// and pass the same value when registering the webhook (see README).
 const WEBHOOK_SECRET = process.env.TELEGRAM_WEBHOOK_SECRET ?? "";
 const BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN ?? "";
 
@@ -16,13 +13,13 @@ async function sendTelegramMessage(chat_id: number, text: string): Promise<void>
   }).catch(() => {});
 }
 
-// ── GET /api/user/telegram/webhook ───────────────────────────────────────────
-// Health-check — confirms the endpoint is reachable (Telegram only sends POST).
+// ── GET /api/telegram-webhook ─────────────────────────────────────────────────
+// Health-check — Telegram only sends POST, this is just for browser verification.
 export function GET() {
   return NextResponse.json({ ok: true, note: "Telegram webhook endpoint. Expects POST from Telegram." });
 }
 
-// ── POST /api/user/telegram/webhook ──────────────────────────────────────────
+// ── POST /api/telegram-webhook ────────────────────────────────────────────────
 // Telegram pushes all bot updates here. Must return 200 quickly or Telegram retries.
 export async function POST(req: NextRequest) {
   // 1. Verify the request is from Telegram
@@ -40,21 +37,18 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
   }
 
-  // 2. Extract the message — only handle text messages
   const message = update.message as Record<string, unknown> | undefined;
-  if (!message) return NextResponse.json({ ok: true }); // ignore non-message updates
+  if (!message) return NextResponse.json({ ok: true });
 
   const text = (message.text as string | undefined)?.trim() ?? "";
   const chat = message.chat as Record<string, unknown>;
   const chat_id = chat.id as number;
   const first_name = ((message.from as Record<string, unknown>)?.first_name as string) ?? "there";
 
-  // 3. Route commands
   if (text.startsWith("/start")) {
     const token = text.slice("/start".length).trim();
     await handleStart(chat_id, first_name, token);
   }
-  // Ignore all other messages — no noisy replies
 
   // Always return 200 so Telegram doesn't retry
   return NextResponse.json({ ok: true });
@@ -73,15 +67,14 @@ async function handleStart(chat_id: number, first_name: string, token: string): 
 
   // Service-role client — bypasses RLS since there is no user session on a webhook request
   const supabase = createServiceClient();
-
   const now = new Date().toISOString();
 
-  // Look up the token — must be valid and not expired
+  // Look up the token in user_telegram_connections
   const { data: rows, error } = await supabase
     .schema("swingtrader")
-    .from("user_narrative_preferences")
-    .select("user_id, telegram_link_expires_at")
-    .eq("telegram_link_token", token)
+    .from("user_telegram_connections")
+    .select("user_id, link_expires_at")
+    .eq("link_token", token)
     .limit(1);
 
   if (error || !rows?.length) {
@@ -94,7 +87,7 @@ async function handleStart(chat_id: number, first_name: string, token: string): 
   }
 
   const row = rows[0];
-  if (row.telegram_link_expires_at && row.telegram_link_expires_at < now) {
+  if (row.link_expires_at && row.link_expires_at < now) {
     await sendTelegramMessage(
       chat_id,
       "❌ This link has <b>expired</b> (links are valid for 15 minutes).\n\n" +
@@ -103,27 +96,15 @@ async function handleStart(chat_id: number, first_name: string, token: string): 
     return;
   }
 
-  // Fetch current delivery_method so we don't downgrade 'both'
-  const { data: prefs } = await supabase
-    .schema("swingtrader")
-    .from("user_narrative_preferences")
-    .select("delivery_method")
-    .eq("user_id", row.user_id)
-    .limit(1)
-    .single();
-
-  const currentMethod = prefs?.delivery_method ?? "in_app";
-  const newMethod = currentMethod === "both" ? "both" : "telegram";
-
-  // Save chat_id, clear the token
+  // Save chat_id, clear the token, record connected_at
   const { error: updateErr } = await supabase
     .schema("swingtrader")
-    .from("user_narrative_preferences")
+    .from("user_telegram_connections")
     .update({
-      telegram_chat_id: String(chat_id),
-      telegram_link_token: null,
-      telegram_link_expires_at: null,
-      delivery_method: newMethod,
+      chat_id: String(chat_id),
+      link_token: null,
+      link_expires_at: null,
+      connected_at: now,
     })
     .eq("user_id", row.user_id);
 
