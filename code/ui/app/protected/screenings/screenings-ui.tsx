@@ -3,7 +3,7 @@
 import { useState, useMemo, useEffect, useCallback, useRef } from "react";
 import { useRouter } from "next/navigation";
 import {
-  CheckCircle, XCircle, Search, SlidersHorizontal, ChevronDown, ChevronUp,
+  CheckCircle, XCircle, Search, ChevronDown, ChevronUp,
   ChevronLeft, ChevronRight, BarChart2, List, TrendingUp, Loader2, Newspaper, Trash2, RotateCcw, Star, MessageSquare,
   Activity, Copy, Gauge,
 } from "lucide-react";
@@ -16,6 +16,25 @@ import {
   screeningsGetTickerRelationships,
   screeningsUpsertDismissNote,
 } from "@/app/actions/screenings";
+import {
+  collectAllRowDataKeys,
+  compareRowDataValues,
+  getRowDataValue,
+  inferBooleanFilterKeys,
+  inferNumericFilterKeys,
+  isBooleanColumn,
+  isNumericColumn,
+  MAX_CATEGORICAL_STRING_OPTIONS,
+  orderedDataColumnKeys,
+  stringifyRowDataValueForFilter,
+  uniqueStringValuesForKey,
+} from "./screenings-row-data";
+import { ScreeningsFilterBar } from "./screenings-filter-bar";
+import {
+  DEFAULT_SCREENINGS_FILTERS,
+  NOTE_STAGE_NONE,
+  type ScreeningsFilters,
+} from "./screenings-filters-model";
 
 type SentimentArticleImpact = ArticleImpact & {
   ticker_sentiment?: Record<string, number>;
@@ -32,6 +51,8 @@ export interface ScreeningRow {
   scan_row_id: number;
   run_id: number;
   symbol: string;
+  /** Raw JSON from `user_scan_rows.row_data` (all keys preserved for dynamic columns / filters). */
+  rowData: Record<string, unknown>;
   sector: string;
   industry: string;
   subSector: string;
@@ -134,243 +155,67 @@ function RsBadge({ rank }: { rank: number | null }) {
   );
 }
 
-// ─── filter state ────────────────────────────────────────────────────────────
-
-interface Filters {
-  status: NoteStatus | "all";
-  passedOnly: boolean;
-  minRsRank: string;
-  rsLineNewHigh: boolean;
-  withinBuyRange: boolean;
-  accumulation: boolean;
-  minEpsGrowth: string;
-  minRevGrowth: string;
-  epsAccelerating: boolean;
-  roe17pct: boolean;
-  beatEstimate: boolean;
-  increasingEps: boolean;
-  threeYrEps25pct: boolean;
-  passesOneil: boolean;
-  sectorLeader: boolean;
-  instSharesIncreasing: boolean;
-  sector: string;
+function DataCell({ colKey, value }: { colKey: string; value: unknown }) {
+  if (value === undefined || value === null) {
+    return <span className="text-muted-foreground/40 text-xs">—</span>;
+  }
+  if (colKey === "RS_Rank" || colKey === "rs_rank") {
+    const n = typeof value === "number" ? value : parseFloat(String(value));
+    return <RsBadge rank={Number.isFinite(n) ? n : null} />;
+  }
+  if (typeof value === "boolean") {
+    return (
+      <div className="flex justify-center">
+        <Check value={value} />
+      </div>
+    );
+  }
+  if (typeof value === "number") {
+    if (Number.isInteger(value)) {
+      return <span className="tabular-nums text-xs">{value}</span>;
+    }
+    return <span className="tabular-nums text-xs">{value.toFixed(3)}</span>;
+  }
+  if (typeof value === "string") {
+    const t = value.trim();
+    if (!t) return <span className="text-muted-foreground/40 text-xs">—</span>;
+    return (
+      <span
+        className="text-xs max-w-[140px] truncate inline-block align-bottom"
+        title={t}
+      >
+        {t}
+      </span>
+    );
+  }
+  if (typeof value === "object") {
+    let s: string;
+    try {
+      s = JSON.stringify(value);
+    } catch {
+      s = "[object]";
+    }
+    return (
+      <span
+        className="text-[10px] font-mono text-muted-foreground max-w-[120px] truncate inline-block align-bottom"
+        title={s}
+      >
+        {s.length > 56 ? `${s.slice(0, 56)}…` : s}
+      </span>
+    );
+  }
+  return <span className="text-xs">{String(value)}</span>;
 }
 
-const DEFAULT_FILTERS: Filters = {
-  status: "active",
-  passedOnly: true,
-  minRsRank: "",
-  rsLineNewHigh: false,
-  withinBuyRange: false,
-  accumulation: false,
-  minEpsGrowth: "",
-  minRevGrowth: "",
-  epsAccelerating: false,
-  roe17pct: false,
-  beatEstimate: false,
-  increasingEps: false,
-  threeYrEps25pct: false,
-  passesOneil: false,
-  sectorLeader: false,
-  instSharesIncreasing: false,
-  sector: "",
-};
+// ─── filter state (model: screenings-filters-model.ts) ───────────────────────
 
-type SortKey = "symbol" | "RS_Rank" | "sector" | "eps_growth_yoy" | "rev_growth_yoy" | "roe" | "adr_pct";
+type Filters = ScreeningsFilters;
+const DEFAULT_FILTERS = DEFAULT_SCREENINGS_FILTERS;
+
+/** Sort column: `symbol` or any key present in rowData (discovered per run). */
+type SortKey = string;
 type SortDir = "asc" | "desc";
 type ViewTab = "results" | "quotes" | "charts" | "news" | "sentiment" | "relationship" | "tradeMonitoring";
-
-// ─── FilterPanel ─────────────────────────────────────────────────────────────
-
-function FilterPanel({
-  filters,
-  setFilters,
-  sectors,
-  hasRichData,
-}: {
-  filters: Filters;
-  setFilters: (f: Filters) => void;
-  sectors: string[];
-  hasRichData: boolean;
-}) {
-  const [open, setOpen] = useState(false);
-
-  function set<K extends keyof Filters>(key: K, value: Filters[K]) {
-    setFilters({ ...filters, [key]: value });
-  }
-
-  function CheckFilter({
-    label,
-    field,
-    disabled,
-    title,
-  }: {
-    label: string;
-    field: keyof Filters;
-    disabled?: boolean;
-    title?: string;
-  }) {
-    return (
-      <label
-        className={`flex items-center gap-2 text-sm cursor-pointer select-none ${disabled ? "opacity-40 cursor-not-allowed" : ""}`}
-        title={title}
-      >
-        <input
-          type="checkbox"
-          checked={filters[field] as boolean}
-          onChange={e => !disabled && set(field, e.target.checked as Filters[typeof field])}
-          disabled={disabled}
-          className="rounded"
-        />
-        {label}
-      </label>
-    );
-  }
-
-  function NumFilter({
-    label,
-    field,
-    placeholder,
-    disabled,
-    title,
-  }: {
-    label: string;
-    field: keyof Filters;
-    placeholder: string;
-    disabled?: boolean;
-    title?: string;
-  }) {
-    return (
-      <label className={`flex flex-col gap-0.5 ${disabled ? "opacity-40" : ""}`} title={title}>
-        <span className="text-xs text-muted-foreground">{label}</span>
-        <input
-          type="number"
-          value={filters[field] as string}
-          onChange={e => !disabled && set(field, e.target.value as Filters[typeof field])}
-          disabled={disabled}
-          placeholder={placeholder}
-          className="w-20 px-2 py-1 text-sm rounded border border-input bg-background focus:outline-none focus:ring-1 focus:ring-ring"
-        />
-      </label>
-    );
-  }
-
-  const richDisabledTitle = hasRichData ? undefined : "Not available for this scan type";
-
-  return (
-    <div className="border border-border rounded-lg">
-      <button
-        onClick={() => setOpen(o => !o)}
-        className="w-full flex items-center justify-between px-4 py-2.5 text-sm font-medium hover:bg-muted/30 transition-colors rounded-lg"
-      >
-        <span className="flex items-center gap-2">
-          <SlidersHorizontal className="w-4 h-4" />
-          Filters
-          {countActiveFilters(filters) > 0 && (
-            <span className="bg-foreground text-background text-xs px-1.5 py-0.5 rounded-full">
-              {countActiveFilters(filters)}
-            </span>
-          )}
-        </span>
-        {open ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
-      </button>
-
-      {open && (
-        <div className="px-4 pb-4 pt-1 border-t border-border flex flex-col gap-4">
-          <div className="flex flex-wrap gap-x-8 gap-y-2 pt-2">
-            <CheckFilter label="Passed technical only" field="passedOnly" />
-            <label className="flex flex-col gap-0.5">
-              <span className="text-xs text-muted-foreground">Status</span>
-              <select
-                value={filters.status}
-                onChange={e => set("status", e.target.value as Filters["status"])}
-                className="px-2 py-1 text-sm rounded border border-input bg-background focus:outline-none focus:ring-1 focus:ring-ring"
-              >
-                <option value="active">Active</option>
-                <option value="dismissed">Dismissed</option>
-                <option value="watchlist">Watchlist</option>
-                <option value="pipeline">Pipeline</option>
-                <option value="all">All statuses</option>
-              </select>
-            </label>
-            {sectors.length > 1 && (
-              <label className="flex flex-col gap-0.5">
-                <span className="text-xs text-muted-foreground">Sector</span>
-                <select
-                  value={filters.sector}
-                  onChange={e => set("sector", e.target.value)}
-                  className="px-2 py-1 text-sm rounded border border-input bg-background focus:outline-none focus:ring-1 focus:ring-ring"
-                >
-                  <option value="">All sectors</option>
-                  {sectors.map(s => (
-                    <option key={s} value={s}>{s}</option>
-                  ))}
-                </select>
-              </label>
-            )}
-          </div>
-
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-            <div className="flex flex-col gap-2">
-              <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Technical</p>
-              <NumFilter label="Min RS Rank" field="minRsRank" placeholder="e.g. 80" />
-              <CheckFilter label="RS line new high" field="rsLineNewHigh" disabled={!hasRichData} title={richDisabledTitle} />
-              <CheckFilter label="Within buy range" field="withinBuyRange" disabled={!hasRichData} title={richDisabledTitle} />
-              <CheckFilter label="Accumulation days" field="accumulation" disabled={!hasRichData} title={richDisabledTitle} />
-            </div>
-
-            <div className="flex flex-col gap-2">
-              <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Fundamentals</p>
-              <NumFilter label="Min EPS YoY %" field="minEpsGrowth" placeholder="e.g. 25" disabled={!hasRichData} title={richDisabledTitle} />
-              <NumFilter label="Min Rev YoY %" field="minRevGrowth" placeholder="e.g. 20" disabled={!hasRichData} title={richDisabledTitle} />
-              <CheckFilter label="EPS accelerating" field="epsAccelerating" disabled={!hasRichData} title={richDisabledTitle} />
-              <CheckFilter label="ROE ≥ 17%" field="roe17pct" disabled={!hasRichData} title={richDisabledTitle} />
-              <CheckFilter label="Beat estimates (3Q)" field="beatEstimate" />
-              <CheckFilter label="Increasing EPS" field="increasingEps" />
-              <CheckFilter label="3yr EPS ≥ 25% p.a." field="threeYrEps25pct" disabled={!hasRichData} title={richDisabledTitle} />
-              <CheckFilter label="Passes O'Neil criteria" field="passesOneil" disabled={!hasRichData} title={richDisabledTitle} />
-            </div>
-
-            <div className="flex flex-col gap-2">
-              <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Sector &amp; Institutional</p>
-              <CheckFilter label="Sector leader (top 40%)" field="sectorLeader" disabled={!hasRichData} title={richDisabledTitle} />
-              <CheckFilter label="Inst. shares increasing" field="instSharesIncreasing" disabled={!hasRichData} title={richDisabledTitle} />
-            </div>
-          </div>
-
-          <button
-            onClick={() => setFilters(DEFAULT_FILTERS)}
-            className="self-start text-xs text-muted-foreground hover:text-foreground underline underline-offset-2"
-          >
-            Reset filters
-          </button>
-        </div>
-      )}
-    </div>
-  );
-}
-
-function countActiveFilters(f: Filters): number {
-  let n = 0;
-  if (f.status !== "active") n++;
-  if (!f.passedOnly) n++;
-  if (f.minRsRank) n++;
-  if (f.rsLineNewHigh) n++;
-  if (f.withinBuyRange) n++;
-  if (f.accumulation) n++;
-  if (f.minEpsGrowth) n++;
-  if (f.minRevGrowth) n++;
-  if (f.epsAccelerating) n++;
-  if (f.roe17pct) n++;
-  if (f.beatEstimate) n++;
-  if (f.increasingEps) n++;
-  if (f.threeYrEps25pct) n++;
-  if (f.passesOneil) n++;
-  if (f.sectorLeader) n++;
-  if (f.instSharesIncreasing) n++;
-  if (f.sector) n++;
-  return n;
-}
 
 // ─── FMP Quote types ─────────────────────────────────────────────────────────
 
@@ -2811,10 +2656,17 @@ export function ScreeningsUI({
   const [search, setSearch] = useState("");
   const [filters, setFiltersState] = useState<Filters>(DEFAULT_FILTERS);
 
-  function setFilters(f: Filters) {
-    setFiltersState(f);
-    try { localStorage.setItem("screenings-filters", JSON.stringify(f)); } catch { /* ignore */ }
-  }
+  const setFilters = useCallback((f: Filters | ((prev: Filters) => Filters)) => {
+    setFiltersState((prev) => {
+      const next = typeof f === "function" ? f(prev) : f;
+      try {
+        localStorage.setItem("screenings-filters", JSON.stringify(next));
+      } catch {
+        /* ignore */
+      }
+      return next;
+    });
+  }, []);
   const [sortKey, setSortKeyState] = useState<SortKey>("RS_Rank");
   const [sortDir, setSortDirState] = useState<SortDir>("desc");
 
@@ -2844,8 +2696,80 @@ export function ScreeningsUI({
     try {
       const storedFilters = localStorage.getItem("screenings-filters");
       if (storedFilters) {
-        const parsed = JSON.parse(storedFilters) as Partial<Filters>;
-        setFiltersState({ ...DEFAULT_FILTERS, ...parsed });
+        const parsed = JSON.parse(storedFilters) as Record<string, unknown>;
+        const legacy = parsed as {
+          dynamicTruthys?: Record<string, boolean>;
+          dynamicNumericMins?: Record<string, string>;
+        };
+        const statusRaw = parsed.status;
+        const nh = parsed.noteHighlighted;
+        const nc = parsed.noteComment;
+        const tagsRaw = parsed.noteTagsAny;
+        setFiltersState({
+          ...DEFAULT_FILTERS,
+          ...(typeof statusRaw === "string" ? { status: statusRaw as Filters["status"] } : {}),
+          ...(nh === "any" || nh === "yes" || nh === "no" ? { noteHighlighted: nh } : {}),
+          ...(nc === "any" || nc === "with" || nc === "without" ? { noteComment: nc } : {}),
+          ...(typeof parsed.noteStage === "string" ? { noteStage: parsed.noteStage } : {}),
+          ...(typeof parsed.notePriorityMin === "string"
+            ? { notePriorityMin: parsed.notePriorityMin }
+            : {}),
+          ...(typeof parsed.notePriorityMax === "string"
+            ? { notePriorityMax: parsed.notePriorityMax }
+            : {}),
+          ...(typeof parsed.notePriorityGt === "string"
+            ? { notePriorityGt: parsed.notePriorityGt }
+            : {}),
+          ...(typeof parsed.notePriorityLt === "string"
+            ? { notePriorityLt: parsed.notePriorityLt }
+            : {}),
+          ...(typeof parsed.notePriorityEq === "string"
+            ? { notePriorityEq: parsed.notePriorityEq }
+            : {}),
+          ...(Array.isArray(tagsRaw)
+            ? {
+                noteTagsAny: tagsRaw.filter((t): t is string => typeof t === "string"),
+              }
+            : {}),
+          boolRequire: {
+            ...DEFAULT_FILTERS.boolRequire,
+            ...((parsed.boolRequire as Record<string, boolean> | undefined) ?? {}),
+            ...(legacy.dynamicTruthys ?? {}),
+          },
+          boolReject: {
+            ...DEFAULT_FILTERS.boolReject,
+            ...((parsed.boolReject as Record<string, boolean> | undefined) ?? {}),
+          },
+          numMin: {
+            ...DEFAULT_FILTERS.numMin,
+            ...((parsed.numMin as Record<string, string> | undefined) ?? {}),
+            ...(legacy.dynamicNumericMins ?? {}),
+          },
+          numMax: {
+            ...DEFAULT_FILTERS.numMax,
+            ...((parsed.numMax as Record<string, string> | undefined) ?? {}),
+          },
+          numGt: {
+            ...DEFAULT_FILTERS.numGt,
+            ...((parsed.numGt as Record<string, string> | undefined) ?? {}),
+          },
+          numLt: {
+            ...DEFAULT_FILTERS.numLt,
+            ...((parsed.numLt as Record<string, string> | undefined) ?? {}),
+          },
+          stringOneOf: {
+            ...DEFAULT_FILTERS.stringOneOf,
+            ...((parsed.stringOneOf as Record<string, string[]> | undefined) ?? {}),
+          },
+          stringContains: {
+            ...DEFAULT_FILTERS.stringContains,
+            ...((parsed.stringContains as Record<string, string> | undefined) ?? {}),
+          },
+          stringEquals: {
+            ...DEFAULT_FILTERS.stringEquals,
+            ...((parsed.stringEquals as Record<string, string> | undefined) ?? {}),
+          },
+        });
       }
     } catch {
       // ignore malformed storage
@@ -2853,7 +2777,7 @@ export function ScreeningsUI({
 
     try {
       const v = localStorage.getItem("screenings-sort-key");
-      if (v === "symbol" || v === "RS_Rank" || v === "sector" || v === "eps_growth_yoy" || v === "rev_growth_yoy" || v === "roe" || v === "adr_pct") {
+      if (typeof v === "string" && v.length > 0 && v.length < 200) {
         setSortKeyState(v);
       }
     } catch {
@@ -2874,6 +2798,11 @@ export function ScreeningsUI({
   const [rowNotes, setRowNotes] = useState<Map<number, ScanRowNote>>(
     () => new Map(initialNotes.map(n => [n.scan_row_id, n]))
   );
+
+  useEffect(() => {
+    setRowNotes(new Map(initialNotes.map((n) => [n.scan_row_id, n])));
+  }, [selectedRunId, initialNotes]);
+
   const rowBySymbol = useMemo(() => {
     const map = new Map<string, ScreeningRow>();
     for (const row of rows) {
@@ -2898,6 +2827,26 @@ export function ScreeningsUI({
       if (note.status === "dismissed") count++;
     }
     return count;
+  }, [rowNotes]);
+
+  const noteStageOptions = useMemo(() => {
+    const s = new Set<string>();
+    for (const n of rowNotes.values()) {
+      const st = n.stage?.trim();
+      if (st) s.add(st);
+    }
+    return [...s].sort((a, b) => a.localeCompare(b));
+  }, [rowNotes]);
+
+  const noteTagOptions = useMemo(() => {
+    const s = new Set<string>();
+    for (const n of rowNotes.values()) {
+      for (const t of n.tags ?? []) {
+        const u = String(t).trim();
+        if (u) s.add(u);
+      }
+    }
+    return [...s].sort((a, b) => a.localeCompare(b));
   }, [rowNotes]);
 
   const tradeMonitoringRows = useMemo(() => {
@@ -3093,12 +3042,55 @@ export function ScreeningsUI({
     }
   }
 
-  const hasRichData = rows.some(r => r.eps_growth_yoy != null || r.rs_line_new_high != null);
+  const rowDataKeySet = useMemo(() => collectAllRowDataKeys(rows), [rows]);
 
-  const sectors = useMemo(() => {
-    const set = new Set(rows.map(r => r.sector).filter(Boolean));
-    return Array.from(set).sort();
-  }, [rows]);
+  const dataColumnKeys = useMemo(
+    () => orderedDataColumnKeys(rowDataKeySet),
+    [rowDataKeySet],
+  );
+
+  const boolFilterKeys = useMemo(
+    () => [...inferBooleanFilterKeys(rows, dataColumnKeys)].sort((a, b) => a.localeCompare(b)),
+    [rows, dataColumnKeys],
+  );
+
+  const numFilterKeys = useMemo(
+    () => [...inferNumericFilterKeys(rows, dataColumnKeys)].sort((a, b) => a.localeCompare(b)),
+    [rows, dataColumnKeys],
+  );
+
+  const { categoricalStringCols, freeStringKeys } = useMemo(() => {
+    const cat: { key: string; options: string[] }[] = [];
+    const free: string[] = [];
+    for (const k of dataColumnKeys) {
+      if (isBooleanColumn(rows, k) || isNumericColumn(rows, k)) continue;
+      const opts = uniqueStringValuesForKey(rows, k);
+      if (opts.length === 0) continue;
+      if (opts.length <= MAX_CATEGORICAL_STRING_OPTIONS) {
+        cat.push({ key: k, options: opts });
+      } else {
+        free.push(k);
+      }
+    }
+    free.sort((a, b) => a.localeCompare(b));
+    return { categoricalStringCols: cat, freeStringKeys: free };
+  }, [rows, dataColumnKeys]);
+
+  useEffect(() => {
+    if (rows.length === 0) return;
+    const ok = sortKey === "symbol" || dataColumnKeys.includes(sortKey);
+    if (ok) return;
+    const next =
+      dataColumnKeys.includes("RS_Rank")
+        ? "RS_Rank"
+        : dataColumnKeys.includes("Passed")
+          ? "Passed"
+          : (dataColumnKeys[0] ?? "symbol");
+    setSortKeyState(next);
+    setSortDirState(
+      next === "symbol" || ["sector", "industry", "subSector"].includes(next) ? "asc" : "desc",
+    );
+  }, [rows.length, dataColumnKeys, sortKey]);
 
   function selectRun(id: number) {
     router.push(`/protected/screenings?run=${id}`);
@@ -3106,60 +3098,167 @@ export function ScreeningsUI({
 
   function toggleSort(key: SortKey) {
     if (sortKey === key) {
-      setSortDir(d => d === "asc" ? "desc" : "asc");
+      setSortDir((d) => (d === "asc" ? "desc" : "asc"));
     } else {
       setSortKey(key);
-      setSortDir(key === "symbol" || key === "sector" ? "asc" : "desc");
+      const ascDefault =
+        key === "symbol" || key === "sector" || key === "industry" || key === "subSector";
+      setSortDir(ascDefault ? "asc" : "desc");
     }
   }
 
   const filtered = useMemo(() => {
-    const minRs = filters.minRsRank ? parseFloat(filters.minRsRank) : null;
-    const minEps = filters.minEpsGrowth ? parseFloat(filters.minEpsGrowth) : null;
-    const minRev = filters.minRevGrowth ? parseFloat(filters.minRevGrowth) : null;
-
-    let result = rows.filter(r => {
+    let result = rows.filter((r) => {
       const note = rowNotes.get(r.scan_row_id);
       const status = note?.status ?? "active";
       if (filters.status !== "all" && status !== filters.status) return false;
-      if (filters.passedOnly && !r.Passed) return false;
-      if (filters.sector && r.sector !== filters.sector) return false;
-      if (minRs != null && (r.RS_Rank == null || r.RS_Rank < minRs)) return false;
-      if (filters.rsLineNewHigh && !r.rs_line_new_high) return false;
-      if (filters.withinBuyRange && !r.within_buy_range) return false;
-      if (filters.accumulation && !r.accumulation) return false;
-      if (minEps != null && (r.eps_growth_yoy == null || r.eps_growth_yoy < minEps)) return false;
-      if (minRev != null && (r.rev_growth_yoy == null || r.rev_growth_yoy < minRev)) return false;
-      if (filters.epsAccelerating && !r.eps_accelerating) return false;
-      if (filters.roe17pct && !r.roe_above_17pct) return false;
-      if (filters.beatEstimate && !r.beat_estimate) return false;
-      if (filters.increasingEps && !r.increasing_eps) return false;
-      if (filters.threeYrEps25pct && !r.three_yr_annual_eps_25pct) return false;
-      if (filters.passesOneil && !r.passes_oneil_fundamentals) return false;
-      if (filters.sectorLeader && !r.sector_is_leader) return false;
-      if (filters.instSharesIncreasing && !r.inst_shares_increasing) return false;
+
+      const highlighted = note?.highlighted ?? false;
+      if (filters.noteHighlighted === "yes" && !highlighted) return false;
+      if (filters.noteHighlighted === "no" && highlighted) return false;
+
+      const commentTrim = note?.comment?.trim() ?? "";
+      if (filters.noteComment === "with" && !commentTrim) return false;
+      if (filters.noteComment === "without" && commentTrim) return false;
+
+      if (filters.noteStage) {
+        const st = note?.stage?.trim() ?? "";
+        if (filters.noteStage === NOTE_STAGE_NONE) {
+          if (st) return false;
+        } else if (st !== filters.noteStage) {
+          return false;
+        }
+      }
+
+      const pminStr = filters.notePriorityMin.trim();
+      if (pminStr) {
+        const pmin = parseFloat(pminStr);
+        if (Number.isFinite(pmin)) {
+          const p = note?.priority;
+          if (p == null || !Number.isFinite(p) || p < pmin) return false;
+        }
+      }
+      const pmaxStr = filters.notePriorityMax.trim();
+      if (pmaxStr) {
+        const pmax = parseFloat(pmaxStr);
+        if (Number.isFinite(pmax)) {
+          const p = note?.priority;
+          if (p == null || !Number.isFinite(p) || p > pmax) return false;
+        }
+      }
+      const pgtNote = filters.notePriorityGt.trim();
+      if (pgtNote) {
+        const bound = parseFloat(pgtNote);
+        if (Number.isFinite(bound)) {
+          const p = note?.priority;
+          if (p == null || !Number.isFinite(p) || p <= bound) return false;
+        }
+      }
+      const pltNote = filters.notePriorityLt.trim();
+      if (pltNote) {
+        const bound = parseFloat(pltNote);
+        if (Number.isFinite(bound)) {
+          const p = note?.priority;
+          if (p == null || !Number.isFinite(p) || p >= bound) return false;
+        }
+      }
+
+      if (filters.noteTagsAny.length > 0) {
+        const rowTags = new Set(
+          (note?.tags ?? []).map((t) => String(t).trim()).filter(Boolean),
+        );
+        const any = filters.noteTagsAny.some((t) => rowTags.has(t));
+        if (!any) return false;
+      }
+
+      for (const [k, on] of Object.entries(filters.boolRequire)) {
+        if (on && !getRowDataValue(r, k)) return false;
+      }
+      for (const [k, on] of Object.entries(filters.boolReject)) {
+        if (on && getRowDataValue(r, k)) return false;
+      }
+
+      for (const [k, minStr] of Object.entries(filters.numMin)) {
+        const t = minStr?.trim();
+        if (!t) continue;
+        const min = parseFloat(t);
+        if (!Number.isFinite(min)) continue;
+        const v = getRowDataValue(r, k);
+        const n = typeof v === "number" ? v : parseFloat(String(v));
+        if (!Number.isFinite(n) || n < min) return false;
+      }
+      for (const [k, maxStr] of Object.entries(filters.numMax)) {
+        const t = maxStr?.trim();
+        if (!t) continue;
+        const max = parseFloat(t);
+        if (!Number.isFinite(max)) continue;
+        const v = getRowDataValue(r, k);
+        const n = typeof v === "number" ? v : parseFloat(String(v));
+        if (!Number.isFinite(n) || n > max) return false;
+      }
+      for (const [k, gtStr] of Object.entries(filters.numGt)) {
+        const t = gtStr?.trim();
+        if (!t) continue;
+        const gt = parseFloat(t);
+        if (!Number.isFinite(gt)) continue;
+        const v = getRowDataValue(r, k);
+        const n = typeof v === "number" ? v : parseFloat(String(v));
+        if (!Number.isFinite(n) || n <= gt) return false;
+      }
+      for (const [k, ltStr] of Object.entries(filters.numLt)) {
+        const t = ltStr?.trim();
+        if (!t) continue;
+        const lt = parseFloat(t);
+        if (!Number.isFinite(lt)) continue;
+        const v = getRowDataValue(r, k);
+        const n = typeof v === "number" ? v : parseFloat(String(v));
+        if (!Number.isFinite(n) || n >= lt) return false;
+      }
+
+      for (const [k, allowed] of Object.entries(filters.stringOneOf)) {
+        if (!allowed.length) continue;
+        const s = stringifyRowDataValueForFilter(getRowDataValue(r, k));
+        if (!allowed.includes(s)) return false;
+      }
+      for (const [k, sub] of Object.entries(filters.stringContains)) {
+        const needle = sub.trim().toLowerCase();
+        if (!needle) continue;
+        const hay = stringifyRowDataValueForFilter(getRowDataValue(r, k)).toLowerCase();
+        if (!hay.includes(needle)) return false;
+      }
+      for (const [k, exact] of Object.entries(filters.stringEquals)) {
+        const want = exact.trim();
+        if (!want) continue;
+        const s = stringifyRowDataValueForFilter(getRowDataValue(r, k));
+        if (s !== want) return false;
+      }
+
       return true;
     });
 
     if (search.trim()) {
       const q = search.trim().toLowerCase();
-      result = result.filter(r =>
-        r.symbol?.toLowerCase().includes(q) ||
-        r.sector?.toLowerCase().includes(q) ||
-        r.industry?.toLowerCase().includes(q) ||
-        r.subSector?.toLowerCase().includes(q)
-      );
+      result = result.filter((r) => {
+        if (r.symbol?.toLowerCase().includes(q)) return true;
+        for (const v of Object.values(r.rowData)) {
+          if (v == null) continue;
+          if (typeof v === "object") {
+            try {
+              if (JSON.stringify(v).toLowerCase().includes(q)) return true;
+            } catch {
+              /* ignore */
+            }
+          } else if (String(v).toLowerCase().includes(q)) return true;
+        }
+        return false;
+      });
     }
 
     result = [...result].sort((a, b) => {
       let cmp = 0;
       if (sortKey === "symbol") cmp = (a.symbol ?? "").localeCompare(b.symbol ?? "");
-      else if (sortKey === "sector") cmp = (a.sector ?? "").localeCompare(b.sector ?? "");
-      else if (sortKey === "RS_Rank") cmp = (a.RS_Rank ?? -1) - (b.RS_Rank ?? -1);
-      else if (sortKey === "eps_growth_yoy") cmp = (a.eps_growth_yoy ?? -9999) - (b.eps_growth_yoy ?? -9999);
-      else if (sortKey === "rev_growth_yoy") cmp = (a.rev_growth_yoy ?? -9999) - (b.rev_growth_yoy ?? -9999);
-      else if (sortKey === "roe") cmp = (a.roe ?? -9999) - (b.roe ?? -9999);
-      else if (sortKey === "adr_pct") cmp = (a.adr_pct ?? -9999) - (b.adr_pct ?? -9999);
+      else
+        cmp = compareRowDataValues(getRowDataValue(a, sortKey), getRowDataValue(b, sortKey));
       return sortDir === "asc" ? cmp : -cmp;
     });
 
@@ -3225,6 +3324,13 @@ export function ScreeningsUI({
     ? "Set a pivot on the Charts tab (right-click) to enable this view"
     : undefined;
 
+  function columnHeaderLabel(key: string): string {
+    const tech = TECH_CRITERIA.find((t) => t.key === key);
+    if (tech) return tech.short;
+    if (key.length > 20) return `${key.slice(0, 18)}…`;
+    return key;
+  }
+
   return (
     <div className="flex flex-col gap-4 min-h-0 w-full">
       {/* Scan runs — horizontal selector (scrolls when many runs) */}
@@ -3264,7 +3370,7 @@ export function ScreeningsUI({
             <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
             <input
               type="text"
-              placeholder="Search symbol, sector, industry…"
+              placeholder="Search symbol or any row field…"
               value={search}
               onChange={e => setSearch(e.target.value)}
               className="pl-8 pr-3 py-1.5 text-sm rounded-md border border-input bg-background focus:outline-none focus:ring-1 focus:ring-ring w-52"
@@ -3272,7 +3378,12 @@ export function ScreeningsUI({
           </div>
           {dismissedCount > 0 && (
             <button
-              onClick={() => setFilters({ ...filters, status: filters.status === "dismissed" ? "active" : "dismissed" })}
+              onClick={() =>
+                setFilters((prev) => ({
+                  ...prev,
+                  status: prev.status === "dismissed" ? "active" : "dismissed",
+                }))
+              }
               className={`flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded-md border transition-colors ${filters.status === "dismissed" ? "bg-foreground text-background border-foreground" : "border-border text-muted-foreground hover:text-foreground hover:border-foreground/40"}`}
               title={filters.status === "dismissed" ? "Switch to active" : "Show dismissed"}
             >
@@ -3286,12 +3397,15 @@ export function ScreeningsUI({
           </span>
         </div>
 
-        {/* Filter panel */}
-        <FilterPanel
+        <ScreeningsFilterBar
           filters={filters}
           setFilters={setFilters}
-          sectors={sectors}
-          hasRichData={hasRichData}
+          noteStageOptions={noteStageOptions}
+          noteTagOptions={noteTagOptions}
+          boolKeys={boolFilterKeys}
+          numKeys={numFilterKeys}
+          categoricalStringCols={categoricalStringCols}
+          freeStringKeys={freeStringKeys}
         />
 
         {/* View tabs — trade monitoring last, separated by a divider */}
@@ -3353,34 +3467,28 @@ export function ScreeningsUI({
                   <thead className="bg-muted/40 border-b border-border">
                     <tr>
                       <Th col="symbol">Symbol</Th>
-                      <Th col="sector">Sector</Th>
-                      <th className="px-3 py-2 text-left text-xs font-medium text-muted-foreground uppercase tracking-wide whitespace-nowrap">Industry</th>
-                      <Th col="RS_Rank" center>RS Rank</Th>
-                      {TECH_CRITERIA.map(c => (
-                        <th
-                          key={c.key}
-                          title={c.label}
-                          className="px-2 py-2 text-center text-xs font-medium text-muted-foreground uppercase tracking-wide whitespace-nowrap"
-                        >
-                          {c.short}
-                        </th>
-                      ))}
-                      <th title="All technical criteria passed" className="px-3 py-2 text-center text-xs font-medium text-muted-foreground uppercase tracking-wide">Tech</th>
-                      <th title="Company sensitivity vector in database" className="px-3 py-2 text-center text-xs font-medium text-muted-foreground uppercase tracking-wide">Vec</th>
-                      <th title="Beat estimates (last 3Q)" className="px-2 py-2 text-center text-xs font-medium text-muted-foreground uppercase tracking-wide">Beat</th>
-                      <th title="Increasing EPS (SMA direction)" className="px-2 py-2 text-center text-xs font-medium text-muted-foreground uppercase tracking-wide">EPS↗</th>
-                      {hasRichData && <>
-                        <Th col="eps_growth_yoy" center>EPS YoY</Th>
-                        <Th col="rev_growth_yoy" center>Rev YoY</Th>
-                        <Th col="roe" center>ROE</Th>
-                        <th title="EPS accelerating QoQ" className="px-2 py-2 text-center text-xs font-medium text-muted-foreground uppercase tracking-wide">Accel</th>
-                        <th title="Passes all O'Neil criteria" className="px-2 py-2 text-center text-xs font-medium text-muted-foreground uppercase tracking-wide">O'Neil</th>
-                        <th title="RS line at 52-week high" className="px-2 py-2 text-center text-xs font-medium text-muted-foreground uppercase tracking-wide">RS Hi</th>
-                        <th title="Within buy range of pivot" className="px-2 py-2 text-center text-xs font-medium text-muted-foreground uppercase tracking-wide">Buy Pt</th>
-                        <th title="Sector in top 40% today" className="px-2 py-2 text-center text-xs font-medium text-muted-foreground uppercase tracking-wide">Sect↑</th>
-                        <th title="Institutional shares increasing QoQ" className="px-2 py-2 text-center text-xs font-medium text-muted-foreground uppercase tracking-wide">Inst↑</th>
-                        <Th col="adr_pct" center>ADR%</Th>
-                      </>}
+                      {dataColumnKeys.map((k) => {
+                        const boolCol = isBooleanColumn(rows, k);
+                        return (
+                          <th
+                            key={k}
+                            title={TECH_CRITERIA.find((t) => t.key === k)?.label ?? k}
+                            className={`px-2 py-2 text-xs font-medium text-muted-foreground uppercase tracking-wide whitespace-nowrap cursor-pointer select-none hover:text-foreground ${
+                              boolCol ? "text-center" : "text-left"
+                            }`}
+                            onClick={() => toggleSort(k)}
+                          >
+                            {columnHeaderLabel(k)}
+                            <SortIcon col={k} />
+                          </th>
+                        );
+                      })}
+                      <th
+                        title="Company sensitivity vector in database"
+                        className="px-3 py-2 text-center text-xs font-medium text-muted-foreground uppercase tracking-wide"
+                      >
+                        Vec
+                      </th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-border">
@@ -3389,45 +3497,36 @@ export function ScreeningsUI({
                       const note = rowNotes.get(row.scan_row_id);
                       const isDismissed = note?.status === "dismissed";
                       const isHighlighted = !!note?.highlighted;
-                      const hasComment = !!note?.comment;
                       return (
-                      <tr
-                        key={row.scan_row_id ?? row.symbol ?? i}
-                        onClick={() => row.symbol && setSelectedTicker(row.symbol)}
-                        onDoubleClick={() => row.symbol && void openTickerWorkflowEditor(row.symbol)}
-                        className={`group cursor-pointer transition-colors ${isDismissed ? "opacity-40" : ""} ${isHighlighted ? "bg-amber-500/10" : ""} ${isSelected ? "bg-foreground/10 ring-1 ring-inset ring-foreground/20" : "hover:bg-muted/30"}`}
-                      >
-                        <td className="px-3 py-2 font-mono font-semibold whitespace-nowrap">{row.symbol ?? "—"}</td>
-                        <td className="px-3 py-2 text-xs text-muted-foreground whitespace-nowrap max-w-[140px] truncate" title={row.sector || undefined}>
-                          {row.sector || "—"}
-                        </td>
-                        <td className="px-3 py-2 text-xs text-muted-foreground whitespace-nowrap max-w-[160px] truncate" title={row.industry || row.subSector || undefined}>
-                          {row.industry || row.subSector || "—"}
-                        </td>
-                        <td className="px-3 py-2 text-center"><RsBadge rank={row.RS_Rank} /></td>
-                        {TECH_CRITERIA.map(c => (
-                          <td key={c.key} className="px-2 py-2 text-center">
-                            <div className="flex justify-center"><Check value={row[c.key] as boolean} /></div>
+                        <tr
+                          key={row.scan_row_id ?? row.symbol ?? i}
+                          onClick={() => row.symbol && setSelectedTicker(row.symbol)}
+                          onDoubleClick={() => row.symbol && void openTickerWorkflowEditor(row.symbol)}
+                          className={`group cursor-pointer transition-colors ${isDismissed ? "opacity-40" : ""} ${isHighlighted ? "bg-amber-500/10" : ""} ${isSelected ? "bg-foreground/10 ring-1 ring-inset ring-foreground/20" : "hover:bg-muted/30"}`}
+                        >
+                          <td className="px-3 py-2 font-mono font-semibold whitespace-nowrap">
+                            {row.symbol ?? "—"}
                           </td>
-                        ))}
-                        <td className="px-3 py-2 text-center"><div className="flex justify-center"><Check value={row.Passed} /></div></td>
-                        <td className="px-3 py-2 text-center"><div className="flex justify-center"><Check value={vectorTickers.has(row.symbol ?? "")} /></div></td>
-                        <td className="px-2 py-2 text-center"><div className="flex justify-center"><Check value={row.beat_estimate} /></div></td>
-                        <td className="px-2 py-2 text-center"><div className="flex justify-center"><Check value={row.increasing_eps} /></div></td>
-                        {hasRichData && <>
-                          <td className="px-3 py-2 text-center text-xs"><Num value={row.eps_growth_yoy} suffix="%" colorize /></td>
-                          <td className="px-3 py-2 text-center text-xs"><Num value={row.rev_growth_yoy} suffix="%" colorize /></td>
-                          <td className="px-3 py-2 text-center text-xs"><Num value={row.roe} suffix="%" /></td>
-                          <td className="px-2 py-2 text-center"><div className="flex justify-center"><Check value={row.eps_accelerating} /></div></td>
-                          <td className="px-2 py-2 text-center"><div className="flex justify-center"><Check value={row.passes_oneil_fundamentals} /></div></td>
-                          <td className="px-2 py-2 text-center"><div className="flex justify-center"><Check value={row.rs_line_new_high} /></div></td>
-                          <td className="px-2 py-2 text-center"><div className="flex justify-center"><Check value={row.within_buy_range} /></div></td>
-                          <td className="px-2 py-2 text-center"><div className="flex justify-center"><Check value={row.sector_is_leader} /></div></td>
-                          <td className="px-2 py-2 text-center"><div className="flex justify-center"><Check value={row.inst_shares_increasing} /></div></td>
-                          <td className="px-3 py-2 text-center text-xs"><Num value={row.adr_pct} suffix="%" decimals={1} /></td>
-                        </>}
-                      </tr>
-                    ); })}
+                          {dataColumnKeys.map((k) => {
+                            const boolCol = isBooleanColumn(rows, k);
+                            const v = getRowDataValue(row, k);
+                            return (
+                              <td
+                                key={k}
+                                className={`px-2 py-2 align-middle ${boolCol ? "text-center" : "text-left"}`}
+                              >
+                                <DataCell colKey={k} value={v} />
+                              </td>
+                            );
+                          })}
+                          <td className="px-3 py-2 text-center">
+                            <div className="flex justify-center">
+                              <Check value={vectorTickers.has(row.symbol ?? "")} />
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>
@@ -3438,25 +3537,30 @@ export function ScreeningsUI({
               <details className="text-xs text-muted-foreground">
                 <summary className="cursor-pointer hover:text-foreground">Column key</summary>
                 <div className="mt-2 grid grid-cols-2 gap-x-6 gap-y-0.5 pl-2">
-                  {TECH_CRITERIA.map(c => (
-                    <div key={c.key}><span className="font-mono font-medium">{c.short}</span> — {c.label}</div>
-                  ))}
-                  <div><span className="font-mono font-medium">Tech</span> — All 7 technical criteria passed</div>
-                  <div><span className="font-mono font-medium">Vec</span> — Company sensitivity vector in database</div>
-                  <div><span className="font-mono font-medium">Beat</span> — Beat EPS estimate last 3 quarters</div>
-                  <div><span className="font-mono font-medium">EPS↗</span> — EPS SMA trending up</div>
-                  {hasRichData && <>
-                    <div><span className="font-mono font-medium">EPS YoY</span> — EPS year-over-year growth %</div>
-                    <div><span className="font-mono font-medium">Rev YoY</span> — Revenue year-over-year growth %</div>
-                    <div><span className="font-mono font-medium">ROE</span> — Return on equity %</div>
-                    <div><span className="font-mono font-medium">Accel</span> — EPS growth accelerating QoQ</div>
-                    <div><span className="font-mono font-medium">O'Neil</span> — Passes EPS≥25%, Rev≥20%, Beat, ROE≥17%</div>
-                    <div><span className="font-mono font-medium">RS Hi</span> — RS line at 52-week high</div>
-                    <div><span className="font-mono font-medium">Buy Pt</span> — Within 5% of pivot buy point</div>
-                    <div><span className="font-mono font-medium">Sect↑</span> — Sector in top 40% today</div>
-                    <div><span className="font-mono font-medium">Inst↑</span> — Institutional shares increasing QoQ</div>
-                    <div><span className="font-mono font-medium">ADR%</span> — Average daily range %</div>
-                  </>}
+                  <div>
+                    <span className="font-mono font-medium">Symbol</span> — From scan row (not duplicated from{" "}
+                    <code className="text-[10px]">row_data</code>)
+                  </div>
+                  {dataColumnKeys.map((k) => {
+                    const tech = TECH_CRITERIA.find((t) => t.key === k);
+                    return (
+                      <div key={k}>
+                        <span className="font-mono font-medium">{columnHeaderLabel(k)}</span>
+                        {tech ? (
+                          ` — ${tech.label}`
+                        ) : (
+                          <>
+                            {" — "}
+                            <code className="text-[10px]">{k}</code>
+                            {" from row_data"}
+                          </>
+                        )}
+                      </div>
+                    );
+                  })}
+                  <div>
+                    <span className="font-mono font-medium">Vec</span> — Company sensitivity vector in database
+                  </div>
                 </div>
               </details>
             )}

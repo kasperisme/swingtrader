@@ -1,5 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
-import { validateApiKey, type ValidatedKey } from "@/lib/api-auth";
+import {
+  authenticateUserApiKeyFromAuthorizationHeader,
+  type ValidatedKey,
+  userApiKeyRateLimitMessage,
+  USER_API_KEY_BEARER_EXPECTED,
+} from "@/lib/api-auth";
 
 export function v1JsonError(
   cors: HeadersInit,
@@ -25,42 +30,27 @@ export async function requireBearerApiKey(
   cors: HeadersInit,
   requiredScopes: readonly string[],
 ): Promise<{ ok: true; key: ValidatedKey } | { ok: false; response: NextResponse }> {
-  const authHeader = req.headers.get("authorization") ?? "";
-  const match = /^Bearer\s+(\S+)$/i.exec(authHeader);
-  if (!match) {
-    return {
-      ok: false,
-      response: v1JsonError(
-        cors,
-        "Missing or malformed Authorization header. Expected: Authorization: Bearer <api_key>",
-        401,
-      ),
-    };
-  }
+  const auth = await authenticateUserApiKeyFromAuthorizationHeader(req.headers.get("authorization"));
 
-  const rawKey = match[1];
-  if (rawKey.length < 16 || rawKey.length > 200) {
-    return { ok: false, response: v1JsonError(cors, "Invalid API key", 401) };
-  }
-
-  const result = await validateApiKey(rawKey);
-
-  if (!result.ok && result.rateLimited) {
-    return {
-      ok: false,
-      response: v1JsonError(cors, "Rate limit exceeded. Maximum 60 requests per minute per key.", 429, {
-        "Retry-After": "60",
-      }),
-    };
-  }
-
-  if (!result.ok) {
-    await new Promise((r) => setTimeout(r, 50 + Math.random() * 50));
-    return { ok: false, response: v1JsonError(cors, "Invalid API key", 401) };
+  if (!auth.ok) {
+    switch (auth.reason) {
+      case "missing_or_malformed_header":
+        return { ok: false, response: v1JsonError(cors, USER_API_KEY_BEARER_EXPECTED, 401) };
+      case "invalid_key_length":
+      case "invalid":
+        return { ok: false, response: v1JsonError(cors, "Invalid API key", 401) };
+      case "rate_limited":
+        return {
+          ok: false,
+          response: v1JsonError(cors, userApiKeyRateLimitMessage(), 429, {
+            "Retry-After": "60",
+          }),
+        };
+    }
   }
 
   for (const scope of requiredScopes) {
-    if (!result.key.scopes.includes(scope)) {
+    if (!auth.key.scopes.includes(scope)) {
       return {
         ok: false,
         response: v1JsonError(
@@ -72,5 +62,5 @@ export async function requireBearerApiKey(
     }
   }
 
-  return { ok: true, key: result.key };
+  return { ok: true, key: auth.key };
 }

@@ -533,6 +533,25 @@ def append_scan_rows(
     return len(rows)
 
 
+def records_for_screening_api_rows(df: Any, dataset: str) -> list[dict[str, Any]]:
+    """Build `rows` payloads for POST /api/v1/screenings/runs/{id}/rows (HTTP API)."""
+    if df is None or df.empty:
+        return []
+    out: list[dict[str, Any]] = []
+    for rec in df.to_dict(orient="records"):
+        cleaned = _clean_row(rec)
+        sym = None
+        for k in ("symbol", "ticker", "Symbol"):
+            if k in cleaned and cleaned[k] is not None and str(cleaned[k]).strip():
+                sym = str(cleaned[k]).strip()
+                break
+        item: dict[str, Any] = {"dataset": dataset, "row_data": cleaned}
+        if sym:
+            item["symbol"] = sym
+        out.append(item)
+    return out
+
+
 def persist_market_wide_scan(
     scan_date: date,
     source: str,

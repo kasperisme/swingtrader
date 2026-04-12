@@ -129,23 +129,24 @@ BEGIN
     END IF;
 
     -- 2. Stamp last_used_at (best-effort; concurrent races are acceptable)
-    UPDATE swingtrader.user_api_keys
+    UPDATE swingtrader.user_api_keys u
        SET last_used_at = NOW()
-     WHERE id = v_key.id;
+     WHERE u.id = v_key.id;
 
     -- 3. Atomic rate-limit increment for the current 1-minute bucket
     v_window := date_trunc('minute', NOW());
 
+    -- Use CONSTRAINT name so key_id does not collide with RETURNS TABLE output param key_id.
     INSERT INTO swingtrader.api_rate_limits (key_id, window_start, request_count)
     VALUES (v_key.id, v_window, 1)
-    ON CONFLICT (key_id, window_start)
-    DO UPDATE SET request_count = swingtrader.api_rate_limits.request_count + 1
+    ON CONFLICT ON CONSTRAINT api_rate_limits_pkey
+    DO UPDATE SET request_count = swingtrader.api_rate_limits.request_count + EXCLUDED.request_count
     RETURNING request_count INTO v_count;
 
     -- 4. Best-effort cleanup of buckets older than 2 hours for this key
-    DELETE FROM swingtrader.api_rate_limits
-     WHERE key_id = v_key.id
-       AND window_start < NOW() - INTERVAL '2 hours';
+    DELETE FROM swingtrader.api_rate_limits a
+     WHERE a.key_id = v_key.id
+       AND a.window_start < NOW() - INTERVAL '2 hours';
 
     -- 5. Return result
     RETURN QUERY

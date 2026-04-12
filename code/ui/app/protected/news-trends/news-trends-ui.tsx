@@ -24,6 +24,8 @@ import { ArticlesGrid } from "@/components/articles-grid";
 export interface ArticleImpact {
   published_at: string;
   impact_json: Record<string, number>;
+  /** Mean confidence across `news_impact_heads` rows for this article; drives weighted period averages. */
+  confidence?: number | null;
   id?: number | null;
   title?: string | null;
   url?: string | null;
@@ -150,7 +152,29 @@ function clientXToDataIndex(
   return Math.round(clamped * (dataLen - 1));
 }
 
-/** Compute per-period average impact per cluster and dimension */
+/** Non-negative weight from model confidence; missing → 1 (neutral). */
+function impactConfidenceWeight(confidence: number | null | undefined): number {
+  if (confidence == null || !Number.isFinite(confidence)) return 1;
+  return Math.max(0, confidence);
+}
+
+/** sum(value × weight) / sum(weight); if all weights are 0, plain mean of values. */
+function weightedMeanPairs(pairs: { value: number; weight: number }[]): number | null {
+  if (pairs.length === 0) return null;
+  let sumW = 0;
+  let sumVW = 0;
+  for (const { value, weight } of pairs) {
+    if (!Number.isFinite(value)) continue;
+    const w = Number.isFinite(weight) && weight > 0 ? weight : 0;
+    sumW += w;
+    sumVW += value * w;
+  }
+  if (sumW > 0) return sumVW / sumW;
+  const vals = pairs.map((p) => p.value).filter((v) => Number.isFinite(v));
+  return vals.length > 0 ? vals.reduce((a, b) => a + b, 0) / vals.length : null;
+}
+
+/** Compute per-period confidence-weighted average impact per cluster and dimension */
 function buildPeriodData(
   articles: ArticleImpact[],
   mode: ViewMode,
@@ -175,46 +199,31 @@ function buildPeriodData(
   const allDimKeys = CLUSTERS.flatMap((c) => c.dimensions.map((d) => d.key));
 
   return sorted.map(([date, rows]) => {
-    // Cluster averages
-    const clusterSums: Record<string, number[]> = {};
-    for (const cluster of CLUSTERS) clusterSums[cluster.id] = [];
-
-    // Dimension averages
-    const dimSums: Record<string, number[]> = {};
-    for (const key of allDimKeys) dimSums[key] = [];
-
-    for (const row of rows) {
-      // Cluster
-      for (const cluster of CLUSTERS) {
+    const clusters: Record<string, number | null> = {};
+    for (const cluster of CLUSTERS) {
+      const pairs: { value: number; weight: number }[] = [];
+      for (const row of rows) {
+        const w = impactConfidenceWeight(row.confidence);
         const dimKeys = cluster.dimensions.map((d) => d.key);
         const scores = dimKeys
           .map((k) => row.impact_json[k])
           .filter((v) => v != null && !isNaN(v)) as number[];
-        if (scores.length > 0) {
-          clusterSums[cluster.id].push(
-            scores.reduce((a, b) => a + b, 0) / scores.length,
-          );
-        }
+        if (scores.length === 0) continue;
+        const value = scores.reduce((a, b) => a + b, 0) / scores.length;
+        pairs.push({ value, weight: w });
       }
-      // Dimensions
-      for (const key of allDimKeys) {
-        const v = row.impact_json[key];
-        if (v != null && !isNaN(v)) dimSums[key].push(v);
-      }
-    }
-
-    const clusters: Record<string, number | null> = {};
-    for (const cluster of CLUSTERS) {
-      const arr = clusterSums[cluster.id];
-      clusters[cluster.id] =
-        arr.length > 0 ? arr.reduce((a, b) => a + b, 0) / arr.length : null;
+      clusters[cluster.id] = weightedMeanPairs(pairs);
     }
 
     const dimensions: Record<string, number | null> = {};
     for (const key of allDimKeys) {
-      const arr = dimSums[key];
-      dimensions[key] =
-        arr.length > 0 ? arr.reduce((a, b) => a + b, 0) / arr.length : null;
+      const pairs: { value: number; weight: number }[] = [];
+      for (const row of rows) {
+        const v = row.impact_json[key];
+        if (v == null || isNaN(v)) continue;
+        pairs.push({ value: v, weight: impactConfidenceWeight(row.confidence) });
+      }
+      dimensions[key] = weightedMeanPairs(pairs);
     }
 
     return { date, clusters, dimensions, count: rows.length };

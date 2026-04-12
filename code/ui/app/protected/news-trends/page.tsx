@@ -2,6 +2,41 @@ import { Suspense } from "react";
 import { createClient } from "@/lib/supabase/server";
 import { NewsTrendsUI, type ArticleImpact } from "./news-trends-ui";
 
+async function fetchMeanConfidenceByArticle(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  articleIds: number[],
+): Promise<Map<number, number>> {
+  const agg = new Map<number, { sum: number; n: number }>();
+  const chunkSize = 200;
+  for (let i = 0; i < articleIds.length; i += chunkSize) {
+    const chunk = articleIds.slice(i, i + chunkSize);
+    const { data, error } = await supabase
+      .schema("swingtrader")
+      .from("news_impact_heads")
+      .select("article_id, confidence")
+      .in("article_id", chunk);
+
+    if (error) {
+      console.error("Failed to fetch news impact heads for confidence:", error);
+      continue;
+    }
+    for (const row of data ?? []) {
+      const aid = Number((row as { article_id?: unknown }).article_id);
+      const c = Number((row as { confidence?: unknown }).confidence);
+      if (!Number.isFinite(aid) || !Number.isFinite(c)) continue;
+      const cur = agg.get(aid) ?? { sum: 0, n: 0 };
+      cur.sum += c;
+      cur.n += 1;
+      agg.set(aid, cur);
+    }
+  }
+  const out = new Map<number, number>();
+  for (const [aid, { sum, n }] of agg) {
+    if (n > 0) out.set(aid, sum / n);
+  }
+  return out;
+}
+
 async function fetchImpactData(): Promise<ArticleImpact[]> {
   const supabase = await createClient();
   const pageSize = 1000;
@@ -13,7 +48,9 @@ async function fetchImpactData(): Promise<ArticleImpact[]> {
     const { data, error } = await supabase
       .schema("swingtrader")
       .from("news_impact_vectors")
-      .select("impact_json, created_at, news_articles(id, published_at, title, url, source, slug, image_url, created_at)")
+      .select(
+        "article_id, impact_json, created_at, news_articles(id, published_at, title, url, source, slug, image_url, created_at)",
+      )
       .order("created_at", { ascending: true })
       .range(from, to);
 
@@ -30,17 +67,31 @@ async function fetchImpactData(): Promise<ArticleImpact[]> {
     from += pageSize;
   }
 
-  return allRows.map((row: any) => ({
-    impact_json: row.impact_json,
-    id: row.news_articles?.id ?? null,
-    published_at: row.news_articles?.published_at ?? row.created_at,
-    title: row.news_articles?.title ?? null,
-    url: row.news_articles?.url ?? null,
-    source: row.news_articles?.source ?? null,
-    slug: row.news_articles?.slug ?? null,
-    image_url: row.news_articles?.image_url ?? null,
-    created_at: row.news_articles?.created_at ?? row.created_at,
-  }));
+  const articleIds = [
+    ...new Set(
+      allRows
+        .map((row: { article_id?: unknown }) => Number(row.article_id))
+        .filter((id: number) => Number.isFinite(id)),
+    ),
+  ];
+  const confidenceByArticle = await fetchMeanConfidenceByArticle(supabase, articleIds);
+
+  return allRows.map((row: any) => {
+    const aid = Number(row.article_id);
+    const c = confidenceByArticle.get(aid);
+    return {
+      impact_json: row.impact_json,
+      confidence: c !== undefined ? c : null,
+      id: row.news_articles?.id ?? null,
+      published_at: row.news_articles?.published_at ?? row.created_at,
+      title: row.news_articles?.title ?? null,
+      url: row.news_articles?.url ?? null,
+      source: row.news_articles?.source ?? null,
+      slug: row.news_articles?.slug ?? null,
+      image_url: row.news_articles?.image_url ?? null,
+      created_at: row.news_articles?.created_at ?? row.created_at,
+    };
+  });
 }
 
 async function TrendsData() {

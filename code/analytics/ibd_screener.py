@@ -9,10 +9,13 @@ Can be launched two ways:
        python ibd_screener.py
        A scan_job row is created here so the run appears in Supabase.
 
-Supabase tables written:
-  scan_jobs   — status / progress / exit_code throughout the run
-  scan_runs   — one row per completed run
-  scan_rows   — trend_template / rs_rating / quote datasets
+Persistence:
+  scan_jobs (Supabase) — status / progress / exit_code throughout the run
+
+  Screening results — either:
+    • HTTP API (default when configured): POST /api/v1/screenings/runs + .../rows
+      Set SWINGTRADER_API_BASE_URL and SWINGTRADER_API_KEY (Bearer; screenings:write).
+    • Else direct Supabase: user_scan_runs + user_scan_rows (same shape as the API).
 """
 
 import os
@@ -36,6 +39,7 @@ from src.db import (
     update_scan_job_pid,
     update_scan_job_progress,
 )
+from src.screenings_api_client import persist_market_wide_scan_via_api
 from src import technical, logging, fundamentals
 
 logger = logging.logger
@@ -213,16 +217,34 @@ def run() -> None:
     )
 
     try:
-        run_id = persist_market_wide_scan(
-            today.date(),
-            "ibd_screener",
-            df_trend_template,
-            df_rs_out,
-            df_quote_out,
+        use_api = bool(
+            os.environ.get("SWINGTRADER_API_BASE_URL", "").strip()
+            and os.environ.get("SWINGTRADER_API_KEY", "").strip()
         )
-        logger.info("Supabase scan saved (run_id=%s)", run_id)
+        if use_api:
+            run_id = persist_market_wide_scan_via_api(
+                today.date(),
+                "ibd_screener",
+                df_trend_template,
+                df_rs_out,
+                df_quote_out,
+            )
+            logger.info("Screening results uploaded via API (run_id=%s)", run_id)
+        else:
+            logger.info(
+                "SWINGTRADER_API_BASE_URL + SWINGTRADER_API_KEY not set; persisting via Supabase client "
+                "(set both to upload through /api/v1/screenings)."
+            )
+            run_id = persist_market_wide_scan(
+                today.date(),
+                "ibd_screener",
+                df_trend_template,
+                df_rs_out,
+                df_quote_out,
+            )
+            logger.info("Supabase scan saved (run_id=%s)", run_id)
     except Exception as e:
-        logger.warning("Supabase persist failed: %s", e)
+        logger.warning("Screening persist (API or Supabase) failed: %s", e)
 
     # Save passed symbols to text file
     if "Passed" in df_trend_template.columns:

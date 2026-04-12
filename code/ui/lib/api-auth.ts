@@ -89,6 +89,57 @@ export async function validateApiKey(rawKey: string): Promise<ValidationResult> 
   };
 }
 
+// ---------------------------------------------------------------------------
+// Shared HTTP Bearer parsing + validation (v1 REST + MCP use the same path)
+// ---------------------------------------------------------------------------
+
+/** Same message as v1 `requireBearerApiKey` when the header is missing or not Bearer. */
+export const USER_API_KEY_BEARER_EXPECTED =
+  "Missing or malformed Authorization header. Expected: Authorization: Bearer <api_key>";
+
+export function userApiKeyRateLimitMessage(): string {
+  return `Rate limit exceeded. Maximum ${RATE_LIMIT_PER_MINUTE} requests per minute per key.`;
+}
+
+export type UserApiKeyAuthFailureReason =
+  | "missing_or_malformed_header"
+  | "invalid_key_length"
+  | "invalid"
+  | "rate_limited";
+
+export type UserApiKeyAuthResult =
+  | { ok: true; key: ValidatedKey; rawKey: string }
+  | { ok: false; reason: UserApiKeyAuthFailureReason };
+
+/**
+ * Parse `Authorization: Bearer <api_key>` and validate via `validateApiKey`.
+ * Used by v1 REST and `/api/mcp` so one key has the same limits, scopes from DB, and timing behavior.
+ */
+export async function authenticateUserApiKeyFromAuthorizationHeader(
+  authorizationHeader: string | null,
+): Promise<UserApiKeyAuthResult> {
+  const authHeader = authorizationHeader ?? "";
+  const match = /^Bearer\s+(\S+)$/i.exec(authHeader);
+  if (!match) {
+    return { ok: false, reason: "missing_or_malformed_header" };
+  }
+  const rawKey = match[1];
+  if (rawKey.length < 16 || rawKey.length > 200) {
+    return { ok: false, reason: "invalid_key_length" };
+  }
+
+  const result = await validateApiKey(rawKey);
+  if (!result.ok && result.rateLimited) {
+    return { ok: false, reason: "rate_limited" };
+  }
+  if (!result.ok) {
+    await new Promise((r) => setTimeout(r, 50 + Math.random() * 50));
+    return { ok: false, reason: "invalid" };
+  }
+
+  return { ok: true, key: result.key, rawKey };
+}
+
 /** Scopes that may be assigned when creating an API key in the dashboard. */
 export const API_KEY_SCOPE_ALLOWLIST = ["news:read", "screenings:write"] as const;
 

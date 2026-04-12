@@ -6,6 +6,7 @@ import {
   type ScreeningRow,
   type ScanRowNote,
 } from "./screenings-ui";
+import { normalizeRowData } from "./screenings-row-data";
 
 async function fetchRuns(): Promise<ScanRun[]> {
   const supabase = await createClient();
@@ -46,10 +47,12 @@ function parseRow(
   symbol: string,
   d: Record<string, unknown>,
 ): ScreeningRow {
+  const rowData = normalizeRowData(d);
   return {
     scan_row_id: scanRowId,
     run_id: runId,
     symbol: normalizeTicker(symbol || d.ticker || d.symbol),
+    rowData,
     sector: String(d.sector ?? d.sector_x ?? d.sector_y ?? ""),
     industry: String(d.industry ?? d.subSector ?? ""),
     subSector: String(d.subSector ?? d.industry ?? ""),
@@ -115,14 +118,14 @@ async function fetchRows(runId: number): Promise<ScreeningRow[]> {
   const source =
     psRes.data && psRes.data.length > 0 ? psRes.data : (ttRes.data ?? []);
 
-  return source.map((r) =>
-    parseRow(
-      r.id,
-      r.run_id,
-      r.symbol ?? "",
-      r.row_data as Record<string, unknown>,
-    ),
-  );
+  return source.map((r) => {
+    const raw = r.row_data;
+    const d =
+      raw && typeof raw === "object" && !Array.isArray(raw)
+        ? (raw as Record<string, unknown>)
+        : normalizeRowData(raw);
+    return parseRow(r.id, r.run_id, r.symbol ?? "", d);
+  });
 }
 
 async function fetchRowNotes(runId: number): Promise<ScanRowNote[]> {
