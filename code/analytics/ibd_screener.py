@@ -12,10 +12,10 @@ Can be launched two ways:
 Persistence:
   scan_jobs (Supabase) — status / progress / exit_code throughout the run
 
-  Screening results — either:
-    • HTTP API (default when configured): POST /api/v1/screenings/runs + .../rows
-      Set SWINGTRADER_API_BASE_URL and SWINGTRADER_API_KEY (Bearer; screenings:write).
-    • Else direct Supabase: user_scan_runs + user_scan_rows (same shape as the API).
+  Screening results — via newsimpactscreener.com HTTP API:
+    POST /api/v1/screenings/runs then .../rows
+    Requires SWINGTRADER_API_KEY (Bearer; screenings:write scope).
+    SWINGTRADER_API_BASE_URL defaults to https://www.newsimpactscreener.com.
 """
 
 import os
@@ -35,7 +35,6 @@ from src.db import (
     create_scan_job,
     ensure_schema,
     finish_scan_job,
-    persist_market_wide_scan,
     update_scan_job_pid,
     update_scan_job_progress,
 )
@@ -198,8 +197,13 @@ def run() -> None:
     # Step 4 — persist to Supabase + save Excel
     # ------------------------------------------------------------------
     df_trend_template = pd.DataFrame(ls_trend_template)
+    # Drop ticker-metadata columns that were already added per-row in the loop
+    # (sector, subSector) to prevent _x/_y suffix collision on merge.
+    tickers_for_merge = df_tickers.drop(
+        columns=[c for c in ("sector", "subSector", "industry") if c in df_tickers.columns],
+    )
     df_trend_template = df_trend_template.merge(
-        df_tickers, left_on="ticker", right_on="symbol", how="left"
+        tickers_for_merge, left_on="ticker", right_on="symbol", how="left"
     )
 
     df_rs_out = df_rs.merge(df_tickers, on="symbol", how="left")
@@ -217,34 +221,16 @@ def run() -> None:
     )
 
     try:
-        use_api = bool(
-            os.environ.get("SWINGTRADER_API_BASE_URL", "").strip()
-            and os.environ.get("SWINGTRADER_API_KEY", "").strip()
+        run_id = persist_market_wide_scan_via_api(
+            today.date(),
+            "ibd_screener",
+            df_trend_template,
+            df_rs_out,
+            df_quote_out,
         )
-        if use_api:
-            run_id = persist_market_wide_scan_via_api(
-                today.date(),
-                "ibd_screener",
-                df_trend_template,
-                df_rs_out,
-                df_quote_out,
-            )
-            logger.info("Screening results uploaded via API (run_id=%s)", run_id)
-        else:
-            logger.info(
-                "SWINGTRADER_API_BASE_URL + SWINGTRADER_API_KEY not set; persisting via Supabase client "
-                "(set both to upload through /api/v1/screenings)."
-            )
-            run_id = persist_market_wide_scan(
-                today.date(),
-                "ibd_screener",
-                df_trend_template,
-                df_rs_out,
-                df_quote_out,
-            )
-            logger.info("Supabase scan saved (run_id=%s)", run_id)
+        logger.info("Screening results uploaded via API (run_id=%s)", run_id)
     except Exception as e:
-        logger.warning("Screening persist (API or Supabase) failed: %s", e)
+        logger.warning("Screening persist via API failed: %s", e)
 
     # Save passed symbols to text file
     if "Passed" in df_trend_template.columns:

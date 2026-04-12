@@ -64,16 +64,17 @@ def _tg_url(method: str) -> str:
     return _TELEGRAM_API.format(token=token, method=method)
 
 
-def _send_telegram_message(chat_id: str, text: str) -> bool:
+def _send_telegram_message(chat_id: str, text: str) -> tuple[bool, int | None, str | None]:
     """
     Send a single Telegram message (HTML parse mode).
-    Returns True on success.
+    Returns (success, telegram_message_id, error_text).
     Requires TELEGRAM_BOT_TOKEN env var.
     """
     import httpx
     if not os.environ.get("TELEGRAM_BOT_TOKEN"):
-        logger.warning("[telegram] TELEGRAM_BOT_TOKEN not set — skipping delivery")
-        return False
+        msg = "TELEGRAM_BOT_TOKEN not set — skipping delivery"
+        logger.warning("[telegram] %s", msg)
+        return False, None, msg
     try:
         r = httpx.post(
             _tg_url("sendMessage"),
@@ -81,17 +82,21 @@ def _send_telegram_message(chat_id: str, text: str) -> bool:
             timeout=15,
         )
         if r.status_code == 200:
-            return True
-        logger.warning("[telegram] API returned %d: %s", r.status_code, r.text[:200])
-        return False
+            telegram_message_id = r.json().get("result", {}).get("message_id")
+            return True, telegram_message_id, None
+        err = f"API returned {r.status_code}: {r.text[:200]}"
+        logger.warning("[telegram] %s", err)
+        return False, None, err
     except Exception as exc:
         logger.error("[telegram] send failed: %s", exc)
-        return False
+        return False, None, str(exc)
 
 
-def _send_telegram_chunks(chat_id: str, text: str) -> bool:
-    """Split text into ≤4096-char chunks and send sequentially."""
-    import httpx
+def _send_telegram_chunks(chat_id: str, text: str) -> tuple[bool, int | None, str | None]:
+    """
+    Split text into ≤4096-char chunks and send sequentially.
+    Returns (overall_success, last_telegram_message_id, last_error_text).
+    """
     chunks: list[str] = []
     while len(text) > _TELEGRAM_MAX_CHARS:
         # Try to break at a newline before the limit
@@ -104,10 +109,16 @@ def _send_telegram_chunks(chat_id: str, text: str) -> bool:
         chunks.append(text)
 
     success = True
+    last_message_id: int | None = None
+    last_error: str | None = None
     for chunk in chunks:
-        if not _send_telegram_message(chat_id, chunk):
+        ok, message_id, error = _send_telegram_message(chat_id, chunk)
+        if not ok:
             success = False
-    return success
+            last_error = error
+        else:
+            last_message_id = message_id
+    return success, last_message_id, last_error
 
 
 def _narrative_to_telegram(narrative: dict, narrative_date: str) -> str:
@@ -176,6 +187,31 @@ def _narrative_to_telegram(narrative: dict, narrative_date: str) -> str:
 
 # ── Delivery orchestration ────────────────────────────────────────────────────
 
+def _log_telegram_message(
+    client,
+    schema: str,
+    user_id: str,
+    chat_id: str,
+    text: str,
+    success: bool,
+    telegram_message_id: int | None,
+    error_text: str | None,
+) -> None:
+    """Insert a row into telegram_message_log (best-effort, never raises)."""
+    try:
+        client.schema(schema).table("telegram_message_log").insert({
+            "user_id": user_id,
+            "chat_id": chat_id,
+            "message_type": "daily_narrative",
+            "message_text": text[:4096],  # store first chunk for audit
+            "telegram_message_id": telegram_message_id,
+            "success": success,
+            "error_text": error_text,
+        }).execute()
+    except Exception as exc:
+        logger.warning("[telegram] failed to write message log: %s", exc)
+
+
 def _deliver_if_needed(user_id: str, narrative: dict, narrative_date: str) -> None:
     """Check user preferences and deliver via Telegram if configured."""
     schema = get_schema()
@@ -194,7 +230,9 @@ def _deliver_if_needed(user_id: str, narrative: dict, narrative_date: str) -> No
     if not prefs.get("is_enabled", True):
         return
 
-    method = prefs.get("delivery_method", "in_app")
+    # Default to 'both' — send via Telegram AND store in-app.
+    # Only skip Telegram if the user explicitly chose 'in_app'.
+    method = prefs.get("delivery_method", "both")
     if method not in ("telegram", "both"):
         logger.debug("[delivery] user=%s method=%s — skipping Telegram", user_id, method)
         return
@@ -218,7 +256,14 @@ def _deliver_if_needed(user_id: str, narrative: dict, narrative_date: str) -> No
         return
 
     text = _narrative_to_telegram(narrative, narrative_date)
-    sent = _send_telegram_chunks(chat_id, text)
+    sent, telegram_message_id, error_text = _send_telegram_chunks(chat_id, text)
+
+    _log_telegram_message(
+        client, schema, user_id, chat_id, text,
+        success=sent,
+        telegram_message_id=telegram_message_id,
+        error_text=error_text,
+    )
 
     if sent:
         logger.info("[telegram] delivered to chat_id=%s for user=%s", chat_id, user_id)

@@ -5,12 +5,13 @@ import { useRouter } from "next/navigation";
 import {
   CheckCircle, XCircle, Search, ChevronDown, ChevronUp,
   ChevronLeft, ChevronRight, BarChart2, List, TrendingUp, Loader2, Newspaper, Trash2, RotateCcw, Star, MessageSquare,
-  Activity, Copy, Gauge,
+  Activity, Copy, Gauge, Plus,
 } from "lucide-react";
 import { CLUSTERS } from "../vectors/dimensions";
 import { NewsTrendsUI, type ArticleImpact } from "../news-trends/news-trends-ui";
 import { getCachedQuotes, setCachedQuotes } from "@/lib/quote-cache";
-import { fmpGetOhlc, fmpGetQuote } from "@/app/actions/fmp";
+import { fmpGetOhlc, fmpGetQuote, fmpGetPriceAtDate } from "@/app/actions/fmp";
+import { createClient } from "@/lib/supabase/client";
 import {
   screeningsGetNewsImpacts,
   screeningsGetTickerRelationships,
@@ -2364,6 +2365,222 @@ function StockNewsTrendView({
   );
 }
 
+function LogTradeForm({
+  ticker,
+  defaultPrice,
+  onDone,
+  onCancel,
+}: {
+  ticker: string;
+  defaultPrice: number | null;
+  onDone: () => void;
+  onCancel: () => void;
+}) {
+  const router = useRouter();
+  const [side, setSide] = useState<"buy" | "sell">("buy");
+  const [positionSide, setPositionSide] = useState<"long" | "short">("long");
+  const [quantity, setQuantity] = useState("");
+  const [pricePerUnit, setPricePerUnit] = useState(
+    defaultPrice != null ? String(Math.round(defaultPrice * 1_000_000) / 1_000_000) : ""
+  );
+  const [currency, setCurrency] = useState("USD");
+  const [executedAtLocal, setExecutedAtLocal] = useState(() => {
+    const d = new Date();
+    const pad = (n: number) => String(n).padStart(2, "0");
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  });
+  const [tradeNotes, setTradeNotes] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [formError, setFormError] = useState<string | null>(null);
+  const [priceStatus, setPriceStatus] = useState<"idle" | "loading" | "ok">("idle");
+  const priceFetchGen = useRef(0);
+  const priceDirtyRef = useRef(false);
+
+  // Auto-fill price when execution date changes (same logic as trades page)
+  useEffect(() => {
+    priceDirtyRef.current = false;
+  }, [executedAtLocal]);
+
+  useEffect(() => {
+    if (!ticker || !executedAtLocal) return;
+    const d = new Date(executedAtLocal);
+    if (Number.isNaN(d.getTime())) return;
+    const cal = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+
+    const handle = setTimeout(() => {
+      const id = ++priceFetchGen.current;
+      async function run() {
+        if (priceDirtyRef.current) return;
+        setPriceStatus("loading");
+        try {
+          const res = await fmpGetPriceAtDate(ticker, cal);
+          if (id !== priceFetchGen.current) return;
+          if (res.ok && !priceDirtyRef.current) {
+            setPricePerUnit(String(Math.round(res.data.price * 1_000_000) / 1_000_000));
+            setPriceStatus("ok");
+          } else {
+            setPriceStatus("idle");
+          }
+        } catch {
+          if (id === priceFetchGen.current) setPriceStatus("idle");
+        }
+      }
+      void run();
+    }, 600);
+
+    return () => { clearTimeout(handle); priceFetchGen.current += 1; };
+  }, [ticker, executedAtLocal]);
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    setFormError(null);
+    const q = parseFloat(quantity);
+    const p = parseFloat(pricePerUnit);
+    if (!Number.isFinite(q) || q <= 0) { setFormError("Quantity must be a positive number."); return; }
+    if (!Number.isFinite(p) || p < 0) { setFormError("Price must be zero or positive."); return; }
+    const executed = new Date(executedAtLocal);
+    if (Number.isNaN(executed.getTime())) { setFormError("Invalid execution date."); return; }
+
+    setSaving(true);
+    const supabase = createClient();
+    const { data: userData, error: userErr } = await supabase.auth.getUser();
+    if (userErr || !userData.user) { setFormError("Not signed in."); setSaving(false); return; }
+
+    const { error: dbErr } = await supabase
+      .schema("swingtrader")
+      .from("user_trades")
+      .insert({
+        user_id: userData.user.id,
+        side,
+        position_side: positionSide,
+        ticker,
+        quantity: q,
+        price_per_unit: p,
+        currency: currency.trim() || "USD",
+        executed_at: executed.toISOString(),
+        notes: tradeNotes.trim() || null,
+      });
+
+    setSaving(false);
+    if (dbErr) { setFormError(dbErr.message); return; }
+    router.refresh();
+    onDone();
+  }
+
+  const inputCls = "rounded-md border border-border bg-background px-2 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-ring";
+  const selectCls = `${inputCls} pr-6`;
+
+  return (
+    <form onSubmit={e => void handleSubmit(e)} className="flex flex-col gap-3 p-4 bg-muted/30 rounded-lg border border-border">
+      <p className="text-xs font-semibold text-foreground">Log trade — <span className="font-mono">{ticker}</span></p>
+      <div className="flex flex-wrap gap-3 items-end">
+        {/* Side */}
+        <label className="flex flex-col gap-1 text-xs text-muted-foreground">
+          Side
+          <select value={side} onChange={e => setSide(e.target.value as "buy" | "sell")} className={selectCls}>
+            <option value="buy">Buy</option>
+            <option value="sell">Sell</option>
+          </select>
+        </label>
+        {/* Position */}
+        <label className="flex flex-col gap-1 text-xs text-muted-foreground">
+          Position
+          <select value={positionSide} onChange={e => setPositionSide(e.target.value as "long" | "short")} className={selectCls}>
+            <option value="long">Long</option>
+            <option value="short">Short</option>
+          </select>
+        </label>
+        {/* Executed */}
+        <label className="flex flex-col gap-1 text-xs text-muted-foreground">
+          Executed (local)
+          <input
+            type="datetime-local"
+            value={executedAtLocal}
+            onChange={e => setExecutedAtLocal(e.target.value)}
+            className={inputCls}
+          />
+        </label>
+        {/* Quantity */}
+        <label className="flex flex-col gap-1 text-xs text-muted-foreground">
+          Quantity
+          <input
+            type="number"
+            min="0"
+            step="any"
+            placeholder="0"
+            value={quantity}
+            onChange={e => setQuantity(e.target.value)}
+            className={`${inputCls} w-24`}
+            required
+          />
+        </label>
+        {/* Price */}
+        <label className="flex flex-col gap-1 text-xs text-muted-foreground">
+          Price / unit
+          <div className="relative flex items-center">
+            <input
+              type="number"
+              min="0"
+              step="any"
+              placeholder="0.00"
+              value={pricePerUnit}
+              onChange={e => { priceDirtyRef.current = true; setPricePerUnit(e.target.value); setPriceStatus("idle"); }}
+              className={`${inputCls} w-28 pr-6`}
+              required
+            />
+            {priceStatus === "loading" && (
+              <Loader2 className="absolute right-1.5 w-3 h-3 animate-spin text-muted-foreground" />
+            )}
+            {priceStatus === "ok" && (
+              <CheckCircle className="absolute right-1.5 w-3 h-3 text-emerald-500" />
+            )}
+          </div>
+        </label>
+        {/* Currency */}
+        <label className="flex flex-col gap-1 text-xs text-muted-foreground">
+          CCY
+          <input
+            type="text"
+            value={currency}
+            onChange={e => setCurrency(e.target.value.toUpperCase())}
+            maxLength={4}
+            className={`${inputCls} w-16 uppercase`}
+          />
+        </label>
+        {/* Notes */}
+        <label className="flex flex-col gap-1 text-xs text-muted-foreground flex-1 min-w-[140px]">
+          Notes (optional)
+          <input
+            type="text"
+            value={tradeNotes}
+            onChange={e => setTradeNotes(e.target.value)}
+            placeholder="e.g. breakout entry"
+            className={inputCls}
+          />
+        </label>
+      </div>
+      {formError && <p className="text-xs text-rose-500">{formError}</p>}
+      <div className="flex gap-2">
+        <button
+          type="submit"
+          disabled={saving}
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-foreground text-background text-xs font-medium disabled:opacity-50 hover:opacity-90 transition-opacity"
+        >
+          {saving ? <Loader2 className="w-3 h-3 animate-spin" /> : <Plus className="w-3 h-3" />}
+          {saving ? "Saving…" : "Save trade"}
+        </button>
+        <button
+          type="button"
+          onClick={onCancel}
+          className="px-3 py-1.5 rounded-md border border-border text-xs text-muted-foreground hover:bg-muted/40 transition-colors"
+        >
+          Cancel
+        </button>
+      </div>
+    </form>
+  );
+}
+
 function TradeMonitoringView({
   entries,
   selectedTicker,
@@ -2384,6 +2601,7 @@ function TradeMonitoringView({
 }) {
   const [quotes, setQuotes] = useState<Record<string, FmpQuote | null>>({});
   const [loadingQuotes, setLoadingQuotes] = useState(false);
+  const [logTradeTicker, setLogTradeTicker] = useState<string | null>(null);
   type TradeSortKey = "symbol" | "sector" | "RS_Rank" | "Passed" | "pivotDate" | "pivotPrice" | "latest" | "vsPivotPct" | "workflow" | "results";
   const TRADE_SORT_KEYS: TradeSortKey[] = ["symbol", "sector", "RS_Rank", "Passed", "pivotDate", "pivotPrice", "latest", "vsPivotPct", "workflow", "results"];
   const [sortKey, setSortKeyRaw] = useState<TradeSortKey>(() => {
@@ -2569,53 +2787,82 @@ function TradeMonitoringView({
               const d = latest != null ? latest - pivot.price : null;
               const dp = d != null && Math.abs(pivot.price) > 1e-9 ? (d / pivot.price) * 100 : null;
               const distColor = d == null ? "text-muted-foreground" : d >= 0 ? "text-emerald-600 dark:text-emerald-400" : "text-rose-500";
+              const loggingThis = logTradeTicker === sym;
               return (
-                <tr
-                  key={row.scan_row_id}
-                  onClick={() => onSelect(sym)}
-                  onDoubleClick={() => onOpenWorkflowEditor(sym)}
-                  className={`cursor-pointer transition-colors ${sel ? "bg-foreground/10 ring-1 ring-inset ring-foreground/20" : "hover:bg-muted/30"}`}
-                >
-                  <td className="px-3 py-2 font-mono font-semibold whitespace-nowrap">{sym}</td>
-                  <td className="px-3 py-2 text-xs text-muted-foreground max-w-[140px] truncate" title={row.sector || undefined}>
-                    {row.sector || "—"}
-                  </td>
-                  <td className="px-3 py-2 text-center"><RsBadge rank={row.RS_Rank} /></td>
-                  <td className="px-3 py-2 text-center"><Check value={row.Passed} /></td>
-                  <td className="px-3 py-2 text-muted-foreground whitespace-nowrap">{pivot.date}</td>
-                  <td className="px-3 py-2 text-right tabular-nums">${pivot.price.toFixed(2)}</td>
-                  <td className="px-3 py-2 text-right tabular-nums font-medium">
-                    {latest != null ? `$${latest.toFixed(2)}` : "—"}
-                  </td>
-                  <td className={`px-3 py-2 text-right tabular-nums whitespace-nowrap ${distColor}`}>
-                    {d == null || dp == null ? "—" : `${d >= 0 ? "+" : ""}${d.toFixed(2)} (${dp >= 0 ? "+" : ""}${dp.toFixed(2)}%)`}
-                  </td>
-                  <td className="px-3 py-2 text-center">
-                    <span className="text-xs text-muted-foreground capitalize">{st}</span>
-                  </td>
-                  <td className="px-3 py-2 text-center">
-                    {inFilter ? (
-                      <span className="text-[11px] text-emerald-600 dark:text-emerald-400">Shown</span>
-                    ) : (
-                      <span className="text-[11px] text-muted-foreground" title="Hidden by current Results filters — still on chart list">
-                        Outside filter
-                      </span>
-                    )}
-                  </td>
-                  <td className="px-3 py-2 text-right">
-                    <button
-                      type="button"
-                      onClick={e => {
-                        e.stopPropagation();
-                        onSelect(sym);
-                        onGoToCharts();
-                      }}
-                      className="text-xs font-medium text-sky-600 hover:underline dark:text-sky-400"
-                    >
-                      Open chart
-                    </button>
-                  </td>
-                </tr>
+                <>
+                  <tr
+                    key={row.scan_row_id}
+                    onClick={() => onSelect(sym)}
+                    onDoubleClick={() => onOpenWorkflowEditor(sym)}
+                    className={`cursor-pointer transition-colors ${sel ? "bg-foreground/10 ring-1 ring-inset ring-foreground/20" : "hover:bg-muted/30"}`}
+                  >
+                    <td className="px-3 py-2 font-mono font-semibold whitespace-nowrap">{sym}</td>
+                    <td className="px-3 py-2 text-xs text-muted-foreground max-w-[140px] truncate" title={row.sector || undefined}>
+                      {row.sector || "—"}
+                    </td>
+                    <td className="px-3 py-2 text-center"><RsBadge rank={row.RS_Rank} /></td>
+                    <td className="px-3 py-2 text-center"><Check value={row.Passed} /></td>
+                    <td className="px-3 py-2 text-muted-foreground whitespace-nowrap">{pivot.date}</td>
+                    <td className="px-3 py-2 text-right tabular-nums">${pivot.price.toFixed(2)}</td>
+                    <td className="px-3 py-2 text-right tabular-nums font-medium">
+                      {latest != null ? `$${latest.toFixed(2)}` : "—"}
+                    </td>
+                    <td className={`px-3 py-2 text-right tabular-nums whitespace-nowrap ${distColor}`}>
+                      {d == null || dp == null ? "—" : `${d >= 0 ? "+" : ""}${d.toFixed(2)} (${dp >= 0 ? "+" : ""}${dp.toFixed(2)}%)`}
+                    </td>
+                    <td className="px-3 py-2 text-center">
+                      <span className="text-xs text-muted-foreground capitalize">{st}</span>
+                    </td>
+                    <td className="px-3 py-2 text-center">
+                      {inFilter ? (
+                        <span className="text-[11px] text-emerald-600 dark:text-emerald-400">Shown</span>
+                      ) : (
+                        <span className="text-[11px] text-muted-foreground" title="Hidden by current Results filters — still on chart list">
+                          Outside filter
+                        </span>
+                      )}
+                    </td>
+                    <td className="px-3 py-2 text-right whitespace-nowrap">
+                      <div className="flex items-center justify-end gap-3">
+                        <button
+                          type="button"
+                          onClick={e => {
+                            e.stopPropagation();
+                            setLogTradeTicker(loggingThis ? null : sym);
+                          }}
+                          className={`flex items-center gap-1 text-xs font-medium transition-colors ${loggingThis ? "text-muted-foreground hover:text-foreground" : "text-emerald-600 hover:text-emerald-700 dark:text-emerald-400 dark:hover:text-emerald-300"}`}
+                          title="Log a trade for this ticker"
+                        >
+                          <Plus className="w-3 h-3" />
+                          {loggingThis ? "Cancel" : "Log trade"}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={e => {
+                            e.stopPropagation();
+                            onSelect(sym);
+                            onGoToCharts();
+                          }}
+                          className="text-xs font-medium text-sky-600 hover:underline dark:text-sky-400"
+                        >
+                          Open chart
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                  {loggingThis && (
+                    <tr key={`${row.scan_row_id}-log-form`}>
+                      <td colSpan={11} className="px-3 py-3 bg-muted/20">
+                        <LogTradeForm
+                          ticker={sym}
+                          defaultPrice={latest}
+                          onDone={() => setLogTradeTicker(null)}
+                          onCancel={() => setLogTradeTicker(null)}
+                        />
+                      </td>
+                    </tr>
+                  )}
+                </>
               );
             })}
           </tbody>

@@ -1,9 +1,9 @@
 """
-Upload screening runs to the SwingTrader HTTP API (Next.js /api/v1/screenings).
+Upload screening runs to the newsimpactscreener.com HTTP API (/api/v1/screenings).
 
-Environment (required for API mode):
-  SWINGTRADER_API_BASE_URL  — origin only, e.g. https://your-app.vercel.app
-  SWINGTRADER_API_KEY       — Bearer token (must include scope screenings:write)
+Environment:
+  SWINGTRADER_API_BASE_URL  — origin (default: https://www.newsimpactscreener.com)
+  SWINGTRADER_API_KEY       — Bearer token (must include scope screenings:write) [required]
 
 Uses the same row shape as direct Supabase inserts (see db.records_for_screening_api_rows).
 """
@@ -37,11 +37,15 @@ def persist_market_wide_scan_via_api(
     POST /api/v1/screenings/runs then batched POST .../rows for trend_template,
     rs_rating, and quote datasets.
     """
-    base = os.environ.get("SWINGTRADER_API_BASE_URL", "").strip().rstrip("/")
+    base = (
+        os.environ.get("SWINGTRADER_API_BASE_URL", "https://www.newsimpactscreener.com")
+        .strip()
+        .rstrip("/")
+    )
     api_key = os.environ.get("SWINGTRADER_API_KEY", "").strip()
-    if not base or not api_key:
+    if not api_key:
         raise RuntimeError(
-            "SWINGTRADER_API_BASE_URL and SWINGTRADER_API_KEY must be set for API upload"
+            "SWINGTRADER_API_KEY must be set (Bearer token with screenings:write scope)"
         )
 
     session = requests.Session()

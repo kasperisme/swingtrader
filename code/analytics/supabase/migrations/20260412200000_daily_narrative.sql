@@ -68,7 +68,7 @@ CREATE TABLE IF NOT EXISTS swingtrader.user_narrative_preferences (
     delivery_time       TIME        NOT NULL DEFAULT '08:30:00',
     timezone            VARCHAR     NOT NULL DEFAULT 'America/New_York',
     -- 'in_app': store in DB only; 'telegram': send Telegram DM; 'both': store + telegram
-    delivery_method     VARCHAR     NOT NULL DEFAULT 'in_app'
+    delivery_method     VARCHAR     NOT NULL DEFAULT 'both'
                             CHECK (delivery_method IN ('telegram', 'in_app', 'both')),
     -- how many hours of news to look back
     lookback_hours      INTEGER     NOT NULL DEFAULT 24,

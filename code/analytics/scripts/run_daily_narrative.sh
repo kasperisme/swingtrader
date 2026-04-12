@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # run_daily_narrative.sh — shell wrapper for Mac Mini cron
-# Requires: TELEGRAM_BOT_TOKEN in .env and telegram_chat_id set per user in DB
+# Requires: TELEGRAM_BOT_TOKEN in .env and user_telegram_connections.chat_id per user (after /start)
 #
 # Add to crontab (crontab -e):
 #   30 12 * * 1-5  /path/to/swingtrader/code/analytics/scripts/run_daily_narrative.sh >> /path/to/logs/narrative.log 2>&1
