@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@/lib/supabase/server";
+import { createServiceClient } from "@/lib/supabase/service";
 
 // Telegram sends this header when a secret_token was set during setWebhook.
 // Set TELEGRAM_WEBHOOK_SECRET to any random string in Vercel env vars,
@@ -14,6 +14,12 @@ async function sendTelegramMessage(chat_id: number, text: string): Promise<void>
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ chat_id, text, parse_mode: "HTML" }),
   }).catch(() => {});
+}
+
+// ── GET /api/user/telegram/webhook ───────────────────────────────────────────
+// Health-check — confirms the endpoint is reachable (Telegram only sends POST).
+export function GET() {
+  return NextResponse.json({ ok: true, note: "Telegram webhook endpoint. Expects POST from Telegram." });
 }
 
 // ── POST /api/user/telegram/webhook ──────────────────────────────────────────
@@ -65,8 +71,8 @@ async function handleStart(chat_id: number, first_name: string, token: string): 
     return;
   }
 
-  // Use service-role client — this route is not authenticated by the user session
-  const supabase = await createClient();
+  // Service-role client — bypasses RLS since there is no user session on a webhook request
+  const supabase = createServiceClient();
 
   const now = new Date().toISOString();
 
