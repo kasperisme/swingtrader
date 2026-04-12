@@ -13,6 +13,7 @@ const appLinks = [
   { href: "/protected/news-trends", label: "News Trends" },
   { href: "/protected/vectors", label: "Vectors" },
   { href: "/protected/screenings", label: "Screenings" },
+  { href: "/protected/daily-narrative", label: "Daily Narrative" },
   { href: "/protected/trades", label: "Trades" },
 ] as const;
 

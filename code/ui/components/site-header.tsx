@@ -80,6 +80,7 @@ export async function SiteHeader() {
             <Link href="/protected/news-trends" className={navLinkClass}>News Trends</Link>
             <Link href="/protected/vectors" className={navLinkClass}>Vectors</Link>
             <Link href="/protected/screenings" className={navLinkClass}>Screenings</Link>
+            <Link href="/protected/daily-narrative" className={navLinkClass}>Daily Narrative</Link>
             <Link href="/protected/trades" className={navLinkClass}>Trades</Link>
           </nav>
         )}
