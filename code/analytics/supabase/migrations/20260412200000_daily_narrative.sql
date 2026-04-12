@@ -70,8 +70,6 @@ CREATE TABLE IF NOT EXISTS swingtrader.user_narrative_preferences (
     -- 'in_app': store in DB only; 'telegram': send Telegram DM; 'both': store + telegram
     delivery_method     VARCHAR     NOT NULL DEFAULT 'in_app'
                             CHECK (delivery_method IN ('telegram', 'in_app', 'both')),
-    -- Telegram chat_id for the user (obtained when user /starts the bot)
-    telegram_chat_id    VARCHAR,
     -- how many hours of news to look back
     lookback_hours      INTEGER     NOT NULL DEFAULT 24,
     include_portfolio   BOOLEAN     NOT NULL DEFAULT TRUE,

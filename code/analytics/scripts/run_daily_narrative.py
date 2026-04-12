@@ -22,8 +22,7 @@ Telegram setup
 --------------
   1. Create a bot via @BotFather → copy the token into TELEGRAM_BOT_TOKEN
   2. Each user must /start the bot once — the bot receives their chat_id
-  3. Store each user's chat_id in user_narrative_preferences.telegram_chat_id
-     (manually or via a /start webhook handler)
+  3. Store each user's chat_id in swingtrader.user_telegram_connections (via /start bot flow)
   4. Set delivery_method = 'telegram' or 'both' in user_narrative_preferences
 """
 
@@ -212,7 +211,7 @@ def _deliver_if_needed(user_id: str, narrative: dict, narrative_date: str) -> No
     chat_id = ((tg_res.data or [{}])[0]).get("chat_id")
     if not chat_id:
         logger.warning(
-            "[telegram] user=%s has no telegram_chat_id — skipping. "
+            "[telegram] user=%s has no chat_id in user_telegram_connections — skipping. "
             "User must /start the bot first.",
             user_id,
         )
