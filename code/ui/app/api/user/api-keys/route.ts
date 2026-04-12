@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
-import { generateApiKey } from "@/lib/api-auth";
+import { generateApiKey, parseApiKeyScopesInput } from "@/lib/api-auth";
 
 const MAX_KEYS_PER_USER = 10;
 
@@ -27,7 +27,7 @@ export async function GET() {
 
 // ── POST /api/user/api-keys ──────────────────────────────────────────────────
 // Create a new API key. Returns the raw key exactly once in the response.
-// Body: { name: string, expiresAt?: string (ISO 8601) }
+// Body: { name: string, expiresAt?: string (ISO 8601), scopes?: string[] }
 export async function POST(req: NextRequest) {
   const supabase = await createClient();
   const {
@@ -49,6 +49,11 @@ export async function POST(req: NextRequest) {
       { error: "name is required and must be 1–100 characters" },
       { status: 400 },
     );
+  }
+
+  const scopesParsed = parseApiKeyScopesInput(body.scopes);
+  if (!scopesParsed.ok) {
+    return NextResponse.json({ error: scopesParsed.error }, { status: 400 });
   }
 
   const expiresAt = body.expiresAt ?? null;
@@ -87,7 +92,7 @@ export async function POST(req: NextRequest) {
       name,
       key_hash: hash,
       key_prefix: displayPrefix,
-      scopes: ["news:read"],
+      scopes: scopesParsed.scopes,
       expires_at: expiresAt ?? null,
     })
     .select("id, name, key_prefix, scopes, created_at, expires_at")

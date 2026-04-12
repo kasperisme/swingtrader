@@ -1,70 +1,50 @@
 import { NextRequest, NextResponse } from "next/server";
-import { validateApiKey } from "@/lib/api-auth";
 import { createServiceClient } from "@/lib/supabase/service";
+import {
+  parseFieldsList,
+  parseIncludeSet,
+  parseOffsetPagination,
+  parseSort,
+} from "@/lib/api-v1/collection-params";
+import {
+  IMPACT_HEAD_FIELD_SET,
+  pickImpactHeadFields,
+  shapeImpactHeadRow,
+  type ImpactHeadJson,
+} from "@/lib/api-v1/news-impact-head";
+import {
+  NEWS_V1_CORS,
+  newsV1JsonError,
+  newsV1OptionsResponse,
+  requireNewsReadBearer,
+} from "@/lib/api-v1/news-public";
 
-// CORS headers applied to every response from this public endpoint
-const CORS: HeadersInit = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Methods": "GET, OPTIONS",
-  "Access-Control-Allow-Headers": "Authorization",
-};
+const SORTABLE_COLUMNS = ["created_at", "confidence", "article_id", "id", "cluster"] as const;
 
-function err(message: string, status: number, extra?: Record<string, unknown>) {
-  return NextResponse.json({ error: message, ...extra }, { status, headers: CORS });
-}
-
-// OPTIONS is handled by middleware, but keep a handler for robustness
 export async function OPTIONS() {
-  return new NextResponse(null, {
-    status: 204,
-    headers: { ...CORS, "Access-Control-Max-Age": "86400" },
-  });
+  return newsV1OptionsResponse();
 }
 
 export async function GET(req: NextRequest) {
-  // ── 1. Extract Bearer token ────────────────────────────────────────────────
-  const authHeader = req.headers.get("authorization") ?? "";
-  const match = /^Bearer\s+(\S+)$/i.exec(authHeader);
-  if (!match) {
-    return err(
-      "Missing or malformed Authorization header. Expected: Authorization: Bearer <api_key>",
-      401,
-    );
-  }
+  const auth = await requireNewsReadBearer(req);
+  if (!auth.ok) return auth.response;
 
-  const rawKey = match[1];
-
-  // Reject obviously-wrong lengths before hitting the DB
-  if (rawKey.length < 16 || rawKey.length > 200) {
-    return err("Invalid API key", 401);
-  }
-
-  // ── 2. Validate key + rate limit ───────────────────────────────────────────
-  const result = await validateApiKey(rawKey);
-
-  if (!result.ok && result.rateLimited) {
-    return err("Rate limit exceeded. Maximum 60 requests per minute per key.", 429, {
-      "Retry-After": "60",
-    });
-  }
-
-  if (!result.ok) {
-    // Small deliberate delay to slow brute-force enumeration
-    await new Promise((r) => setTimeout(r, 50 + Math.random() * 50));
-    return err("Invalid API key", 401);
-  }
-
-  if (!result.key.scopes.includes("news:read")) {
-    return err("Forbidden: this key does not have the 'news:read' scope", 403);
-  }
-
-  // ── 3. Parse & validate query parameters ──────────────────────────────────
   const sp = req.nextUrl.searchParams;
 
-  const rawLimit = sp.get("limit") ?? "20";
-  const rawOffset = sp.get("offset") ?? "0";
-  const limit = Math.min(Math.max(parseInt(rawLimit, 10) || 20, 1), 100);
-  const offset = Math.max(parseInt(rawOffset, 10) || 0, 0);
+  const pag = parseOffsetPagination(sp);
+  if (!pag.ok) return newsV1JsonError(pag.message, 400);
+
+  const sort = parseSort(sp, SORTABLE_COLUMNS, "created_at", false);
+  if (!sort.ok) return newsV1JsonError(sort.message, 400);
+
+  const fieldsResult = parseFieldsList(sp, IMPACT_HEAD_FIELD_SET);
+  if (!fieldsResult.ok) return newsV1JsonError(fieldsResult.message, 400);
+
+  const includeResult = parseIncludeSet(sp, new Set(["article"]), new Set(["article"]));
+  if (!includeResult.ok) return newsV1JsonError(includeResult.message, 400);
+  const includeArticle = includeResult.value.has("article");
+
+  const { limit, offset } = pag.value;
 
   const articleIdParam = sp.get("article_id");
   const clusterParam = sp.get("cluster");
@@ -74,16 +54,16 @@ export async function GET(req: NextRequest) {
   const minConfidenceParam = sp.get("min_confidence");
 
   if (articleIdParam !== null && !/^\d{1,19}$/.test(articleIdParam)) {
-    return err("'article_id' must be a positive integer", 400);
+    return newsV1JsonError("'article_id' must be a positive integer", 400);
   }
   if (clusterParam !== null && clusterParam.length > 64) {
-    return err("'cluster' too long", 400);
+    return newsV1JsonError("'cluster' too long", 400);
   }
   if (fromParam !== null && isNaN(Date.parse(fromParam))) {
-    return err("'from' must be a valid ISO 8601 date", 400);
+    return newsV1JsonError("'from' must be a valid ISO 8601 date", 400);
   }
   if (toParam !== null && isNaN(Date.parse(toParam))) {
-    return err("'to' must be a valid ISO 8601 date", 400);
+    return newsV1JsonError("'to' must be a valid ISO 8601 date", 400);
   }
   if (
     minConfidenceParam !== null &&
@@ -91,13 +71,11 @@ export async function GET(req: NextRequest) {
       Number(minConfidenceParam) < 0 ||
       Number(minConfidenceParam) > 1)
   ) {
-    return err("'min_confidence' must be a number between 0 and 1", 400);
+    return newsV1JsonError("'min_confidence' must be a number between 0 and 1", 400);
   }
 
-  // ── 4. Query ──────────────────────────────────────────────────────────────
   const supabase = createServiceClient();
 
-  // If filtering by ticker, first resolve matching article_ids
   let articleIdsFromTicker: number[] | null = null;
   if (tickerParam) {
     const { data: tickerRows, error: tickerErr } = await supabase
@@ -106,26 +84,26 @@ export async function GET(req: NextRequest) {
       .select("article_id")
       .eq("ticker", tickerParam);
 
-    if (tickerErr) return err("Internal error", 500);
+    if (tickerErr) return newsV1JsonError("Internal error", 500);
 
     articleIdsFromTicker = (tickerRows ?? []).map((r) => Number(r.article_id));
     if (articleIdsFromTicker.length === 0) {
       return NextResponse.json(
         { data: [], pagination: { limit, offset, total: 0 } },
-        { headers: CORS },
+        { headers: NEWS_V1_CORS },
       );
     }
   }
 
+  const baseSelect = includeArticle
+    ? "id, article_id, cluster, scores_json, reasoning_json, confidence, model, created_at, news_articles!fk_news_impact_heads_article ( title, url, slug, source, created_at )"
+    : "id, article_id, cluster, scores_json, reasoning_json, confidence, model, created_at";
+
   let query = supabase
     .schema("swingtrader")
     .from("news_impact_heads")
-    .select(
-      `id, article_id, cluster, scores_json, reasoning_json, confidence, model, created_at,
-       news_articles!fk_news_impact_heads_article ( title, url, slug, source, created_at )`,
-      { count: "exact" },
-    )
-    .order("created_at", { ascending: false })
+    .select(baseSelect, { count: "exact" })
+    .order(sort.value.column, { ascending: sort.value.ascending })
     .range(offset, offset + limit - 1);
 
   if (articleIdParam !== null) query = query.eq("article_id", parseInt(articleIdParam, 10));
@@ -137,28 +115,24 @@ export async function GET(req: NextRequest) {
 
   const { data, error: queryErr, count } = await query;
 
-  if (queryErr) return err("Internal error", 500);
+  if (queryErr) return newsV1JsonError("Internal error", 500);
 
-  // ── 5. Shape response ─────────────────────────────────────────────────────
-  type ArticleShape = { title: string; url: string | null; slug: string | null; source: string | null; created_at: string } | null;
+  type RowIn = Parameters<typeof shapeImpactHeadRow>[0];
 
-  const shaped = (data ?? []).map((row) => {
-    const article = (row as unknown as { news_articles: ArticleShape }).news_articles;
-    return {
-      id: (row as { id: number }).id,
-      article_id: (row as { article_id: number }).article_id,
-      article,
-      cluster: (row as { cluster: string }).cluster,
-      scores: (row as { scores_json: unknown }).scores_json,
-      reasoning: (row as { reasoning_json: unknown }).reasoning_json,
-      confidence: (row as { confidence: number }).confidence,
-      model: (row as { model: string }).model,
-      created_at: (row as { created_at: string }).created_at,
-    };
+  const shaped: ImpactHeadJson[] = (data ?? []).map((row) => {
+    const r = row as unknown as RowIn;
+    if (!includeArticle) {
+      return shapeImpactHeadRow({ ...r, news_articles: null });
+    }
+    return shapeImpactHeadRow(r);
   });
 
+  const fields = fieldsResult.value;
+  const payload: ImpactHeadJson[] | Record<string, unknown>[] =
+    fields === null ? shaped : shaped.map((row) => pickImpactHeadFields(row, fields));
+
   return NextResponse.json(
-    { data: shaped, pagination: { limit, offset, total: count ?? 0 } },
-    { headers: CORS },
+    { data: payload, pagination: { limit, offset, total: count ?? 0 } },
+    { headers: NEWS_V1_CORS },
   );
 }

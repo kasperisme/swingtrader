@@ -41,9 +41,20 @@ async function ApiKeysContent() {
             <code className="font-mono text-xs bg-muted rounded px-1.5 py-0.5">Authorization</code>{" "}
             header:
           </p>
-          <pre className="text-xs bg-background rounded-xl border border-border p-4 overflow-x-auto text-muted-foreground">{`curl https://<your-domain>/api/v1/news/impact-heads \\
+          <pre className="text-xs bg-background rounded-xl border border-border p-4 overflow-x-auto text-muted-foreground">{`# News (scope: news:read)
+curl https://<your-domain>/api/v1/news/impact-heads \\
   -H "Authorization: Bearer st_live_<your_key>" \\
-  -G -d "limit=10" -d "min_confidence=0.8"`}</pre>
+  -G -d "limit=10" -d "min_confidence=0.8"
+
+# Screenings — create run, then rows (scope: screenings:write)
+curl https://<your-domain>/api/v1/screenings/runs \\
+  -H "Authorization: Bearer st_live_<your_key>" \\
+  -H "Content-Type: application/json" \\
+  -d '{"scan_date":"2026-04-11","source":"my_screener","market_json":{}}'
+curl https://<your-domain>/api/v1/screenings/runs/<run_id>/rows \\
+  -H "Authorization: Bearer st_live_<your_key>" \\
+  -H "Content-Type: application/json" \\
+  -d '{"rows":[{"dataset":"passed_stocks","row_data":{"symbol":"AAPL","Passed":true}}]}'`}</pre>
           <p className="text-muted-foreground">
             Rate limit:{" "}
             <span className="font-semibold text-foreground">60 requests / minute</span> per key.

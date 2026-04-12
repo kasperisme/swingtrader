@@ -69,6 +69,7 @@ function NewKeyDialog({
 }) {
   const [name, setName] = useState("");
   const [expiresAt, setExpiresAt] = useState("");
+  const [screeningsWrite, setScreeningsWrite] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -77,10 +78,11 @@ function NewKeyDialog({
     setError(null);
     setLoading(true);
     try {
+      const scopes = screeningsWrite ? ["news:read", "screenings:write"] : ["news:read"];
       const res = await fetch("/api/user/api-keys", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name, expiresAt: expiresAt || null }),
+        body: JSON.stringify({ name, expiresAt: expiresAt || null, scopes }),
       });
       const json = await res.json();
       if (!res.ok) throw new Error(json.error ?? "Failed to create key");
@@ -121,6 +123,18 @@ function NewKeyDialog({
               className="rounded border bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring"
             />
           </div>
+          <label className="flex items-start gap-2 text-sm cursor-pointer">
+            <input
+              type="checkbox"
+              checked={screeningsWrite}
+              onChange={(e) => setScreeningsWrite(e.target.checked)}
+              className="mt-0.5 rounded border"
+            />
+            <span>
+              Allow posting screening runs via API{" "}
+              <span className="text-muted-foreground font-normal">(adds scope screenings:write)</span>
+            </span>
+          </label>
           {error && <p className="text-sm text-red-500">{error}</p>}
           <div className="flex justify-end gap-2 mt-2">
             <button

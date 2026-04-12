@@ -88,3 +88,36 @@ export async function validateApiKey(rawKey: string): Promise<ValidationResult> 
     key: { keyId: row.key_id, userId: row.user_id, scopes: row.scopes },
   };
 }
+
+/** Scopes that may be assigned when creating an API key in the dashboard. */
+export const API_KEY_SCOPE_ALLOWLIST = ["news:read", "screenings:write"] as const;
+
+export type ApiKeyScopeAllowlist = (typeof API_KEY_SCOPE_ALLOWLIST)[number];
+
+/**
+ * Parse `scopes` from a create-key request body.
+ * Defaults to `["news:read"]` when omitted. Returns an error message if invalid.
+ */
+export function parseApiKeyScopesInput(raw: unknown): { ok: true; scopes: string[] } | { ok: false; error: string } {
+  if (raw === undefined || raw === null) {
+    return { ok: true, scopes: ["news:read"] };
+  }
+  if (!Array.isArray(raw)) {
+    return { ok: false, error: "scopes must be an array of strings" };
+  }
+  const set = new Set<string>();
+  const allow = new Set<string>(API_KEY_SCOPE_ALLOWLIST);
+  for (const item of raw) {
+    if (typeof item !== "string" || !allow.has(item)) {
+      return {
+        ok: false,
+        error: `each scope must be one of: ${API_KEY_SCOPE_ALLOWLIST.join(", ")}`,
+      };
+    }
+    set.add(item);
+  }
+  if (set.size === 0) {
+    return { ok: false, error: "scopes must include at least one allowed scope" };
+  }
+  return { ok: true, scopes: Array.from(set) };
+}
