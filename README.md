@@ -135,7 +135,7 @@ mkdir -p /path/to/swingtrader/logs
 
 ```bash
 curl "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/setWebhook" \
-  -d "url=https://www.newsimpactscreener.com/api/user/telegram/webhook" \
+  -d "url=https://www.newsimpactscreener.com/api/telegram-webhook" \
   -d "secret_token=${TELEGRAM_WEBHOOK_SECRET}" \
   -d "allowed_updates=[\"message\"]"
 ```
