@@ -16,7 +16,7 @@ import {
   ResponsiveContainer,
 } from "recharts";
 import type { MouseHandlerDataParam } from "recharts";
-import { TrendingUp, TrendingDown, Minus, ChevronRight, Sparkles, X } from "lucide-react";
+import { TrendingUp, TrendingDown, Minus, ChevronRight, Sparkles, X, Search } from "lucide-react";
 import { CLUSTERS } from "../vectors/dimensions";
 import { fmpGetOhlc } from "@/app/actions/fmp";
 import { ArticlesGrid } from "@/components/articles-grid";
@@ -34,6 +34,19 @@ export interface ArticleImpact {
   image_url?: string | null;
   created_at?: string | null;
 }
+
+type SemanticSearchItem = {
+  article_id: number;
+  title: string | null;
+  url: string | null;
+  source: string | null;
+  slug: string | null;
+  image_url: string | null;
+  article_stream: string | null;
+  published_at: string | null;
+  snippet: string | null;
+  similarity: number;
+};
 
 // ── cluster palette ──────────────────────────────────────────────────────────
 const CLUSTER_COLORS: Record<string, string> = {
@@ -743,6 +756,10 @@ export function NewsTrendsUI({ articles, chartHeight = 400 }: { articles: Articl
   const [benchmark, setBenchmark] = useState<BenchmarkId>("none");
   const [benchmarkData, setBenchmarkData] = useState<OhlcPoint[]>([]);
   const [showClusterMean, setShowClusterMean] = useState(true);
+  const [semanticQuery, setSemanticQuery] = useState("");
+  const [semanticLoading, setSemanticLoading] = useState(false);
+  const [semanticResults, setSemanticResults] = useState<SemanticSearchItem[]>([]);
+  const [semanticNote, setSemanticNote] = useState<string | null>(null);
 
   function applyQuickRange(range: QuickRange) {
     setQuickRange(range);
@@ -1164,6 +1181,33 @@ export function NewsTrendsUI({ articles, chartHeight = 400 }: { articles: Articl
     [],
   );
 
+  const runSemanticSearch = useCallback(async () => {
+    const q = semanticQuery.trim();
+    if (q.length < 3) {
+      setSemanticResults([]);
+      setSemanticNote("Type at least 3 characters.");
+      return;
+    }
+    setSemanticLoading(true);
+    setSemanticNote(null);
+    try {
+      const r = await fetch("/api/news/semantic-search", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ query: q, limit: 16, lookback_days: 90 }),
+      });
+      const data = await r.json();
+      if (!r.ok) throw new Error(data?.error ?? "Search failed");
+      setSemanticResults((data?.results ?? []) as SemanticSearchItem[]);
+      setSemanticNote(data?.note ?? null);
+    } catch (err) {
+      setSemanticResults([]);
+      setSemanticNote(err instanceof Error ? err.message : "Search failed");
+    } finally {
+      setSemanticLoading(false);
+    }
+  }, [semanticQuery]);
+
   return (
     <div className="flex flex-col gap-6">
       {/* Controls */}
@@ -1289,6 +1333,62 @@ export function NewsTrendsUI({ articles, chartHeight = 400 }: { articles: Articl
             className="text-xs px-2 py-1 rounded-md border border-border bg-background text-foreground"
           />
         </div>
+      </div>
+
+      {/* Semantic article search */}
+      <div className="rounded-xl border border-border p-3">
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="relative min-w-[260px] flex-1">
+            <Search className="pointer-events-none absolute left-2.5 top-2.5 h-3.5 w-3.5 text-muted-foreground" />
+            <input
+              value={semanticQuery}
+              onChange={(e) => setSemanticQuery(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  void runSemanticSearch();
+                }
+              }}
+              placeholder="Semantic search (e.g. tariff impact on semis)"
+              className="w-full rounded-md border border-border bg-background py-2 pl-8 pr-2 text-sm"
+            />
+          </div>
+          <button
+            type="button"
+            onClick={() => void runSemanticSearch()}
+            disabled={semanticLoading}
+            className="rounded-md border border-border px-3 py-2 text-xs font-medium text-muted-foreground hover:text-foreground disabled:opacity-60"
+          >
+            {semanticLoading ? "Searching..." : "Search"}
+          </button>
+        </div>
+        {semanticNote && (
+          <p className="mt-2 text-xs text-muted-foreground">{semanticNote}</p>
+        )}
+        {semanticResults.length > 0 && (
+          <div className="mt-3 grid gap-2 sm:grid-cols-2">
+            {semanticResults.map((item) => (
+              <a
+                key={`${item.article_id}-${item.published_at ?? ""}`}
+                href={item.slug ? `/articles/${item.slug}` : `/articles/${item.article_id}`}
+                className="rounded-lg border border-border bg-card p-3 transition-colors hover:border-amber-500/40"
+              >
+                <p className="line-clamp-2 text-sm font-medium">
+                  {item.title || item.url || `Article ${item.article_id}`}
+                </p>
+                {item.snippet && (
+                  <p className="mt-1 line-clamp-3 text-xs text-muted-foreground">
+                    {item.snippet}
+                  </p>
+                )}
+                <p className="mt-2 text-[10px] uppercase tracking-wide text-muted-foreground">
+                  {(item.article_stream || "unknown").replaceAll("_", " ")}
+                  {item.similarity > 0 ? ` · ${(item.similarity * 100).toFixed(0)}%` : ""}
+                </p>
+              </a>
+            ))}
+          </div>
+        )}
       </div>
 
       <div className="flex gap-6">

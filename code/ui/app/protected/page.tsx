@@ -6,6 +6,7 @@ import {
   ArticlesGridFallback,
   type ArticleGridItem,
 } from "@/components/articles-grid";
+import { ArticlesSearchPanel } from "./articles-search-panel";
 
 async function ArticlesData() {
   const supabase = await createClient();
@@ -31,7 +32,7 @@ async function ArticlesData() {
     );
   }
 
-  return <ArticlesGrid articles={(data ?? []) as ArticleGridItem[]} />;
+  return <ArticlesSearchPanel initialArticles={(data ?? []) as ArticleGridItem[]} />;
 }
 
 export default function ProtectedPage() {
