@@ -1,6 +1,8 @@
 import Link from "next/link";
+import { headers } from "next/headers";
 import { notFound } from "next/navigation";
 import { PortableText } from "@portabletext/react";
+import { ShareButtons } from "./share-buttons";
 import type { PortableTextComponents } from "@portabletext/react";
 import { isSanityConfigured, sanityFetch } from "@/lib/sanity/client";
 import { blogPostBySlugQuery } from "@/lib/sanity/queries";
@@ -120,6 +122,11 @@ export default async function BlogPostPage({ params }: Props) {
     notFound();
   }
 
+  const headersList = await headers();
+  const host = headersList.get("host") ?? "www.newsimpactscreener.com";
+  const protocol = host.startsWith("localhost") ? "http" : "https";
+  const canonicalUrl = `${protocol}://${host}/blog/${slug}`;
+
   return (
     <div className="mx-auto max-w-3xl px-4 py-12 sm:px-6 md:py-20">
       {/* Back link */}
@@ -160,8 +167,11 @@ export default async function BlogPostPage({ params }: Props) {
           </p>
         )}
 
-        {/* Divider */}
-        <hr className="my-8 border-border" />
+        {/* Divider + share */}
+        <div className="my-8 flex items-center gap-4">
+          <hr className="flex-1 border-border" />
+          <ShareButtons title={post.title} url={canonicalUrl} />
+        </div>
 
         {/* Body */}
         <div className="prose-custom space-y-5">
@@ -174,13 +184,14 @@ export default async function BlogPostPage({ params }: Props) {
       </article>
 
       {/* Footer nav */}
-      <div className="mt-16 pt-8 border-t border-border">
+      <div className="mt-16 pt-8 border-t border-border flex items-center justify-between gap-4 flex-wrap">
         <Link
           href="/blog"
           className="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors"
         >
           ← Back to all posts
         </Link>
+        <ShareButtons title={post.title} url={canonicalUrl} />
       </div>
     </div>
   );
