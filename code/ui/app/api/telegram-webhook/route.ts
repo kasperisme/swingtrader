@@ -53,6 +53,10 @@ export async function POST(req: NextRequest) {
   if (text.startsWith("/update")) {
     await handleUpdate(chat_id, first_name);
   }
+  if (text.startsWith("/search")) {
+    const query = text.slice("/search".length).trim();
+    await handleSearch(chat_id, first_name, query);
+  }
 
   // Always return 200 so Telegram doesn't retry
   return NextResponse.json({ ok: true });
@@ -130,8 +134,53 @@ async function handleStart(chat_id: number, first_name: string, token: string): 
 }
 
 async function handleUpdate(chat_id: number, first_name: string): Promise<void> {
-  const supabase = createServiceClient();
+  const inserted = await enqueueTelegramRequest(chat_id, first_name, "update", null);
+  if (!inserted) {
+    await sendTelegramMessage(
+      chat_id,
+      "⚠️ I couldn't queue your update right now. Please try /update again in a minute.",
+    );
+    return;
+  }
 
+  await sendTelegramMessage(
+    chat_id,
+    "🧠 Got it — building your personalised news update now.\n\nI'll send it here shortly.",
+  );
+}
+
+async function handleSearch(chat_id: number, first_name: string, query: string): Promise<void> {
+  if (!query) {
+    await sendTelegramMessage(
+      chat_id,
+      "🔎 Usage: <code>/search &lt;search terms&gt;</code>\n\n" +
+      "Example: <code>/search Novo Nordisk obesity trial results</code>",
+    );
+    return;
+  }
+
+  const inserted = await enqueueTelegramRequest(chat_id, first_name, "search", query);
+  if (!inserted) {
+    await sendTelegramMessage(
+      chat_id,
+      "⚠️ I couldn't queue your search right now. Please try /search again in a minute.",
+    );
+    return;
+  }
+
+  await sendTelegramMessage(
+    chat_id,
+    `🔎 Searching latest articles for: <b>${query}</b>\n\nI'll send the top matches shortly.`,
+  );
+}
+
+async function enqueueTelegramRequest(
+  chat_id: number,
+  first_name: string,
+  requestType: "update" | "search",
+  requestText: string | null,
+): Promise<boolean> {
+  const supabase = createServiceClient();
   const { data: connRows, error: connError } = await supabase
     .schema(SCHEMA)
     .from("user_telegram_connections")
@@ -144,13 +193,12 @@ async function handleUpdate(chat_id: number, first_name: string): Promise<void> 
       chat_id,
       `👋 Hi <b>${first_name}</b>!\n\n` +
       "Your Telegram is not linked to a NewsImpactScreener account yet.\n" +
-      "Open the app and use <b>Connect Telegram</b>, then try <b>/update</b> again.",
+      "Open the app and use <b>Connect Telegram</b>, then try again.",
     );
-    return;
+    return false;
   }
 
   const userId = connRows[0].user_id as string;
-
   const { data: activeRows } = await supabase
     .schema(SCHEMA)
     .from("telegram_update_requests")
@@ -162,27 +210,18 @@ async function handleUpdate(chat_id: number, first_name: string): Promise<void> 
   if (activeRows?.length) {
     await sendTelegramMessage(
       chat_id,
-      "⏳ You already have an update in progress.\n\nI'll send it here as soon as it's ready.",
+      "⏳ You already have a request in progress.\n\nI'll send it here as soon as it's ready.",
     );
-    return;
+    return false;
   }
 
   const { error: insertErr } = await supabase.schema(SCHEMA).from("telegram_update_requests").insert({
     user_id: userId,
     chat_id: String(chat_id),
+    request_type: requestType,
+    request_text: requestText,
     status: "pending",
   });
 
-  if (insertErr) {
-    await sendTelegramMessage(
-      chat_id,
-      "⚠️ I couldn't queue your update right now. Please try /update again in a minute.",
-    );
-    return;
-  }
-
-  await sendTelegramMessage(
-    chat_id,
-    "🧠 Got it — building your personalised news update now.\n\nI'll send it here shortly.",
-  );
+  return !insertErr;
 }

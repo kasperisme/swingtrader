@@ -3,8 +3,7 @@ process_telegram_updates.py
 ===========================
 
 Polls swingtrader.telegram_update_requests for pending rows created by the
-Telegram /update command, generates a personalised update, and sends it back
-to the requesting chat_id.
+Telegram commands. Requests are queued by the webhook and processed on Mac.
 
 Usage:
   python -m scripts.process_telegram_updates
@@ -15,6 +14,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import html
 import logging
 import pathlib
 import sys
@@ -31,6 +31,7 @@ if str(_ANALYTICS) not in sys.path:
 load_dotenv(_ANALYTICS / ".env")
 
 from news_impact.narrative_generator import _DEFAULT_LOOKBACK_HOURS, generate_for_user  # noqa: E402
+from news_impact.semantic_retrieval import search_news_embeddings  # noqa: E402
 from src.db import get_schema, get_supabase_client  # noqa: E402
 from scripts.run_daily_narrative import _narrative_to_telegram, _send_telegram_chunks  # noqa: E402
 
@@ -49,7 +50,7 @@ def _claim_pending_requests(limit: int) -> list[dict]:
     pending = (
         client.schema(schema)
         .table("telegram_update_requests")
-        .select("id,user_id,chat_id,requested_at")
+        .select("id,user_id,chat_id,request_type,request_text,requested_at")
         .eq("status", "pending")
         .order("requested_at")
         .limit(limit)
@@ -115,13 +116,23 @@ async def _process_single(row: dict) -> None:
     req_id = str(row["id"])
     user_id = str(row["user_id"])
     chat_id = str(row["chat_id"])
+    request_type = str(row.get("request_type") or "update")
+    request_text = str(row.get("request_text") or "").strip()
     date_text = datetime.now(_EASTERN).date().isoformat()
 
-    logger.info("[tg-update] processing request id=%s user=%s", req_id, user_id)
+    logger.info(
+        "[tg-update] processing request id=%s user=%s type=%s",
+        req_id,
+        user_id,
+        request_type,
+    )
     try:
         lookback_hours = _load_lookback_hours(user_id)
-        narrative = await generate_for_user(user_id, lookback_hours=lookback_hours)
-        message = _narrative_to_telegram(narrative, date_text)
+        if request_type == "search":
+            message = _build_search_response(request_text, lookback_hours=lookback_hours)
+        else:
+            narrative = await generate_for_user(user_id, lookback_hours=lookback_hours)
+            message = _narrative_to_telegram(narrative, date_text)
         ok, message_id, send_error = _send_telegram_chunks(chat_id, message)
 
         if ok:
@@ -145,6 +156,43 @@ async def _process_single(row: dict) -> None:
         logger.exception("[tg-update] request failed id=%s user=%s", req_id, user_id)
 
 
+def _build_search_response(query: str, *, lookback_hours: int) -> str:
+    q = query.strip()
+    if not q:
+        return (
+            "🔎 <b>Search request is empty.</b>\n\n"
+            "Usage: <code>/search &lt;search terms&gt;</code>"
+        )
+    matches = search_news_embeddings(
+        q,
+        lookback_hours=max(24, lookback_hours),
+        limit=5,
+    )
+    if not matches:
+        return (
+            f"🔎 <b>Search results</b> for: <i>{html.escape(q)}</i>\n\n"
+            "No relevant recent articles found."
+        )
+
+    lines: list[str] = [
+        f"🔎 <b>Search results</b> for: <i>{html.escape(q)}</i>",
+        "",
+    ]
+    for i, item in enumerate(matches, start=1):
+        title = html.escape(str(item.get("title") or "Untitled"))
+        url = html.escape(str(item.get("url") or ""), quote=True)
+        similarity = float(item.get("similarity") or 0.0)
+        snippet = html.escape(str(item.get("snippet") or "").strip())
+        if url:
+            lines.append(f"{i}. <a href=\"{url}\">{title}</a> ({similarity:.2f})")
+        else:
+            lines.append(f"{i}. {title} ({similarity:.2f})")
+        if snippet:
+            lines.append(f"   {snippet[:180]}")
+        lines.append("")
+    return "\n".join(lines).strip()
+
+
 async def _run_loop(batch_size: int, poll_interval_sec: int, once: bool) -> None:
     while True:
         claimed = _claim_pending_requests(batch_size)
@@ -163,7 +211,7 @@ if __name__ == "__main__":
         format="%(asctime)s %(levelname)s %(message)s",
         datefmt="%Y-%m-%d %H:%M:%S",
     )
-    parser = argparse.ArgumentParser(description="Process queued Telegram /update requests")
+    parser = argparse.ArgumentParser(description="Process queued Telegram requests")
     parser.add_argument("--batch-size", type=int, default=5)
     parser.add_argument("--poll-interval-sec", type=int, default=20)
     parser.add_argument("--once", action="store_true", help="Process one fetch cycle then exit")
