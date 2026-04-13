@@ -146,16 +146,31 @@ def _fetch_open_positions(conn, user_id: str) -> list[OpenPosition]:
 
 
 def _fetch_active_screen_tickers(conn, user_id: str) -> list[str]:
-    """Return tickers the user has marked 'active' in their screening notes."""
+    """
+    Return active screening tickers from the user's latest screening run only.
+
+    This avoids mixing stale active notes from older runs into today's narrative.
+    """
     schema = get_schema()
     sql = f"""
-        SELECT DISTINCT ticker
-        FROM {schema}.user_scan_row_notes
-        WHERE user_id = %s AND status = 'active'
-        ORDER BY ticker
+        WITH latest_run AS (
+            SELECT id
+            FROM {schema}.user_scan_runs
+            WHERE user_id = %s
+            ORDER BY scan_date DESC, id DESC
+            LIMIT 1
+        )
+        SELECT DISTINCT n.ticker
+        FROM {schema}.user_scan_row_notes n
+        JOIN latest_run lr ON lr.id = n.run_id
+        WHERE n.user_id = %s
+          AND n.status = 'active'
+          AND n.ticker IS NOT NULL
+          AND btrim(n.ticker) <> ''
+        ORDER BY n.ticker
     """
     cur = conn.cursor()
-    cur.execute(sql, (user_id,))
+    cur.execute(sql, (user_id, user_id))
     return [r[0] for r in (cur.fetchall() or [])]
 
 
@@ -578,6 +593,45 @@ def _enrich_narrative_sources(narrative: dict[str, Any], catalog: dict[int, dict
     narrative["market_pulse_sources"] = enriched_mp
 
 
+def _enforce_section_ticker_integrity(narrative: dict[str, Any], ctx: UserContext) -> dict[str, Any]:
+    """
+    Prevent model leakage between sections:
+    - portfolio_watch tickers must exist in actual open positions
+    - screening_update tickers must come from active screening candidates
+    - screening_update excludes portfolio tickers
+    """
+    portfolio_tickers = {p.ticker.upper() for p in ctx.open_positions}
+    screening_tickers = {t.upper() for t in ctx.active_screen_tickers}
+
+    portfolio_watch = narrative.get("portfolio_watch")
+    if isinstance(portfolio_watch, list):
+        filtered_portfolio: list[dict[str, Any]] = []
+        for item in portfolio_watch:
+            if not isinstance(item, dict):
+                continue
+            ticker = str(item.get("ticker") or "").upper().strip()
+            if ticker and ticker in portfolio_tickers:
+                filtered_portfolio.append(item)
+        narrative["portfolio_watch"] = filtered_portfolio
+    else:
+        narrative["portfolio_watch"] = []
+
+    screening_update = narrative.get("screening_update")
+    if isinstance(screening_update, list):
+        filtered_screening: list[dict[str, Any]] = []
+        for item in screening_update:
+            if not isinstance(item, dict):
+                continue
+            ticker = str(item.get("ticker") or "").upper().strip()
+            if ticker and ticker in screening_tickers and ticker not in portfolio_tickers:
+                filtered_screening.append(item)
+        narrative["screening_update"] = filtered_screening
+    else:
+        narrative["screening_update"] = []
+
+    return narrative
+
+
 def _parse_narrative_json(raw: str) -> dict:
     """Best-effort JSON extraction from Ollama response."""
     import re
@@ -649,6 +703,7 @@ async def _generate_narrative_text(ctx: UserContext) -> tuple[dict, int]:
 
     catalog = _article_catalog_from_context(ctx)
     _enrich_narrative_sources(parsed, catalog)
+    parsed = _enforce_section_ticker_integrity(parsed, ctx)
 
     return parsed, latency_ms
 
