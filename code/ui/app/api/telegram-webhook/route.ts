@@ -63,7 +63,7 @@ async function handleStart(chat_id: number, first_name: string, token: string): 
     await sendTelegramMessage(
       chat_id,
       `👋 Hi <b>${first_name}</b>!\n\n` +
-      "To connect your Swingtrader account, open the app and click " +
+      "To connect your NewsImpactScreener account, open the app and click " +
       "<b>Connect Telegram</b> — you'll get a personal link to tap here.",
     );
     return;
@@ -85,7 +85,7 @@ async function handleStart(chat_id: number, first_name: string, token: string): 
     await sendTelegramMessage(
       chat_id,
       "❌ This link has <b>expired or is invalid</b>.\n\n" +
-      "Please go back to the Swingtrader app and generate a new one.",
+      "Please go back to the NewsImpactScreener app and generate a new one.",
     );
     return;
   }
@@ -143,7 +143,7 @@ async function handleUpdate(chat_id: number, first_name: string): Promise<void> 
     await sendTelegramMessage(
       chat_id,
       `👋 Hi <b>${first_name}</b>!\n\n` +
-      "Your Telegram is not linked to a Swingtrader account yet.\n" +
+      "Your Telegram is not linked to a NewsImpactScreener account yet.\n" +
       "Open the app and use <b>Connect Telegram</b>, then try <b>/update</b> again.",
     );
     return;

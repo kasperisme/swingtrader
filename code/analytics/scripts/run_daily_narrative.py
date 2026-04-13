@@ -174,8 +174,8 @@ def _narrative_to_telegram(narrative: dict, narrative_date: str) -> str:
 
     # ── Portfolio Watch ───────────────────────────────────────────────────────
     portfolio = narrative.get("portfolio_watch", [])
+    lines.append("📊 <b>PORTFOLIO WATCH</b>")
     if portfolio:
-        lines.append("📊 <b>PORTFOLIO WATCH</b>")
         action_icons = {"monitor": "🟢", "review": "🟡", "urgent": "🔴"}
         for item in portfolio:
             action = item.get("action", "monitor")
@@ -189,7 +189,9 @@ def _narrative_to_telegram(narrative: dict, narrative_date: str) -> str:
                 lines.append(f"  {item['narrative']}")
             for src_line in _format_sources_html(item.get("sources")):
                 lines.append(src_line)
-        lines.append("")
+    else:
+        lines.append("No material portfolio changes in the current lookback window.")
+    lines.append("")
 
     # ── Screening Update ──────────────────────────────────────────────────────
     screening = narrative.get("screening_update", [])
