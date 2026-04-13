@@ -21,6 +21,7 @@ import {
   ArticlesGridFallback,
   type ArticleGridItem,
 } from "@/components/articles-grid";
+import { EarlyAccessSignupForm } from "@/components/early-access-signup-form";
 
 type CardItem = {
   title: string;
@@ -471,24 +472,7 @@ export default function Home() {
             own money and want context, not chaos.
           </p>
 
-          <form className="mt-8 flex flex-col gap-3 sm:flex-row sm:justify-center">
-            <label htmlFor="email" className="sr-only">
-              Email address
-            </label>
-            <input
-              id="email"
-              type="email"
-              required
-              placeholder="Enter your email"
-              className="h-12 w-full rounded-xl border border-border bg-card px-4 text-sm outline-none transition focus-visible:border-primary sm:max-w-xs"
-            />
-            <button
-              type="submit"
-              className="inline-flex h-12 cursor-pointer items-center justify-center rounded-xl bg-violet-600 px-6 text-sm font-semibold text-white shadow-lg shadow-violet-500/20 transition-all hover:bg-violet-500"
-            >
-              Get Early Access
-            </button>
-          </form>
+          <EarlyAccessSignupForm />
           <p className="mt-4 text-xs text-muted-foreground">
             No credit card. No terminal subscription.
           </p>
