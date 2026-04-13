@@ -5,6 +5,8 @@
 export const NOTE_STAGE_NONE = "__none__";
 
 export type NoteHighlightedFilter = "any" | "yes" | "no";
+/** Row has a persisted workflow note row (any fields), vs no DB note yet. */
+export type HasRowNoteFilter = "any" | "yes" | "no";
 export type NoteCommentFilter = "any" | "with" | "without";
 
 /** Matches `ScanRowNote.status` plus "all". */
@@ -17,6 +19,7 @@ export type ScreeningStatusFilter =
 
 export interface ScreeningsFilters {
   status: ScreeningStatusFilter;
+  hasRowNote: HasRowNoteFilter;
   noteHighlighted: NoteHighlightedFilter;
   noteComment: NoteCommentFilter;
   noteStage: string;
@@ -41,6 +44,7 @@ export interface ScreeningsFilters {
 
 export const DEFAULT_SCREENINGS_FILTERS: ScreeningsFilters = {
   status: "active",
+  hasRowNote: "any",
   noteHighlighted: "any",
   noteComment: "any",
   noteStage: "",
@@ -64,6 +68,7 @@ export const DEFAULT_SCREENINGS_FILTERS: ScreeningsFilters = {
 export function countScreeningsFilterRules(f: ScreeningsFilters): number {
   let n = 0;
   if (f.status !== "active") n++;
+  if (f.hasRowNote !== "any") n++;
   if (f.noteHighlighted !== "any") n++;
   if (f.noteComment !== "any") n++;
   if (f.noteStage) n++;

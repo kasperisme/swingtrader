@@ -15,6 +15,7 @@ type SetFilters = (f: ScreeningsFilters | ((prev: ScreeningsFilters) => Screenin
 
 type FieldKind =
   | { kind: "wf_status" }
+  | { kind: "wf_has_row_note" }
   | { kind: "wf_highlighted" }
   | { kind: "wf_comment" }
   | { kind: "wf_stage" }
@@ -40,6 +41,13 @@ function catalogEntries(
   const out: CatalogEntry[] = [];
   const wf = "Workflow notes";
   out.push({ group: wf, id: "wf.status", label: "status", sub: "varchar", field: { kind: "wf_status" } });
+  out.push({
+    group: wf,
+    id: "wf.hasRowNote",
+    label: "saved note",
+    sub: "bool",
+    field: { kind: "wf_has_row_note" },
+  });
   out.push({ group: wf, id: "wf.highlighted", label: "highlighted", sub: "bool", field: { kind: "wf_highlighted" } });
   out.push({ group: wf, id: "wf.comment", label: "comment", sub: "text", field: { kind: "wf_comment" } });
   out.push({ group: wf, id: "wf.stage", label: "stage", sub: "varchar", field: { kind: "wf_stage" } });
@@ -82,6 +90,11 @@ function opsForField(f: FieldKind): OpDef[] {
   switch (f.kind) {
     case "wf_status":
       return [{ id: "eq", label: "Equals", sym: "=" }];
+    case "wf_has_row_note":
+      return [
+        { id: "true", label: "Is true", sym: "=" },
+        { id: "false", label: "Is false", sym: "=" },
+      ];
     case "wf_highlighted":
       return [
         { id: "true", label: "Is true", sym: "=" },
@@ -145,6 +158,21 @@ function buildPills(filters: ScreeningsFilters, setFilters: SetFilters) {
       id: "st",
       text: `status = ${filters.status}`,
       remove: () => patch((p) => ({ ...p, status: "active" })),
+    });
+  }
+  if (filters.hasRowNote === "yes") {
+    pills.push({
+      id: "hrn-y",
+      text: "saved note = true",
+      title: "Only rows with a saved workflow note",
+      remove: () => patch((p) => ({ ...p, hasRowNote: "any" })),
+    });
+  } else if (filters.hasRowNote === "no") {
+    pills.push({
+      id: "hrn-n",
+      text: "saved note = false",
+      title: "Only rows with no saved workflow note yet",
+      remove: () => patch((p) => ({ ...p, hasRowNote: "any" })),
     });
   }
   if (filters.noteHighlighted === "yes") {
@@ -495,6 +523,11 @@ export function ScreeningsFilterBar({
       const v = (valueDraft.trim() || filters.status) as ScreeningStatusFilter;
       if (!["active", "dismissed", "watchlist", "pipeline", "all"].includes(v)) return;
       applyFilter((p) => ({ ...p, status: v }));
+      return;
+    }
+    if (f.kind === "wf_has_row_note") {
+      if (op === "true") applyFilter((p) => ({ ...p, hasRowNote: "yes" }));
+      else applyFilter((p) => ({ ...p, hasRowNote: "no" }));
       return;
     }
     if (f.kind === "wf_highlighted") {
@@ -911,7 +944,8 @@ export function ScreeningsFilterBar({
                       ))}
                     </div>
                   )}
-                  {(selectedEntry.field.kind === "wf_highlighted" ||
+                  {(selectedEntry.field.kind === "wf_has_row_note" ||
+                    selectedEntry.field.kind === "wf_highlighted" ||
                     selectedEntry.field.kind === "wf_comment" ||
                     selectedEntry.field.kind === "row_bool") && (
                     <p className="text-xs text-muted-foreground">Apply this constraint with the button below.</p>

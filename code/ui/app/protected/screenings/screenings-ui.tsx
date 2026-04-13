@@ -2951,12 +2951,14 @@ export function ScreeningsUI({
           dynamicNumericMins?: Record<string, string>;
         };
         const statusRaw = parsed.status;
+        const hrn = parsed.hasRowNote;
         const nh = parsed.noteHighlighted;
         const nc = parsed.noteComment;
         const tagsRaw = parsed.noteTagsAny;
         setFiltersState({
           ...DEFAULT_FILTERS,
           ...(typeof statusRaw === "string" ? { status: statusRaw as Filters["status"] } : {}),
+          ...(hrn === "any" || hrn === "yes" || hrn === "no" ? { hasRowNote: hrn } : {}),
           ...(nh === "any" || nh === "yes" || nh === "no" ? { noteHighlighted: nh } : {}),
           ...(nc === "any" || nc === "with" || nc === "without" ? { noteComment: nc } : {}),
           ...(typeof parsed.noteStage === "string" ? { noteStage: parsed.noteStage } : {}),
@@ -3389,6 +3391,10 @@ export function ScreeningsUI({
   const filtered = useMemo(() => {
     let result = rows.filter((r) => {
       const note = rowNotes.get(r.scan_row_id);
+      const hasSavedNote = note !== undefined;
+      if (filters.hasRowNote === "yes" && !hasSavedNote) return false;
+      if (filters.hasRowNote === "no" && hasSavedNote) return false;
+
       const status = note?.status ?? "active";
       if (filters.status !== "all" && status !== filters.status) return false;
 
