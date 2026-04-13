@@ -1,7 +1,9 @@
+import Link from "next/link";
 import { notFound } from "next/navigation";
 import { Suspense } from "react";
-import { PortableText } from "next-sanity";
+import { PortableText } from "@portabletext/react";
 import { isSanityConfigured, sanityFetch } from "@/lib/sanity/client";
+import { portableTextComponents } from "@/lib/sanity/portable-text-components";
 import { docPageBySlugQuery, docPageSlugListQuery } from "@/lib/sanity/queries";
 import type { DocPage } from "@/lib/sanity/types";
 
@@ -28,11 +30,12 @@ export async function generateMetadata({ params }: Props) {
 async function DocPageDetailData({ params }: Props) {
   if (!isSanityConfigured) {
     return (
-      <div className="max-w-2xl">
+      <div className="mx-auto max-w-3xl">
         <h1 className="text-3xl font-semibold tracking-tight">Page unavailable</h1>
         <p className="mt-4 text-sm leading-6 text-muted-foreground">
-          Sanity is not configured. Add <code>NEXT_PUBLIC_SANITY_PROJECT_ID</code> and{" "}
-          <code>NEXT_PUBLIC_SANITY_DATASET</code> in <code>code/ui/.env.local</code>.
+          Sanity is not configured. Add <code className="rounded bg-muted px-1.5 py-0.5 text-xs font-mono">NEXT_PUBLIC_SANITY_PROJECT_ID</code> and{" "}
+          <code className="rounded bg-muted px-1.5 py-0.5 text-xs font-mono">NEXT_PUBLIC_SANITY_DATASET</code> in{" "}
+          <code className="rounded bg-muted px-1.5 py-0.5 text-xs font-mono">code/ui/.env.local</code>.
         </p>
       </div>
     );
@@ -46,25 +49,51 @@ async function DocPageDetailData({ params }: Props) {
   }
 
   return (
-    <article className="max-w-2xl">
-      {page.section ? (
-        <p className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">
-          {page.section}
-        </p>
-      ) : null}
-      <h1 className="mt-2 text-3xl font-semibold tracking-tight md:text-4xl">{page.title}</h1>
-      {page.description ? (
-        <p className="mt-4 text-base leading-7 text-muted-foreground">{page.description}</p>
-      ) : null}
+    <div className="mx-auto max-w-3xl">
+      <Link
+        href="/docs/getting-started"
+        className="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 rounded-sm"
+      >
+        ← Documentation home
+      </Link>
 
-      {page.body?.length > 0 ? (
-        <div className="mt-10 space-y-4 text-sm leading-7 text-foreground/95 [&_a]:text-primary [&_a]:underline [&_a:hover]:opacity-80 [&_code]:rounded [&_code]:bg-muted [&_code]:px-1 [&_code]:py-0.5 [&_code]:text-xs [&_h2]:mt-10 [&_h2]:text-xl [&_h2]:font-semibold [&_h2]:tracking-tight [&_h3]:mt-8 [&_h3]:text-base [&_h3]:font-semibold [&_li]:leading-7 [&_ul]:mt-3 [&_ul]:list-disc [&_ul]:pl-5 [&_ul]:space-y-2">
-          <PortableText value={page.body} />
-        </div>
-      ) : (
-        <p className="mt-10 text-sm text-muted-foreground">Content coming soon.</p>
-      )}
-    </article>
+      <article className="mt-8">
+        {page.section ? (
+          <p className="text-xs font-semibold uppercase tracking-widest text-amber-500">
+            {page.section}
+          </p>
+        ) : null}
+
+        <h1 className="mt-3 text-3xl font-bold tracking-tight leading-tight md:text-4xl">
+          {page.title}
+        </h1>
+
+        {page.description ? (
+          <p className="mt-5 text-lg leading-8 text-muted-foreground border-l-4 border-primary/30 pl-4">
+            {page.description}
+          </p>
+        ) : null}
+
+        <div className="my-8 border-b border-border" aria-hidden />
+
+        {page.body?.length > 0 ? (
+          <div className="space-y-5 text-base">
+            <PortableText value={page.body} components={portableTextComponents} />
+          </div>
+        ) : (
+          <p className="mt-8 text-muted-foreground">Content coming soon.</p>
+        )}
+      </article>
+
+      <div className="mt-16 pt-8 border-t border-border">
+        <Link
+          href="/docs/getting-started"
+          className="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 rounded-sm"
+        >
+          ← Back to documentation
+        </Link>
+      </div>
+    </div>
   );
 }
 
@@ -72,8 +101,8 @@ export default function DocPageDetail({ params }: Props) {
   return (
     <Suspense
       fallback={
-        <div className="max-w-2xl text-sm text-muted-foreground animate-pulse">
-          Loading doc page...
+        <div className="mx-auto max-w-3xl text-sm text-muted-foreground animate-pulse">
+          Loading doc page…
         </div>
       }
     >

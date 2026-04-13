@@ -3,6 +3,7 @@
 import { useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { ChevronDown } from "lucide-react";
 import type { DocPagePreview } from "@/lib/sanity/types";
 
 type Props = {
@@ -18,30 +19,33 @@ export function DocsMobileNav({ grouped }: Props) {
     .find((p) => pathname === `/docs/${p.slug}`);
 
   return (
-    <div className="border-b border-border lg:hidden">
+    <div className="border-b border-border bg-muted/15 lg:hidden">
       <button
         type="button"
+        id="docs-mobile-nav-trigger"
+        aria-expanded={open}
+        aria-controls="docs-mobile-nav-panel"
         onClick={() => setOpen((o) => !o)}
-        className="flex w-full items-center justify-between px-6 py-3 text-sm font-medium"
+        className="flex min-h-11 w-full items-center justify-between gap-3 px-4 py-3 text-left text-sm font-medium transition-colors hover:bg-muted/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset sm:px-6"
       >
-        <span className="truncate text-muted-foreground">
-          {currentPage ? currentPage.title : "Browse docs"}
+        <span className="min-w-0 truncate text-foreground">
+          {currentPage ? currentPage.title : "Browse documentation"}
         </span>
-        <svg
-          className={`ml-2 h-4 w-4 shrink-0 text-muted-foreground transition-transform ${open ? "rotate-180" : ""}`}
-          fill="none"
-          viewBox="0 0 24 24"
-          stroke="currentColor"
-          strokeWidth={2}
-        >
-          <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
-        </svg>
+        <ChevronDown
+          className={`h-4 w-4 shrink-0 text-muted-foreground transition-transform duration-200 ${open ? "rotate-180" : ""}`}
+          aria-hidden
+        />
       </button>
 
-      {open && (
-        <nav className="border-t border-border bg-background px-6 pb-4 pt-3">
+      {open ? (
+        <nav
+          id="docs-mobile-nav-panel"
+          role="region"
+          aria-labelledby="docs-mobile-nav-trigger"
+          className="border-t border-border bg-background px-4 pb-4 pt-3 sm:px-6"
+        >
           {grouped.map(({ section, pages }) => (
-            <div key={section} className="mb-4">
+            <div key={section} className="mb-4 last:mb-0">
               <p className="mb-1.5 text-xs font-semibold uppercase tracking-widest text-muted-foreground">
                 {section}
               </p>
@@ -54,10 +58,10 @@ export function DocsMobileNav({ grouped }: Props) {
                       <Link
                         href={href}
                         onClick={() => setOpen(false)}
-                        className={`block rounded-md px-3 py-2 text-sm transition-colors ${
+                        className={`block min-h-11 rounded-md px-3 py-2.5 text-sm leading-snug transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 ${
                           isActive
-                            ? "bg-muted font-medium text-foreground"
-                            : "text-muted-foreground hover:bg-muted/60 hover:text-foreground"
+                            ? "bg-primary/10 font-medium text-foreground border border-primary/20"
+                            : "text-muted-foreground hover:bg-muted/80 hover:text-foreground border border-transparent"
                         }`}
                       >
                         {page.title}
@@ -69,7 +73,7 @@ export function DocsMobileNav({ grouped }: Props) {
             </div>
           ))}
         </nav>
-      )}
+      ) : null}
     </div>
   );
 }

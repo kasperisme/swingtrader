@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { Suspense } from "react";
 import { isSanityConfigured, sanityFetch } from "@/lib/sanity/client";
 import { docPagePreviewsQuery } from "@/lib/sanity/queries";
@@ -38,34 +39,49 @@ export default function DocsLayout({
   return (
     <div className="min-h-screen bg-background text-foreground">
       <div className="mx-auto flex max-w-7xl">
-        {/* Desktop sidebar */}
-        <aside className="sticky top-16 hidden h-[calc(100vh-64px)] w-60 shrink-0 overflow-y-auto border-r border-border px-4 py-8 lg:block">
-          <Suspense
-            fallback={
-              <div className="space-y-3 text-xs text-muted-foreground animate-pulse">
-                <div className="h-3 w-20 rounded bg-muted" />
-                <div className="h-3 w-28 rounded bg-muted" />
-                <div className="h-3 w-24 rounded bg-muted" />
-              </div>
-            }
-          >
-            <DocsNavData mode="desktop" />
-          </Suspense>
+        {/* Desktop sidebar — aligned with blog: clear hierarchy, readable nav */}
+        <aside className="sticky top-16 hidden h-[calc(100vh-64px)] w-64 shrink-0 overflow-y-auto border-r border-border bg-muted/20 lg:block">
+          <div className="px-4 pb-4 pt-8">
+            <Link
+              href="/docs/getting-started"
+              className="block rounded-md px-2 py-1 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+            >
+              <p className="text-xs font-semibold uppercase tracking-widest text-amber-500">Docs</p>
+              <p className="mt-1 text-sm font-semibold tracking-tight text-foreground">
+                Documentation
+              </p>
+              <p className="mt-1 text-xs leading-5 text-muted-foreground">
+                Guides, methodology, and reference.
+              </p>
+            </Link>
+          </div>
+          <div className="px-3 pb-8">
+            <Suspense
+              fallback={
+                <div className="space-y-3 text-xs text-muted-foreground animate-pulse px-1">
+                  <div className="h-3 w-20 rounded bg-muted" />
+                  <div className="h-3 w-28 rounded bg-muted" />
+                  <div className="h-3 w-24 rounded bg-muted" />
+                </div>
+              }
+            >
+              <DocsNavData mode="desktop" />
+            </Suspense>
+          </div>
         </aside>
 
-        {/* Content */}
+        {/* Content — padding rhythm matches blog posts */}
         <main className="min-w-0 flex-1">
-          {/* Mobile nav — inside content area, not a separate top bar */}
           <div className="lg:hidden">
             <Suspense fallback={null}>
               <DocsNavData mode="mobile" />
             </Suspense>
           </div>
-          <div className="px-4 py-8 sm:px-6 md:px-10 md:py-14">
+          <div className="px-4 py-12 sm:px-6 md:py-20">
             <Suspense
               fallback={
-                <div className="max-w-2xl text-sm text-muted-foreground animate-pulse">
-                  Loading docs...
+                <div className="mx-auto max-w-3xl text-sm text-muted-foreground animate-pulse">
+                  Loading docs…
                 </div>
               }
             >
