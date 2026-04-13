@@ -231,6 +231,10 @@ TAILWINDS              HEADWINDS
 
 5. **Persistence** — article, all 8 head responses, and the aggregated vector are stored in Supabase. Duplicate articles (same sha256) return the cached result unless `--refresh` is passed.
 
+6. **Embedding queue hook** — when a row is persisted, `score_news_cli` enqueues a
+   job in `news_article_embedding_jobs` for async chunk embedding by
+   `news_impact.embeddings_cli` (split pipeline).
+
 ## Supabase tables (swingtrader schema)
 
 | Table                  | Contents                                                                              |
@@ -239,6 +243,8 @@ TAILWINDS              HEADWINDS
 | `news_impact_heads`    | 8 rows per article — one per cluster (scores, reasoning, confidence)                  |
 | `news_impact_vectors`  | Aggregated impact vector per article (`impact_json`, `top_dimensions`)                |
 | `news_article_tickers` | Ticker mentions per article — `source` is `extracted` (LLM) or `explicit` (--tickers) |
+| `news_article_embedding_jobs` | Async embedding queue + status (`pending`, `processing`, `completed`, `failed`) |
+| `news_article_embeddings` | Chunk embeddings for retrieval (default: `mxbai-embed-large`, `vector(1024)`) |
 
 ## Environment variables
 
@@ -264,6 +270,8 @@ TAILWINDS              HEADWINDS
 | `ANTHROPIC_TIMEOUT`      | `60`                      | Per-request timeout (anthropic)                                              |
 | `FMP_API_KEY`            | —                         | Required only when fetching company vectors                                 |
 | `HANS_DUCKDB_PATH`       | `data/swingtrader.duckdb` | DuckDB file path                                                            |
+| `OLLAMA_EMBED_MODEL`     | `mxbai-embed-large`       | Model used by `embeddings_cli` and semantic retrieval query embedding       |
+| `USE_SEMANTIC_RETRIEVAL` | `true`                    | Enable semantic evidence retrieval in daily narrative + blog generation      |
 
 For GenAI Agent: models such as Qwen3 may leave `content` empty and put text in `reasoning_content`; the client uses that as a fallback. If JSON responses truncate, increase `DO_GENAI_AGENT_MAX_TOKENS`.
 
@@ -278,3 +286,11 @@ Faster alternatives (lower quality): `qwen2.5:7b`, `llama3.2:3b`
 ### DigitalOcean GenAI Agent (`do_agent`)
 
 The scorer calls `POST /api/v1/chat/completions` with Bearer auth (OpenAI-style `messages`, `stream: false`). Discover parameters on your deployment via `https://<agent-host>/openapi.json`. Set `NEWS_IMPACT_BACKEND=do_agent`, `DO_GENAI_AGENT_API_KEY`, and `DO_GENAI_AGENT_BASE_URL` if not using the default in `do_agent_client.py`. Use `DO_GENAI_AGENT_RETRIEVAL=none` for scoring without knowledge-base retrieval (default).
+
+## Related scripts/modules
+
+- `news_impact.embeddings_cli` — queue/process/retry/cleanup embedding jobs.
+- `news_impact.embeddings` — chunking + Ollama embedding + job orchestration.
+- `news_impact.semantic_retrieval` — query embedding + pgvector retrieval against `news_article_embeddings`.
+- `news_impact.narrative_generator` — now consumes semantic evidence in prompt context (guarded by `USE_SEMANTIC_RETRIEVAL`, default on).
+- `scripts/generate_blog_post.py` — now adds semantic evidence snippets to the generation prompt (guarded by same flag).

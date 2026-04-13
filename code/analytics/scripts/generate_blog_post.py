@@ -55,6 +55,7 @@ load_dotenv(dotenv_path=_REPO_ROOT / ".env")
 sys.path.insert(0, str(_REPO_ROOT))
 
 from src.db import get_supabase_client, get_schema, _as_json  # noqa: E402
+from news_impact.semantic_retrieval import search_news_embeddings  # noqa: E402
 
 logging.basicConfig(
     level=logging.INFO,
@@ -62,6 +63,7 @@ logging.basicConfig(
     datefmt="%H:%M:%S",
 )
 log = logging.getLogger(__name__)
+USE_SEMANTIC_RETRIEVAL = os.environ.get("USE_SEMANTIC_RETRIEVAL", "true").strip().lower() not in {"0", "false", "no", "off"}
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -282,6 +284,28 @@ def _build_prompt(mode: str, articles: list[dict], tickers_map: dict[int, list[s
         industry = meta.get("industry") or ""
         tickers_block += f"  - {t} ({name}) — {sector}" + (f", {industry}" if industry else "") + "\n"
 
+    # Semantic evidence snippets (embedding retrieval over recent corpus).
+    semantic_hits: list[dict] = []
+    if USE_SEMANTIC_RETRIEVAL:
+        retrieval_query = (
+            f"{period_label} market narrative. "
+            f"Top tickers: {', '.join(top_tickers) or 'none'}. "
+            f"Key factor dimensions: {', '.join(_fmt_dim(d) for d, _ in agg[:5])}. "
+            "Provide the most relevant recent snippets to support blog analysis."
+        )
+        semantic_hits = search_news_embeddings(
+            retrieval_query,
+            lookback_hours=LOOKBACK_HOURS.get(mode, 14),
+            tickers=top_tickers or None,
+            limit=10,
+        )
+    semantic_block = ""
+    for i, hit in enumerate(semantic_hits[:8], 1):
+        semantic_block += (
+            f"  {i}. [article_id={hit['article_id']}] {hit.get('title','')[:90]}\n"
+            f"     snippet: {str(hit.get('snippet') or '')[:220]}\n"
+        )
+
     prompt = f"""You are writing a concise, insight-packed market analysis blog post for the NewsImpactScreener blog.
 
 The post is for the **{period_label} Edition — {date_str}**.
@@ -300,6 +324,9 @@ Tone: direct, analytical, no fluff. Think Bloomberg Brief meets quantitative hed
 
 **Top exposed companies (by appearance in high-impact stories):**
 {tickers_block}
+
+**Semantic evidence snippets (for grounding and citations):**
+{semantic_block if semantic_block else "  (none)"}
 
 ---
 

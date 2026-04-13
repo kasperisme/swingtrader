@@ -41,6 +41,7 @@ from zoneinfo import ZoneInfo
 
 from src.db import get_pg_connection, get_supabase_client, get_schema, _tbl
 from news_impact.ollama_client import chat as ollama_chat, OllamaError
+from news_impact.semantic_retrieval import search_news_embeddings
 
 logger = logging.getLogger(__name__)
 
@@ -49,6 +50,7 @@ _DEFAULT_LOOKBACK_HOURS = 24
 _OLLAMA_NARRATIVE_MODEL = os.environ.get("OLLAMA_NARRATIVE_MODEL") or os.environ.get("OLLAMA_IMPACT_MODEL", "devstral")
 _OLLAMA_NARRATIVE_TOKENS = int(os.environ.get("OLLAMA_NARRATIVE_TOKENS", "3072"))
 _OLLAMA_NARRATIVE_TIMEOUT = float(os.environ.get("OLLAMA_NARRATIVE_TIMEOUT", "180"))
+_USE_SEMANTIC_RETRIEVAL = os.environ.get("USE_SEMANTIC_RETRIEVAL", "true").strip().lower() not in {"0", "false", "no", "off"}
 
 
 # ── Data containers ───────────────────────────────────────────────────────────
@@ -91,6 +93,7 @@ class UserContext:
     portfolio_news: dict[str, list[TickerNewsItem]] = field(default_factory=dict)
     screening_news: dict[str, list[TickerNewsItem]] = field(default_factory=dict)
     alert_items: list[AlertItem] = field(default_factory=list)
+    semantic_evidence: list[dict] = field(default_factory=list)
     lookback_hours: int = _DEFAULT_LOOKBACK_HOURS
 
 
@@ -376,6 +379,9 @@ Each line starts with article_id=... — cite these integer ids in "sources" and
 === ACTIVE ALERTS ===
 {alerts_block}
 
+=== SEMANTIC EVIDENCE (retrieved chunks) ===
+{semantic_block}
+
 Generate a daily narrative JSON with this exact structure:
 {{
   "portfolio_watch": [
@@ -481,6 +487,21 @@ def _build_alerts_block(alerts: list[AlertItem]) -> str:
     return "\n".join(lines)
 
 
+def _build_semantic_block(items: list[dict]) -> str:
+    if not items:
+        return "  (no semantic evidence)"
+    lines: list[str] = []
+    for it in items[:12]:
+        ts = (it.get("published_at") or "?")[:16].replace("T", " ")
+        sim = it.get("similarity", 0.0)
+        lines.append(
+            f"  article_id={it.get('article_id')} | sim={sim:.3f} | {ts} | {it.get('title','')[:90]}"
+        )
+        if it.get("snippet"):
+            lines.append(f"    snippet: {str(it.get('snippet'))[:220]}")
+    return "\n".join(lines)
+
+
 def _article_catalog_from_context(ctx: UserContext) -> dict[int, dict[str, Any]]:
     """Map article_id -> stable title/url for post-processing model citations."""
     cat: dict[int, dict[str, Any]] = {}
@@ -492,6 +513,19 @@ def _article_catalog_from_context(ctx: UserContext) -> dict[int, dict[str, Any]]
                 "url": it.url,
                 "published_at": it.published_at.isoformat() if it.published_at else None,
             }
+    for it in ctx.semantic_evidence:
+        aid = int(it.get("article_id") or 0)
+        if aid <= 0:
+            continue
+        cat.setdefault(
+            aid,
+            {
+                "article_id": aid,
+                "title": it.get("title") or "",
+                "url": it.get("url") or "",
+                "published_at": it.get("published_at"),
+            },
+        )
     return cat
 
 
@@ -584,6 +618,7 @@ async def _generate_narrative_text(ctx: UserContext) -> tuple[dict, int]:
     screening_block = _build_screening_block(ctx.active_screen_tickers)
     news_block = _build_news_block(ctx.portfolio_news, ctx.screening_news)
     alerts_block = _build_alerts_block(ctx.alert_items)
+    semantic_block = _build_semantic_block(ctx.semantic_evidence)
 
     prompt = _NARRATIVE_USER_TEMPLATE.format(
         date=ctx.narrative_date.strftime("%A %B %-d, %Y"),
@@ -591,6 +626,7 @@ async def _generate_narrative_text(ctx: UserContext) -> tuple[dict, int]:
         screening_block=screening_block,
         news_block=news_block,
         alerts_block=alerts_block,
+        semantic_block=semantic_block,
         lookback_hours=ctx.lookback_hours,
     )
 
@@ -691,6 +727,20 @@ async def generate_for_user(user_id: str, narrative_date: Optional[date] = None,
             portfolio_set = set(portfolio_tickers)
             ctx.portfolio_news = {t: v for t, v in news_map.items() if t in portfolio_set}
             ctx.screening_news = {t: v for t, v in news_map.items() if t not in portfolio_set}
+            if _USE_SEMANTIC_RETRIEVAL:
+                # Add semantic retrieval evidence to improve grounding/recall.
+                retrieval_query = (
+                    f"Portfolio: {', '.join(portfolio_tickers) or 'none'}. "
+                    f"Screening: {', '.join(ctx.active_screen_tickers) or 'none'}. "
+                    f"Alerts: {', '.join(a.ticker for a in ctx.alert_items) or 'none'}. "
+                    "Find the most relevant recent news snippets for a pre-market swing-trading brief."
+                )
+                ctx.semantic_evidence = search_news_embeddings(
+                    retrieval_query,
+                    lookback_hours=lookback_hours,
+                    tickers=all_tickers,
+                    limit=14,
+                )
         else:
             logger.info("[narrative] user=%s has no positions or active screens", user_id)
     finally:
