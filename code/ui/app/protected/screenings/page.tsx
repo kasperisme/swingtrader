@@ -14,6 +14,7 @@ async function fetchRuns(): Promise<ScanRun[]> {
     .schema("swingtrader")
     .from("user_scan_runs")
     .select("id, created_at, scan_date, source")
+    .or("status.eq.active,status.is.null")
     .order("created_at", { ascending: false })
     .limit(50);
 

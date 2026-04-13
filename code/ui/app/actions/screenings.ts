@@ -216,3 +216,36 @@ export async function screeningsUpsertDismissNote(input: {
   if (error) return { ok: false, error: error.message };
   return { ok: true, data: true };
 }
+
+/** Soft-delete a screening run (hides from UI; does not remove rows). */
+export async function screeningsSoftDeleteRun(
+  runId: number,
+): Promise<ScreeningActionSuccess<true> | ScreeningActionError> {
+  if (!runId || typeof runId !== "number" || runId < 1) {
+    return { ok: false, error: "runId required" };
+  }
+
+  const supabase = await createClient();
+  const {
+    data: { user },
+    error: authError,
+  } = await supabase.auth.getUser();
+  if (authError || !user) {
+    return { ok: false, error: "Unauthorized" };
+  }
+
+  const { data, error } = await supabase
+    .schema("swingtrader")
+    .from("user_scan_runs")
+    .update({ status: "deleted" })
+    .eq("id", runId)
+    .eq("user_id", user.id)
+    .eq("status", "active")
+    .select("id");
+
+  if (error) return { ok: false, error: error.message };
+  if (!data?.length) {
+    return { ok: false, error: "Screening not found or already removed" };
+  }
+  return { ok: true, data: true };
+}

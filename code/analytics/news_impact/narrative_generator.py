@@ -157,6 +157,7 @@ def _fetch_active_screen_tickers(conn, user_id: str) -> list[str]:
             SELECT id
             FROM {schema}.user_scan_runs
             WHERE user_id = %s
+              AND COALESCE(status, 'active') = 'active'
             ORDER BY scan_date DESC, id DESC
             LIMIT 1
         )

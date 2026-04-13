@@ -15,6 +15,7 @@ import { createClient } from "@/lib/supabase/client";
 import {
   screeningsGetNewsImpacts,
   screeningsGetTickerRelationships,
+  screeningsSoftDeleteRun,
   screeningsUpsertDismissNote,
 } from "@/app/actions/screenings";
 import {
@@ -2937,6 +2938,7 @@ export function ScreeningsUI({
     comment: string;
   } | null>(null);
   const [savingWorkflowEditor, setSavingWorkflowEditor] = useState(false);
+  const [deletingRunId, setDeletingRunId] = useState<number | null>(null);
 
   // Load persisted UI preferences only after hydration to avoid SSR/client mismatch.
   useEffect(() => {
@@ -3343,6 +3345,36 @@ export function ScreeningsUI({
     router.push(`/protected/screenings?run=${id}`);
   }
 
+  async function softDeleteRun(runId: number) {
+    if (
+      !window.confirm(
+        "Remove this screening from your list? Data stays in the database but it will no longer appear here.",
+      )
+    ) {
+      return;
+    }
+    setDeletingRunId(runId);
+    try {
+      const res = await screeningsSoftDeleteRun(runId);
+      if (!res.ok) {
+        window.alert(res.error);
+        return;
+      }
+      const wasSelected = selectedRunId === runId;
+      const others = runs.filter((r) => r.id !== runId);
+      if (wasSelected) {
+        if (others[0]) {
+          router.push(`/protected/screenings?run=${others[0].id}`);
+        } else {
+          router.push("/protected/screenings");
+        }
+      }
+      router.refresh();
+    } finally {
+      setDeletingRunId(null);
+    }
+  }
+
   function toggleSort(key: SortKey) {
     if (sortKey === key) {
       setSortDir((d) => (d === "asc" ? "desc" : "asc"));
@@ -3589,20 +3621,51 @@ export function ScreeningsUI({
           <div className="flex gap-2 overflow-x-auto pb-1 -mx-1 px-1 [scrollbar-width:thin]">
             {runs.map(run => {
               const active = run.id === (selectedRun?.id ?? null);
+              const busy = deletingRunId === run.id;
               return (
-                <button
+                <div
                   key={run.id}
-                  type="button"
-                  onClick={() => selectRun(run.id)}
-                  className={`shrink-0 text-left min-w-[9.5rem] max-w-[220px] rounded-lg border px-3 py-2 text-sm transition-colors ${
+                  className={`relative shrink-0 group min-w-[9.5rem] max-w-[220px] rounded-lg border flex flex-col ${
                     active
-                      ? "border-foreground bg-foreground text-background font-medium"
-                      : "border-border bg-background text-muted-foreground hover:bg-muted hover:text-foreground hover:border-foreground/30"
+                      ? "border-foreground bg-foreground text-background"
+                      : "border-border bg-background text-muted-foreground"
                   }`}
                 >
-                  <div className="font-medium leading-tight">{run.scan_date}</div>
-                  <div className="text-xs opacity-80 truncate mt-0.5" title={run.source}>{run.source}</div>
-                </button>
+                  <button
+                    type="button"
+                    onClick={() => selectRun(run.id)}
+                    disabled={busy}
+                    className={`text-left px-3 pt-2 pb-1.5 pr-8 text-sm transition-colors rounded-t-lg ${
+                      active
+                        ? "font-medium"
+                        : "hover:bg-muted hover:text-foreground hover:border-foreground/30"
+                    } ${busy ? "opacity-60" : ""}`}
+                  >
+                    <div className="font-medium leading-tight">{run.scan_date}</div>
+                    <div className="text-xs opacity-80 truncate mt-0.5" title={run.source}>{run.source}</div>
+                  </button>
+                  <button
+                    type="button"
+                    title="Remove from list"
+                    aria-label={`Remove screening ${run.scan_date}`}
+                    disabled={busy}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      void softDeleteRun(run.id);
+                    }}
+                    className={`absolute right-1 top-1 p-1 rounded-md transition-colors ${
+                      active
+                        ? "text-background/70 hover:text-background hover:bg-background/15"
+                        : "text-muted-foreground hover:text-destructive hover:bg-destructive/10"
+                    } ${busy ? "pointer-events-none opacity-50" : ""}`}
+                  >
+                    {busy ? (
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    ) : (
+                      <Trash2 className="w-3.5 h-3.5" />
+                    )}
+                  </button>
+                </div>
               );
             })}
           </div>

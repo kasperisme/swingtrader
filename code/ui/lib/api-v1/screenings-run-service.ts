@@ -15,6 +15,7 @@ export type CreateRunSuccess = {
     created_at: string;
     scan_date: string;
     source: string;
+    status?: "active" | "deleted";
     market_json: unknown;
     result_json: unknown;
   };
@@ -38,11 +39,12 @@ export async function createScreeningRunService(
     .insert({
       scan_date,
       source,
+      status: "active",
       market_json: market_json ?? null,
       result_json: result_json ?? null,
       user_id: key.userId,
     })
-    .select("id, created_at, scan_date, source, market_json, result_json")
+    .select("id, created_at, scan_date, source, status, market_json, result_json")
     .single();
 
   if (error) {
@@ -73,7 +75,7 @@ export async function appendScreeningRowsService(
   const { data: run, error: runErr } = await supabase
     .schema("swingtrader")
     .from("user_scan_runs")
-    .select("id, scan_date, user_id")
+    .select("id, scan_date, user_id, status")
     .eq("id", runId)
     .maybeSingle();
 
@@ -81,6 +83,9 @@ export async function appendScreeningRowsService(
   if (run === null) return { ok: false, status: 404, message: "Screening run not found" };
   if (run.user_id !== key.userId) {
     return { ok: false, status: 403, message: "Forbidden: this run belongs to another user" };
+  }
+  if (run.status === "deleted") {
+    return { ok: false, status: 410, message: "Screening run has been deleted" };
   }
 
   const scanDate = String(run.scan_date).slice(0, 10);
