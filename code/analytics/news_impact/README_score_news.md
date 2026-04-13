@@ -125,6 +125,29 @@ Use `--from` and `--to` with `--fmp-news` to constrain fetches to a specific dat
   - `--to` only: fetch up to that date
 - Can be combined with `--tickers`, `--limit`, and `--page`
 
+### Embedding pipeline (split job)
+
+`score_news_cli` now enqueues `news_article_embedding_jobs` when articles are persisted.
+Run the worker separately:
+
+```bash
+# Queue any old rows missing jobs/embeddings
+python -m news_impact.embeddings_cli --enqueue-missing --limit 500
+
+# Process pending jobs (Ollama embeddings)
+python -m news_impact.embeddings_cli --process-pending --limit 100
+
+# Retry failed jobs
+python -m news_impact.embeddings_cli --process-pending --retry-failed --limit 200
+
+# Cleanup orphan rows
+python -m news_impact.embeddings_cli --cleanup-orphans
+```
+
+Environment:
+- `OLLAMA_BASE_URL` (default `http://localhost:11434`)
+- `OLLAMA_EMBED_MODEL` (default `mxbai-embed-large`)
+
 Examples:
 
 ```bash
