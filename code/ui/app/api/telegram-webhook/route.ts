@@ -3,6 +3,7 @@ import { createServiceClient } from "@/lib/supabase/service";
 
 const WEBHOOK_SECRET = process.env.TELEGRAM_WEBHOOK_SECRET ?? "";
 const BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN ?? "";
+const SCHEMA = "swingtrader";
 
 async function sendTelegramMessage(chat_id: number, text: string): Promise<void> {
   if (!BOT_TOKEN) return;
@@ -48,6 +49,9 @@ export async function POST(req: NextRequest) {
   if (text.startsWith("/start")) {
     const token = text.slice("/start".length).trim();
     await handleStart(chat_id, first_name, token);
+  }
+  if (text.startsWith("/update")) {
+    await handleUpdate(chat_id, first_name);
   }
 
   // Always return 200 so Telegram doesn't retry
@@ -122,5 +126,63 @@ async function handleStart(chat_id: number, first_name: string, token: string): 
     "You'll receive your personalised Daily Narrative each weekday at <b>08:30 ET</b> — " +
     "covering your portfolio positions, active screening candidates, and alert watch.\n\n" +
     "<i>Not financial advice.</i>",
+  );
+}
+
+async function handleUpdate(chat_id: number, first_name: string): Promise<void> {
+  const supabase = createServiceClient();
+
+  const { data: connRows, error: connError } = await supabase
+    .schema(SCHEMA)
+    .from("user_telegram_connections")
+    .select("user_id")
+    .eq("chat_id", String(chat_id))
+    .limit(1);
+
+  if (connError || !connRows?.length) {
+    await sendTelegramMessage(
+      chat_id,
+      `👋 Hi <b>${first_name}</b>!\n\n` +
+      "Your Telegram is not linked to a Swingtrader account yet.\n" +
+      "Open the app and use <b>Connect Telegram</b>, then try <b>/update</b> again.",
+    );
+    return;
+  }
+
+  const userId = connRows[0].user_id as string;
+
+  const { data: activeRows } = await supabase
+    .schema(SCHEMA)
+    .from("telegram_update_requests")
+    .select("id")
+    .eq("user_id", userId)
+    .in("status", ["pending", "processing"])
+    .limit(1);
+
+  if (activeRows?.length) {
+    await sendTelegramMessage(
+      chat_id,
+      "⏳ You already have an update in progress.\n\nI'll send it here as soon as it's ready.",
+    );
+    return;
+  }
+
+  const { error: insertErr } = await supabase.schema(SCHEMA).from("telegram_update_requests").insert({
+    user_id: userId,
+    chat_id: String(chat_id),
+    status: "pending",
+  });
+
+  if (insertErr) {
+    await sendTelegramMessage(
+      chat_id,
+      "⚠️ I couldn't queue your update right now. Please try /update again in a minute.",
+    );
+    return;
+  }
+
+  await sendTelegramMessage(
+    chat_id,
+    "🧠 Got it — building your personalised news update now.\n\nI'll send it here shortly.",
   );
 }
