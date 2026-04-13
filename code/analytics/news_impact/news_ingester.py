@@ -126,6 +126,7 @@ def _persist(
     published_at: Optional[str] = None,
     publisher: Optional[str] = None,
     image_url: Optional[str] = None,
+    article_stream: Optional[str] = None,
 ) -> int:
     """
     Insert (or re-use) article row, then insert heads and vector.
@@ -151,6 +152,7 @@ def _persist(
             "body": body,
             "source": source,
             "article_hash": article_hash,
+            "article_stream": article_stream or "unknown",
         }
         if published_at is not None:
             row["published_at"] = published_at
@@ -217,6 +219,7 @@ async def ingest_article(
     published_at: Optional[str] = None,
     publisher: Optional[str] = None,
     image_url: Optional[str] = None,
+    article_stream: Optional[str] = None,
 ) -> tuple[int, dict[str, float]]:
     """
     Full pipeline: article → 8 LLM heads → aggregate → persist → return
@@ -264,6 +267,7 @@ async def ingest_article(
             published_at=published_at,
             publisher=publisher,
             image_url=image_url,
+            article_stream=article_stream,
         )
     else:
         article_id = _persist(
@@ -271,6 +275,7 @@ async def ingest_article(
             published_at=published_at,
             publisher=publisher,
             image_url=image_url,
+            article_stream=article_stream,
         )
 
     logger.info("[news_ingester] persisted article_id=%d", article_id)

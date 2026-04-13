@@ -17,6 +17,8 @@ Data sources
 Output
 ------
   Writes one row per (user_id, narrative_date) to daily_narratives.
+  Each section item may include sources [{article_id, title, url, published_at}];
+  market_pulse_sources lists articles backing the macro summary.
   Returns the structured dict that was saved.
 
 Usage
@@ -368,6 +370,7 @@ Date: {date} (US Eastern premarket)
 {screening_block}
 
 === RECENT NEWS HITS (last {lookback_hours}h) ===
+Each line starts with article_id=... — cite these integer ids in "sources" and market_pulse_sources only.
 {news_block}
 
 === ACTIVE ALERTS ===
@@ -380,13 +383,15 @@ Generate a daily narrative JSON with this exact structure:
       "ticker": "AAPL",
       "sentiment": 0.65,
       "narrative": "One or two sentences on what happened and why it matters for this position.",
-      "action": "monitor"
+      "action": "monitor",
+      "sources": [{{"article_id": 12345}}]
     }}
   ],
   "screening_update": [
     {{
       "ticker": "MSFT",
-      "narrative": "One sentence on news impact for this setup candidate."
+      "narrative": "One sentence on news impact for this setup candidate.",
+      "sources": [{{"article_id": 67890}}]
     }}
   ],
   "alert_watch": [
@@ -395,10 +400,12 @@ Generate a daily narrative JSON with this exact structure:
       "alert_type": "stop_loss",
       "alert_price": 220.0,
       "pct_away": -3.2,
-      "narrative": "Approaching stop. Negative sentiment from earnings miss narrative."
+      "narrative": "Approaching stop. Negative sentiment from earnings miss narrative.",
+      "sources": [{{"article_id": 111}}]
     }}
   ],
-  "market_pulse": "Two or three sentences summarising the key macro themes from today's news that affect these positions."
+  "market_pulse": "Two or three sentences summarising the key macro themes from today's news that affect these positions.",
+  "market_pulse_sources": [12345, 67890]
 }}
 
 Rules:
@@ -407,7 +414,9 @@ Rules:
 - action: one of "monitor" | "review" | "urgent" (urgent = needs attention today).
 - alert_watch: only include alerts where pct_away is within 5% of the trigger level.
 - market_pulse: required even if brief.
-- Return {{"portfolio_watch":[],"screening_update":[],"alert_watch":[],"market_pulse":"No significant news in the lookback window."}} if nothing relevant found.
+- sources: for each portfolio_watch, screening_update, and alert_watch item, include "sources" as a JSON array of objects {{"article_id": <int>}} for every article you relied on. Use only article_id values that appear in the news hits block. Omit "sources" or use [] if none apply.
+- market_pulse_sources: array of article_id integers drawn from the news hits that informed market_pulse; use [] if not article-specific.
+- Return {{"portfolio_watch":[],"screening_update":[],"alert_watch":[],"market_pulse":"No significant news in the lookback window.","market_pulse_sources":[]}} if nothing relevant found.
 """
 
 
@@ -447,7 +456,9 @@ def _build_news_block(
         for item in items[:3]:  # cap at 3 articles per ticker to control token budget
             ts = item.published_at.strftime("%H:%M") if item.published_at else "?"
             score_str = f"{item.sentiment_score:+.2f}" if item.sentiment_score else " 0.00"
-            lines.append(f"    {ts} sentiment={score_str} | {item.title[:100]}")
+            lines.append(
+                f"    article_id={item.article_id} | {ts} sentiment={score_str} | {item.title[:100]}"
+            )
             if item.sentiment_reason:
                 lines.append(f"           reason: {item.sentiment_reason[:120]}")
             for rel in item.relationships[:2]:
@@ -468,6 +479,69 @@ def _build_alerts_block(alerts: list[AlertItem]) -> str:
             f"  {a.ticker} {a.alert_type.upper()} @ ${a.alert_price:.2f} | {price_str} | {away_str} away"
         )
     return "\n".join(lines)
+
+
+def _article_catalog_from_context(ctx: UserContext) -> dict[int, dict[str, Any]]:
+    """Map article_id -> stable title/url for post-processing model citations."""
+    cat: dict[int, dict[str, Any]] = {}
+    for items in list(ctx.portfolio_news.values()) + list(ctx.screening_news.values()):
+        for it in items:
+            cat[it.article_id] = {
+                "article_id": it.article_id,
+                "title": it.title,
+                "url": it.url,
+                "published_at": it.published_at.isoformat() if it.published_at else None,
+            }
+    return cat
+
+
+def _coerce_article_id(entry: Any) -> Optional[int]:
+    if isinstance(entry, int):
+        return entry
+    if isinstance(entry, dict):
+        v = entry.get("article_id")
+        if v is None:
+            return None
+        try:
+            return int(v)
+        except (TypeError, ValueError):
+            return None
+    try:
+        return int(entry)
+    except (TypeError, ValueError):
+        return None
+
+
+def _enrich_narrative_sources(narrative: dict[str, Any], catalog: dict[int, dict[str, Any]]) -> None:
+    """Replace model article_id citations with title/url from DB; drop unknown ids. Mutates narrative."""
+    for section in ("portfolio_watch", "screening_update", "alert_watch"):
+        for item in narrative.get(section) or []:
+            if not isinstance(item, dict):
+                continue
+            raw = item.get("sources")
+            if not isinstance(raw, list):
+                item.pop("sources", None)
+                continue
+            enriched: list[dict[str, Any]] = []
+            for ent in raw:
+                aid = _coerce_article_id(ent)
+                if aid is not None and aid in catalog:
+                    enriched.append(dict(catalog[aid]))
+            if enriched:
+                item["sources"] = enriched
+            else:
+                item.pop("sources", None)
+
+    mp = narrative.get("market_pulse_sources")
+    if not isinstance(mp, list):
+        narrative["market_pulse_sources"] = []
+        return
+    enriched_mp: list[dict[str, Any]] = []
+    for ent in mp:
+        aid = _coerce_article_id(ent)
+        if aid is not None and aid in catalog:
+            enriched_mp.append(dict(catalog[aid]))
+    narrative["market_pulse_sources"] = enriched_mp
 
 
 def _parse_narrative_json(raw: str) -> dict:
@@ -537,6 +611,9 @@ async def _generate_narrative_text(ctx: UserContext) -> tuple[dict, int]:
         logger.warning("[narrative] could not parse Ollama response for user %s: %r", ctx.user_id, raw[:200])
         return _empty_narrative(), latency_ms
 
+    catalog = _article_catalog_from_context(ctx)
+    _enrich_narrative_sources(parsed, catalog)
+
     return parsed, latency_ms
 
 
@@ -546,6 +623,7 @@ def _empty_narrative() -> dict:
         "screening_update": [],
         "alert_watch": [],
         "market_pulse": "Could not generate narrative. Check Ollama connectivity.",
+        "market_pulse_sources": [],
     }
 
 
@@ -559,6 +637,7 @@ def _save_narrative(
     screening_section: list,
     alert_warnings: list,
     market_pulse: str,
+    market_pulse_sources: list,
     model: str,
     latency_ms: int,
 ) -> None:
@@ -571,6 +650,7 @@ def _save_narrative(
         "screening_section": screening_section,
         "alert_warnings": alert_warnings,
         "market_pulse": market_pulse,
+        "market_pulse_sources": market_pulse_sources,
         "model": model,
         "latency_ms": latency_ms,
         "generated_at": datetime.now().isoformat(),
@@ -627,6 +707,7 @@ async def generate_for_user(user_id: str, narrative_date: Optional[date] = None,
         screening_section=narrative.get("screening_update", []),
         alert_warnings=narrative.get("alert_watch", []),
         market_pulse=narrative.get("market_pulse", ""),
+        market_pulse_sources=narrative.get("market_pulse_sources") or [],
         model=_OLLAMA_NARRATIVE_MODEL,
         latency_ms=latency_ms,
     )

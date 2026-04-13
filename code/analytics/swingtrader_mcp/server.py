@@ -789,7 +789,11 @@ def score_news_url(url: str, tickers: Optional[list[str]] = None) -> str:
 
         heads, extracted = await asyncio.gather(score_article(body), extract_tickers(body))
         impact = aggregate_heads(heads)
-        article_id, impact = await ingest_article(body=body, url=url)
+        article_id, impact = await ingest_article(
+            body=body,
+            url=url,
+            article_stream="manual_url",
+        )
 
         all_tickers = list(dict.fromkeys((tickers or []) + extracted))
         company_scores = []
@@ -835,7 +839,11 @@ def score_news_text(
     async def _run():
         heads, extracted = await asyncio.gather(score_article(text), extract_tickers(text))
         impact = aggregate_heads(heads)
-        article_id, impact = await ingest_article(body=text, title=title)
+        article_id, impact = await ingest_article(
+            body=text,
+            title=title,
+            article_stream="manual_text",
+        )
 
         all_tickers = list(dict.fromkeys((tickers or []) + extracted))
         company_scores = []
@@ -863,13 +871,26 @@ def run_fmp_news_scoring(
     tickers: Optional[list[str]] = None,
     limit: int = 20,
     page: int = 0,
+    feed: str = "stock",
 ) -> str:
     """
-    Fetch the latest stock news from FMP and score each article in the background.
-    Optionally filter to specific tickers.
+    Fetch news from FMP stable APIs and score each article in the background.
+    feed: "stock" (stock-latest or news/stock with tickers), "general" (general-latest),
+    or "both" (parallel fetch, URL-deduped).
     Returns immediately with a job_id. Poll get_scan_job(job_id) for status.
     """
-    args = ["--fmp-news", "--limit", str(int(limit)), "--page", str(int(page))]
+    f = (feed or "stock").strip().lower()
+    if f not in ("stock", "general", "both"):
+        return json.dumps({"ok": False, "error": "feed must be stock, general, or both"})
+    args = [
+        "--fmp-news",
+        "--fmp-news-feed",
+        f,
+        "--limit",
+        str(int(limit)),
+        "--page",
+        str(int(page)),
+    ]
     if tickers:
         args += ["--tickers"] + [t.upper() for t in tickers]
     return json.dumps(_start_repo_script("news_impact/score_news_cli.py", args), default=str)

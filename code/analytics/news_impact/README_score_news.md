@@ -27,11 +27,12 @@ python -m news_impact.score_news_cli --text "..." --refresh
 # Score without writing to Supabase
 python -m news_impact.score_news_cli --text "..." --no-persist
 
-# Fetch and score latest FMP stock news (market-wide)
+# Fetch and score latest FMP stock news (market-wide Stock News Feed API)
+# → GET https://financialmodelingprep.com/stable/news/stock-latest?page=0&limit=20
 python -m news_impact.score_news_cli --fmp-news
 python -m news_impact.score_news_cli --fmp-news --limit 30
 
-# Fetch FMP news filtered to specific tickers
+# Fetch FMP news for specific tickers (Search Stock News API — stable/news/stock?symbols=...)
 python -m news_impact.score_news_cli --fmp-news --tickers AAPL MSFT NVDA
 
 # Fetch FMP news for a date window (inclusive)
@@ -42,6 +43,13 @@ python -m news_impact.score_news_cli --fmp-news --tickers AAPL --from 2025-11-01
 
 # Paginate through older FMP news
 python -m news_impact.score_news_cli --fmp-news --limit 20 --page 2
+
+# General News API (headlines/snippets/URLs; symbol often null)
+# → GET https://financialmodelingprep.com/stable/news/general-latest?page=0&limit=20
+python -m news_impact.score_news_cli --fmp-news --fmp-news-feed general
+
+# Stock + general in one run (merged, URL-deduped)
+python -m news_impact.score_news_cli --fmp-news --fmp-news-feed both --limit 40
 
 # Pick the sparsest UTC calendar day in the last N days (by DB row counts), then ingest until M new rows exist
 #
@@ -61,12 +69,13 @@ python -m news_impact.score_news_cli --fmp-news --sparse-fill 30 10 --sparse-fil
 | `--url URL`   | Fetch article from a URL (fetches full article, falls back to summary) |
 | `--text TEXT` | Article text supplied inline                                           |
 | `--file PATH` | Read article text from a local file                                    |
-| `--fmp-news`  | Fetch latest stock news from FMP and score each article                |
+| `--fmp-news`  | Fetch news from FMP stable APIs and score each article (see `--fmp-news-feed`) |
 
 ### FMP news options (only with `--fmp-news`)
 
 | Flag                         | Default | Description                                                                                                                                                                                                                                                                    |
 | ---------------------------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `--fmp-news-feed FEED`       | `stock` | `stock` → `news/stock-latest` or `news/stock?symbols=…` if `--tickers`. `general` → `news/general-latest` (market-wide). `both` → fetch stock + general in parallel and merge (dedupe by URL).                                                                                |
 | `--limit N`                  | `20`    | Max articles to fetch per FMP request (FMP max: `250`)                                                                                                                                                                                                                         |
 | `--page N`                   | `0`     | Page offset for pagination (0-indexed; FMP max: `100`)                                                                                                                                                                                                                         |
 | `--from YYYY-MM-DD`          | —       | Start date filter for FMP fetch (inclusive)                                                                                                                                                                                                                                    |
@@ -78,7 +87,7 @@ python -m news_impact.score_news_cli --fmp-news --sparse-fill 30 10 --sparse-fil
 
 | Flag                   | Default | Description                                                                                                                                                                                                |
 | ---------------------- | ------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `--tickers TICKER ...` | —       | **Non–FMP:** Explicit symbols (merged with LLM-extracted; persisted to `news_article_tickers`). **FMP:** Restrict the news feed to these symbols. Company tailwinds/headwinds require `--score-companies`. |
+| `--tickers TICKER ...` | —       | **Non–FMP:** Explicit symbols (merged with LLM-extracted; persisted to `news_article_tickers`). **FMP stock / both:** Uses `news/stock?symbols=…` when set; else `stock-latest`. **FMP general:** Does not filter the API; symbols are only added as explicit tags after scoring. Company tailwinds/headwinds require `--score-companies`. |
 | `--score-companies`    | off     | Build/load company vectors and print tailwinds/headwinds (otherwise only impact clusters and extracted tickers are shown).                                                                                 |
 | `--use-cache`          | off     | Load company vectors from the on-disk cache from `build_vectors_cli` (avoids refetching fundamentals from FMP where cached).                                                                               |
 | `--top-n N`            | `6`     | Max companies shown per side (tailwinds vs headwinds) when `--score-companies` is on.                                                                                                                      |

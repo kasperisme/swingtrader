@@ -25,9 +25,13 @@ Usage:
     python -m news_impact.score_news_cli --fmp-news --sparse-fill 30 10
     python -m news_impact.score_news_cli --fmp-news --sparse-fill 30 10 --sparse-fill-loop
 
-    # Fetch FMP news filtered to specific tickers
+    # Fetch FMP news filtered to specific tickers (stable/news/stock?symbols=...)
     python -m news_impact.score_news_cli --fmp-news --tickers AAPL MSFT NVDA
     python -m news_impact.score_news_cli --fmp-news --tickers AAPL --from 2025-11-01 --to 2025-11-30
+
+    # FMP General News API (stable/news/general-latest) or merge with stock feed
+    python -m news_impact.score_news_cli --fmp-news --fmp-news-feed general
+    python -m news_impact.score_news_cli --fmp-news --fmp-news-feed both --limit 30
 
     # Fetch recent X (Twitter) posts mentioning stock cashtags
     python -m news_impact.score_news_cli --x-news --tickers AAPL MSFT NVDA
@@ -142,9 +146,91 @@ console = Console()
 
 _CACHE_DIR = pathlib.Path(__file__).parent / "cache"
 
-# FMP stock news API limits (see fmp_fetcher.fetch_stock_news)
+# FMP stock / general news API limits (see fmp_fetcher)
 _FMP_NEWS_MAX_PAGE = 100
 _FMP_NEWS_MAX_LIMIT = 250
+
+
+def _merge_fmp_articles_by_url(*batches: list[dict]) -> list[dict]:
+    """Stable order: first batch first; skip later rows with the same normalized URL."""
+    seen: set[str] = set()
+    out: list[dict] = []
+    for batch in batches:
+        for art in batch:
+            url = (art.get("url") or "").strip()
+            key = _normalize_url(url) if url else ""
+            if key:
+                if key in seen:
+                    continue
+                seen.add(key)
+            else:
+                # No URL — allow duplicates only if title differs (weak dedupe)
+                title = (art.get("title") or "")[:120]
+                tkey = f"notitle:{title}"
+                if tkey in seen:
+                    continue
+                seen.add(tkey)
+            out.append(art)
+    return out
+
+
+def _manual_stream_from_args(args: argparse.Namespace) -> str:
+    if args.url:
+        return "manual_url"
+    if args.file:
+        return "manual_file"
+    if args.text:
+        return "manual_text"
+    return "unknown"
+
+
+async def _fmp_fetch_articles(
+    fetcher: FMPFetcher,
+    args: argparse.Namespace,
+    *,
+    page: int | None = None,
+    limit: int | None = None,
+    from_date: str | None = None,
+    to_date: str | None = None,
+) -> list[dict]:
+    """
+    Fetch FMP articles according to ``args.fmp_news_feed`` (stock | general | both).
+    When ``page``/``limit``/dates are None, uses ``args.page``, ``args.limit``, ``args.from_date``, ``args.to_date``.
+    """
+    feed = getattr(args, "fmp_news_feed", "stock") or "stock"
+    pg = args.page if page is None else page
+    lim = args.limit if limit is None else limit
+    fd = args.from_date if from_date is None else from_date
+    td = args.to_date if to_date is None else to_date
+    tickers = [t.upper() for t in args.tickers] if args.tickers else None
+
+    if feed == "general":
+        rows = await fetcher.fetch_general_news(
+            limit=lim, page=pg, from_date=fd, to_date=td,
+        )
+        for r in rows:
+            r["__stream"] = "fmp_general"
+        return rows
+    if feed == "stock":
+        rows = await fetcher.fetch_stock_news(
+            tickers=tickers, limit=lim, page=pg, from_date=fd, to_date=td,
+        )
+        for r in rows:
+            r["__stream"] = "fmp_stock"
+        return rows
+    # both
+    stock_task = fetcher.fetch_stock_news(
+        tickers=tickers, limit=lim, page=pg, from_date=fd, to_date=td,
+    )
+    general_task = fetcher.fetch_general_news(
+        limit=lim, page=pg, from_date=fd, to_date=td,
+    )
+    stock_arts, gen_arts = await asyncio.gather(stock_task, general_task)
+    for r in stock_arts:
+        r["__stream"] = "fmp_stock"
+    for r in gen_arts:
+        r["__stream"] = "fmp_general"
+    return _merge_fmp_articles_by_url(stock_arts, gen_arts)
 
 # ── HTML stripping (stdlib only) ─────────────────────────────────────────────
 
@@ -346,14 +432,30 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     source.add_argument("--url",      metavar="URL",  help="Fetch article from URL")
     source.add_argument("--text",     metavar="TEXT", help="Article text inline")
     source.add_argument("--file",     metavar="PATH", help="Read article from file")
-    source.add_argument("--fmp-news", action="store_true",
-                        help="Fetch latest stock news from FMP (filterable by --tickers)")
+    source.add_argument(
+        "--fmp-news",
+        action="store_true",
+        help=(
+            "Fetch news from FMP (see --fmp-news-feed): stock-latest / stock?symbols=…, "
+            "general-latest, or both merged (URL-deduped)"
+        ),
+    )
     source.add_argument("--x-news", action="store_true",
                         help="Fetch recent X posts mentioning stock cashtags (requires --tickers)")
 
     parser.add_argument(
+        "--fmp-news-feed",
+        dest="fmp_news_feed",
+        choices=["stock", "general", "both"],
+        default="stock",
+        help=(
+            "With --fmp-news: stock (stock-latest or news/stock if --tickers), "
+            "general (general-latest), or both (parallel fetch, merge by URL)"
+        ),
+    )
+    parser.add_argument(
         "--limit", type=int, default=20,
-        help="Max articles to fetch with --fmp-news (default: 20, max: 250)",
+        help="Max articles per FMP request with --fmp-news (default: 20, max: 250)",
     )
     parser.add_argument(
         "--page", type=int, default=0,
@@ -365,11 +467,11 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument(
         "--from", dest="from_date", metavar="DATE",
-        help="Start date filter for --fmp-news (YYYY-MM-DD, e.g. 2025-09-09)",
+        help="Start date filter for --fmp-news / FMP feeds (YYYY-MM-DD, e.g. 2025-09-09)",
     )
     parser.add_argument(
         "--to", dest="to_date", metavar="DATE",
-        help="End date filter for --fmp-news (YYYY-MM-DD, e.g. 2025-12-10)",
+        help="End date filter for --fmp-news / FMP feeds (YYYY-MM-DD, e.g. 2025-12-10)",
     )
     parser.add_argument(
         "--sparse-fill",
@@ -457,6 +559,11 @@ async def _main(argv: list[str] | None = None) -> None:
         os.environ["OLLAMA_IMPACT_MODEL"] = args.ollama_impact_model.strip()
 
     logging.basicConfig(level=logging.DEBUG if args.verbose else logging.WARNING)
+
+    if args.fmp_news_feed == "general" and args.tickers:
+        console.print(
+            "[yellow]Note: general-latest is market-wide; --tickers only adds explicit symbol tags after scoring.[/yellow]",
+        )
 
     if args.sparse_fill is not None:
         if not args.fmp_news:
@@ -547,6 +654,7 @@ async def _main(argv: list[str] | None = None) -> None:
                 source=args.source,
                 refresh=args.refresh,
                 published_at=args.published_at,
+                article_stream=_manual_stream_from_args(args),
             )
 
     # 2b. Persist detected tickers to DB
@@ -641,9 +749,11 @@ async def _process_one_fmp_article(
     url = article.get("url", "")
     source = url
     publisher = article.get("publisher") or article.get("site") or None
-    symbol = article.get("symbol", "")
+    sym_raw = article.get("symbol")
+    symbol = sym_raw.strip().upper() if isinstance(sym_raw, str) and sym_raw.strip() else ""
     published_at = _normalize_fmp_published_at(article.get("publishedDate") or None)
     image_url = (article.get("image") or "").strip() or None
+    article_stream = str(article.get("__stream") or "fmp_stock")
 
     if not summary and not url:
         console.print(f"[dim][{index}/{batch_total}] {title[:60]} — skipped (no text or url)[/dim]")
@@ -730,6 +840,7 @@ async def _process_one_fmp_article(
                 published_at=published_at,
                 publisher=publisher,
                 image_url=image_url,
+                article_stream=article_stream,
             )
         else:
             article_id = _persist(
@@ -744,6 +855,7 @@ async def _process_one_fmp_article(
                 published_at=published_at,
                 publisher=publisher,
                 image_url=image_url,
+                article_stream=article_stream,
             )
 
     if client is not None and article_id >= 0 and extracted_tickers:
@@ -864,12 +976,14 @@ async def _process_one_x_post(
                 client, text, article_hash, url, title, "x.com",
                 heads, impact, existing_article_id=existing[0],
                 published_at=published_at, publisher=publisher,
+                article_stream="x_post",
             )
         else:
             article_id = _persist(
                 client, text, article_hash, url, title, "x.com",
                 heads, impact,
                 published_at=published_at, publisher=publisher,
+                article_stream="x_post",
             )
 
     if client is not None and article_id >= 0 and extracted_tickers:
@@ -948,20 +1062,14 @@ async def _process_x_news(args: argparse.Namespace) -> None:
 async def _process_fmp_news(args: argparse.Namespace) -> None:
     """Fetch articles from FMP and run each through the full pipeline."""
     fetcher = FMPFetcher()
-    tickers = [t.upper() for t in args.tickers] if args.tickers else None
-    articles = await fetcher.fetch_stock_news(
-        tickers=tickers,
-        limit=args.limit,
-        page=args.page,
-        from_date=getattr(args, "from_date", None),
-        to_date=getattr(args, "to_date", None),
-    )
+    articles = await _fmp_fetch_articles(fetcher, args)
 
     if not articles:
         console.print("[red]No articles returned from FMP.[/red]")
         return
 
-    console.print(f"\nFetched [bold]{len(articles)}[/bold] articles from FMP news\n")
+    feed = getattr(args, "fmp_news_feed", "stock")
+    console.print(f"\nFetched [bold]{len(articles)}[/bold] articles from FMP ([cyan]{feed}[/cyan])\n")
 
     seen_urls: set[str] = set()
     seen_hashes: set[str] = set()
@@ -975,7 +1083,6 @@ async def _process_fmp_news(args: argparse.Namespace) -> None:
 async def _run_sparse_fill_for_day(
     args: argparse.Namespace,
     fetcher: FMPFetcher,
-    tickers: list[str] | None,
     target_day: date,
     m_new: int,
     seen_urls: set[str],
@@ -988,10 +1095,11 @@ async def _run_sparse_fill_for_day(
     page = 0
 
     while added < m_new and page <= _FMP_NEWS_MAX_PAGE:
-        articles = await fetcher.fetch_stock_news(
-            tickers=tickers,
-            limit=page_limit,
+        articles = await _fmp_fetch_articles(
+            fetcher,
+            args,
             page=page,
+            limit=page_limit,
             from_date=day_iso,
             to_date=day_iso,
         )
@@ -1041,7 +1149,6 @@ async def _process_fmp_sparse_fill(args: argparse.Namespace) -> None:
     loop = bool(getattr(args, "sparse_fill_loop", False))
 
     fetcher = FMPFetcher()
-    tickers = [t.upper() for t in args.tickers] if args.tickers else None
     seen_urls: set[str] = set()
     seen_hashes: set[str] = set()
     excluded: set[date] = set()
@@ -1083,7 +1190,7 @@ async def _process_fmp_sparse_fill(args: argparse.Namespace) -> None:
             console.print(f"  {bar} {d.isoformat()}  {counts[d]:>4} articles{ex}")
 
         await _run_sparse_fill_for_day(
-            args, fetcher, tickers, target_day, m_new, seen_urls, seen_hashes,
+            args, fetcher, target_day, m_new, seen_urls, seen_hashes,
         )
 
         if not loop:

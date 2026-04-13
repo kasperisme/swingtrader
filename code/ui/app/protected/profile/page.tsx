@@ -4,6 +4,7 @@ import { redirect } from "next/navigation";
 import Link from "next/link";
 import { KeyRound, Lock, LogOut } from "lucide-react";
 import { LogoutButton } from "@/components/logout-button";
+import { TelegramConnect } from "@/components/telegram-connect";
 
 export const metadata = { title: "Profile" };
 
@@ -69,6 +70,16 @@ async function ProfileContent() {
         </dl>
       </section>
 
+      {/* Telegram — pair account for Daily Narrative delivery */}
+      <section>
+        <div className="mb-3">
+          <p className="text-xs font-semibold uppercase tracking-widest text-amber-500">
+            Notifications
+          </p>
+        </div>
+        <TelegramConnect />
+      </section>
+
       {/* Settings links */}
       <section className="rounded-2xl border border-border bg-card overflow-hidden">
         <div className="border-b border-border px-5 py-3">
@@ -119,7 +130,7 @@ async function ProfileContent() {
 
 export default function ProfilePage() {
   return (
-    <div className="flex-1 w-full max-w-lg">
+    <div className="flex-1 w-full max-w-2xl">
       <Suspense
         fallback={
           <div className="text-sm text-muted-foreground animate-pulse">Loading profile…</div>

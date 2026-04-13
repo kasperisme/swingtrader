@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import type {
+  ArticleSource,
   DailyNarrativeRow,
   PortfolioWatchItem,
   ScreeningUpdateItem,
@@ -60,6 +61,30 @@ function pctAwayColor(pct: number | null, direction: AlertWatchItem["alert_type"
 
 // ── Section components ────────────────────────────────────────────────────────
 
+function SourcesList({ sources }: { sources?: ArticleSource[] }) {
+  if (!sources?.length) return null;
+  return (
+    <ul className="mt-2 space-y-1 border-t border-border pt-2">
+      {sources.map((s) => (
+        <li key={s.article_id} className="text-xs text-muted-foreground">
+          {s.url ? (
+            <a
+              href={s.url}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-blue-600 hover:underline dark:text-blue-400"
+            >
+              {s.title?.trim() || `Article ${s.article_id}`}
+            </a>
+          ) : (
+            <span>{s.title?.trim() || `Article ${s.article_id}`}</span>
+          )}
+        </li>
+      ))}
+    </ul>
+  );
+}
+
 function EmptyState({ label }: { label: string }) {
   return (
     <p className="text-sm text-muted-foreground italic py-3">
@@ -87,7 +112,10 @@ function PortfolioSection({ items }: { items: PortfolioWatchItem[] }) {
               </span>
             </div>
           </div>
-          <div className="flex-1 text-sm leading-relaxed">{item.narrative}</div>
+          <div className="flex-1 min-w-0">
+            <div className="text-sm leading-relaxed">{item.narrative}</div>
+            <SourcesList sources={item.sources} />
+          </div>
           <div className="shrink-0">{actionBadge(item.action)}</div>
         </div>
       ))}
@@ -105,7 +133,10 @@ function ScreeningSection({ items }: { items: ScreeningUpdateItem[] }) {
           className="rounded-lg border border-border bg-card p-4 flex gap-4 items-start"
         >
           <span className="min-w-[64px] text-base font-bold">{item.ticker}</span>
-          <p className="flex-1 text-sm leading-relaxed">{item.narrative}</p>
+          <div className="flex-1 min-w-0">
+            <p className="text-sm leading-relaxed">{item.narrative}</p>
+            <SourcesList sources={item.sources} />
+          </div>
         </div>
       ))}
     </div>
@@ -138,6 +169,7 @@ function AlertSection({ items }: { items: AlertWatchItem[] }) {
               )}
             </div>
             <p className="text-sm leading-relaxed text-muted-foreground">{item.narrative}</p>
+            <SourcesList sources={item.sources} />
           </div>
         </div>
       ))}
@@ -250,6 +282,7 @@ export function DailyNarrativeUI({ narratives }: { narratives: DailyNarrativeRow
           </h2>
           <div className="rounded-lg border border-border bg-card p-5 text-sm leading-relaxed">
             {current.market_pulse}
+            <SourcesList sources={current.market_pulse_sources ?? undefined} />
           </div>
         </section>
       )}

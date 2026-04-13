@@ -81,12 +81,12 @@ export function TelegramConnect() {
   const isConnected = status?.connected || link.phase === "connected";
 
   return (
-    <div className="rounded-lg border border-border bg-card p-5 flex flex-col gap-4">
+    <div className="rounded-2xl border border-border bg-card p-5 flex flex-col gap-4">
       <div className="flex items-start justify-between gap-4">
         <div>
-          <h3 className="text-sm font-semibold">Telegram Delivery</h3>
+          <h3 className="text-sm font-semibold">Telegram</h3>
           <p className="text-xs text-muted-foreground mt-0.5">
-            Receive your Daily Narrative as a Telegram message at 08:30 ET on weekdays.
+            Pair your account to receive the Daily Narrative by message at 08:30 ET on weekdays.
           </p>
         </div>
         {/* Status badge */}
@@ -114,6 +114,7 @@ export function TelegramConnect() {
             </code>
           </p>
           <button
+            type="button"
             onClick={handleDisconnect}
             className="text-xs text-muted-foreground hover:text-red-500 transition-colors cursor-pointer"
           >
@@ -125,6 +126,7 @@ export function TelegramConnect() {
       {/* Idle — show connect button */}
       {!isConnected && link.phase === "idle" && (
         <button
+          type="button"
           onClick={handleConnect}
           className="self-start rounded-lg bg-blue-500 hover:bg-blue-600 text-white text-sm font-semibold px-4 py-2 transition-colors cursor-pointer"
         >
@@ -154,6 +156,7 @@ export function TelegramConnect() {
               {link.deep_link}
             </a>
             <button
+              type="button"
               onClick={() => handleCopy(link.deep_link)}
               className="shrink-0 rounded-lg border border-border bg-card px-3 py-2 text-xs font-medium hover:bg-muted transition-colors cursor-pointer"
             >
@@ -169,7 +172,10 @@ export function TelegramConnect() {
               hour: "2-digit",
               minute: "2-digit",
             })}
-            . <button onClick={handleConnect} className="underline cursor-pointer">Regenerate</button>
+            .{" "}
+            <button type="button" onClick={handleConnect} className="underline cursor-pointer">
+              Regenerate
+            </button>
           </p>
         </div>
       )}
@@ -186,6 +192,7 @@ export function TelegramConnect() {
         <div className="flex items-center gap-3">
           <p className="text-sm text-red-500">{link.message}</p>
           <button
+            type="button"
             onClick={() => setLink({ phase: "idle" })}
             className="text-xs underline cursor-pointer text-muted-foreground hover:text-foreground"
           >

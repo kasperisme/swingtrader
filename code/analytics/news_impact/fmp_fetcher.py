@@ -20,6 +20,16 @@ _DELAY = 0.6          # seconds between request dispatches (global, shared acros
 _MAX_RETRIES = 3      # max retries on 429
 _RETRY_DELAYS = (10.0, 30.0, 60.0)  # wait times between 429 retries
 
+# FMP stable Stock News Feed — latest headlines/snippets/URLs per symbol (market-wide).
+# https://financialmodelingprep.com/stable/news/stock-latest?page=0&limit=20&from=...&to=...
+_FMP_NEWS_STOCK_LATEST = "news/stock-latest"
+# Symbol-filtered search (use when caller passes tickers; not the same path as stock-latest).
+# https://financialmodelingprep.com/stable/news/stock?symbols=AAPL
+_FMP_NEWS_STOCK_BY_SYMBOL = "news/stock"
+# General News API — cross-market headlines (symbol often null).
+# https://financialmodelingprep.com/stable/news/general-latest?page=0&limit=20&from=...&to=...
+_FMP_NEWS_GENERAL_LATEST = "news/general-latest"
+
 # Module-level lock — ensures at most one FMP request is dispatched every _DELAY seconds
 # regardless of how many tickers are being fetched concurrently.
 _rate_lock: asyncio.Lock | None = None
@@ -183,35 +193,80 @@ class FMPFetcher:
         to_date: str | None = None,
     ) -> list[dict]:
         """
-        Fetch latest stock news from FMP.
+        Fetch stock news from FMP stable APIs.
+
+        **Market-wide (no tickers)** — Stock News Feed API::
+
+            GET /stable/news/stock-latest?page=0&limit=20&from=YYYY-MM-DD&to=YYYY-MM-DD
+
+        Headlines, snippets, publication URLs, and ticker symbols for recent articles.
+
+        **Ticker-filtered** — Search Stock News API (FMP uses ``symbols``, not stock-latest)::
+
+            GET /stable/news/stock?symbols=AAPL,MSFT&page=0&limit=20&from=...&to=...
 
         Parameters
         ----------
-        tickers   : filter to these symbols (passed as comma-joined 'tickers' param).
-                    None = market-wide latest news.
-        limit     : max articles to return (FMP max per page: 250).
-        page      : pagination offset (max 100).
-        from_date : start date filter in YYYY-MM-DD format (e.g. "2025-09-09").
-        to_date   : end date filter in YYYY-MM-DD format (e.g. "2025-12-10").
+        tickers   : if set, calls ``news/stock`` with comma-joined ``symbols``;
+                    if empty/None, calls ``news/stock-latest`` for the broad feed.
+        limit     : max articles per request (FMP max 250; page max 100).
+        page      : page index.
+        from_date : start date ``YYYY-MM-DD`` (optional).
+        to_date   : end date ``YYYY-MM-DD`` (optional).
 
         Returns
         -------
-        List of dicts with keys: symbol, publishedDate, publisher, title,
-        site, text, url, image (thumbnail URL).  Empty list on failure.
+        List of dicts with keys such as: symbol, publishedDate, publisher, title,
+        site, text, url, image. Empty list on failure.
         """
-        params: dict = {"page": page, "limit": limit}
-        if tickers:
-            params["tickers"] = ",".join(tickers)
+        params: dict[str, str | int] = {"page": page, "limit": limit}
+        if from_date:
+            params["from"] = from_date
+        if to_date:
+            params["to"] = to_date
+
+        symbols = [t.strip().upper() for t in (tickers or []) if t and str(t).strip()]
+
+        async with httpx.AsyncClient() as client:
+            if symbols:
+                params["symbols"] = ",".join(symbols)
+                endpoint = _FMP_NEWS_STOCK_BY_SYMBOL
+            else:
+                endpoint = _FMP_NEWS_STOCK_LATEST
+            data = await self._get(client, endpoint, params)
+
+        if not isinstance(data, list):
+            logger.warning("[FMPFetcher] fetch_stock_news returned unexpected type: %s", type(data))
+            return []
+        return data
+
+    async def fetch_general_news(
+        self,
+        limit: int = 20,
+        page: int = 0,
+        from_date: str | None = None,
+        to_date: str | None = None,
+    ) -> list[dict]:
+        """
+        Fetch latest **general** (non–ticker-scoped) news from FMP.
+
+        Endpoint::
+
+            GET /stable/news/general-latest?page=0&limit=20&from=YYYY-MM-DD&to=YYYY-MM-DD
+
+        Response items match the stock news shape (``symbol`` may be ``null``).
+        """
+        params: dict[str, str | int] = {"page": page, "limit": limit}
         if from_date:
             params["from"] = from_date
         if to_date:
             params["to"] = to_date
 
         async with httpx.AsyncClient() as client:
-            data = await self._get(client, "news/stock-latest", params)
+            data = await self._get(client, _FMP_NEWS_GENERAL_LATEST, params)
 
         if not isinstance(data, list):
-            logger.warning("[FMPFetcher] fetch_stock_news returned unexpected type: %s", type(data))
+            logger.warning("[FMPFetcher] fetch_general_news returned unexpected type: %s", type(data))
             return []
         return data
 
