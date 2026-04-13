@@ -19,8 +19,10 @@ export type BlogPostPreview = {
   excerpt: string;
   publishedAt: string;
   authorName: string | null;
+  readingTimeMinutes: number | null;
 };
 
 export type BlogPost = BlogPostPreview & {
-  bodyText: string;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  body: any[];
 };

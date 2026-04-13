@@ -40,7 +40,8 @@ export const blogPostPreviewsQuery = `
     "slug": slug.current,
     "excerpt": coalesce(excerpt, ""),
     publishedAt,
-    "authorName": author->name
+    "authorName": author->name,
+    "readingTimeMinutes": round(length(pt::text(body)) / 5 / 200)
   }
 `;
 
@@ -52,6 +53,7 @@ export const blogPostBySlugQuery = `
     "excerpt": coalesce(excerpt, ""),
     publishedAt,
     "authorName": author->name,
-    "bodyText": coalesce(pt::text(body), "")
+    body,
+    "readingTimeMinutes": round(length(pt::text(body)) / 5 / 200)
   }
 `;
