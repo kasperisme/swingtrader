@@ -830,10 +830,6 @@ export function RelationshipsUI({ vectors = [] }: { vectors?: TickerRow[] }) {
                       </p>
                     </div>
                   ) : null}
-
-                  <p className="text-[10px] text-muted-foreground">
-                    Data: Financial Modeling Prep company profile. Cached up to ~1 hour.
-                  </p>
                 </div>
               ) : (
                 <p className="text-xs text-muted-foreground">No profile returned for this symbol.</p>
