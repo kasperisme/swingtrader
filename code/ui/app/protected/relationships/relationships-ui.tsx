@@ -172,7 +172,8 @@ export function RelationshipsUI({ vectors = [] }: { vectors?: TickerRow[] }) {
   );
 
   const visibleGraph = useMemo(() => {
-    const fullGraph = { nodes, edges: filteredEdges };
+    // "Entire network": every node and every edge from the loaded neighborhood (ignore legend rel-type filters).
+    const fullGraph = { nodes, edges };
     if (graphScope === "full" || !selectedNode) {
       return fullGraph;
     }
@@ -198,7 +199,7 @@ export function RelationshipsUI({ vectors = [] }: { vectors?: TickerRow[] }) {
       (e) => visited.has(e.from_ticker) && visited.has(e.to_ticker),
     );
     return { nodes: visibleNodes, edges: visibleEdges };
-  }, [filteredEdges, graphScope, nodes, selectedNode]);
+  }, [edges, filteredEdges, graphScope, nodes, selectedNode]);
 
   const connectedSet = useMemo(() => {
     if (!selectedNode) return new Set<string>();
@@ -560,7 +561,7 @@ export function RelationshipsUI({ vectors = [] }: { vectors?: TickerRow[] }) {
                   ? "bg-background text-foreground"
                   : "text-muted-foreground hover:text-foreground"
               }`}
-              title="Show every node and edge (respecting edge-type filters)"
+              title="Show every node and every edge in the loaded neighborhood (edge-type legend does not hide edges)"
             >
               Entire network
             </button>
