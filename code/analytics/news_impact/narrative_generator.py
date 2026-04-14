@@ -34,6 +34,7 @@ import json
 import logging
 import os
 import time
+from collections import defaultdict, deque
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
 from typing import Any, Optional
@@ -51,6 +52,11 @@ _OLLAMA_NARRATIVE_MODEL = os.environ.get("OLLAMA_NARRATIVE_MODEL") or os.environ
 _OLLAMA_NARRATIVE_TOKENS = int(os.environ.get("OLLAMA_NARRATIVE_TOKENS", "3072"))
 _OLLAMA_NARRATIVE_TIMEOUT = float(os.environ.get("OLLAMA_NARRATIVE_TIMEOUT", "180"))
 _USE_SEMANTIC_RETRIEVAL = os.environ.get("USE_SEMANTIC_RETRIEVAL", "true").strip().lower() not in {"0", "false", "no", "off"}
+_REL_GRAPH_HOPS = max(1, int(os.environ.get("NARRATIVE_REL_GRAPH_HOPS", "2")))
+_REL_DECAY = max(0.0, min(1.0, float(os.environ.get("NARRATIVE_REL_DECAY", "0.7"))))
+_REL_MIN_SCORE = max(0.0, min(1.0, float(os.environ.get("NARRATIVE_REL_MIN_SCORE", "0.35"))))
+_REL_MAX_TICKERS = max(1, int(os.environ.get("NARRATIVE_REL_MAX_TICKERS", "8")))
+_REL_ARTICLES_PER_TICKER = max(1, int(os.environ.get("NARRATIVE_REL_ARTICLES_PER_TICKER", "2")))
 
 
 # ── Data containers ───────────────────────────────────────────────────────────
@@ -92,12 +98,171 @@ class UserContext:
     active_screen_tickers: list[str] = field(default_factory=list)
     portfolio_news: dict[str, list[TickerNewsItem]] = field(default_factory=dict)
     screening_news: dict[str, list[TickerNewsItem]] = field(default_factory=dict)
+    related_news: dict[str, list[TickerNewsItem]] = field(default_factory=dict)
+    related_ticker_scores: dict[str, float] = field(default_factory=dict)
+    related_ticker_paths: dict[str, list[str]] = field(default_factory=dict)
     alert_items: list[AlertItem] = field(default_factory=list)
     semantic_evidence: list[dict] = field(default_factory=list)
     lookback_hours: int = _DEFAULT_LOOKBACK_HOURS
 
 
 # ── DB queries ────────────────────────────────────────────────────────────────
+
+@dataclass
+class RelationshipEdge:
+    from_ticker: str
+    to_ticker: str
+    rel_type: str
+    strength: float
+
+
+def _normalize_ticker(ticker: Any) -> str:
+    return str(ticker or "").upper().strip()
+
+
+def _fetch_relationship_edges(conn, lookback_hours: int) -> list[RelationshipEdge]:
+    """Build a recent ticker-relationship edge list from relationship heads."""
+    schema = get_schema()
+    since = datetime.now(_EASTERN) - timedelta(hours=lookback_hours)
+    sql = f"""
+        SELECT h.scores_json
+        FROM {schema}.news_impact_heads h
+        JOIN {schema}.news_articles a ON a.id = h.article_id
+        WHERE h.cluster = 'TICKER_RELATIONSHIPS'
+          AND COALESCE(a.published_at, a.created_at) >= %s
+    """
+    cur = conn.cursor()
+    cur.execute(sql, (since,))
+    rows = cur.fetchall() or []
+    pair_agg: dict[tuple[str, str, str], tuple[float, int]] = {}
+
+    for row in rows:
+        scores = row[0] or {}
+        if not isinstance(scores, dict):
+            continue
+        for key, raw in scores.items():
+            parts = str(key).split("__")
+            if len(parts) != 3:
+                continue
+            from_ticker = _normalize_ticker(parts[0])
+            to_ticker = _normalize_ticker(parts[1])
+            rel_type = str(parts[2]).strip() or "related"
+            if not from_ticker or not to_ticker:
+                continue
+            try:
+                strength = max(0.0, min(1.0, float(raw)))
+            except (TypeError, ValueError):
+                continue
+            agg_key = (from_ticker, to_ticker, rel_type)
+            strength_sum, count = pair_agg.get(agg_key, (0.0, 0))
+            pair_agg[agg_key] = (strength_sum + strength, count + 1)
+
+    edges: list[RelationshipEdge] = []
+    for (from_ticker, to_ticker, rel_type), (strength_sum, count) in pair_agg.items():
+        if count <= 0:
+            continue
+        avg_strength = strength_sum / count
+        edges.append(
+            RelationshipEdge(
+                from_ticker=from_ticker,
+                to_ticker=to_ticker,
+                rel_type=rel_type,
+                strength=avg_strength,
+            )
+        )
+        # Treat relationship edges as bidirectional for related-news expansion.
+        edges.append(
+            RelationshipEdge(
+                from_ticker=to_ticker,
+                to_ticker=from_ticker,
+                rel_type=rel_type,
+                strength=avg_strength,
+            )
+        )
+    return edges
+
+
+def _expand_related_tickers(
+    seed_tickers: list[str],
+    edges: list[RelationshipEdge],
+    hops: int = _REL_GRAPH_HOPS,
+    decay: float = _REL_DECAY,
+    min_score: float = _REL_MIN_SCORE,
+    max_tickers: int = _REL_MAX_TICKERS,
+) -> tuple[dict[str, float], dict[str, list[str]]]:
+    """
+    Multi-hop traversal (up to K steps) with per-hop decay.
+    Returns (ticker_score_map, ticker_paths_map).
+    """
+    if not seed_tickers or not edges:
+        return {}, {}
+
+    adjacency: dict[str, list[RelationshipEdge]] = defaultdict(list)
+    for edge in edges:
+        adjacency[edge.from_ticker].append(edge)
+
+    seeds = {_normalize_ticker(t) for t in seed_tickers if _normalize_ticker(t)}
+    best_score: dict[str, float] = {}
+    best_path: dict[str, list[str]] = {}
+    path_rel_types: dict[str, list[str]] = {}
+
+    queue: deque[tuple[str, int, float, list[str], list[str]]] = deque()
+    for seed in seeds:
+        queue.append((seed, 0, 1.0, [seed], []))
+
+    while queue:
+        ticker, depth, score, path_nodes, rel_types = queue.popleft()
+        if depth >= hops:
+            continue
+        for edge in adjacency.get(ticker, []):
+            next_ticker = edge.to_ticker
+            if next_ticker in path_nodes:
+                continue
+            next_depth = depth + 1
+            next_score = score * edge.strength * (decay if next_depth > 1 else 1.0)
+            if next_score <= 0:
+                continue
+            next_path = path_nodes + [next_ticker]
+            next_rel_types = rel_types + [edge.rel_type]
+
+            if next_ticker not in seeds:
+                should_update = (
+                    next_ticker not in best_score
+                    or next_score > best_score[next_ticker]
+                    or (
+                        abs(next_score - best_score[next_ticker]) < 1e-9
+                        and len(next_path) < len(best_path.get(next_ticker, next_path))
+                    )
+                )
+                if should_update:
+                    best_score[next_ticker] = next_score
+                    best_path[next_ticker] = next_path
+                    path_rel_types[next_ticker] = next_rel_types
+
+            queue.append((next_ticker, next_depth, next_score, next_path, next_rel_types))
+
+    ranked = sorted(
+        (
+            (ticker, score)
+            for ticker, score in best_score.items()
+            if score >= min_score and ticker not in seeds
+        ),
+        key=lambda x: x[1],
+        reverse=True,
+    )[:max_tickers]
+
+    final_scores = {ticker: score for ticker, score in ranked}
+    final_paths: dict[str, list[str]] = {}
+    for ticker in final_scores:
+        nodes = best_path.get(ticker, [ticker])
+        rel_types = path_rel_types.get(ticker, [])
+        segments: list[str] = []
+        for idx, src in enumerate(nodes[:-1]):
+            rel = rel_types[idx] if idx < len(rel_types) else "related"
+            dst = nodes[idx + 1]
+            segments.append(f"{src} -{rel}-> {dst}")
+        final_paths[ticker] = segments or [ticker]
+    return final_scores, final_paths
 
 def _fetch_open_positions(conn, user_id: str) -> list[OpenPosition]:
     """
@@ -187,6 +352,9 @@ def _fetch_ticker_news(
     """
     if not tickers:
         return {}
+    normalized_tickers = list(dict.fromkeys(_normalize_ticker(t) for t in tickers if _normalize_ticker(t)))
+    if not normalized_tickers:
+        return {}
 
     schema = get_schema()
     since = datetime.now(_EASTERN) - timedelta(hours=lookback_hours)
@@ -206,7 +374,7 @@ def _fetch_ticker_news(
         ORDER BY nat.ticker, COALESCE(na.published_at, na.created_at) DESC
     """
     cur = conn.cursor()
-    cur.execute(sql_articles, (tickers, since))
+    cur.execute(sql_articles, (normalized_tickers, since))
     article_rows = cur.fetchall() or []
 
     # Collect unique article IDs to fetch heads in one query
@@ -252,10 +420,11 @@ def _fetch_ticker_news(
         relationships_by_article[row[0]] = parsed
 
     # Build output grouped by ticker
-    result: dict[str, list[TickerNewsItem]] = {t: [] for t in tickers}
+    result: dict[str, list[TickerNewsItem]] = {t: [] for t in normalized_tickers}
     seen: set[tuple[str, int]] = set()
 
     for ticker, article_id, title, url, published_at in article_rows:
+        ticker = _normalize_ticker(ticker)
         key = (ticker, article_id)
         if key in seen:
             continue
@@ -392,6 +561,9 @@ Date: {date} (US Eastern premarket)
 Each line starts with article_id=... — cite these integer ids in "sources" and market_pulse_sources only.
 {news_block}
 
+=== RELATED NETWORK NEWS (graph-expanded) ===
+{related_news_block}
+
 === ACTIVE ALERTS ===
 {alerts_block}
 
@@ -416,6 +588,14 @@ Generate a daily narrative JSON with this exact structure:
       "sources": [{{"article_id": 67890}}]
     }}
   ],
+  "related_network_update": [
+    {{
+      "ticker": "LLY",
+      "anchor_ticker": "NOVO.B",
+      "narrative": "One sentence about why this related-company news matters for the anchor ticker.",
+      "sources": [{{"article_id": 22222}}]
+    }}
+  ],
   "alert_watch": [
     {{
       "ticker": "TSLA",
@@ -436,9 +616,10 @@ Rules:
 - action: one of "monitor" | "review" | "urgent" (urgent = needs attention today).
 - alert_watch: only include alerts where pct_away is within 5% of the trigger level.
 - market_pulse: required even if brief.
-- sources: for each portfolio_watch, screening_update, and alert_watch item, include "sources" as a JSON array of objects {{"article_id": <int>}} for every article you relied on. Use only article_id values that appear in the news hits block. Omit "sources" or use [] if none apply.
+- related_network_update: use only tickers from the RELATED NETWORK NEWS block and include anchor_ticker when clear from the provided path.
+- sources: for each portfolio_watch, screening_update, related_network_update, and alert_watch item, include "sources" as a JSON array of objects {{"article_id": <int>}} for every article you relied on. Use only article_id values that appear in the news hits block or related network block. Omit "sources" or use [] if none apply.
 - market_pulse_sources: array of article_id integers drawn from the news hits that informed market_pulse; use [] if not article-specific.
-- Return {{"portfolio_watch":[],"screening_update":[],"alert_watch":[],"market_pulse":"No significant news in the lookback window.","market_pulse_sources":[]}} if nothing relevant found.
+- Return {{"portfolio_watch":[],"screening_update":[],"related_network_update":[],"alert_watch":[],"market_pulse":"No significant news in the lookback window.","market_pulse_sources":[]}} if nothing relevant found.
 """
 
 
@@ -490,6 +671,39 @@ def _build_news_block(
     return "\n".join(lines) if lines else "  (no news hits)"
 
 
+def _build_related_news_block(
+    related_news: dict[str, list[TickerNewsItem]],
+    related_scores: dict[str, float],
+    related_paths: dict[str, list[str]],
+    per_ticker_limit: int = _REL_ARTICLES_PER_TICKER,
+) -> str:
+    if not related_news:
+        return "  (no graph-related ticker news in the lookback window)"
+
+    lines: list[str] = []
+    for ticker, items in sorted(
+        related_news.items(),
+        key=lambda kv: related_scores.get(kv[0], 0.0),
+        reverse=True,
+    ):
+        if not items:
+            continue
+        score = related_scores.get(ticker, 0.0)
+        path_text = "; ".join(related_paths.get(ticker, []))[:180]
+        lines.append(f"\n  [{ticker}] graph_score={score:.3f}")
+        if path_text:
+            lines.append(f"    path: {path_text}")
+        for item in items[:per_ticker_limit]:
+            ts = item.published_at.strftime("%H:%M") if item.published_at else "?"
+            score_str = f"{item.sentiment_score:+.2f}" if item.sentiment_score else " 0.00"
+            lines.append(
+                f"    article_id={item.article_id} | {ts} sentiment={score_str} | {item.title[:100]}"
+            )
+            if item.sentiment_reason:
+                lines.append(f"           reason: {item.sentiment_reason[:120]}")
+    return "\n".join(lines) if lines else "  (no graph-related ticker news in the lookback window)"
+
+
 def _build_alerts_block(alerts: list[AlertItem]) -> str:
     if not alerts:
         return "  (no active alerts)"
@@ -521,7 +735,7 @@ def _build_semantic_block(items: list[dict]) -> str:
 def _article_catalog_from_context(ctx: UserContext) -> dict[int, dict[str, Any]]:
     """Map article_id -> stable title/url for post-processing model citations."""
     cat: dict[int, dict[str, Any]] = {}
-    for items in list(ctx.portfolio_news.values()) + list(ctx.screening_news.values()):
+    for items in list(ctx.portfolio_news.values()) + list(ctx.screening_news.values()) + list(ctx.related_news.values()):
         for it in items:
             cat[it.article_id] = {
                 "article_id": it.article_id,
@@ -564,7 +778,7 @@ def _coerce_article_id(entry: Any) -> Optional[int]:
 
 def _enrich_narrative_sources(narrative: dict[str, Any], catalog: dict[int, dict[str, Any]]) -> None:
     """Replace model article_id citations with title/url from DB; drop unknown ids. Mutates narrative."""
-    for section in ("portfolio_watch", "screening_update", "alert_watch"):
+    for section in ("portfolio_watch", "screening_update", "related_network_update", "alert_watch"):
         for item in narrative.get(section) or []:
             if not isinstance(item, dict):
                 continue
@@ -603,6 +817,7 @@ def _enforce_section_ticker_integrity(narrative: dict[str, Any], ctx: UserContex
     """
     portfolio_tickers = {p.ticker.upper() for p in ctx.open_positions}
     screening_tickers = {t.upper() for t in ctx.active_screen_tickers}
+    related_tickers = {t.upper() for t in ctx.related_ticker_scores.keys()}
 
     portfolio_watch = narrative.get("portfolio_watch")
     if isinstance(portfolio_watch, list):
@@ -629,6 +844,25 @@ def _enforce_section_ticker_integrity(narrative: dict[str, Any], ctx: UserContex
         narrative["screening_update"] = filtered_screening
     else:
         narrative["screening_update"] = []
+
+    related_update = narrative.get("related_network_update")
+    if isinstance(related_update, list):
+        filtered_related: list[dict[str, Any]] = []
+        for item in related_update:
+            if not isinstance(item, dict):
+                continue
+            ticker = str(item.get("ticker") or "").upper().strip()
+            if not ticker or ticker not in related_tickers:
+                continue
+            if ticker in portfolio_tickers or ticker in screening_tickers:
+                continue
+            anchor = str(item.get("anchor_ticker") or "").upper().strip()
+            if anchor and anchor not in portfolio_tickers and anchor not in screening_tickers:
+                item.pop("anchor_ticker", None)
+            filtered_related.append(item)
+        narrative["related_network_update"] = filtered_related
+    else:
+        narrative["related_network_update"] = []
 
     return narrative
 
@@ -672,6 +906,11 @@ async def _generate_narrative_text(ctx: UserContext) -> tuple[dict, int]:
     portfolio_block = _build_portfolio_block(ctx.open_positions)
     screening_block = _build_screening_block(ctx.active_screen_tickers)
     news_block = _build_news_block(ctx.portfolio_news, ctx.screening_news)
+    related_news_block = _build_related_news_block(
+        ctx.related_news,
+        ctx.related_ticker_scores,
+        ctx.related_ticker_paths,
+    )
     alerts_block = _build_alerts_block(ctx.alert_items)
     semantic_block = _build_semantic_block(ctx.semantic_evidence)
 
@@ -680,6 +919,7 @@ async def _generate_narrative_text(ctx: UserContext) -> tuple[dict, int]:
         portfolio_block=portfolio_block,
         screening_block=screening_block,
         news_block=news_block,
+        related_news_block=related_news_block,
         alerts_block=alerts_block,
         semantic_block=semantic_block,
         lookback_hours=ctx.lookback_hours,
@@ -713,6 +953,7 @@ def _empty_narrative() -> dict:
     return {
         "portfolio_watch": [],
         "screening_update": [],
+        "related_network_update": [],
         "alert_watch": [],
         "market_pulse": "Could not generate narrative. Check Ollama connectivity.",
         "market_pulse_sources": [],
@@ -780,9 +1021,30 @@ async def generate_for_user(user_id: str, narrative_date: Optional[date] = None,
 
         if all_tickers:
             news_map = _fetch_ticker_news(conn, all_tickers, lookback_hours)
-            portfolio_set = set(portfolio_tickers)
+            portfolio_set = {_normalize_ticker(t) for t in portfolio_tickers}
             ctx.portfolio_news = {t: v for t, v in news_map.items() if t in portfolio_set}
             ctx.screening_news = {t: v for t, v in news_map.items() if t not in portfolio_set}
+
+            relationship_edges = _fetch_relationship_edges(conn, lookback_hours=lookback_hours)
+            related_scores, related_paths = _expand_related_tickers(
+                all_tickers,
+                relationship_edges,
+                hops=_REL_GRAPH_HOPS,
+                decay=_REL_DECAY,
+                min_score=_REL_MIN_SCORE,
+                max_tickers=_REL_MAX_TICKERS,
+            )
+            if related_scores:
+                related_map = _fetch_ticker_news(conn, list(related_scores.keys()), lookback_hours)
+                related_map = {t: items[:_REL_ARTICLES_PER_TICKER] for t, items in related_map.items() if items}
+                # Keep only related tickers that have retrievable article context.
+                ctx.related_news = related_map
+                ctx.related_ticker_scores = {t: s for t, s in related_scores.items() if t in related_map}
+                ctx.related_ticker_paths = {t: related_paths.get(t, []) for t in related_map}
+                if ctx.related_ticker_scores:
+                    top_related = sorted(ctx.related_ticker_scores.items(), key=lambda x: x[1], reverse=True)[:5]
+                    logger.info("[narrative] user=%s related candidates=%s", user_id, top_related)
+
             if _USE_SEMANTIC_RETRIEVAL:
                 # Add semantic retrieval evidence to improve grounding/recall.
                 retrieval_query = (
@@ -803,6 +1065,18 @@ async def generate_for_user(user_id: str, narrative_date: Optional[date] = None,
         conn.close()
 
     narrative, latency_ms = await _generate_narrative_text(ctx)
+    related_section = narrative.get("related_network_update", [])
+    screening_section = narrative.get("screening_update", [])
+    if isinstance(related_section, list) and related_section:
+        merged_screening: list[dict[str, Any]] = []
+        if isinstance(screening_section, list):
+            for row in screening_section:
+                if isinstance(row, dict):
+                    merged_screening.append({"kind": "screening", **row})
+        for row in related_section:
+            if isinstance(row, dict):
+                merged_screening.append({"kind": "related", **row})
+        screening_section = merged_screening
 
     client = get_supabase_client()
     _save_narrative(
@@ -810,7 +1084,7 @@ async def generate_for_user(user_id: str, narrative_date: Optional[date] = None,
         user_id=user_id,
         narrative_date=narrative_date,
         portfolio_section=narrative.get("portfolio_watch", []),
-        screening_section=narrative.get("screening_update", []),
+        screening_section=screening_section if isinstance(screening_section, list) else [],
         alert_warnings=narrative.get("alert_watch", []),
         market_pulse=narrative.get("market_pulse", ""),
         market_pulse_sources=narrative.get("market_pulse_sources") or [],

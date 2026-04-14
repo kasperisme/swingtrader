@@ -120,6 +120,14 @@ bash scripts/run_blog_post.sh intra-market
 
 See inline docstrings for usage.
 
+### Relationship graph + alias docs
+
+- `news_impact/README_ticker_identity_graph.md` documents:
+  - `ticker_relationship_edges` materialization
+  - unified alias table `security_identity_map`
+  - canonicalized graph view `ticker_relationship_network_resolved_v`
+  - operational SQL examples for mapping aliases like `NOVO.B` / `Novo Nordisk` to `NVO`
+
 ---
 
 ## Scheduled Jobs (Mac Mini)
