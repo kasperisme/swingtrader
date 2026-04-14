@@ -7,7 +7,12 @@ import { createGraphForceSimulation, type GraphForceNode } from "./d3-force-layo
 
 export type SelectedEdge = { from_ticker: string; to_ticker: string; rel_type?: string } | null;
 
-const EDGE_ARROW_MARKER_ID = "swingtrader-rel-edge-arrow";
+const EDGE_ARROW_MARKER_PREFIX = "swingtrader-rel-edge-arrow";
+
+function edgeMarkerId(relType: string) {
+  const safe = relType.replace(/[^a-zA-Z0-9_-]/g, "_") || "unknown";
+  return `${EDGE_ARROW_MARKER_PREFIX}-${safe}`;
+}
 
 function directedEdgeEndpoints(
   fromX: number,
@@ -25,7 +30,7 @@ function directedEdgeEndpoints(
   const ux = dx / len;
   const uy = dy / len;
   const tailInset = nodeR + 1;
-  const headInset = nodeR + 10;
+  const headInset = nodeR + 6;
   if (len < tailInset + headInset + 2) {
     const half = Math.max(2, (len - 2) / 2);
     return {
@@ -94,19 +99,26 @@ export function NetworkGraphD3({
     const svg = select(el);
     svg.selectAll("*").remove();
 
-    svg
-      .append("defs")
-      .append("marker")
-      .attr("id", EDGE_ARROW_MARKER_ID)
-      .attr("viewBox", "0 -4 10 8")
-      .attr("refX", 9)
-      .attr("refY", 0)
-      .attr("markerWidth", 6)
-      .attr("markerHeight", 6)
-      .attr("orient", "auto")
-      .append("path")
-      .attr("d", "M0,-3.25L9,0L0,3.25z")
-      .attr("fill", "currentColor");
+    const defs = svg.append("defs");
+    const seenRelTypes = new Set<string>();
+    for (const e of visibleEdges) {
+      if (seenRelTypes.has(e.rel_type)) continue;
+      seenRelTypes.add(e.rel_type);
+      const fill = REL_COLORS[e.rel_type] ?? "hsl(var(--muted-foreground))";
+      defs
+        .append("marker")
+        .attr("id", edgeMarkerId(e.rel_type))
+        .attr("viewBox", "0 -2.25 6.5 4.5")
+        .attr("refX", 6.2)
+        .attr("refY", 0)
+        .attr("markerWidth", 3.25)
+        .attr("markerHeight", 3.25)
+        .attr("markerUnits", "userSpaceOnUse")
+        .attr("orient", "auto")
+        .append("path")
+        .attr("d", "M0,-2.1L6.2,0L0,2.1z")
+        .attr("fill", fill);
+    }
 
     const layoutEdges = visibleEdges.map((e) => ({
       from: e.from_ticker,
@@ -142,8 +154,7 @@ export function NetworkGraphD3({
       .join("line")
       .attr("class", "link cursor-pointer")
       .attr("stroke", (d) => edgeStroke(d))
-      .style("color", (d) => edgeStroke(d))
-      .attr("marker-end", `url(#${EDGE_ARROW_MARKER_ID})`)
+      .attr("marker-end", (d) => `url(#${edgeMarkerId(d.rel_type)})`)
       .attr("stroke-width", (d) => 1 + d.strength_avg * 3)
       .on("click", (event, d) => {
         event.stopPropagation();
