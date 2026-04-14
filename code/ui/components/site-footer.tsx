@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { ThemeSwitcher } from "@/components/theme-switcher";
 
 /** Canonical X (Twitter) profile for metadata and footer links. */
@@ -22,6 +23,12 @@ export function SiteFooter() {
           >
             {X_HANDLE} on X
           </a>
+          <Link href="/terms" className="transition-colors hover:text-foreground">
+            Terms
+          </Link>
+          <Link href="/privacy" className="transition-colors hover:text-foreground">
+            Privacy
+          </Link>
           <ThemeSwitcher />
         </div>
       </div>

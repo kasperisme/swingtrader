@@ -46,6 +46,17 @@ export const blogPostPreviewsQuery = `
   }
 `;
 
+export const legalPageBySlugQuery = `
+  *[_type == "legalPage" && slug.current == $slug][0] {
+    _id,
+    title,
+    "slug": slug.current,
+    "description": coalesce(description, ""),
+    updatedAt,
+    body
+  }
+`;
+
 export const blogPostBySlugQuery = `
   *[_type == "post" && slug.current == $slug][0] {
     _id,

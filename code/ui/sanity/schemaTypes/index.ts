@@ -5,7 +5,8 @@ import {categoryType} from './categoryType'
 import {postType} from './postType'
 import {authorType} from './authorType'
 import {docPageType} from './docPageType'
+import {legalPageType} from './legalPageType'
 
 export const schema: { types: SchemaTypeDefinition[] } = {
-  types: [blockContentType, categoryType, postType, authorType, docPageType],
+  types: [blockContentType, categoryType, postType, authorType, docPageType, legalPageType],
 }

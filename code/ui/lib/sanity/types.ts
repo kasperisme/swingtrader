@@ -14,6 +14,16 @@ export type DocPage = DocPagePreview & {
   cavemanBody?: any[];
 };
 
+export type LegalPage = {
+  _id: string;
+  title: string;
+  slug: string;
+  description: string;
+  updatedAt: string | null;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  body: any[];
+};
+
 export type BlogPostPreview = {
   _id: string;
   title: string;

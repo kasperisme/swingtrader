@@ -13,7 +13,11 @@ export const structure: StructureResolver = (S) =>
       S.documentTypeListItem('category').title('Categories'),
       S.documentTypeListItem('author').title('Authors'),
       S.divider(),
+      S.listItem().title('Legal Pages').child(
+        S.documentTypeList('legalPage').title('Legal Pages'),
+      ),
+      S.divider(),
       ...S.documentTypeListItems().filter(
-        (item) => item.getId() && !['docPage', 'post', 'category', 'author'].includes(item.getId()!),
+        (item) => item.getId() && !['docPage', 'post', 'category', 'author', 'legalPage'].includes(item.getId()!),
       ),
     ])
