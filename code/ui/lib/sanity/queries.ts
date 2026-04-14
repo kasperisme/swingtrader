@@ -17,7 +17,8 @@ export const docPageBySlugQuery = `
     section,
     order,
     "description": coalesce(description, ""),
-    body
+    body,
+    cavemanBody
   }
 `;
 
@@ -54,6 +55,7 @@ export const blogPostBySlugQuery = `
     publishedAt,
     "authorName": author->name,
     body,
+    cavemanBody,
     "readingTimeMinutes": round(length(pt::text(body)) / 5 / 200)
   }
 `;

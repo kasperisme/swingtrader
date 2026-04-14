@@ -1,9 +1,9 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { Suspense } from "react";
-import { PortableText } from "@portabletext/react";
+import { CavemanModeToggle } from "@/components/caveman-mode-toggle";
+import { CavemanContent } from "@/components/caveman-content";
 import { isSanityConfigured, sanityFetch } from "@/lib/sanity/client";
-import { portableTextComponents } from "@/lib/sanity/portable-text-components";
 import { docPageBySlugQuery, docPageSlugListQuery } from "@/lib/sanity/queries";
 import type { DocPage } from "@/lib/sanity/types";
 
@@ -74,15 +74,17 @@ async function DocPageDetailData({ params }: Props) {
           </p>
         ) : null}
 
-        <div className="my-8 border-b border-border" aria-hidden />
+        <div className="my-8 flex items-center gap-4">
+          <div className="flex-1 border-b border-border" aria-hidden />
+          <CavemanModeToggle />
+        </div>
 
-        {page.body?.length > 0 ? (
-          <div className="space-y-5 text-base">
-            <PortableText value={page.body} components={portableTextComponents} />
-          </div>
-        ) : (
-          <p className="mt-8 text-muted-foreground">Content coming soon.</p>
-        )}
+        <div className="space-y-5 text-base">
+          <CavemanContent
+            body={page.body ?? []}
+            cavemanBody={page.cavemanBody}
+          />
+        </div>
       </article>
 
       <div className="mt-16 pt-8 border-t border-border">
