@@ -951,16 +951,16 @@ def get_recent_news_impact(ticker: Optional[str] = None, limit: int = 10) -> str
         if not article_ids:
             return json.dumps({"ticker": ticker_upper, "articles": []})
         art_res = (
-            client.schema(schema).table("news_articles")
-            .select("id,title,url,source,created_at")
-            .in_("id", article_ids)
+            client.schema(schema).table("news_trends_article_base_v")
+            .select("article_id,title,url,source,published_at,article_created_at")
+            .in_("article_id", article_ids)
             .execute()
         )
     else:
         art_res = (
-            client.schema(schema).table("news_articles")
-            .select("id,title,url,source,created_at")
-            .order("id", desc=True)
+            client.schema(schema).table("news_trends_article_base_v")
+            .select("article_id,title,url,source,published_at,article_created_at")
+            .order("published_at", desc=True)
             .limit(int(limit))
             .execute()
         )
@@ -969,7 +969,7 @@ def get_recent_news_impact(ticker: Optional[str] = None, limit: int = 10) -> str
     if not articles:
         return json.dumps({"articles": []})
 
-    ids = [a["id"] for a in articles]
+    ids = [a["article_id"] for a in articles]
     vec_res = (
         client.schema(schema).table("news_impact_vectors")
         .select("article_id,top_dimensions")
@@ -981,12 +981,13 @@ def get_recent_news_impact(ticker: Optional[str] = None, limit: int = 10) -> str
     results = []
     for a in articles:
         results.append({
-            "article_id": a["id"],
+            "article_id": a["article_id"],
             "title": a.get("title"),
             "url": a.get("url"),
             "source": a.get("source"),
-            "created_at": a.get("created_at"),
-            "top_signals": top_dims_by_id.get(a["id"]),
+            "published_at": a.get("published_at"),
+            "created_at": a.get("article_created_at"),
+            "top_signals": top_dims_by_id.get(a["article_id"]),
         })
 
     return json.dumps({"articles": results}, default=str)
@@ -1017,12 +1018,12 @@ def get_ticker_news_impact_summary(tickers: list[str], limit_per_ticker: int = 5
         return json.dumps({t: [] for t in tickers_upper})
 
     art_res = (
-        client.schema(schema).table("news_articles")
-        .select("id,title,url,created_at")
-        .in_("id", all_ids)
+        client.schema(schema).table("news_trends_article_base_v")
+        .select("article_id,title,url,published_at,article_created_at")
+        .in_("article_id", all_ids)
         .execute()
     )
-    art_by_id = {a["id"]: a for a in (art_res.data or [])}
+    art_by_id = {a["article_id"]: a for a in (art_res.data or [])}
 
     vec_res = (
         client.schema(schema).table("news_impact_vectors")
@@ -1040,7 +1041,8 @@ def get_ticker_news_impact_summary(tickers: list[str], limit_per_ticker: int = 5
                 "article_id": aid,
                 "title": art_by_id[aid]["title"] if aid in art_by_id else None,
                 "url": art_by_id[aid].get("url") if aid in art_by_id else None,
-                "created_at": art_by_id[aid].get("created_at") if aid in art_by_id else None,
+                "published_at": art_by_id[aid].get("published_at") if aid in art_by_id else None,
+                "created_at": art_by_id[aid].get("article_created_at") if aid in art_by_id else None,
                 "top_signals": top_dims_by_id.get(aid),
             }
             for aid in ids

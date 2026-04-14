@@ -5,7 +5,9 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Brush,
   LineChart,
+  ComposedChart,
   Line,
+  Bar,
   XAxis,
   YAxis,
   CartesianGrid,
@@ -317,6 +319,7 @@ function applyClusterMA(
     const slice = daily.slice(start, i + 1);
     const result: { date: string; [key: string]: number | string | null } = {
       date: point.date,
+      __articleCount: point.count,
     };
     for (const cluster of CLUSTERS) {
       const vals = slice
@@ -508,13 +511,20 @@ function CustomTooltip({
 }) {
   if (!active || !payload?.length) return null;
 
+  const articleCount = payload.find((p) => p.name === "__articleCount")?.value ?? null;
   const sorted = [...payload]
+    .filter((p) => p.name !== "__articleCount")
     .filter((p) => p.value != null)
     .sort((a, b) => (b.value ?? 0) - (a.value ?? 0));
 
   return (
     <div className="bg-background border rounded-lg shadow-lg p-3 text-xs max-w-[220px]">
       <p className="font-semibold mb-2 text-muted-foreground">{label}</p>
+      {typeof articleCount === "number" ? (
+        <p className="mb-2 text-[11px] text-muted-foreground">
+          Articles: <span className="font-mono tabular-nums">{articleCount}</span>
+        </p>
+      ) : null}
       {sorted.map((p) => {
         const displayLabel = labelMap[p.name] ?? p.name;
         const isPos = (p.value ?? 0) > 0.05;
@@ -756,6 +766,7 @@ export function NewsTrendsUI({ articles, chartHeight = 400 }: { articles: Articl
   const [benchmark, setBenchmark] = useState<BenchmarkId>("none");
   const [benchmarkData, setBenchmarkData] = useState<OhlcPoint[]>([]);
   const [showClusterMean, setShowClusterMean] = useState(true);
+  const [showArticleCount, setShowArticleCount] = useState(true);
   const [semanticQuery, setSemanticQuery] = useState("");
   const [semanticLoading, setSemanticLoading] = useState(false);
   const [semanticResults, setSemanticResults] = useState<SemanticSearchItem[]>([]);
@@ -1177,6 +1188,7 @@ export function NewsTrendsUI({ articles, chartHeight = 400 }: { articles: Articl
     () => ({
       ...Object.fromEntries(CLUSTERS.map((c) => [c.id, c.label])),
       __clusterMean: "Mean (all clusters)",
+      __articleCount: "Articles",
     }),
     [],
   );
@@ -1286,6 +1298,15 @@ export function NewsTrendsUI({ articles, chartHeight = 400 }: { articles: Articl
             className="rounded border-border"
           />
           Mean line
+        </label>
+        <label className="flex items-center gap-1.5 text-xs text-muted-foreground cursor-pointer select-none">
+          <input
+            type="checkbox"
+            checked={showArticleCount}
+            onChange={(e) => setShowArticleCount(e.target.checked)}
+            className="rounded border-border"
+          />
+          Article count
         </label>
         <span className="ml-auto text-xs text-muted-foreground">
           {totalArticles} articles · {dateRange}
@@ -1461,7 +1482,7 @@ export function NewsTrendsUI({ articles, chartHeight = 400 }: { articles: Articl
                   </div>
                 )}
               <ResponsiveContainer width="100%" height={chartHeight}>
-                <LineChart
+              <ComposedChart
                   data={chartDataWithBenchmark}
                   margin={{ top: 5, right: 10, left: 0, bottom: 8 }}
                   onMouseDown={handleChartMouseDown}
@@ -1501,6 +1522,14 @@ export function NewsTrendsUI({ articles, chartHeight = 400 }: { articles: Articl
                     axisLine={false}
                     tickFormatter={(v: number) => `${v >= 0 ? "+" : ""}${(v * 100).toFixed(0)}%`}
                     width={44}
+                  />
+                )}
+                {showArticleCount && (
+                  <YAxis
+                    yAxisId="count"
+                    hide
+                    domain={[0, "auto"]}
+                    allowDataOverflow={false}
                   />
                 )}
                 <ReferenceLine
@@ -1569,6 +1598,18 @@ export function NewsTrendsUI({ articles, chartHeight = 400 }: { articles: Articl
                     connectNulls
                   />
                 )}
+                {showArticleCount && (
+                  <Bar
+                    yAxisId="count"
+                    dataKey="__articleCount"
+                    name="__articleCount"
+                    fill="#64748b"
+                    fillOpacity={0.2}
+                    stroke="#64748b"
+                    strokeOpacity={0.35}
+                    barSize={10}
+                  />
+                )}
                 {dataLen > 1 ? (
                   <Brush
                     dataKey="date"
@@ -1582,7 +1623,7 @@ export function NewsTrendsUI({ articles, chartHeight = 400 }: { articles: Articl
                     tickFormatter={(v: string) => formatBucket(v, viewMode)}
                   />
                 ) : null}
-              </LineChart>
+              </ComposedChart>
               </ResponsiveContainer>
             </div>
           </div>

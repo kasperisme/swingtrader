@@ -52,13 +52,23 @@ SELECT
   NULLIF(e.value, '')::double precision AS dimension_value
 FROM swingtrader.news_trends_article_base_v b
 CROSS JOIN LATERAL jsonb_each_text(b.impact_jsonb) AS e(key, value)
-WHERE NULLIF(e.value, '') IS NOT NULL;
+WHERE
+  jsonb_typeof(b.impact_jsonb) = 'object'
+  AND NULLIF(e.value, '') IS NOT NULL;
 
 -- 3) Dimension aggregates (daily / hourly), weighted and unweighted.
 CREATE OR REPLACE VIEW swingtrader.news_trends_dimension_daily_v AS
+WITH bucket_counts AS (
+  SELECT
+    bucket_day,
+    COUNT(DISTINCT article_id) AS bucket_article_count
+  FROM swingtrader.news_trends_article_base_v
+  GROUP BY bucket_day
+)
 SELECT
   p.bucket_day,
   p.dimension_key,
+  bc.bucket_article_count,
   COUNT(*) AS sample_count,
   COUNT(DISTINCT p.article_id) AS article_count,
   AVG(p.dimension_value) AS dimension_avg,
@@ -68,12 +78,22 @@ SELECT
     AVG(p.dimension_value)
   ) AS dimension_weighted_avg
 FROM swingtrader.news_trends_dimension_points_v p
-GROUP BY p.bucket_day, p.dimension_key;
+JOIN bucket_counts bc
+  ON bc.bucket_day = p.bucket_day
+GROUP BY p.bucket_day, p.dimension_key, bc.bucket_article_count;
 
 CREATE OR REPLACE VIEW swingtrader.news_trends_dimension_hourly_v AS
+WITH bucket_counts AS (
+  SELECT
+    bucket_hour,
+    COUNT(DISTINCT article_id) AS bucket_article_count
+  FROM swingtrader.news_trends_article_base_v
+  GROUP BY bucket_hour
+)
 SELECT
   p.bucket_hour,
   p.dimension_key,
+  bc.bucket_article_count,
   COUNT(*) AS sample_count,
   COUNT(DISTINCT p.article_id) AS article_count,
   AVG(p.dimension_value) AS dimension_avg,
@@ -83,7 +103,9 @@ SELECT
     AVG(p.dimension_value)
   ) AS dimension_weighted_avg
 FROM swingtrader.news_trends_dimension_points_v p
-GROUP BY p.bucket_hour, p.dimension_key;
+JOIN bucket_counts bc
+  ON bc.bucket_hour = p.bucket_hour
+GROUP BY p.bucket_hour, p.dimension_key, bc.bucket_article_count;
 
 -- 4) Cluster rollups from dimensions, matching UI logic:
 --    per-article cluster = mean(dimensions in cluster), then weighted mean by bucket.
@@ -156,10 +178,18 @@ article_cluster_scores AS (
   JOIN dimension_cluster_map m
     ON m.dimension_key = p.dimension_key
   GROUP BY p.article_id, p.bucket_day, m.cluster_id
+),
+bucket_counts AS (
+  SELECT
+    bucket_day,
+    COUNT(DISTINCT article_id) AS bucket_article_count
+  FROM swingtrader.news_trends_article_base_v
+  GROUP BY bucket_day
 )
 SELECT
   a.bucket_day,
   a.cluster_id,
+  bc.bucket_article_count,
   COUNT(*) AS article_count,
   AVG(a.article_cluster_score) AS cluster_avg,
   COALESCE(
@@ -168,7 +198,9 @@ SELECT
     AVG(a.article_cluster_score)
   ) AS cluster_weighted_avg
 FROM article_cluster_scores a
-GROUP BY a.bucket_day, a.cluster_id;
+JOIN bucket_counts bc
+  ON bc.bucket_day = a.bucket_day
+GROUP BY a.bucket_day, a.cluster_id, bc.bucket_article_count;
 
 CREATE OR REPLACE VIEW swingtrader.news_trends_cluster_hourly_v AS
 WITH dimension_cluster_map AS (
@@ -239,10 +271,18 @@ article_cluster_scores AS (
   JOIN dimension_cluster_map m
     ON m.dimension_key = p.dimension_key
   GROUP BY p.article_id, p.bucket_hour, m.cluster_id
+),
+bucket_counts AS (
+  SELECT
+    bucket_hour,
+    COUNT(DISTINCT article_id) AS bucket_article_count
+  FROM swingtrader.news_trends_article_base_v
+  GROUP BY bucket_hour
 )
 SELECT
   a.bucket_hour,
   a.cluster_id,
+  bc.bucket_article_count,
   COUNT(*) AS article_count,
   AVG(a.article_cluster_score) AS cluster_avg,
   COALESCE(
@@ -251,28 +291,50 @@ SELECT
     AVG(a.article_cluster_score)
   ) AS cluster_weighted_avg
 FROM article_cluster_scores a
-GROUP BY a.bucket_hour, a.cluster_id;
+JOIN bucket_counts bc
+  ON bc.bucket_hour = a.bucket_hour
+GROUP BY a.bucket_hour, a.cluster_id, bc.bucket_article_count;
 
 -- 5) Head-level aggregates for diagnostics/trend overlays.
 CREATE OR REPLACE VIEW swingtrader.news_trends_heads_daily_v AS
+WITH bucket_counts AS (
+  SELECT
+    bucket_day,
+    COUNT(DISTINCT article_id) AS bucket_article_count
+  FROM swingtrader.news_trends_article_base_v
+  GROUP BY bucket_day
+)
 SELECT
   date_trunc('day', nih.created_at) AS bucket_day,
   nih.cluster,
+  bc.bucket_article_count,
   COUNT(*) AS head_count,
   COUNT(DISTINCT nih.article_id) AS article_count,
   AVG(nih.confidence) AS confidence_avg
 FROM swingtrader.news_impact_heads nih
-GROUP BY date_trunc('day', nih.created_at), nih.cluster;
+JOIN bucket_counts bc
+  ON bc.bucket_day = date_trunc('day', nih.created_at)
+GROUP BY date_trunc('day', nih.created_at), nih.cluster, bc.bucket_article_count;
 
 CREATE OR REPLACE VIEW swingtrader.news_trends_heads_hourly_v AS
+WITH bucket_counts AS (
+  SELECT
+    bucket_hour,
+    COUNT(DISTINCT article_id) AS bucket_article_count
+  FROM swingtrader.news_trends_article_base_v
+  GROUP BY bucket_hour
+)
 SELECT
   date_trunc('hour', nih.created_at) AS bucket_hour,
   nih.cluster,
+  bc.bucket_article_count,
   COUNT(*) AS head_count,
   COUNT(DISTINCT nih.article_id) AS article_count,
   AVG(nih.confidence) AS confidence_avg
 FROM swingtrader.news_impact_heads nih
-GROUP BY date_trunc('hour', nih.created_at), nih.cluster;
+JOIN bucket_counts bc
+  ON bc.bucket_hour = date_trunc('hour', nih.created_at)
+GROUP BY date_trunc('hour', nih.created_at), nih.cluster, bc.bucket_article_count;
 
 -- Make views queryable via API roles.
 GRANT SELECT ON

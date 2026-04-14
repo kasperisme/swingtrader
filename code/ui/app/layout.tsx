@@ -72,13 +72,21 @@ export default function RootLayout({
           enableSystem={false}
           disableTransitionOnChange
         >
-          <CavemanModeProvider>
-            <Suspense fallback={<SiteHeaderFallback />}>
-              <SiteHeader />
-            </Suspense>
-            {children}
-            <SiteFooter />
-          </CavemanModeProvider>
+          <Suspense
+            fallback={
+              <>
+                <SiteHeaderFallback />
+              </>
+            }
+          >
+            <CavemanModeProvider>
+              <Suspense fallback={<SiteHeaderFallback />}>
+                <SiteHeader />
+              </Suspense>
+              {children}
+              <SiteFooter />
+            </CavemanModeProvider>
+          </Suspense>
         </ThemeProvider>
       </body>
     </html>

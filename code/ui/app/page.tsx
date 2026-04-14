@@ -1,4 +1,5 @@
 import Link from "next/link";
+import Image from "next/image";
 import { Suspense } from "react";
 import { unstable_noStore as noStore } from "next/cache";
 import { createClient as createSupabaseClient } from "@supabase/supabase-js";
@@ -22,6 +23,9 @@ import {
   type ArticleGridItem,
 } from "@/components/articles-grid";
 import { EarlyAccessSignupForm } from "@/components/early-access-signup-form";
+import { isSanityConfigured, sanityFetch } from "@/lib/sanity/client";
+import { newsPublishersQuery } from "@/lib/sanity/queries";
+import type { NewsPublisher } from "@/lib/sanity/types";
 
 type CardItem = {
   title: string;
@@ -122,6 +126,59 @@ const tickerThemes = [
   "Biotech regulatory cycle",
   "Dollar strength impact",
 ];
+
+async function PublishersMarquee() {
+  let publishers: NewsPublisher[] = [];
+  if (isSanityConfigured) {
+    try {
+      publishers = await sanityFetch<NewsPublisher[]>(newsPublishersQuery);
+    } catch {
+      publishers = [];
+    }
+  }
+
+  if (publishers.length === 0) return null;
+
+  const doubled = [...publishers, ...publishers];
+
+  return (
+    <section className="border-t border-border py-12 md:py-16">
+      <div className="mx-auto max-w-6xl px-4 sm:px-6 lg:px-8">
+        <p className="text-center text-xs font-semibold uppercase tracking-widest text-muted-foreground">
+          Scanning news from
+        </p>
+      </div>
+      <div className="relative mt-8 overflow-hidden">
+        <div className="pointer-events-none absolute inset-y-0 left-0 w-16 bg-gradient-to-r from-background to-transparent z-10" />
+        <div className="pointer-events-none absolute inset-y-0 right-0 w-16 bg-gradient-to-l from-background to-transparent z-10" />
+        <div className="flex animate-news-roll gap-0 whitespace-nowrap">
+          {doubled.map((p, i) => (
+            <span
+              key={`${p._id}-${i}`}
+              className="inline-flex items-center gap-2 px-5"
+            >
+              {p.iconUrl ? (
+                <Image
+                  src={p.iconUrl}
+                  alt={p.name}
+                  width={20}
+                  height={20}
+                  className="h-5 w-5 rounded-sm object-contain opacity-60"
+                  unoptimized
+                />
+              ) : (
+                <span className="h-1 w-1 rounded-full bg-muted-foreground/40" />
+              )}
+              <span className="text-xs font-medium text-muted-foreground">
+                {p.name}
+              </span>
+            </span>
+          ))}
+        </div>
+      </div>
+    </section>
+  );
+}
 
 async function LandingArticlesHeaderAndList() {
   noStore();
@@ -396,6 +453,9 @@ export default function Home() {
           </div>
         </div>
       </section>
+
+      {/* ── PUBLISHERS ───────────────────────────────────────────── */}
+      <PublishersMarquee />
 
       {/* ── PRODUCT VALUES ───────────────────────────────────────── */}
       <section className="border-t border-border py-16 md:py-24">

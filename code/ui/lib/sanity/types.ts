@@ -14,6 +14,14 @@ export type DocPage = DocPagePreview & {
   cavemanBody?: any[];
 };
 
+export type NewsPublisher = {
+  _id: string;
+  name: string;
+  slug: string;
+  iconUrl: string | null;
+  website: string | null;
+};
+
 export type LegalPage = {
   _id: string;
   title: string;

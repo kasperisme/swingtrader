@@ -16,8 +16,11 @@ export const structure: StructureResolver = (S) =>
       S.listItem().title('Legal Pages').child(
         S.documentTypeList('legalPage').title('Legal Pages'),
       ),
+      S.listItem().title('News Publishers').child(
+        S.documentTypeList('newsPublisher').title('News Publishers'),
+      ),
       S.divider(),
       ...S.documentTypeListItems().filter(
-        (item) => item.getId() && !['docPage', 'post', 'category', 'author', 'legalPage'].includes(item.getId()!),
+        (item) => item.getId() && !['docPage', 'post', 'category', 'author', 'legalPage', 'newsPublisher'].includes(item.getId()!),
       ),
     ])

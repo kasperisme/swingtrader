@@ -46,6 +46,16 @@ export const blogPostPreviewsQuery = `
   }
 `;
 
+export const newsPublishersQuery = `
+  *[_type == "newsPublisher"] | order(name asc) {
+    _id,
+    name,
+    "slug": slug.current,
+    "iconUrl": icon.asset->url,
+    website
+  }
+`;
+
 export const legalPageBySlugQuery = `
   *[_type == "legalPage" && slug.current == $slug][0] {
     _id,

@@ -119,9 +119,9 @@ export async function screeningsGetNewsImpacts(): Promise<
   const [vectorsRes, headsRes] = await Promise.all([
     supabase
       .schema("swingtrader")
-      .from("news_impact_vectors")
-      .select("article_id, impact_json, created_at, news_articles(published_at)")
-      .order("created_at", { ascending: true }),
+      .from("news_trends_article_base_v")
+      .select("article_id, impact_jsonb, published_at")
+      .order("published_at", { ascending: true }),
     supabase
       .schema("swingtrader")
       .from("news_impact_heads")
@@ -149,16 +149,16 @@ export async function screeningsGetNewsImpacts(): Promise<
   const articles = (vectorsRes.data ?? []).map((row) => {
     const r = row as {
       article_id: unknown;
-      impact_json?: unknown;
-      created_at?: unknown;
-      news_articles?: { published_at?: unknown } | null;
+      impact_jsonb?: unknown;
+      published_at?: unknown;
     };
+    const parsedImpact =
+      r.impact_jsonb && typeof r.impact_jsonb === "object"
+        ? (r.impact_jsonb as Record<string, number>)
+        : {};
     return {
-      impact_json:
-        r.impact_json && typeof r.impact_json === "object"
-          ? (r.impact_json as Record<string, number>)
-          : {},
-      published_at: String(r.news_articles?.published_at ?? r.created_at ?? ""),
+      impact_json: parsedImpact,
+      published_at: String(r.published_at ?? ""),
       ticker_sentiment: tickerSentimentByArticleId.get(Number(r.article_id)) ?? {},
     };
   });
