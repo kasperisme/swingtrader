@@ -19,6 +19,48 @@ export type FmpActionError = { ok: false; error: string };
 export type FmpOhlcSuccess = { ok: true; data: FmpOhlcBar[] };
 export type FmpQuoteSuccess = { ok: true; data: unknown };
 export type FmpSearchSuccess = { ok: true; data: unknown[] };
+
+/** Shape from FMP `/stable/profile` (fields optional — API may omit). */
+export type FmpCompanyProfile = {
+  symbol?: string;
+  price?: number;
+  marketCap?: number;
+  beta?: number;
+  lastDividend?: number;
+  range?: string;
+  change?: number;
+  changePercentage?: number;
+  volume?: number;
+  averageVolume?: number;
+  companyName?: string;
+  currency?: string;
+  cik?: string;
+  isin?: string;
+  cusip?: string;
+  exchangeFullName?: string;
+  exchange?: string;
+  industry?: string;
+  website?: string;
+  description?: string;
+  ceo?: string;
+  sector?: string;
+  country?: string;
+  fullTimeEmployees?: string | number;
+  phone?: string;
+  address?: string;
+  city?: string;
+  state?: string;
+  zip?: string;
+  image?: string;
+  ipoDate?: string;
+  defaultImage?: boolean;
+  isEtf?: boolean;
+  isActivelyTrading?: boolean;
+  isAdr?: boolean;
+  isFund?: boolean;
+};
+
+export type FmpCompanyProfileSuccess = { ok: true; data: FmpCompanyProfile };
 export type FmpPriceAtDateSuccess = { ok: true; data: FmpPriceAtDateResult };
 
 function getNewYorkOffsetMinutes(utcDate: Date): number {
@@ -245,6 +287,39 @@ export async function fmpSearchSymbol(query: string): Promise<FmpSearchSuccess |
     return { ok: false, error: "Unexpected FMP response" };
   }
 
+  return { ok: true, data };
+}
+
+export async function fmpGetCompanyProfile(
+  symbolParam: string,
+): Promise<FmpCompanyProfileSuccess | FmpActionError> {
+  const symbol = normalizeSymbolInput(symbolParam);
+  if (!symbol.trim()) {
+    return { ok: false, error: "symbol required" };
+  }
+
+  const apiKey = process.env.FMP_API_KEY;
+  if (!apiKey) {
+    return { ok: false, error: "FMP_API_KEY not configured" };
+  }
+
+  const url = `https://financialmodelingprep.com/stable/profile?symbol=${encodeURIComponent(symbol)}&apikey=${encodeURIComponent(apiKey)}`;
+  const res = await fetch(url, { next: { revalidate: 3600 } });
+  if (!res.ok) {
+    return { ok: false, error: "FMP profile request failed" };
+  }
+
+  const raw: unknown = await res.json();
+  if (!Array.isArray(raw) || raw.length === 0) {
+    return { ok: false, error: "No profile data for symbol" };
+  }
+
+  const row = raw[0];
+  if (typeof row !== "object" || row === null) {
+    return { ok: false, error: "Unexpected FMP profile response" };
+  }
+
+  const data = row as FmpCompanyProfile;
   return { ok: true, data };
 }
 
