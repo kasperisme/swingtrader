@@ -3,105 +3,35 @@
 import { useCavemanMode } from "@/lib/caveman-mode";
 import { cn } from "@/lib/utils";
 
-// ─── SVG characters ──────────────────────────────────────────────────────────
+// ─── Icons (temaki icon set, viewBox 0 0 15 15) ───────────────────────────────
 
-function BusinessmanIcon({ className }: { className?: string }) {
+function BriefcaseIcon({ className }: { className?: string }) {
   return (
     <svg
-      viewBox="0 0 20 24"
-      fill="none"
+      viewBox="0 0 15 15"
       xmlns="http://www.w3.org/2000/svg"
       aria-hidden
       className={className}
     >
-      {/* Neat hair parting */}
       <path
-        d="M7 4 Q10 2.5 13 4"
-        stroke="currentColor"
-        strokeWidth="1.1"
-        strokeLinecap="round"
-        opacity="0.45"
-      />
-      {/* Head */}
-      <circle cx="10" cy="7" r="5" fill="currentColor" />
-      {/* Suit body */}
-      <path
-        d="M2 15 C2 13 5 12 10 12 C15 12 18 13 18 15 L17 23 H3 Z"
         fill="currentColor"
-        fillOpacity="0.72"
-      />
-      {/* Lapels */}
-      <path
-        d="M2 15 L6 12.5 L10 15.5 L14 12.5 L18 15"
-        stroke="currentColor"
-        strokeWidth="1.2"
-        fill="none"
-        strokeLinejoin="round"
-      />
-      {/* Tie */}
-      <path d="M10 12.5 L9 17 L10 18.5 L11 17 Z" fill="currentColor" />
-      {/* Briefcase */}
-      <rect x="13" y="17" width="5" height="4" rx="0.8" fill="currentColor" fillOpacity="0.6" />
-      <path
-        d="M14.5 17 L14.5 15.8 Q14.5 15 15.5 15 Q16.5 15 16.5 15.8 L16.5 17"
-        stroke="currentColor"
-        strokeWidth="1"
-        fill="none"
-        strokeLinecap="round"
+        d="M5 4h5V3H5zM4 4V3c0-.55.45-1 1-1h5c.55 0 1 .45 1 1v1h2c.55 0 1 .45 1 1v7c0 .55-.45 1-1 1H2c-.55 0-1-.45-1-1V5c0-.55.45-1 1-1z"
       />
     </svg>
   );
 }
 
-function CavemanIcon({ className }: { className?: string }) {
+function BoulderIcon({ className }: { className?: string }) {
   return (
     <svg
-      viewBox="0 0 24 24"
-      fill="none"
+      viewBox="0 0 15 15"
       xmlns="http://www.w3.org/2000/svg"
       aria-hidden
       className={className}
     >
-      {/* Wild spiky hair */}
       <path
-        d="M5 7 L2.5 3 M7 6 L6 1.5 M10 5.5 L10 1 M13 6 L14 1.5 M15 7 L17.5 3"
-        stroke="currentColor"
-        strokeWidth="1.5"
-        strokeLinecap="round"
-      />
-      {/* Head */}
-      <circle cx="10" cy="9" r="5" fill="currentColor" />
-      {/* Animal-skin body */}
-      <path
-        d="M2 17 C2 15 5 14 10 14 C15 14 18 15 18 17 L17 23 H3 Z"
         fill="currentColor"
-        fillOpacity="0.72"
-      />
-      {/* Fur spots */}
-      <circle cx="7.5" cy="19" r="1.3" fill="currentColor" fillOpacity="0.42" />
-      <circle cx="12" cy="21" r="1.1" fill="currentColor" fillOpacity="0.42" />
-      {/* Arm holding club */}
-      <path
-        d="M17 16 L21 10"
-        stroke="currentColor"
-        strokeWidth="1.8"
-        strokeLinecap="round"
-      />
-      {/* Club head (bulgy end at top) */}
-      <ellipse
-        cx="22"
-        cy="8.5"
-        rx="2.5"
-        ry="3.5"
-        fill="currentColor"
-      />
-      {/* Club texture lines */}
-      <path
-        d="M20.5 7 L23 8 M20.5 9 L23 10"
-        stroke="currentColor"
-        strokeWidth="0.8"
-        strokeLinecap="round"
-        opacity="0.4"
+        d="M6 14c-.67 0-5-.22-5-2c0-2.64 1.96-4.46 2.5-5c1.04-1.04.93-2.37 1.5-3.5C5.77 1.96 7.79 1 8.5 1c.57 0 2.25 1.3 3.5 3c.56.75 2 4.37 2 5.5c0 3.58-1.66 4.5-3 4.5z"
       />
     </svg>
   );
@@ -147,7 +77,7 @@ export function CavemanToggle({ showLabels = false, className }: Props) {
           !isCaveman ? "text-foreground" : "text-muted-foreground",
         )}
       >
-        <BusinessmanIcon className="h-5 w-5 shrink-0" />
+        <BriefcaseIcon className="h-4 w-4 shrink-0" />
         {showLabels && <span>Normal</span>}
       </span>
 
@@ -160,7 +90,7 @@ export function CavemanToggle({ showLabels = false, className }: Props) {
             : "text-muted-foreground",
         )}
       >
-        <CavemanIcon className="h-5 w-5 shrink-0" />
+        <BoulderIcon className="h-4 w-4 shrink-0" />
         {showLabels && <span>Caveman</span>}
       </span>
     </button>
