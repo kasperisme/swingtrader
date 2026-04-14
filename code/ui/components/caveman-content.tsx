@@ -1,8 +1,8 @@
 "use client";
 
-import { useSearchParams } from "next/navigation";
 import { PortableText } from "@portabletext/react";
 import { portableTextComponents } from "@/lib/sanity/portable-text-components";
+import { useCavemanMode } from "@/lib/caveman-mode";
 
 type Props = {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -13,8 +13,7 @@ type Props = {
 };
 
 export function CavemanContent({ body, cavemanBody, emptyFallback }: Props) {
-  const searchParams = useSearchParams();
-  const isCaveman = searchParams.get("caveman") === "1";
+  const { isCaveman } = useCavemanMode();
   const hasCavemanVersion = Array.isArray(cavemanBody) && cavemanBody.length > 0;
   const activeBody = isCaveman && hasCavemanVersion ? cavemanBody : body;
 

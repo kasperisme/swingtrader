@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import type { DocPagePreview } from "@/lib/sanity/types";
+import { CavemanToggle } from "@/components/caveman-toggle";
 
 type Props = {
   grouped: { section: string; pages: DocPagePreview[] }[];
@@ -40,6 +41,14 @@ export function DocsSidebar({ grouped }: Props) {
           </ul>
         </div>
       ))}
+
+      {/* Caveman mode toggle */}
+      <div className="border-t border-border pt-4">
+        <p className="mb-2 px-2 text-xs font-semibold uppercase tracking-widest text-muted-foreground">
+          Reading mode
+        </p>
+        <CavemanToggle showLabels className="w-full justify-center" />
+      </div>
     </nav>
   );
 }

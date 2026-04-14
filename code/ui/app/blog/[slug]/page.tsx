@@ -3,7 +3,6 @@ import { headers } from "next/headers";
 import { notFound } from "next/navigation";
 import { Suspense } from "react";
 import { ShareButtons } from "./share-buttons";
-import { CavemanModeToggle } from "@/components/caveman-mode-toggle";
 import { CavemanContent } from "@/components/caveman-content";
 import { isSanityConfigured, sanityFetch } from "@/lib/sanity/client";
 import { blogPostBySlugQuery } from "@/lib/sanity/queries";
@@ -88,12 +87,9 @@ export default async function BlogPostPage({ params }: Props) {
           </p>
         )}
 
-        {/* Divider + share + caveman toggle */}
+        {/* Divider + share */}
         <div className="my-8 flex items-center gap-4">
           <hr className="flex-1 border-border" />
-          <Suspense>
-            <CavemanModeToggle />
-          </Suspense>
           <ShareButtons title={post.title} url={canonicalUrl} />
         </div>
 

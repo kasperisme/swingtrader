@@ -1,7 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { Suspense } from "react";
-import { CavemanModeToggle } from "@/components/caveman-mode-toggle";
 import { CavemanContent } from "@/components/caveman-content";
 import { isSanityConfigured, sanityFetch } from "@/lib/sanity/client";
 import { docPageBySlugQuery, docPageSlugListQuery } from "@/lib/sanity/queries";
@@ -74,10 +73,7 @@ async function DocPageDetailData({ params }: Props) {
           </p>
         ) : null}
 
-        <div className="my-8 flex items-center gap-4">
-          <div className="flex-1 border-b border-border" aria-hidden />
-          <CavemanModeToggle />
-        </div>
+        <div className="my-8 border-b border-border" aria-hidden />
 
         <div className="space-y-5 text-base">
           <CavemanContent
