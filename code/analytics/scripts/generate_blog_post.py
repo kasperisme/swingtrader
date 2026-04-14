@@ -31,6 +31,7 @@ Optional env vars:
   NEWS_MAX_ARTICLES        (default: 20 — max articles pulled for analysis)
   SITE_BASE_URL            (default: https://newsimpactscreener.com)
   X_CLIENT_ID              — OAuth2 PKCE client ID
+  X_CLIENT_SECRET          — OAuth2 client secret (for confidential clients)
   X_REDIRECT_URI           — OAuth2 PKCE redirect URI
                              (default: https://www.newsimpactscreener.com/x/oauth/callback-script)
   X_OAUTH2_SCOPE           — OAuth2 scopes (default: tweet.read users.read offline.access)
@@ -103,6 +104,7 @@ SITE_BASE_URL = os.environ.get(
     "SITE_BASE_URL", "https://newsimpactscreener.com"
 ).rstrip("/")
 X_CLIENT_ID = os.environ.get("X_CLIENT_ID", "")
+X_CLIENT_SECRET = os.environ.get("X_CLIENT_SECRET", "")
 X_REDIRECT_URI = os.environ.get(
     "X_REDIRECT_URI",
     "https://www.newsimpactscreener.com/x/oauth/callback-script",
@@ -747,24 +749,30 @@ def _post_x_thread(tweets: list[str], dry_run: bool = False) -> Optional[str]:
             "Missing OAuth2 PKCE config. Set both X_CLIENT_ID and X_REDIRECT_URI — skipping X thread."
         )
         return None
-    if "supabase.co/auth/v1/callback" in X_REDIRECT_URI:
-        log.warning(
-            "X_REDIRECT_URI points to Supabase auth callback (%s), which can trigger bad_oauth_state "
-            "for this CLI PKCE flow. Use a redirect URI registered in your X app for this script.",
-            X_REDIRECT_URI,
-        )
-        return None
+
     if "tweet.write" not in X_OAUTH2_SCOPE:
         log.warning(
             "X_OAUTH2_SCOPE is missing tweet.write; posting will fail. Current scope: %s",
             X_OAUTH2_SCOPE,
         )
         return None
-    auth = OAuth2PKCEAuth(
-        client_id=X_CLIENT_ID,
-        redirect_uri=X_REDIRECT_URI,
-        scope=X_OAUTH2_SCOPE,
-    )
+    auth_kwargs: dict[str, str] = {
+        "client_id": X_CLIENT_ID,
+        "redirect_uri": X_REDIRECT_URI,
+        "scope": X_OAUTH2_SCOPE,
+    }
+    if X_CLIENT_SECRET:
+        auth_kwargs["client_secret"] = X_CLIENT_SECRET
+    try:
+        auth = OAuth2PKCEAuth(**auth_kwargs)
+    except TypeError:
+        # Some xdk versions may not accept client_secret in constructor.
+        auth_kwargs.pop("client_secret", None)
+        auth = OAuth2PKCEAuth(**auth_kwargs)
+        if X_CLIENT_SECRET:
+            log.warning(
+                "Installed xdk does not accept client_secret in OAuth2PKCEAuth constructor."
+            )
     auth_url = auth.get_authorization_url()
     log.warning("Complete X OAuth2 authorization in your browser: %s", auth_url)
     callback_url = X_OAUTH2_AUTH_RESPONSE_URL.strip()
@@ -778,36 +786,41 @@ def _post_x_thread(tweets: list[str], dry_run: bool = False) -> Optional[str]:
     try:
         tokens = auth.fetch_token(authorization_response=callback_url)
     except Exception as exc:
+        msg = str(exc)
+        if "unauthorized_client" in msg or "Missing valid authorization header" in msg:
+            log.error(
+                "OAuth2 token exchange rejected client authentication: %s. "
+                "If your X app is confidential, ensure X_CLIENT_SECRET is set and your xdk supports "
+                "passing it; otherwise configure the X app/client type for PKCE public client flow.",
+                exc,
+            )
+            return None
         log.error(
             "OAuth2 token exchange failed: %s. Ensure callback URL is from the latest auth_url in this run "
             "(state must match) and uses the same X_REDIRECT_URI.",
             exc,
         )
         return None
-    x_access_token = str(tokens.get("access_token") or "").strip()
-    if not x_access_token:
-        log.warning("OAuth2 token exchange returned no access_token — skipping X thread.")
-        return None
-    log.info("OAuth2 PKCE exchange succeeded — TOKEN=%s", _mask(x_access_token))
-
+    x_access_token = tokens["access_token"]
     client = XClient(bearer_token=x_access_token)
+
+    log.info("OAuth2 PKCE exchange succeeded — TOKEN=%s", _mask(x_access_token))
+    # Some xdk versions expose OAuth2PKCEAuth without request-header helpers.
+    # In that case, use the exchanged access token directly.
+
     root_id: Optional[str] = None
     reply_to: Optional[str] = None
 
     for i, text in enumerate(tweets):
-        try:
-            body: dict[str, Any] = {"text": text}
-            if reply_to:
-                body["reply"] = {"in_reply_to_tweet_id": reply_to}
-            response = client.posts.create(body=body)
-            tweet_id = str(response.data.id)
-            log.info("Posted tweet %d/%d id=%s", i + 1, len(tweets), tweet_id)
-            if root_id is None:
-                root_id = tweet_id
-            reply_to = tweet_id
-        except Exception as exc:
-            log.error("Failed to post tweet %d/%d: %s", i + 1, len(tweets), exc)
-            break
+        body: dict[str, Any] = {"text": text}
+        if reply_to:
+            body["reply"] = {"in_reply_to_tweet_id": reply_to}
+        response = client.posts.create(body=body)
+        tweet_id = str(response.data.id)
+        log.info("Posted tweet %d/%d id=%s", i + 1, len(tweets), tweet_id)
+        if root_id is None:
+            root_id = tweet_id
+        reply_to = tweet_id
 
     return root_id
 
