@@ -79,12 +79,36 @@ Purpose:
 Effect:
 - If both `NOVO.B` and `NVO` map to canonical `NVO`, edges converge into one canonical graph node.
 
+---
+
+## 4) Edge traceability to source articles + dimensions
+
+Table: `swingtrader.ticker_relationship_edge_evidence`
+
+Purpose:
+- Attach each edge to concrete source rows from `news_impact_heads`.
+- Persist article provenance and dimension snapshots from `news_impact_vectors`.
+
+Stored evidence:
+- `edge_id`, `article_id`, `rel_pair_key`, `rel_type`
+- `pair_strength`, `head_confidence`, `reasoning_text`
+- `impact_json_snapshot`, `top_dimensions_snapshot`
+
+Refresh function:
+- `swingtrader.refresh_ticker_relationship_edge_evidence(p_lookback interval default null)`
+
+Traceability view:
+- `swingtrader.ticker_relationship_edge_traceability_v`
+- Join path: `ticker_relationship_edges -> edge_evidence -> news_articles (+ vector snapshots)`
+
 ## Data flow
 
 1. Ingestion/scoring writes article relationship heads to `news_impact_heads`.
 2. `refresh_ticker_relationship_edges()` parses heads and upserts `ticker_relationship_edges`.
-3. `ticker_relationship_network_resolved_v` maps aliases to canonical symbols using `security_identity_map`.
-4. Narrative graph traversal can read from the resolved view for stable multi-hop expansion.
+3. `refresh_ticker_relationship_edge_evidence()` backfills edge-to-article evidence plus vector snapshots.
+4. `ticker_relationship_network_resolved_v` maps aliases to canonical symbols using `security_identity_map`.
+5. Narrative graph traversal can read from the resolved view for stable multi-hop expansion.
+6. Audit/debug can read `ticker_relationship_edge_traceability_v` for exact source provenance.
 
 ## Operational queries
 
@@ -96,6 +120,9 @@ select swingtrader.refresh_ticker_relationship_edges(null);
 
 -- Sliding refresh (recent rows only)
 select swingtrader.refresh_ticker_relationship_edges(interval '7 days');
+
+-- Refresh traceability rows (recommended after edge refresh)
+select swingtrader.refresh_ticker_relationship_edge_evidence(interval '7 days');
 ```
 
 ## Add alias mappings
@@ -146,6 +173,27 @@ from swingtrader.ticker_relationship_network_resolved_v
 where from_ticker = 'NVO'
 order by strength_avg desc, mention_count desc
 limit 30;
+```
+
+## Trace a specific edge back to source evidence
+
+```sql
+select
+  edge_id,
+  from_ticker,
+  to_ticker,
+  rel_type,
+  article_id,
+  article_title,
+  article_url,
+  pair_strength,
+  head_confidence,
+  top_dimensions_snapshot
+from swingtrader.ticker_relationship_edge_traceability_v
+where from_ticker = 'NVO'
+  and to_ticker = 'LLY'
+order by published_at desc
+limit 20;
 ```
 
 ## Best practices
