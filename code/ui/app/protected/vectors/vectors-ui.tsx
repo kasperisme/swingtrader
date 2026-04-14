@@ -1,8 +1,8 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useMemo, useState } from "react";
 import { CLUSTERS, DIMENSION_MAP, type Cluster } from "./dimensions";
-import { ChevronDown, ChevronRight, Search, TrendingUp, TrendingDown, Minus } from "lucide-react";
+import { Search, TrendingDown, TrendingUp } from "lucide-react";
 
 export interface TickerRow {
   ticker: string;
@@ -101,7 +101,45 @@ function ClusterSummaryScore({
   return <span className={`text-xs font-mono font-medium ${color}`}>{avg.toFixed(2)}</span>;
 }
 
-function ClusterPanel({
+function DimensionRow({
+  label,
+  description,
+  higherIs,
+  score,
+  rawValue,
+}: {
+  label: string;
+  description: string;
+  higherIs: "better" | "worse";
+  score: number | null;
+  rawValue: number | null;
+}) {
+  return (
+    <div className="border-t border-border py-2 first:border-t-0">
+      <div className="mb-1 flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <div className="flex items-center gap-1.5">
+            <span className="text-xs font-medium text-foreground">{label}</span>
+            {higherIs === "better" ? (
+              <TrendingUp size={10} className="shrink-0 text-emerald-500" />
+            ) : (
+              <TrendingDown size={10} className="shrink-0 text-rose-500" />
+            )}
+          </div>
+          <p className="mt-0.5 text-[11px] leading-snug text-muted-foreground">{description}</p>
+          {rawValue != null ? (
+            <span className="font-mono text-[10px] text-muted-foreground/60">
+              raw: {rawValue.toFixed(4)}
+            </span>
+          ) : null}
+        </div>
+      </div>
+      <ScoreBar score={score} higherIs={higherIs} />
+    </div>
+  );
+}
+
+function ClusterSection({
   cluster,
   dimensions,
   raw,
@@ -110,121 +148,63 @@ function ClusterPanel({
   dimensions: Record<string, number | null>;
   raw: Record<string, number | null>;
 }) {
-  const [open, setOpen] = useState(false);
-
   return (
-    <div className="border rounded-lg overflow-hidden">
-      <button
-        onClick={() => setOpen((o) => !o)}
-        className="w-full flex items-center justify-between px-3 py-2 bg-muted/40 hover:bg-muted/70 transition-colors text-left"
-      >
-        <div className="flex items-center gap-2">
-          {open ? (
-            <ChevronDown size={14} className="text-muted-foreground shrink-0" />
-          ) : (
-            <ChevronRight size={14} className="text-muted-foreground shrink-0" />
-          )}
-          <span className="text-xs font-semibold uppercase tracking-wide text-foreground/80">
-            {cluster.label}
-          </span>
-        </div>
+    <section className="pt-2">
+      <div className="mb-2 flex items-center justify-between">
+        <p className="text-[11px] font-semibold uppercase tracking-wide text-foreground/80">{cluster.label}</p>
         <ClusterSummaryScore cluster={cluster} dimensions={dimensions} />
-      </button>
-
-      {open && (
-        <div className="divide-y">
-          {cluster.dimensions.map((dim) => {
-            const score = dimensions[dim.key] ?? null;
-            const rawVal = raw[dim.key] ?? null;
-            return (
-              <div key={dim.key} className="px-3 py-2">
-                <div className="flex items-start justify-between gap-3 mb-1">
-                  <div className="min-w-0">
-                    <div className="flex items-center gap-1.5">
-                      <span className="text-xs font-medium text-foreground">{dim.label}</span>
-                      {dim.higher_is === "better" ? (
-                        <TrendingUp size={10} className="text-emerald-500 shrink-0" />
-                      ) : (
-                        <TrendingDown size={10} className="text-rose-500 shrink-0" />
-                      )}
-                    </div>
-                    <p className="text-[11px] text-muted-foreground leading-snug mt-0.5">
-                      {dim.description}
-                    </p>
-                    {rawVal != null && (
-                      <span className="text-[10px] text-muted-foreground/60 font-mono">
-                        raw: {rawVal.toFixed(4)}
-                      </span>
-                    )}
-                  </div>
-                </div>
-                <ScoreBar score={score} higherIs={dim.higher_is} />
-              </div>
-            );
-          })}
-        </div>
-      )}
-    </div>
+      </div>
+      <div>
+        {cluster.dimensions.map((dim) => (
+          <DimensionRow
+            key={dim.key}
+            label={dim.label}
+            description={dim.description}
+            higherIs={dim.higher_is}
+            score={dimensions[dim.key] ?? null}
+            rawValue={raw[dim.key] ?? null}
+          />
+        ))}
+      </div>
+    </section>
   );
 }
 
-function TickerCard({ row }: { row: TickerRow }) {
-  const [expanded, setExpanded] = useState(false);
-
+function TickerProfile({ row }: { row: TickerRow }) {
   return (
-    <div className="border rounded-xl overflow-hidden shadow-sm">
-      <button
-        onClick={() => setExpanded((e) => !e)}
-        className="w-full text-left px-4 py-3 hover:bg-muted/30 transition-colors"
-      >
-        <div className="flex items-start justify-between gap-3">
-          <div className="min-w-0">
-            <div className="flex items-center gap-2">
-              <span className="font-bold text-sm text-foreground font-mono">{row.ticker}</span>
-              {expanded ? (
-                <ChevronDown size={14} className="text-muted-foreground" />
-              ) : (
-                <ChevronRight size={14} className="text-muted-foreground" />
-              )}
-            </div>
-            <p className="text-xs text-muted-foreground truncate mt-0.5">{row.metadata.name}</p>
-            <div className="flex items-center gap-2 mt-1 flex-wrap">
-              {row.metadata.sector && (
-                <span className="text-[10px] px-1.5 py-0.5 rounded bg-muted text-muted-foreground">
-                  {row.metadata.sector}
-                </span>
-              )}
-              {row.metadata.industry && (
-                <span className="text-[10px] text-muted-foreground truncate">
-                  {row.metadata.industry}
-                </span>
-              )}
-            </div>
+    <section className="space-y-3 border-t border-border pt-3 first:border-t-0 first:pt-0">
+      <div className="flex items-start justify-between gap-4">
+        <div className="min-w-0 space-y-1">
+          <div className="flex items-center gap-2">
+            <span className="font-mono text-sm font-bold text-foreground">{row.ticker}</span>
+            <span className="text-xs text-muted-foreground">{row.metadata.name}</span>
           </div>
-          <div className="text-right shrink-0">
-            <p className="text-xs font-mono font-medium">{formatMarketCap(row.metadata.market_cap)}</p>
-            <p className="text-[10px] text-muted-foreground mt-0.5">
-              {formatVectorDate(row.vector_date)}
-            </p>
+          <div className="mt-1 flex flex-wrap items-center gap-2">
+            {row.metadata.sector ? (
+              <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">
+                {row.metadata.sector}
+              </span>
+            ) : null}
+            {row.metadata.industry ? (
+              <span className="truncate text-[10px] text-muted-foreground">{row.metadata.industry}</span>
+            ) : null}
           </div>
         </div>
-      </button>
+        <div className="shrink-0 text-right">
+          <p className="font-mono text-xs font-medium">{formatMarketCap(row.metadata.market_cap)}</p>
+          <p className="mt-0.5 text-[10px] text-muted-foreground">{formatVectorDate(row.vector_date)}</p>
+        </div>
+      </div>
 
-      {expanded && (
-        <div className="px-4 pb-4 pt-1 border-t bg-background">
-          <div className="grid gap-2">
-            {CLUSTERS.map((cluster) => (
-              <ClusterPanel
-                key={cluster.id}
-                cluster={cluster}
-                dimensions={row.dimensions}
-                raw={row.raw}
-              />
-            ))}
-          </div>
-        </div>
-      )}
-    </div>
+      {CLUSTERS.map((cluster) => (
+        <ClusterSection
+          key={cluster.id}
+          cluster={cluster}
+          dimensions={row.dimensions}
+          raw={row.raw}
+        />
+      ))}
+    </section>
   );
 }
 
@@ -253,11 +233,11 @@ export function VectorsUI({ tickers, count }: { tickers: TickerRow[]; count: num
 
   if (count === 0) {
     return (
-      <div className="text-center py-16 text-muted-foreground">
-        <p className="text-sm">No company vectors found in the database.</p>
-        <p className="text-xs mt-1">
+      <div className="rounded-xl border border-border bg-card p-6 text-center text-muted-foreground">
+        <p className="text-sm">No vectors found for this selection.</p>
+        <p className="mt-1 text-xs">
           Run{" "}
-          <code className="font-mono bg-muted px-1 rounded">
+          <code className="rounded bg-muted px-1 font-mono">
             python -m news_impact.build_vectors_cli --tickers AAPL MSFT
           </code>{" "}
           to populate.
@@ -267,70 +247,68 @@ export function VectorsUI({ tickers, count }: { tickers: TickerRow[]; count: num
   }
 
   return (
-    <div className="flex flex-col gap-4">
-      {/* Controls */}
-      <div className="flex flex-col sm:flex-row gap-2">
-        <div className="relative flex-1">
-          <Search
-            size={14}
-            className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground"
-          />
-          <input
-            type="text"
-            placeholder="Search ticker, name, sector…"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            className="w-full pl-8 pr-3 py-1.5 text-sm border rounded-lg bg-background focus:outline-none focus:ring-2 focus:ring-ring"
-          />
+    <div className="flex flex-col gap-3">
+      {count > 1 ? (
+        <div className="grid gap-2 sm:grid-cols-[1fr_auto]">
+          <label className="relative block">
+            <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+            <span className="sr-only">Search vectors</span>
+            <input
+              type="text"
+              placeholder="Search ticker, company, sector…"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              className="h-9 w-full rounded-md border border-input bg-background pl-8 pr-3 text-sm outline-none ring-ring/50 transition focus-visible:ring-2"
+            />
+          </label>
+          <label className="sr-only" htmlFor="vectors-sector-filter">
+            Filter by sector
+          </label>
+          <select
+            id="vectors-sector-filter"
+            value={sectorFilter}
+            onChange={(e) => setSectorFilter(e.target.value)}
+            className="h-9 rounded-md border border-input bg-background px-3 text-sm outline-none ring-ring/50 transition focus-visible:ring-2"
+          >
+            {sectors.map((s) => (
+              <option key={s} value={s}>
+                {s === "all" ? "All sectors" : s}
+              </option>
+            ))}
+          </select>
         </div>
-        <select
-          value={sectorFilter}
-          onChange={(e) => setSectorFilter(e.target.value)}
-          className="text-sm border rounded-lg px-3 py-1.5 bg-background focus:outline-none focus:ring-2 focus:ring-ring"
-        >
-          {sectors.map((s) => (
-            <option key={s} value={s}>
-              {s === "all" ? "All sectors" : s}
-            </option>
-          ))}
-        </select>
-      </div>
+      ) : null}
 
-      <p className="text-xs text-muted-foreground">
-        {filtered.length} of {count} companies — scores are rank-normalised 0–1 within the
-        stored universe
-      </p>
-
-      {/* Legend */}
-      <div className="flex items-center gap-4 text-[11px] text-muted-foreground flex-wrap">
-        <span className="font-medium text-foreground/70">Score guide:</span>
-        <span className="flex items-center gap-1">
-          <span className="inline-block w-2.5 h-2.5 rounded-sm bg-emerald-500" /> favorable
+      <div className="flex flex-wrap items-center gap-3 text-[11px] text-muted-foreground">
+        <span className="font-medium text-foreground/80">Guide</span>
+        <span className="inline-flex items-center gap-1">
+          <span className="h-2.5 w-2.5 rounded-sm bg-emerald-500" /> favorable
         </span>
-        <span className="flex items-center gap-1">
-          <span className="inline-block w-2.5 h-2.5 rounded-sm bg-amber-400" /> neutral
+        <span className="inline-flex items-center gap-1">
+          <span className="h-2.5 w-2.5 rounded-sm bg-amber-400" /> neutral
         </span>
-        <span className="flex items-center gap-1">
-          <span className="inline-block w-2.5 h-2.5 rounded-sm bg-rose-500" /> risk
+        <span className="inline-flex items-center gap-1">
+          <span className="h-2.5 w-2.5 rounded-sm bg-rose-500" /> risk
         </span>
-        <span className="flex items-center gap-1">
-          <TrendingUp size={10} className="text-emerald-500" /> higher = better
+        <span className="inline-flex items-center gap-1">
+          <TrendingUp size={10} className="text-emerald-500" /> high = better
         </span>
-        <span className="flex items-center gap-1">
-          <TrendingDown size={10} className="text-rose-500" /> higher = worse
+        <span className="inline-flex items-center gap-1">
+          <TrendingDown size={10} className="text-rose-500" /> high = worse
         </span>
       </div>
 
-      {/* Ticker list */}
       <div className="grid gap-3">
         {filtered.map((row) => (
-          <TickerCard key={row.ticker} row={row} />
+          <TickerProfile key={row.ticker} row={row} />
         ))}
       </div>
 
-      {filtered.length === 0 && (
-        <div className="text-center py-8 text-muted-foreground text-sm">No results match your filter.</div>
-      )}
+      {filtered.length === 0 ? (
+        <div className="rounded-lg border border-border bg-card px-3 py-6 text-center text-sm text-muted-foreground">
+          No vectors match your current filter.
+        </div>
+      ) : null}
     </div>
   );
 }

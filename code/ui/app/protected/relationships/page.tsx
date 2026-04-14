@@ -1,8 +1,66 @@
 import { Suspense } from "react";
+import { createClient } from "@/lib/supabase/server";
 import { RelationshipsUI } from "./relationships-ui";
+import { type TickerRow } from "../vectors/vectors-ui";
 
-function RelationshipsData() {
-  return <RelationshipsUI />;
+async function fetchCompanyVectors(): Promise<TickerRow[]> {
+  const supabase = await createClient();
+
+  const { data, error } = await supabase
+    .schema("swingtrader")
+    .from("company_vectors")
+    .select("ticker, vector_date, dimensions_json, raw_json, metadata_json, fetched_at")
+    .order("ticker", { ascending: true })
+    .order("vector_date", { ascending: false });
+
+  if (error) {
+    console.error("Failed to fetch company vectors:", error);
+    return [];
+  }
+
+  const seen = new Set<string>();
+  const rows: TickerRow[] = [];
+
+  for (const row of data ?? []) {
+    if (seen.has(row.ticker)) continue;
+    seen.add(row.ticker);
+
+    let dimensions: Record<string, number | null> = {};
+    let raw: Record<string, number | null> = {};
+    let metadata = { name: row.ticker, sector: "", industry: "", market_cap: null as number | null };
+
+    try {
+      dimensions = JSON.parse(row.dimensions_json ?? "{}");
+    } catch {}
+    try {
+      raw = JSON.parse(row.raw_json ?? "{}");
+    } catch {}
+    try {
+      const m = JSON.parse(row.metadata_json ?? "{}");
+      metadata = {
+        name: m.name ?? row.ticker,
+        sector: m.sector ?? "",
+        industry: m.industry ?? "",
+        market_cap: m.market_cap ?? null,
+      };
+    } catch {}
+
+    rows.push({
+      ticker: row.ticker,
+      vector_date: row.vector_date,
+      dimensions,
+      raw,
+      metadata,
+      fetched_at: row.fetched_at,
+    });
+  }
+
+  return rows;
+}
+
+async function RelationshipsData() {
+  const vectors = await fetchCompanyVectors();
+  return <RelationshipsUI vectors={vectors} />;
 }
 
 export default function RelationshipsPage() {
@@ -10,16 +68,13 @@ export default function RelationshipsPage() {
     <div className="flex-1 w-full flex flex-col gap-6">
       <div>
         <p className="text-xs font-semibold uppercase tracking-widest text-amber-500">Network</p>
-        <h1 className="mt-1 text-2xl font-bold tracking-tight">Ticker Relationships Explorer</h1>
-        <p className="mt-1 text-sm text-muted-foreground">
-          Traverse canonical ticker relationships and inspect source-article evidence behind each edge.
-        </p>
+        <h1 className="mt-1 text-2xl font-bold tracking-tight">Explore</h1>
       </div>
 
       <Suspense
         fallback={
           <div className="text-sm text-muted-foreground animate-pulse rounded-lg border border-border p-6">
-            Loading relationship explorer…
+            Loading explore view…
           </div>
         }
       >

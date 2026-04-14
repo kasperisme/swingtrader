@@ -56,6 +56,28 @@ export type NodeNewsRow = {
   matched_ticker: string;
 };
 
+export type NodeSentimentRow = {
+  head_id: number;
+  article_id: number;
+  ticker: string;
+  sentiment_score: number;
+  reasoning_text: string | null;
+  confidence: number | null;
+  article_ts: string | null;
+  published_at: string | null;
+  article_source: string | null;
+  article_publisher: string | null;
+  article_title: string | null;
+  article_url: string | null;
+};
+
+export type NodeSentimentWindow = {
+  days: 10 | 21 | 50 | 200;
+  avg_sentiment: number | null;
+  weighted_sentiment: number | null;
+  mention_count: number;
+};
+
 export type NeighborhoodParams = {
   seedTicker: string;
   hops?: number;
@@ -139,7 +161,7 @@ export async function relationshipsGetNeighborhood(
 
   // Enforce hard cap: network traversal never exceeds 2 hops.
   const hops = Math.max(1, Math.min(2, Math.floor(params.hops ?? 2)));
-  const minStrength = Math.max(0, Math.min(1, params.minStrength ?? 0.35));
+  const minStrength = Math.max(0, Math.min(1, params.minStrength ?? 0.25));
   const minMentions = Math.max(1, params.minMentions ?? 1);
   const limitNodes = Math.max(20, params.limitNodes ?? 120);
   const limitEdges = Math.max(50, params.limitEdges ?? 300);
@@ -386,7 +408,10 @@ export async function relationshipsGetNodeNews(input: {
   const pageSize = Math.min(30, Math.max(5, input.pageSize ?? 12));
   const from = (page - 1) * pageSize;
   const to = from + pageSize - 1;
-  const daysLookback = Math.max(1, input.daysLookback ?? 30);
+  const daysLookback =
+    typeof input.daysLookback === "number" && input.daysLookback > 0
+      ? Math.max(1, input.daysLookback)
+      : null;
 
   const canonicalTicker = await resolveTickerClientSide(ticker);
   const supabase = await createClient();
@@ -405,28 +430,48 @@ export async function relationshipsGetNodeNews(input: {
       ...(aliasRows ?? []).map((r) => normalizeTicker(String(r.alias_value ?? ""))).filter(Boolean),
     ]),
   );
-  const cutoff = new Date(Date.now() - daysLookback * 24 * 60 * 60 * 1000).toISOString();
+  const cutoff = daysLookback
+    ? new Date(Date.now() - daysLookback * 24 * 60 * 60 * 1000).toISOString()
+    : null;
 
   // Primary source: graph traceability evidence (edge -> article).
   // This guarantees returned articles are directly tied to network edges.
-  const { data: fromTraceRows, error: fromTraceError } = await supabase
-    .schema("swingtrader")
-    .from("ticker_relationship_edge_traceability_v")
-    .select("article_id,article_title,article_url,published_at,from_ticker,to_ticker")
-    .in("from_ticker", tickers)
-    .gte("published_at", cutoff)
-    .order("published_at", { ascending: false })
-    .range(0, 300);
+  const fromTraceQuery = cutoff
+    ? supabase
+        .schema("swingtrader")
+        .from("ticker_relationship_edge_traceability_v")
+        .select("article_id,article_title,article_url,published_at,from_ticker,to_ticker")
+        .in("from_ticker", tickers)
+        .gte("published_at", cutoff)
+        .order("published_at", { ascending: false })
+        .range(0, 300)
+    : supabase
+        .schema("swingtrader")
+        .from("ticker_relationship_edge_traceability_v")
+        .select("article_id,article_title,article_url,published_at,from_ticker,to_ticker")
+        .in("from_ticker", tickers)
+        .order("published_at", { ascending: false })
+        .range(0, 300);
+  const { data: fromTraceRows, error: fromTraceError } = await fromTraceQuery;
   if (fromTraceError) return { ok: false, error: fromTraceError.message };
 
-  const { data: toTraceRows, error: toTraceError } = await supabase
-    .schema("swingtrader")
-    .from("ticker_relationship_edge_traceability_v")
-    .select("article_id,article_title,article_url,published_at,from_ticker,to_ticker")
-    .in("to_ticker", tickers)
-    .gte("published_at", cutoff)
-    .order("published_at", { ascending: false })
-    .range(0, 300);
+  const toTraceQuery = cutoff
+    ? supabase
+        .schema("swingtrader")
+        .from("ticker_relationship_edge_traceability_v")
+        .select("article_id,article_title,article_url,published_at,from_ticker,to_ticker")
+        .in("to_ticker", tickers)
+        .gte("published_at", cutoff)
+        .order("published_at", { ascending: false })
+        .range(0, 300)
+    : supabase
+        .schema("swingtrader")
+        .from("ticker_relationship_edge_traceability_v")
+        .select("article_id,article_title,article_url,published_at,from_ticker,to_ticker")
+        .in("to_ticker", tickers)
+        .order("published_at", { ascending: false })
+        .range(0, 300);
+  const { data: toTraceRows, error: toTraceError } = await toTraceQuery;
   if (toTraceError) return { ok: false, error: toTraceError.message };
 
   const dedupByArticle = new Map<number, NodeNewsRow>();
@@ -470,14 +515,23 @@ export async function relationshipsGetNodeNews(input: {
   }
 
   if (articleIds.length > 0) {
-    const { data: articleRows, error: articleError } = await supabase
-      .schema("swingtrader")
-      .from("news_articles")
-      .select("id,title,url,source,publisher,published_at,created_at")
-      .in("id", articleIds)
-      .gte("published_at", cutoff)
-      .order("published_at", { ascending: false })
-      .limit(500);
+    const articleQuery = cutoff
+      ? supabase
+          .schema("swingtrader")
+          .from("news_articles")
+          .select("id,title,url,source,publisher,published_at,created_at")
+          .in("id", articleIds)
+          .gte("published_at", cutoff)
+          .order("published_at", { ascending: false })
+          .limit(500)
+      : supabase
+          .schema("swingtrader")
+          .from("news_articles")
+          .select("id,title,url,source,publisher,published_at,created_at")
+          .in("id", articleIds)
+          .order("published_at", { ascending: false })
+          .limit(500);
+    const { data: articleRows, error: articleError } = await articleQuery;
 
     if (articleError) return { ok: false, error: articleError.message };
 
@@ -509,4 +563,115 @@ export async function relationshipsGetNodeNews(input: {
   const rows = allRows.slice(from, to + 1);
 
   return { ok: true, data: { canonicalTicker, rows, page, pageSize } };
+}
+
+export async function relationshipsGetNodeSentiment(input: {
+  ticker: string;
+  page?: number;
+  pageSize?: number;
+}): Promise<
+  RelationshipActionSuccess<{
+    canonicalTicker: string;
+    rows: NodeSentimentRow[];
+    windows: NodeSentimentWindow[];
+    page: number;
+    pageSize: number;
+  }>
+  | RelationshipActionError
+> {
+  const ticker = normalizeTicker(input.ticker ?? "");
+  if (!ticker) return { ok: false, error: "ticker is required" };
+  const page = Math.max(1, input.page ?? 1);
+  const pageSize = Math.min(50, Math.max(5, input.pageSize ?? 12));
+  const from = (page - 1) * pageSize;
+  const to = from + pageSize - 1;
+
+  const canonicalTicker = await resolveTickerClientSide(ticker);
+  const supabase = await createClient();
+
+  const { data: aliasRows, error: aliasError } = await supabase
+    .schema("swingtrader")
+    .from("security_identity_map")
+    .select("alias_kind,alias_value")
+    .eq("canonical_ticker", canonicalTicker)
+    .eq("alias_kind", "ticker");
+  if (aliasError) return { ok: false, error: aliasError.message };
+
+  const tickers = Array.from(
+    new Set([
+      canonicalTicker,
+      ...(aliasRows ?? []).map((r) => normalizeTicker(String(r.alias_value ?? ""))).filter(Boolean),
+    ]),
+  );
+
+  const { data, error } = await supabase
+    .schema("swingtrader")
+    .from("ticker_sentiment_heads_v")
+    .select(
+      "head_id,article_id,ticker,sentiment_score,reasoning_text,confidence,article_ts,published_at,article_source,article_publisher,article_title,article_url",
+    )
+    .in("ticker", tickers)
+    .order("article_ts", { ascending: false, nullsFirst: false })
+    .range(from, to);
+  if (error) return { ok: false, error: error.message };
+
+  const rows: NodeSentimentRow[] = (data ?? []).map((row) => ({
+    head_id: Number(row.head_id ?? 0),
+    article_id: Number(row.article_id ?? 0),
+    ticker: normalizeTicker(String(row.ticker ?? "")),
+    sentiment_score: Number(row.sentiment_score ?? 0),
+    reasoning_text: row.reasoning_text ? String(row.reasoning_text) : null,
+    confidence: row.confidence == null ? null : Number(row.confidence),
+    article_ts: row.article_ts ? String(row.article_ts) : null,
+    published_at: row.published_at ? String(row.published_at) : null,
+    article_source: row.article_source ? String(row.article_source) : null,
+    article_publisher: row.article_publisher ? String(row.article_publisher) : null,
+    article_title: row.article_title ? String(row.article_title) : null,
+    article_url: row.article_url ? String(row.article_url) : null,
+  }));
+
+  const windowsDef: Array<10 | 21 | 50 | 200> = [10, 21, 50, 200];
+  const maxDays = 200;
+  const cutoff = new Date(Date.now() - maxDays * 24 * 60 * 60 * 1000).toISOString();
+  const { data: aggData, error: aggError } = await supabase
+    .schema("swingtrader")
+    .from("ticker_sentiment_heads_v")
+    .select("sentiment_score,confidence,article_ts")
+    .in("ticker", tickers)
+    .gte("article_ts", cutoff)
+    .order("article_ts", { ascending: false })
+    .limit(5000);
+  if (aggError) return { ok: false, error: aggError.message };
+
+  const nowMs = Date.now();
+  const aggregates = (aggData ?? []).flatMap((row) => {
+    const ts = row.article_ts ? Date.parse(String(row.article_ts)) : NaN;
+    const sentiment = Number(row.sentiment_score ?? NaN);
+    const confidence =
+      row.confidence == null ? 1 : Math.max(0, Math.min(1, Number(row.confidence)));
+    if (!Number.isFinite(ts) || !Number.isFinite(sentiment)) return [];
+    const ageDays = (nowMs - ts) / (24 * 60 * 60 * 1000);
+    return [{ ageDays, sentiment, confidence }];
+  });
+
+  const windows: NodeSentimentWindow[] = windowsDef.map((days) => {
+    const within = aggregates.filter((r) => r.ageDays <= days);
+    if (within.length === 0) {
+      return { days, avg_sentiment: null, weighted_sentiment: null, mention_count: 0 };
+    }
+    const avg = within.reduce((sum, r) => sum + r.sentiment, 0) / within.length;
+    const weightSum = within.reduce((sum, r) => sum + r.confidence, 0);
+    const weighted =
+      weightSum > 0
+        ? within.reduce((sum, r) => sum + r.sentiment * r.confidence, 0) / weightSum
+        : null;
+    return {
+      days,
+      avg_sentiment: avg,
+      weighted_sentiment: weighted,
+      mention_count: within.length,
+    };
+  });
+
+  return { ok: true, data: { canonicalTicker, rows, windows, page, pageSize } };
 }

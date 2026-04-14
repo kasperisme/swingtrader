@@ -1,20 +1,24 @@
 "use client";
 
-import { useEffect, useMemo, useState, type MouseEvent as ReactMouseEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from "react";
 import {
   relationshipsGetAliases,
   relationshipsGetAliasesBulk,
   relationshipsGetEdgeEvidence,
   relationshipsGetNeighborhood,
   relationshipsGetNodeNews,
+  relationshipsGetNodeSentiment,
   relationshipsResolveTicker,
   type AliasRow,
   type AliasMap,
   type EdgeEvidence,
   type NodeNewsRow,
+  type NodeSentimentRow,
+  type NodeSentimentWindow,
   type RelationshipEdge,
 } from "@/app/actions/relationships";
 import { TickerSearchCombobox } from "@/components/ticker-search-combobox";
+import { VectorsUI, type TickerRow } from "../vectors/vectors-ui";
 
 const REL_COLORS: Record<string, string> = {
   competitor: "hsl(var(--chart-3))",
@@ -107,7 +111,11 @@ function runForceLayout(
   return Object.fromEntries(nodeIds.map((id) => [id, { x: pos[id]!.x, y: pos[id]!.y }]));
 }
 
-export function RelationshipsUI() {
+export function RelationshipsUI({ vectors = [] }: { vectors?: TickerRow[] }) {
+  const FIXED_MIN_STRENGTH = 0.25;
+  const FIXED_MIN_MENTIONS = 1;
+  const [sideTab, setSideTab] = useState<"details" | "vectors" | "sentiment">("details");
+  const [isDrawerOpen, setIsDrawerOpen] = useState(false);
   const [seedInput, setSeedInput] = useState("AAPL");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -117,9 +125,6 @@ export function RelationshipsUI() {
   const [truncated, setTruncated] = useState(false);
 
   const [hops] = useState<2>(2);
-  const [minStrength, setMinStrength] = useState(0.35);
-  const [minMentions, setMinMentions] = useState(1);
-  const [daysLookback, setDaysLookback] = useState(30);
   const [selectedRelTypes, setSelectedRelTypes] = useState<string[]>([...REL_TYPES]);
 
   const [selectedNode, setSelectedNode] = useState<string | null>(null);
@@ -130,12 +135,18 @@ export function RelationshipsUI() {
   const [nodeNewsPage, setNodeNewsPage] = useState(1);
   const [nodeNewsLoading, setNodeNewsLoading] = useState(false);
   const [nodeNewsError, setNodeNewsError] = useState<string | null>(null);
+  const [sentimentRows, setSentimentRows] = useState<NodeSentimentRow[]>([]);
+  const [sentimentWindows, setSentimentWindows] = useState<NodeSentimentWindow[]>([]);
+  const [sentimentPage, setSentimentPage] = useState(1);
+  const [sentimentLoading, setSentimentLoading] = useState(false);
+  const [sentimentError, setSentimentError] = useState<string | null>(null);
   const [evidenceRows, setEvidenceRows] = useState<EdgeEvidence[]>([]);
   const [evidencePage, setEvidencePage] = useState(1);
   const [draggingNode, setDraggingNode] = useState<string | null>(null);
   const [dragGroup, setDragGroup] = useState<string[]>([]);
   const [lastDragPoint, setLastDragPoint] = useState<{ x: number; y: number } | null>(null);
   const [manualPositions, setManualPositions] = useState<Record<string, { x: number; y: number }>>({});
+  const suppressNodeClickRef = useRef(false);
 
   const filteredEdges = useMemo(
     () => edges.filter((e) => selectedRelTypes.includes(e.rel_type)),
@@ -222,6 +233,15 @@ export function RelationshipsUI() {
       .sort((a, b) => b.strength_avg - a.strength_avg);
   }, [selectedNode, visibleGraph.edges]);
 
+  const selectedNodeVectors = useMemo(() => {
+    if (!selectedNode) return [];
+    const allowed = new Set<string>([
+      selectedNode,
+      ...(aliasesByNode[selectedNode] ?? []).map((v) => v.toUpperCase()),
+    ]);
+    return vectors.filter((row) => allowed.has(row.ticker.toUpperCase()));
+  }, [aliasesByNode, selectedNode, vectors]);
+
   async function loadNeighborhood(resetSelection = true, seedOverride?: string) {
     setLoading(true);
     setError(null);
@@ -235,10 +255,9 @@ export function RelationshipsUI() {
     const result = await relationshipsGetNeighborhood({
       seedTicker: canonical,
       hops,
-      minStrength,
-      minMentions,
+      minStrength: FIXED_MIN_STRENGTH,
+      minMentions: FIXED_MIN_MENTIONS,
       relTypes: selectedRelTypes,
-      daysLookback,
       limitNodes: 140,
       limitEdges: 360,
     });
@@ -259,6 +278,8 @@ export function RelationshipsUI() {
       setEvidencePage(1);
       setNodeNewsRows([]);
       setNodeNewsPage(1);
+      setSentimentRows([]);
+      setSentimentPage(1);
     }
   }
 
@@ -266,10 +287,9 @@ export function RelationshipsUI() {
     const result = await relationshipsGetNeighborhood({
       seedTicker: node,
       hops,
-      minStrength,
-      minMentions,
+      minStrength: FIXED_MIN_STRENGTH,
+      minMentions: FIXED_MIN_MENTIONS,
       relTypes: selectedRelTypes,
-      daysLookback,
       limitNodes: 140,
       limitEdges: 360,
     });
@@ -324,7 +344,6 @@ export function RelationshipsUI() {
       ticker: selectedNode,
       page: nodeNewsPage,
       pageSize: 10,
-      daysLookback,
     }).then((res) => {
       setNodeNewsLoading(false);
       if (!res.ok) {
@@ -338,7 +357,33 @@ export function RelationshipsUI() {
       setNodeNewsError(err instanceof Error ? err.message : "Failed to load node news");
       setNodeNewsRows([]);
     });
-  }, [selectedNode, nodeNewsPage, daysLookback]);
+  }, [selectedNode, nodeNewsPage]);
+
+  useEffect(() => {
+    if (!selectedNode) return;
+    setSentimentLoading(true);
+    setSentimentError(null);
+    relationshipsGetNodeSentiment({
+      ticker: selectedNode,
+      page: sentimentPage,
+      pageSize: 10,
+    }).then((res) => {
+      setSentimentLoading(false);
+      if (!res.ok) {
+        setSentimentError(res.error);
+        setSentimentRows([]);
+        setSentimentWindows([]);
+        return;
+      }
+      setSentimentRows(res.data.rows);
+      setSentimentWindows(res.data.windows);
+    }).catch((err) => {
+      setSentimentLoading(false);
+      setSentimentError(err instanceof Error ? err.message : "Failed to load node sentiment");
+      setSentimentRows([]);
+      setSentimentWindows([]);
+    });
+  }, [selectedNode, sentimentPage]);
 
   useEffect(() => {
     if (!selectedEdge) return;
@@ -381,51 +426,23 @@ export function RelationshipsUI() {
 
   return (
     <div className="flex flex-col gap-4">
-      <div className="rounded-xl border border-border bg-card/60 p-3">
+      <div className="p-1">
         <div className="grid gap-3 md:grid-cols-6">
           <TickerSearchCombobox
-            className="md:col-span-2"
+            className="md:col-span-5"
             value={seedInput}
             onChange={setSeedInput}
             onSubmit={() => void loadNeighborhood(true)}
             options={searchSuggestions}
             placeholder="Search ticker or alias…"
           />
-          <input
-            type="number"
-            step="0.05"
-            min="0"
-            max="1"
-            value={minStrength}
-            onChange={(e) => setMinStrength(Math.max(0, Math.min(1, Number(e.target.value) || 0)))}
-            className="h-9 rounded-md border border-input bg-background px-3 text-sm"
-            title="Min strength"
-          />
-          <input
-            type="number"
-            min="1"
-            value={minMentions}
-            onChange={(e) => setMinMentions(Math.max(1, Number(e.target.value) || 1))}
-            className="h-9 rounded-md border border-input bg-background px-3 text-sm"
-            title="Min mentions"
-          />
           <button
             onClick={() => void loadNeighborhood(true)}
-            className="h-9 rounded-md bg-foreground px-3 text-sm font-medium text-background"
+            className="h-9 rounded-md border border-border bg-background px-3 text-sm font-medium text-foreground transition-colors hover:bg-muted"
             disabled={loading}
           >
             {loading ? "Loading..." : "Explore"}
           </button>
-        </div>
-        <div className="mt-3 flex flex-wrap items-center gap-2">
-          <input
-            type="number"
-            min="1"
-            value={daysLookback}
-            onChange={(e) => setDaysLookback(Math.max(1, Number(e.target.value) || 1))}
-            className="ml-auto h-8 w-28 rounded-md border border-input bg-background px-2 text-xs"
-            title="Days lookback"
-          />
         </div>
         <div className="mt-2 flex flex-wrap items-center gap-3">
           <span className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Edge legend</span>
@@ -473,16 +490,29 @@ export function RelationshipsUI() {
 
       {error ? <p className="text-sm text-rose-500">{error}</p> : null}
 
-      <div className="grid gap-4 lg:grid-cols-[1.6fr_1fr]">
-        <div className="rounded-xl border border-border bg-card overflow-hidden">
+      <div className="relative">
+        <button
+          type="button"
+          onClick={() => setIsDrawerOpen((prev) => !prev)}
+          className="absolute right-3 top-3 z-20 rounded-md border border-border bg-background px-2.5 py-1 text-xs font-medium text-foreground transition-colors hover:bg-muted"
+        >
+          {isDrawerOpen ? "Hide Panel" : "Show Panel"}
+        </button>
+        <div className="overflow-hidden rounded-xl bg-card">
           <svg
             viewBox={`0 0 ${GW} ${GH}`}
             className="w-full"
+            onDoubleClick={() => {
+              if (isDrawerOpen) setIsDrawerOpen(false);
+            }}
             onMouseMove={(e) => {
               if (!draggingNode || !lastDragPoint) return;
               const p = toSvgCoords(e);
               const dx = p.x - lastDragPoint.x;
               const dy = p.y - lastDragPoint.y;
+              if (Math.abs(dx) + Math.abs(dy) > 0.5) {
+                suppressNodeClickRef.current = true;
+              }
               setLastDragPoint(p);
               setManualPositions((prev) => {
                 const next = { ...prev };
@@ -498,11 +528,17 @@ export function RelationshipsUI() {
               setDraggingNode(null);
               setDragGroup([]);
               setLastDragPoint(null);
+              setTimeout(() => {
+                suppressNodeClickRef.current = false;
+              }, 0);
             }}
             onMouseLeave={() => {
               setDraggingNode(null);
               setDragGroup([]);
               setLastDragPoint(null);
+              setTimeout(() => {
+                suppressNodeClickRef.current = false;
+              }, 0);
             }}
           >
             {visibleGraph.edges.map((edge, idx) => {
@@ -552,6 +588,7 @@ export function RelationshipsUI() {
                   style={{ opacity: dimmed ? 0.3 : 1 }}
                   onMouseDown={(e) => {
                     e.stopPropagation();
+                    suppressNodeClickRef.current = false;
                     setDraggingNode(node);
                     const connected = new Set<string>([node]);
                     for (const edge of edges) {
@@ -570,13 +607,23 @@ export function RelationshipsUI() {
                     }
                   }}
                   onClick={() => void (async () => {
+                    if (suppressNodeClickRef.current) {
+                      suppressNodeClickRef.current = false;
+                      return;
+                    }
                     setSelectedNode(node);
                     setSelectedEdge(null);
                     setEvidenceRows([]);
                     setNodeNewsPage(1);
+                    setSentimentPage(1);
                     // Keep current graph and append neighborhood from clicked node.
                     await expandAroundNode(node);
                   })()}
+                  onDoubleClick={(e) => {
+                    e.stopPropagation();
+                    setSelectedNode(node);
+                    setIsDrawerOpen((prev) => !prev);
+                  }}
                 >
                   <circle
                     r={NODE_R}
@@ -600,8 +647,161 @@ export function RelationshipsUI() {
           </svg>
         </div>
 
-        <div className="rounded-xl border border-border bg-card p-3 flex flex-col gap-3">
-          <div>
+        {isDrawerOpen ? (
+          <div className="absolute right-0 top-0 z-10 h-full w-full max-w-[30rem] overflow-y-auto border-l border-border bg-background/95 p-2 backdrop-blur-sm">
+          <div className="inline-flex w-fit items-center gap-1 rounded-md bg-muted/60 p-1">
+            <button
+              type="button"
+              onClick={() => setSideTab("details")}
+              className={`rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${
+                sideTab === "details"
+                  ? "bg-background text-foreground"
+                  : "text-muted-foreground hover:text-foreground"
+              }`}
+            >
+              Graph Details
+            </button>
+            <button
+              type="button"
+              onClick={() => setSideTab("vectors")}
+              className={`rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${
+                sideTab === "vectors"
+                  ? "bg-background text-foreground"
+                  : "text-muted-foreground hover:text-foreground"
+              }`}
+            >
+              Company Profile
+            </button>
+            <button
+              type="button"
+              onClick={() => setSideTab("sentiment")}
+              className={`rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${
+                sideTab === "sentiment"
+                  ? "bg-background text-foreground"
+                  : "text-muted-foreground hover:text-foreground"
+              }`}
+            >
+              Sentiment
+            </button>
+          </div>
+
+          {sideTab === "vectors" ? (
+            <div className="p-2">
+              {!selectedNode ? (
+                <p className="text-sm text-muted-foreground">
+                  Select a node to view company profile for that ticker.
+                </p>
+              ) : (
+                <VectorsUI tickers={selectedNodeVectors} count={selectedNodeVectors.length} />
+              )}
+            </div>
+          ) : sideTab === "sentiment" ? (
+            <div className="p-2">
+              <div className="flex items-center justify-between">
+                <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Ticker Sentiment</p>
+                {selectedNode ? (
+                  <div className="flex items-center gap-1">
+                    <button
+                      onClick={() => setSentimentPage((p) => Math.max(1, p - 1))}
+                      className="rounded border border-border px-2 py-0.5 text-xs"
+                    >
+                      Prev
+                    </button>
+                    <span className="text-xs text-muted-foreground">{sentimentPage}</span>
+                    <button
+                      onClick={() => setSentimentPage((p) => p + 1)}
+                      className="rounded border border-border px-2 py-0.5 text-xs"
+                    >
+                      Next
+                    </button>
+                  </div>
+                ) : null}
+              </div>
+              <div className="mt-2 max-h-[36rem] overflow-auto">
+                {selectedNode && !sentimentLoading && !sentimentError ? (
+                  <div className="grid grid-cols-2 gap-2 border-b border-border p-2 md:grid-cols-4">
+                    {[10, 21, 50, 200].map((days) => {
+                      const bucket = sentimentWindows.find((w) => w.days === days);
+                      const score = bucket?.weighted_sentiment ?? bucket?.avg_sentiment ?? null;
+                      const toneClass =
+                        score == null
+                          ? "text-muted-foreground"
+                          : score > 0
+                            ? "text-emerald-500"
+                            : score < 0
+                              ? "text-rose-500"
+                              : "text-muted-foreground";
+                      return (
+                        <div key={`sent-window-${days}`} className="bg-background/60 px-2 py-1.5">
+                          <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">{days}D</p>
+                          <p className={`mt-0.5 font-mono text-sm font-semibold ${toneClass}`}>
+                            {score == null ? "—" : `${score > 0 ? "+" : ""}${score.toFixed(2)}`}
+                          </p>
+                          <p className="text-[10px] text-muted-foreground">
+                            {bucket?.mention_count ?? 0} mentions
+                          </p>
+                        </div>
+                      );
+                    })}
+                  </div>
+                ) : null}
+                {!selectedNode ? (
+                  <p className="p-2 text-xs text-muted-foreground">Select a node to load ticker sentiment.</p>
+                ) : sentimentLoading ? (
+                  <p className="p-2 text-xs text-muted-foreground">Loading sentiment…</p>
+                ) : sentimentError ? (
+                  <p className="p-2 text-xs text-rose-500">{sentimentError}</p>
+                ) : sentimentRows.length === 0 ? (
+                  <p className="p-2 text-xs text-muted-foreground">
+                    No sentiment rows found for <span className="font-mono">{selectedNode}</span>.
+                  </p>
+                ) : (
+                  <div className="divide-y divide-border">
+                    {sentimentRows.map((row) => (
+                      <div key={`${row.head_id}-${row.article_id}-${row.ticker}`} className="p-2">
+                        <div className="flex items-center gap-2">
+                          <span className="font-mono text-xs font-semibold">{row.ticker}</span>
+                          <span
+                            className={`text-xs font-semibold ${
+                              row.sentiment_score > 0
+                                ? "text-emerald-500"
+                                : row.sentiment_score < 0
+                                  ? "text-rose-500"
+                                  : "text-muted-foreground"
+                            }`}
+                          >
+                            {row.sentiment_score > 0 ? "+" : ""}
+                            {row.sentiment_score.toFixed(2)}
+                          </span>
+                          <span className="text-[11px] text-muted-foreground">
+                            conf {row.confidence == null ? "—" : row.confidence.toFixed(2)}
+                          </span>
+                        </div>
+                        <a
+                          href={row.article_url ?? "#"}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="mt-1 block text-xs font-medium text-foreground hover:underline"
+                        >
+                          {row.article_title ?? `Article #${row.article_id}`}
+                        </a>
+                        <p className="mt-0.5 text-[11px] text-muted-foreground">
+                          {row.article_ts ? new Date(row.article_ts).toLocaleString() : "Unknown date"}
+                          {row.article_source ? ` · ${row.article_source}` : ""}
+                          {row.article_publisher ? ` · ${row.article_publisher}` : ""}
+                        </p>
+                        {row.reasoning_text ? (
+                          <p className="mt-1 text-[11px] text-muted-foreground line-clamp-3">{row.reasoning_text}</p>
+                        ) : null}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+          ) : (
+            <div className="p-2 flex flex-col gap-3">
+              <div>
             <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Selection</p>
             {selectedNode ? (
               <p className="mt-1 text-sm">
@@ -625,12 +825,12 @@ export function RelationshipsUI() {
             ) : null}
           </div>
 
-          <div>
+              <div>
             <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Aliases</p>
             {aliases.length === 0 ? (
               <p className="mt-1 text-xs text-muted-foreground">No aliases loaded</p>
             ) : (
-              <div className="mt-1 max-h-32 overflow-auto rounded-md border border-border">
+              <div className="mt-1 max-h-32 overflow-auto">
                 <table className="w-full text-xs">
                   <tbody className="divide-y divide-border">
                     {aliases.slice(0, 12).map((a, idx) => (
@@ -646,11 +846,11 @@ export function RelationshipsUI() {
             )}
           </div>
 
-          <div>
+              <div>
             <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
               Connections ({nodeConnections.length})
             </p>
-            <div className="mt-1 max-h-36 overflow-auto rounded-md border border-border">
+            <div className="mt-1 max-h-36 overflow-auto">
               <table className="w-full text-xs">
                 <tbody className="divide-y divide-border">
                   {nodeConnections.slice(0, 20).flatMap((c, idx) => {
@@ -688,7 +888,7 @@ export function RelationshipsUI() {
             </div>
           </div>
 
-          <div>
+              <div>
             <div className="flex items-center justify-between">
               <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Node News</p>
               {selectedNode ? (
@@ -709,7 +909,7 @@ export function RelationshipsUI() {
                 </div>
               ) : null}
             </div>
-            <div className="mt-1 max-h-44 overflow-auto rounded-md border border-border">
+            <div className="mt-1 max-h-44 overflow-auto">
               {!selectedNode ? (
                 <p className="p-2 text-xs text-muted-foreground">
                   Select a node to load related news.
@@ -720,7 +920,7 @@ export function RelationshipsUI() {
                 <p className="p-2 text-xs text-rose-500">{nodeNewsError}</p>
               ) : nodeNewsRows.length === 0 ? (
                 <p className="p-2 text-xs text-muted-foreground">
-                  No related news found for <span className="font-mono">{selectedNode}</span> in the current lookback window.
+                  No related news found for <span className="font-mono">{selectedNode}</span>.
                 </p>
               ) : (
                 <div className="divide-y divide-border">
@@ -745,7 +945,7 @@ export function RelationshipsUI() {
             </div>
           </div>
 
-          <div>
+              <div>
             <div className="flex items-center justify-between">
               <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Edge Evidence</p>
               {selectedEdge ? (
@@ -766,7 +966,7 @@ export function RelationshipsUI() {
                 </div>
               ) : null}
             </div>
-            <div className="mt-1 max-h-48 overflow-auto rounded-md border border-border">
+            <div className="mt-1 max-h-48 overflow-auto">
               {evidenceRows.length === 0 ? (
                 <p className="p-2 text-xs text-muted-foreground">Select an edge to load article provenance.</p>
               ) : (
@@ -793,8 +993,11 @@ export function RelationshipsUI() {
                 </div>
               )}
             </div>
+              </div>
+            </div>
+          )}
           </div>
-        </div>
+        ) : null}
       </div>
     </div>
   );

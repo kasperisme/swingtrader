@@ -79,8 +79,7 @@ export async function SiteHeader() {
           <nav className="hidden min-w-0 items-center gap-4 md:flex">
             <Link href="/protected" className={navLinkClass}>Articles</Link>
             <Link href="/protected/news-trends" className={navLinkClass}>News Trends</Link>
-            <Link href="/protected/relationships" className={navLinkClass}>Relationships</Link>
-            <Link href="/protected/vectors" className={navLinkClass}>Vectors</Link>
+            <Link href="/protected/relationships" className={navLinkClass}>Explore</Link>
             <Link href="/protected/screenings" className={navLinkClass}>Screenings</Link>
             <Link href="/protected/daily-narrative" className={navLinkClass}>Daily Narrative</Link>
             <Link href="/protected/trades" className={navLinkClass}>Trades</Link>
