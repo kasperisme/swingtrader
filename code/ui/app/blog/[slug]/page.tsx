@@ -1,10 +1,10 @@
 import Link from "next/link";
 import { headers } from "next/headers";
 import { notFound } from "next/navigation";
-import { PortableText } from "@portabletext/react";
+import { Suspense } from "react";
 import { ShareButtons } from "./share-buttons";
+import { CavemanContent } from "@/components/caveman-content";
 import { isSanityConfigured, sanityFetch } from "@/lib/sanity/client";
-import { portableTextComponents } from "@/lib/sanity/portable-text-components";
 import { blogPostBySlugQuery } from "@/lib/sanity/queries";
 import type { BlogPost } from "@/lib/sanity/types";
 
@@ -95,11 +95,21 @@ export default async function BlogPostPage({ params }: Props) {
 
         {/* Body */}
         <div className="prose-custom space-y-5">
-          {post.body && post.body.length > 0 ? (
-            <PortableText value={post.body} components={portableTextComponents} />
-          ) : (
-            <p className="text-muted-foreground">Post content is not available yet.</p>
-          )}
+          <Suspense
+            fallback={
+              <div className="animate-pulse space-y-3">
+                <div className="h-4 rounded bg-muted w-3/4" />
+                <div className="h-4 rounded bg-muted w-full" />
+                <div className="h-4 rounded bg-muted w-5/6" />
+              </div>
+            }
+          >
+            <CavemanContent
+              body={post.body}
+              cavemanBody={post.cavemanBody}
+              emptyFallback="Post content is not available yet."
+            />
+          </Suspense>
         </div>
       </article>
 

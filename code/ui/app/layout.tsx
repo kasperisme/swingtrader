@@ -7,6 +7,7 @@ import "./globals.css";
 import { Analytics } from "@vercel/analytics/next";
 import { SiteFooter, SITE_X_PROFILE_URL } from "@/components/site-footer";
 import { SiteHeader, SiteHeaderFallback } from "@/components/site-header";
+import { CavemanModeProvider } from "@/lib/caveman-mode";
 
 const defaultUrl = process.env.VERCEL_URL
   ? `https://${process.env.VERCEL_URL}`
@@ -71,11 +72,13 @@ export default function RootLayout({
           enableSystem={false}
           disableTransitionOnChange
         >
-          <Suspense fallback={<SiteHeaderFallback />}>
-            <SiteHeader />
-          </Suspense>
-          {children}
-          <SiteFooter />
+          <CavemanModeProvider>
+            <Suspense fallback={<SiteHeaderFallback />}>
+              <SiteHeader />
+            </Suspense>
+            {children}
+            <SiteFooter />
+          </CavemanModeProvider>
         </ThemeProvider>
       </body>
     </html>

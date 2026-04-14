@@ -50,6 +50,12 @@ export const postType = defineType({
       name: 'body',
       type: 'blockContent',
     }),
+    defineField({
+      name: 'cavemanBody',
+      title: 'Caveman Body',
+      type: 'blockContent',
+      description: 'Compressed, terse version of the post for caveman mode. Less word. More understand.',
+    }),
   ],
   preview: {
     select: {

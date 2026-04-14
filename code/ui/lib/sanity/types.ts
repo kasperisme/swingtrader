@@ -10,6 +10,8 @@ export type DocPagePreview = {
 export type DocPage = DocPagePreview & {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   body: any[];
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  cavemanBody?: any[];
 };
 
 export type BlogPostPreview = {
@@ -25,4 +27,6 @@ export type BlogPostPreview = {
 export type BlogPost = BlogPostPreview & {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   body: any[];
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  cavemanBody?: any[];
 };
