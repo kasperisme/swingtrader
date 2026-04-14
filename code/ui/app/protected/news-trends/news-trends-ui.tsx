@@ -52,29 +52,29 @@ type SemanticSearchItem = {
 
 // ── cluster palette ──────────────────────────────────────────────────────────
 const CLUSTER_COLORS: Record<string, string> = {
-  MACRO_SENSITIVITY: "#ef4444",
-  SECTOR_ROTATION: "#8b5cf6",
-  BUSINESS_MODEL: "#3b82f6",
-  FINANCIAL_STRUCTURE: "#06b6d4",
-  GROWTH_PROFILE: "#10b981",
-  VALUATION_POSITIONING: "#f59e0b",
-  GEOGRAPHY_TRADE: "#f97316",
-  SUPPLY_CHAIN_EXPOSURE: "#84cc16",
-  MARKET_BEHAVIOUR: "#ec4899",
+  MACRO_SENSITIVITY: "hsl(var(--chart-1))",
+  SECTOR_ROTATION: "hsl(var(--chart-2))",
+  BUSINESS_MODEL: "hsl(var(--chart-4))",
+  FINANCIAL_STRUCTURE: "hsl(var(--chart-3))",
+  GROWTH_PROFILE: "hsl(var(--chart-3))",
+  VALUATION_POSITIONING: "hsl(var(--chart-5))",
+  GEOGRAPHY_TRADE: "hsl(var(--chart-5))",
+  SUPPLY_CHAIN_EXPOSURE: "hsl(var(--chart-1))",
+  MARKET_BEHAVIOUR: "hsl(var(--chart-2))",
 };
 
 // Distinct colors for individual dimensions within a drilled-down cluster
 const DIM_PALETTE = [
-  "#ef4444",
-  "#f97316",
-  "#f59e0b",
-  "#84cc16",
-  "#10b981",
-  "#06b6d4",
-  "#3b82f6",
-  "#8b5cf6",
-  "#ec4899",
-  "#14b8a6",
+  "hsl(var(--chart-1))",
+  "hsl(var(--chart-5))",
+  "hsl(var(--chart-2))",
+  "hsl(var(--chart-3))",
+  "hsl(var(--chart-4))",
+  "hsl(var(--accent))",
+  "hsl(var(--primary))",
+  "hsl(var(--chart-2))",
+  "hsl(var(--chart-5))",
+  "hsl(var(--chart-3))",
 ];
 
 // ── helpers ──────────────────────────────────────────────────────────────────
@@ -1223,93 +1223,116 @@ export function NewsTrendsUI({ articles, chartHeight = 400 }: { articles: Articl
   return (
     <div className="flex flex-col gap-6">
       {/* Controls */}
-      <div className="flex flex-wrap items-center gap-3">
-        {/* View mode toggle */}
-        <div className="flex rounded-md border border-border overflow-hidden text-xs">
-          {(["daily", "hourly"] as ViewMode[]).map((mode) => (
+      <div className="flex flex-wrap items-end gap-3 rounded-xl border border-border bg-card/60 p-3">
+        <div className="flex flex-col gap-1.5">
+          <span className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+            Granularity
+          </span>
+          <div className="flex rounded-md border border-border overflow-hidden text-xs">
+            {(["daily", "hourly"] as ViewMode[]).map((mode) => (
+              <button
+                key={mode}
+                onClick={() => switchMode(mode)}
+                className={`px-3 py-1 capitalize transition-colors ${
+                  viewMode === mode
+                    ? "bg-foreground text-background"
+                    : "bg-background text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                {mode}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className="flex flex-col gap-1.5">
+          <span className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+            Smoothing
+          </span>
+          <div className="flex flex-wrap items-center gap-1.5">
+            {MA_OPTIONS[viewMode].map((opt) => (
+              <button
+                key={opt.value}
+                onClick={() => setMaWindow(opt.value)}
+                className={`text-xs px-2.5 py-1 rounded-md border transition-colors ${
+                  maWindow === opt.value
+                    ? "bg-foreground text-background border-foreground"
+                    : "bg-background text-muted-foreground border-border hover:border-foreground/40"
+                }`}
+              >
+                {opt.label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className="flex flex-col gap-1.5">
+          <span className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+            Series Mode
+          </span>
+          <div className="flex rounded-md border border-border overflow-hidden text-xs">
             <button
-              key={mode}
-              onClick={() => switchMode(mode)}
-              className={`px-3 py-1 capitalize transition-colors ${
-                viewMode === mode
+              onClick={() => setAggregationMode("period")}
+              className={`px-2.5 py-1 transition-colors ${
+                aggregationMode === "period"
                   ? "bg-foreground text-background"
                   : "bg-background text-muted-foreground hover:text-foreground"
               }`}
             >
-              {mode}
+              Period
             </button>
-          ))}
+            <button
+              onClick={() => setAggregationMode("cumulative")}
+              className={`px-2.5 py-1 transition-colors ${
+                aggregationMode === "cumulative"
+                  ? "bg-foreground text-background"
+                  : "bg-background text-muted-foreground hover:text-foreground"
+              }`}
+            >
+              Cumulative
+            </button>
+          </div>
         </div>
 
-        <span className="text-xs text-muted-foreground">MA:</span>
-        {MA_OPTIONS[viewMode].map((opt) => (
-          <button
-            key={opt.value}
-            onClick={() => setMaWindow(opt.value)}
-            className={`text-xs px-2.5 py-1 rounded-md border transition-colors ${
-              maWindow === opt.value
-                ? "bg-foreground text-background border-foreground"
-                : "bg-background text-muted-foreground border-border hover:border-foreground/40"
-            }`}
-          >
-            {opt.label}
-          </button>
-        ))}
-        <span className="text-xs text-muted-foreground ml-2">Series:</span>
-        <div className="flex rounded-md border border-border overflow-hidden text-xs">
-          <button
-            onClick={() => setAggregationMode("period")}
-            className={`px-2.5 py-1 transition-colors ${
-              aggregationMode === "period"
-                ? "bg-foreground text-background"
-                : "bg-background text-muted-foreground hover:text-foreground"
-            }`}
-          >
-            Period
-          </button>
-          <button
-            onClick={() => setAggregationMode("cumulative")}
-            className={`px-2.5 py-1 transition-colors ${
-              aggregationMode === "cumulative"
-                ? "bg-foreground text-background"
-                : "bg-background text-muted-foreground hover:text-foreground"
-            }`}
-          >
-            Cumulative
-          </button>
+        <div className="flex flex-col gap-1.5">
+          <span className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+            Overlay
+          </span>
+          <div className="flex items-center gap-2">
+            <select
+              value={benchmark}
+              onChange={(e) => setBenchmark(e.target.value as BenchmarkId)}
+              className="text-xs border rounded-md px-2 py-1 bg-background focus:outline-none focus:ring-2 focus:ring-ring"
+            >
+              {BENCHMARK_OPTIONS.map((b) => (
+                <option key={b.id} value={b.id}>
+                  {b.label}
+                </option>
+              ))}
+            </select>
+            <label className="flex items-center gap-1.5 text-xs text-muted-foreground cursor-pointer select-none">
+              <input
+                type="checkbox"
+                checked={showClusterMean}
+                onChange={(e) => setShowClusterMean(e.target.checked)}
+                className="rounded border-border"
+              />
+              Mean line
+            </label>
+            <label className="flex items-center gap-1.5 text-xs text-muted-foreground cursor-pointer select-none">
+              <input
+                type="checkbox"
+                checked={showArticleCount}
+                onChange={(e) => setShowArticleCount(e.target.checked)}
+                className="rounded border-border"
+              />
+              Article count
+            </label>
+          </div>
         </div>
-        <span className="text-xs text-muted-foreground ml-2">Overlay:</span>
-        <select
-          value={benchmark}
-          onChange={(e) => setBenchmark(e.target.value as BenchmarkId)}
-          className="text-xs border rounded-md px-2 py-1 bg-background focus:outline-none focus:ring-2 focus:ring-ring"
-        >
-          {BENCHMARK_OPTIONS.map((b) => (
-            <option key={b.id} value={b.id}>
-              {b.label}
-            </option>
-          ))}
-        </select>
-        <label className="flex items-center gap-1.5 text-xs text-muted-foreground cursor-pointer select-none">
-          <input
-            type="checkbox"
-            checked={showClusterMean}
-            onChange={(e) => setShowClusterMean(e.target.checked)}
-            className="rounded border-border"
-          />
-          Mean line
-        </label>
-        <label className="flex items-center gap-1.5 text-xs text-muted-foreground cursor-pointer select-none">
-          <input
-            type="checkbox"
-            checked={showArticleCount}
-            onChange={(e) => setShowArticleCount(e.target.checked)}
-            className="rounded border-border"
-          />
-          Article count
-        </label>
-        <span className="ml-auto text-xs text-muted-foreground">
-          {totalArticles} articles · {dateRange}
+
+        <span className="ml-auto text-sm text-muted-foreground">
+          <span className="font-medium text-foreground/80">{totalArticles}</span> articles · {dateRange}
         </span>
       </div>
 
@@ -1524,12 +1547,16 @@ export function NewsTrendsUI({ articles, chartHeight = 400 }: { articles: Articl
                     width={44}
                   />
                 )}
-                {showArticleCount && (
+                {showArticleCount && benchmark === "none" && (
                   <YAxis
                     yAxisId="count"
-                    hide
+                    orientation="right"
                     domain={[0, "auto"]}
                     allowDataOverflow={false}
+                    tick={{ fontSize: 10, fill: "currentColor", opacity: 0.45 }}
+                    tickLine={false}
+                    axisLine={false}
+                    width={34}
                   />
                 )}
                 <ReferenceLine
@@ -1603,10 +1630,10 @@ export function NewsTrendsUI({ articles, chartHeight = 400 }: { articles: Articl
                     yAxisId="count"
                     dataKey="__articleCount"
                     name="__articleCount"
-                    fill="#64748b"
-                    fillOpacity={0.2}
-                    stroke="#64748b"
-                    strokeOpacity={0.35}
+                    fill="hsl(var(--muted-foreground))"
+                    fillOpacity={0.28}
+                    stroke="hsl(var(--muted-foreground))"
+                    strokeOpacity={0.45}
                     barSize={10}
                   />
                 )}

@@ -48,25 +48,25 @@ export function ArticlesGridFallback() {
 export function ArticlesGrid({ articles }: { articles: ArticleGridItem[] }) {
   if (articles.length === 0) {
     return (
-      <div className="rounded-xl border border-border bg-card p-6 text-sm text-muted-foreground">
+      <div className="py-6 text-sm text-muted-foreground">
         No articles found.
       </div>
     );
   }
 
   return (
-    <div className="grid gap-3 sm:grid-cols-2">
+    <div className="grid gap-4 sm:grid-cols-2">
       {articles.map((article) => (
         <div
           key={article.id}
-          className="group rounded-xl border border-border bg-card p-3 transition-all duration-200 hover:border-amber-500/30 hover:shadow-md hover:shadow-amber-500/5"
+          className="group rounded-xl border border-border/80 bg-card/40 p-3 transition-colors duration-200 hover:border-amber-500/30 hover:bg-card/70"
         >
           <div className="relative h-36 w-full overflow-hidden rounded-lg bg-muted">
             {article.image_url ? (
               <img
                 src={article.image_url}
                 alt=""
-                className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-[1.02]"
+                className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-[1.01]"
                 loading="lazy"
               />
             ) : (

@@ -26,7 +26,7 @@ async function ArticlesData() {
 
   if (error) {
     return (
-      <div className="rounded-md border p-4 text-sm text-muted-foreground">
+      <div className="p-1 text-sm text-muted-foreground">
         Unable to load articles right now.
       </div>
     );
@@ -37,12 +37,11 @@ async function ArticlesData() {
 
 export default function ProtectedPage() {
   return (
-    <div className="flex-1 w-full flex flex-col gap-6">
+    <div className="flex-1 w-full flex flex-col gap-4">
       <div>
-        <p className="text-xs font-semibold uppercase tracking-widest text-amber-500">Feed</p>
-        <h1 className="mt-1 text-2xl font-bold tracking-tight">Latest Articles</h1>
-        <p className="mt-1 text-sm text-muted-foreground">
-          Most recently ingested articles from the news pipeline.
+        <h1 className="text-2xl font-bold tracking-tight">Articles</h1>
+        <p className="mt-1 max-w-2xl text-sm text-muted-foreground">
+          Most recent articles from the ingestion pipeline, with semantic search.
         </p>
       </div>
       <Suspense fallback={<ArticlesGridFallback />}>

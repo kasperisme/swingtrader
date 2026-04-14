@@ -142,7 +142,7 @@ async function PublishersMarquee() {
   const doubled = [...publishers, ...publishers];
 
   return (
-    <section className="border-t border-border py-12 md:py-16">
+    <section className="py-12 md:py-16">
       <div className="mx-auto max-w-6xl px-4 sm:px-6 lg:px-8">
         <p className="text-center text-xs font-semibold uppercase tracking-widest text-muted-foreground">
           Scanning news from
@@ -218,10 +218,10 @@ async function LandingArticlesHeaderAndList() {
               (item, index) => (
                 <div
                   key={item}
-                  className="flex items-center justify-between rounded-lg border border-border bg-background/50 px-4 py-3"
+                  className="flex items-center justify-between px-1 py-2.5"
                 >
                   <p className="text-sm font-medium">{item}</p>
-                  <span className="rounded-full border border-amber-500/20 bg-amber-500/10 px-2.5 py-0.5 text-xs font-semibold text-amber-400">
+                  <span className="text-xs font-semibold text-amber-500/85">
                     #{index + 1}
                   </span>
                 </div>
@@ -240,19 +240,8 @@ export default function Home() {
   return (
     <main className="min-h-screen bg-background text-foreground">
       {/* ── HERO ─────────────────────────────────────────────────── */}
-      <section className="relative overflow-hidden pt-12 pb-0 md:pt-20">
-        {/* Subtle grid background */}
-        <div
-          aria-hidden
-          className="pointer-events-none absolute inset-0 bg-[linear-gradient(to_right,hsl(var(--border))_1px,transparent_1px),linear-gradient(to_bottom,hsl(var(--border))_1px,transparent_1px)] bg-[size:72px_72px] opacity-40"
-        />
-        {/* Radial amber glow top-center */}
-        <div
-          aria-hidden
-          className="pointer-events-none absolute -top-32 left-1/2 h-[480px] w-[720px] -translate-x-1/2 rounded-full bg-amber-500/10 blur-3xl"
-        />
-
-        <div className="relative mx-auto max-w-6xl px-4 sm:px-6 lg:px-8">
+      <section className="pt-12 pb-0 md:pt-20">
+        <div className="mx-auto max-w-6xl px-4 sm:px-6 lg:px-8">
           <div className="grid gap-12 lg:grid-cols-2 lg:items-center">
             {/* Left: copy */}
             <div>
@@ -289,8 +278,8 @@ export default function Home() {
               </div>
             </div>
 
-            {/* Right: live articles card */}
-            <div className="rounded-2xl border border-border bg-card p-6 shadow-xl">
+            {/* Right: latest articles */}
+            <div className="p-1">
               <Suspense
                 fallback={
                   <>
@@ -305,26 +294,11 @@ export default function Home() {
               >
                 <LandingArticlesHeaderAndList />
               </Suspense>
-              <div className="mt-4 rounded-xl border border-border bg-background/60 p-3">
-                <p className="text-xs text-muted-foreground">Example themes being tracked</p>
-                <div className="mt-2 flex flex-wrap gap-2">
-                  {["Semiconductors", "Cloud Capex", "Defense", "Utilities"].map((tag) => (
-                    <span
-                      key={tag}
-                      className="rounded-full border border-amber-500/20 bg-amber-500/10 px-2.5 py-0.5 text-xs font-semibold text-amber-400"
-                    >
-                      {tag}
-                    </span>
-                  ))}
-                </div>
-              </div>
             </div>
           </div>
 
           {/* News ticker — visible above the fold */}
-          <div className="relative mt-10 overflow-hidden rounded-xl border border-border bg-card py-3">
-            <div className="pointer-events-none absolute inset-y-0 left-0 w-12 bg-gradient-to-r from-card to-transparent z-10" />
-            <div className="pointer-events-none absolute inset-y-0 right-0 w-12 bg-gradient-to-l from-card to-transparent z-10" />
+          <div className="mt-10 overflow-hidden py-2">
             <div className="flex animate-news-roll gap-0 whitespace-nowrap">
               {doubledTicker.map((item, i) => (
                 <span
@@ -360,18 +334,14 @@ export default function Home() {
             {(() => {
               const Icon0 = benefitCards[0].icon;
               return (
-                <article className="group relative cursor-default overflow-hidden rounded-2xl border border-border bg-card p-6 transition-all duration-200 hover:border-amber-500/30 hover:shadow-lg hover:shadow-amber-500/5 md:col-span-2">
-                  <div className="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-border bg-background">
+                <article className="cursor-default p-2 md:col-span-2">
+                  <div className="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-border bg-background/80">
                     <Icon0 className="h-5 w-5 text-amber-400" />
                   </div>
                   <h3 className="mt-4 text-lg font-semibold tracking-tight">{benefitCards[0].title}</h3>
                   <p className="mt-2 text-sm leading-6 text-muted-foreground">
                     {benefitCards[0].description}
                   </p>
-                  <div
-                    aria-hidden
-                    className="pointer-events-none absolute -bottom-8 -right-8 h-32 w-32 rounded-full bg-amber-500/5 blur-2xl opacity-0 transition-opacity duration-300 group-hover:opacity-100"
-                  />
                 </article>
               );
             })()}
@@ -380,8 +350,8 @@ export default function Home() {
             {(() => {
               const Icon1 = benefitCards[1].icon;
               return (
-                <article className="group relative cursor-default overflow-hidden rounded-2xl border border-border bg-card p-6 transition-all duration-200 hover:border-amber-500/30 hover:shadow-lg hover:shadow-amber-500/5">
-                  <div className="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-border bg-background">
+                <article className="cursor-default p-2">
+                  <div className="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-border bg-background/80">
                     <Icon1 className="h-5 w-5 text-amber-400" />
                   </div>
                   <h3 className="mt-4 text-base font-semibold tracking-tight">
@@ -390,10 +360,6 @@ export default function Home() {
                   <p className="mt-2 text-sm leading-6 text-muted-foreground">
                     {benefitCards[1].description}
                   </p>
-                  <div
-                    aria-hidden
-                    className="pointer-events-none absolute -bottom-8 -right-8 h-32 w-32 rounded-full bg-amber-500/5 blur-2xl opacity-0 transition-opacity duration-300 group-hover:opacity-100"
-                  />
                 </article>
               );
             })()}
@@ -402,9 +368,9 @@ export default function Home() {
             {(() => {
               const Icon2 = benefitCards[2].icon;
               return (
-                <article className="group relative cursor-default overflow-hidden rounded-2xl border border-border bg-card p-6 transition-all duration-200 hover:border-amber-500/30 hover:shadow-lg hover:shadow-amber-500/5 md:col-span-3 md:flex md:items-center md:gap-8">
+                <article className="cursor-default p-2 md:col-span-3 md:flex md:items-center md:gap-8">
                   <div className="shrink-0">
-                    <div className="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-border bg-background">
+                    <div className="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-border bg-background/80">
                       <Icon2 className="h-5 w-5 text-amber-400" />
                     </div>
                   </div>
@@ -414,10 +380,6 @@ export default function Home() {
                       {benefitCards[2].description}
                     </p>
                   </div>
-                  <div
-                    aria-hidden
-                    className="pointer-events-none absolute -bottom-8 right-8 h-32 w-32 rounded-full bg-amber-500/5 blur-2xl opacity-0 transition-opacity duration-300 group-hover:opacity-100"
-                  />
                 </article>
               );
             })()}
@@ -426,7 +388,7 @@ export default function Home() {
       </section>
 
       {/* ── HOW IT WORKS ─────────────────────────────────────────── */}
-      <section id="how-it-works" className="border-t border-border py-16 md:py-24">
+      <section id="how-it-works" className="py-16 md:py-24">
         <div className="mx-auto max-w-6xl px-4 sm:px-6 lg:px-8">
           <p className="text-xs font-semibold uppercase tracking-widest text-amber-500">
             How it works
@@ -458,7 +420,7 @@ export default function Home() {
       <PublishersMarquee />
 
       {/* ── PRODUCT VALUES ───────────────────────────────────────── */}
-      <section className="border-t border-border py-16 md:py-24">
+      <section className="py-16 md:py-24">
         <div className="mx-auto max-w-6xl px-4 sm:px-6 lg:px-8">
           <p className="text-xs font-semibold uppercase tracking-widest text-amber-500">
             What you get
@@ -468,11 +430,8 @@ export default function Home() {
           </h2>
           <div className="mt-10 grid gap-4 sm:grid-cols-2 md:grid-cols-3">
             {productValueItems.map((item) => (
-              <article
-                key={item.title}
-                className="group cursor-default rounded-2xl border border-border bg-card p-6 transition-all duration-200 hover:border-amber-500/30 hover:shadow-lg hover:shadow-amber-500/5"
-              >
-                <div className="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-border bg-background">
+              <article key={item.title} className="cursor-default p-2">
+                <div className="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-border bg-background/80">
                   <item.icon className="h-5 w-5 text-amber-400" />
                 </div>
                 <h3 className="mt-4 text-base font-semibold">{item.title}</h3>
@@ -484,7 +443,7 @@ export default function Home() {
       </section>
 
       {/* ── STRAIGHT ANSWERS ─────────────────────────────────────── */}
-      <section className="border-t border-border py-16 md:py-24">
+      <section className="py-16 md:py-24">
         <div className="mx-auto max-w-6xl px-4 sm:px-6 lg:px-8">
           <p className="text-xs font-semibold uppercase tracking-widest text-amber-500">
             Straight answers
@@ -494,11 +453,8 @@ export default function Home() {
           </h2>
           <div className="mt-10 grid gap-4 sm:grid-cols-2 md:grid-cols-3">
             {trustItems.map((item) => (
-              <article
-                key={item.title}
-                className="rounded-2xl border border-border bg-card p-6"
-              >
-                <div className="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-border bg-background">
+              <article key={item.title} className="p-2">
+                <div className="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-border bg-background/80">
                   <item.icon className="h-5 w-5 text-amber-400" />
                 </div>
                 <h3 className="mt-4 text-base font-semibold">{item.title}</h3>
@@ -510,17 +466,8 @@ export default function Home() {
       </section>
 
       {/* ── FINAL CTA ────────────────────────────────────────────── */}
-      <section id="final-cta" className="relative border-t border-border py-20 md:py-28">
-        {/* Ambient glows */}
-        <div
-          aria-hidden
-          className="pointer-events-none absolute inset-0 overflow-hidden"
-        >
-          <div className="absolute bottom-0 left-1/4 h-72 w-72 rounded-full bg-amber-500/8 blur-3xl" />
-          <div className="absolute bottom-0 right-1/4 h-72 w-72 rounded-full bg-violet-500/8 blur-3xl" />
-        </div>
-
-        <div className="relative mx-auto max-w-2xl px-4 text-center">
+      <section id="final-cta" className="border-t border-border py-20 md:py-28">
+        <div className="mx-auto max-w-2xl px-4 text-center">
           <p className="text-xs font-semibold uppercase tracking-widest text-amber-500">
             Early access
           </p>

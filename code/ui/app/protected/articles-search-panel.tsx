@@ -68,10 +68,15 @@ export function ArticlesSearchPanel({ initialArticles }: { initialArticles: Arti
     }));
   }, [hasSearched, initialArticles, results]);
 
+  const resultLabel = hasSearched
+    ? `${gridArticles.length} semantic result${gridArticles.length === 1 ? "" : "s"}`
+    : `${initialArticles.length} latest article${initialArticles.length === 1 ? "" : "s"}`;
+
   return (
     <div className="flex flex-col gap-4">
-      <div className="rounded-xl border border-border p-3">
-        <div className="flex flex-wrap items-center gap-2">
+      <div className="flex flex-wrap items-end gap-2">
+        <div className="flex min-w-[260px] flex-1 flex-col gap-1.5">
+          <span className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Search</span>
           <div className="relative min-w-[260px] flex-1">
             <Search className="pointer-events-none absolute left-2.5 top-2.5 h-3.5 w-3.5 text-muted-foreground" />
             <input
@@ -87,15 +92,17 @@ export function ArticlesSearchPanel({ initialArticles }: { initialArticles: Arti
               className="w-full rounded-md border border-border bg-background py-2 pl-8 pr-2 text-sm"
             />
           </div>
-          <button
-            type="button"
-            onClick={() => void runSearch()}
-            disabled={loading}
-            className="rounded-md border border-border px-3 py-2 text-xs font-medium text-muted-foreground hover:text-foreground disabled:opacity-60"
-          >
-            {loading ? "Searching..." : "Search"}
-          </button>
-          {results.length > 0 && (
+        </div>
+        <button
+          type="button"
+          onClick={() => void runSearch()}
+          disabled={loading}
+          className="rounded-md border border-border px-3 py-2 text-xs font-medium text-muted-foreground hover:text-foreground disabled:opacity-60"
+        >
+          {loading ? "Searching..." : "Search"}
+        </button>
+        {results.length > 0 && (
+          <>
             <button
               type="button"
               onClick={() => {
@@ -108,9 +115,14 @@ export function ArticlesSearchPanel({ initialArticles }: { initialArticles: Arti
             >
               Clear
             </button>
-          )}
-        </div>
-        {note && <p className="mt-2 text-xs text-muted-foreground">{note}</p>}
+          </>
+        )}
+        {note && <p className="w-full pt-1 text-xs text-muted-foreground">{note}</p>}
+      </div>
+
+      <div className="flex items-center justify-between text-xs text-muted-foreground">
+        <p>{resultLabel}</p>
+        <p className="uppercase tracking-wide">{hasSearched ? "Query mode" : "Feed mode"}</p>
       </div>
 
       <ArticlesGrid articles={gridArticles} />

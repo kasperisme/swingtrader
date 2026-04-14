@@ -13,6 +13,7 @@ type ArticleRow = {
   title: string | null;
   url: string | null;
   source: string | null;
+  publisher: string | null;
   published_at: string | null;
   created_at: string;
   image_url: string | null;
@@ -126,13 +127,21 @@ function computeClusterProfile(impact: Record<string, number>) {
     const vals = cluster.dimensions
       .map((d) => impact[d.key])
       .filter((v): v is number => Number.isFinite(v));
-    const score = vals.length ? vals.reduce((a, b) => a + b, 0) / vals.length : 0;
-    return { id: cluster.id, label: cluster.label, score, docSlug: clusterDocSlug(cluster.id) };
+    const score = vals.length
+      ? vals.reduce((a, b) => a + b, 0) / vals.length
+      : 0;
+    return {
+      id: cluster.id,
+      label: cluster.label,
+      score,
+      docSlug: clusterDocSlug(cluster.id),
+    };
   }).sort((a, b) => Math.abs(b.score) - Math.abs(a.score));
 }
 
 async function fetchRankedStocks(impact: Record<string, number>) {
-  if (Object.keys(impact).length === 0) return { winners: [] as RankedStock[], losers: [] as RankedStock[] };
+  if (Object.keys(impact).length === 0)
+    return { winners: [] as RankedStock[], losers: [] as RankedStock[] };
   const supabase = await createClient();
   const { data, error } = await supabase
     .schema("swingtrader")
@@ -163,12 +172,19 @@ async function fetchRankedStocks(impact: Record<string, number>) {
     }
     if (!used) continue;
     const meta = asObject(row.metadata_json);
-    ranked.push({ ticker: row.ticker, score: total / used, sector: String(meta.sector ?? "") });
+    ranked.push({
+      ticker: row.ticker,
+      score: total / used,
+      sector: String(meta.sector ?? ""),
+    });
   }
   ranked.sort((a, b) => b.score - a.score);
   return {
     winners: ranked.filter((r) => r.score > 0).slice(0, 10),
-    losers: ranked.filter((r) => r.score < 0).sort((a, b) => a.score - b.score).slice(0, 10),
+    losers: ranked
+      .filter((r) => r.score < 0)
+      .sort((a, b) => a.score - b.score)
+      .slice(0, 10),
   };
 }
 
@@ -182,57 +198,220 @@ function AnalyticsBlock({
   locked,
   lockHref,
 }: {
-  clusterProfile: Array<{ id: string; label: string; score: number; docSlug: string }>;
+  clusterProfile: Array<{
+    id: string;
+    label: string;
+    score: number;
+    docSlug: string;
+  }>;
   topDimensions: Array<{ key: string; score: number }>;
   winners: RankedStock[];
   losers: RankedStock[];
   tickerSentiment: Array<{ ticker: string; score: number; reason: string }>;
-  tickerRelationships: Array<{ from: string; to: string; relType: string; score: number; reason: string }>;
+  tickerRelationships: Array<{
+    from: string;
+    to: string;
+    relType: string;
+    score: number;
+    reason: string;
+  }>;
   locked: boolean;
   lockHref: string;
 }) {
   return (
     <>
-      <section className="grid gap-4 lg:grid-cols-2">
-        <div className="relative rounded-xl border bg-card p-5">
-          <h2 className="text-lg font-semibold">Analytical profile by cluster</h2>
-          <div className={locked ? "mt-4 space-y-2 blur-[2.5px] pointer-events-none select-none" : "mt-4 space-y-2"}>
+      <section className="grid gap-6 lg:grid-cols-2">
+        <div className="relative border-b border-border/60 pb-5">
+          <h2 className="text-lg font-semibold">
+            Analytical profile by cluster
+          </h2>
+          <div
+            className={
+              locked
+                ? "mt-4 space-y-2 blur-[2.5px] pointer-events-none select-none"
+                : "mt-4 space-y-2"
+            }
+          >
             {clusterProfile.map((c) => (
-              <div key={c.id} className="flex items-center justify-between text-sm">
-                <Link href={c.docSlug} className="hover:underline underline-offset-4">{c.label}</Link>
-                <span className={`font-mono ${scoreClass(c.score)}`}>{c.score >= 0 ? "+" : ""}{c.score.toFixed(3)}</span>
+              <div
+                key={c.id}
+                className="flex items-center justify-between text-sm"
+              >
+                <Link
+                  href={c.docSlug}
+                  className="hover:underline underline-offset-4"
+                >
+                  {c.label}
+                </Link>
+                <span className={`font-mono ${scoreClass(c.score)}`}>
+                  {c.score >= 0 ? "+" : ""}
+                  {c.score.toFixed(3)}
+                </span>
               </div>
             ))}
           </div>
           {locked ? (
-            <Link href={lockHref} className="absolute inset-0 flex items-center justify-center">
-              <span className="inline-flex items-center gap-2 rounded-md border border-border bg-background/95 px-3 py-1.5 text-xs font-medium text-foreground shadow-sm">
+            <Link
+              href={lockHref}
+              className="absolute inset-0 flex items-center justify-center"
+            >
+              <span className="inline-flex items-center gap-2 rounded-md border border-border bg-background/95 px-3 py-1.5 text-xs font-medium text-foreground">
                 <Lock size={14} />
                 Sign up to unlock
               </span>
             </Link>
           ) : null}
         </div>
-        <div className="relative rounded-xl border bg-card p-5">
+        <div className="relative border-b border-border/60 pb-5">
           <h2 className="text-lg font-semibold">Top impact dimensions</h2>
-          <div className={locked ? "mt-4 space-y-2 blur-[2.5px] pointer-events-none select-none" : "mt-4 space-y-2"}>
+          <div
+            className={
+              locked
+                ? "mt-4 space-y-2 blur-[2.5px] pointer-events-none select-none"
+                : "mt-4 space-y-2"
+            }
+          >
             {topDimensions.length === 0 ? (
-              <p className="text-sm text-muted-foreground">No impact vector found for this article yet.</p>
-            ) : topDimensions.map((d) => {
-              const dim = DIMENSION_MAP[d.key];
-              const clusterKey = CLUSTERS.find((c) => c.dimensions.some((x) => x.key === d.key))?.id;
-              const href = clusterKey ? clusterDocSlug(clusterKey) : "/docs/news-impact-scores";
-              return (
-                <div key={d.key} className="flex items-center justify-between text-sm">
-                  <Link href={href} className="truncate pr-2 hover:underline underline-offset-4">{dim?.label ?? d.key}</Link>
-                  <span className={`font-mono shrink-0 ${scoreClass(d.score)}`}>{d.score >= 0 ? "+" : ""}{d.score.toFixed(3)}</span>
+              <p className="text-sm text-muted-foreground">
+                No impact vector found for this article yet.
+              </p>
+            ) : (
+              topDimensions.map((d) => {
+                const dim = DIMENSION_MAP[d.key];
+                const clusterKey = CLUSTERS.find((c) =>
+                  c.dimensions.some((x) => x.key === d.key),
+                )?.id;
+                const href = clusterKey
+                  ? clusterDocSlug(clusterKey)
+                  : "/docs/news-impact-scores";
+                return (
+                  <div
+                    key={d.key}
+                    className="flex items-center justify-between text-sm"
+                  >
+                    <Link
+                      href={href}
+                      className="truncate pr-2 hover:underline underline-offset-4"
+                    >
+                      {dim?.label ?? d.key}
+                    </Link>
+                    <span
+                      className={`font-mono shrink-0 ${scoreClass(d.score)}`}
+                    >
+                      {d.score >= 0 ? "+" : ""}
+                      {d.score.toFixed(3)}
+                    </span>
+                  </div>
+                );
+              })
+            )}
+          </div>
+          {locked ? (
+            <Link
+              href={lockHref}
+              className="absolute inset-0 flex items-center justify-center"
+            >
+              <span className="inline-flex items-center gap-2 rounded-md border border-border bg-background/95 px-3 py-1.5 text-xs font-medium text-foreground">
+                <Lock size={14} />
+                Sign up to unlock
+              </span>
+            </Link>
+          ) : null}
+        </div>
+      </section>
+      <section className="mt-6 grid gap-6 lg:grid-cols-2">
+        <div className="relative border-b border-border/60 pb-5">
+          <h2 className="text-lg font-semibold">
+            Most positively impacted stocks
+          </h2>
+          <div
+            className={
+              locked
+                ? "mt-4 space-y-2 blur-[2.5px] pointer-events-none select-none"
+                : "mt-4 space-y-2"
+            }
+          >
+            {winners.length === 0 ? (
+              <p className="text-sm text-muted-foreground">
+                No stock impact ranking available yet.
+              </p>
+            ) : (
+              winners.map((s) => (
+                <div
+                  key={s.ticker}
+                  className="flex items-center justify-between text-sm"
+                >
+                  <span>
+                    <span className="font-medium">{s.ticker}</span>
+                    {s.sector ? (
+                      <span className="text-muted-foreground">
+                        {" "}
+                        · {s.sector}
+                      </span>
+                    ) : null}
+                  </span>
+                  <span className="font-mono text-emerald-600">
+                    +{s.score.toFixed(3)}
+                  </span>
                 </div>
-              );
-            })}
+              ))
+            )}
           </div>
           {locked ? (
-            <Link href={lockHref} className="absolute inset-0 flex items-center justify-center">
-              <span className="inline-flex items-center gap-2 rounded-md border border-border bg-background/95 px-3 py-1.5 text-xs font-medium text-foreground shadow-sm">
+            <Link
+              href={lockHref}
+              className="absolute inset-0 flex items-center justify-center"
+            >
+              <span className="inline-flex items-center gap-2 rounded-md border border-border bg-background/95 px-3 py-1.5 text-xs font-medium text-foreground">
+                <Lock size={14} />
+                Sign up to unlock
+              </span>
+            </Link>
+          ) : null}
+        </div>
+        <div className="relative border-b border-border/60 pb-5">
+          <h2 className="text-lg font-semibold">
+            Most negatively impacted stocks
+          </h2>
+          <div
+            className={
+              locked
+                ? "mt-4 space-y-2 blur-[2.5px] pointer-events-none select-none"
+                : "mt-4 space-y-2"
+            }
+          >
+            {losers.length === 0 ? (
+              <p className="text-sm text-muted-foreground">
+                No stock impact ranking available yet.
+              </p>
+            ) : (
+              losers.map((s) => (
+                <div
+                  key={s.ticker}
+                  className="flex items-center justify-between text-sm"
+                >
+                  <span>
+                    <span className="font-medium">{s.ticker}</span>
+                    {s.sector ? (
+                      <span className="text-muted-foreground">
+                        {" "}
+                        · {s.sector}
+                      </span>
+                    ) : null}
+                  </span>
+                  <span className="font-mono text-rose-600">
+                    {s.score.toFixed(3)}
+                  </span>
+                </div>
+              ))
+            )}
+          </div>
+          {locked ? (
+            <Link
+              href={lockHref}
+              className="absolute inset-0 flex items-center justify-center"
+            >
+              <span className="inline-flex items-center gap-2 rounded-md border border-border bg-background/95 px-3 py-1.5 text-xs font-medium text-foreground">
                 <Lock size={14} />
                 Sign up to unlock
               </span>
@@ -240,95 +419,101 @@ function AnalyticsBlock({
           ) : null}
         </div>
       </section>
-      <section className="mt-4 grid gap-4 lg:grid-cols-2">
-        <div className="relative rounded-xl border bg-card p-5">
-          <h2 className="text-lg font-semibold">Most positively impacted stocks</h2>
-          <div className={locked ? "mt-4 space-y-2 blur-[2.5px] pointer-events-none select-none" : "mt-4 space-y-2"}>
-            {winners.length === 0 ? <p className="text-sm text-muted-foreground">No stock impact ranking available yet.</p> : winners.map((s) => (
-              <div key={s.ticker} className="flex items-center justify-between text-sm">
-                <span><span className="font-medium">{s.ticker}</span>{s.sector ? <span className="text-muted-foreground"> · {s.sector}</span> : null}</span>
-                <span className="font-mono text-emerald-600">+{s.score.toFixed(3)}</span>
-              </div>
-            ))}
-          </div>
-          {locked ? (
-            <Link href={lockHref} className="absolute inset-0 flex items-center justify-center">
-              <span className="inline-flex items-center gap-2 rounded-md border border-border bg-background/95 px-3 py-1.5 text-xs font-medium text-foreground shadow-sm">
-                <Lock size={14} />
-                Sign up to unlock
-              </span>
-            </Link>
-          ) : null}
-        </div>
-        <div className="relative rounded-xl border bg-card p-5">
-          <h2 className="text-lg font-semibold">Most negatively impacted stocks</h2>
-          <div className={locked ? "mt-4 space-y-2 blur-[2.5px] pointer-events-none select-none" : "mt-4 space-y-2"}>
-            {losers.length === 0 ? <p className="text-sm text-muted-foreground">No stock impact ranking available yet.</p> : losers.map((s) => (
-              <div key={s.ticker} className="flex items-center justify-between text-sm">
-                <span><span className="font-medium">{s.ticker}</span>{s.sector ? <span className="text-muted-foreground"> · {s.sector}</span> : null}</span>
-                <span className="font-mono text-rose-600">{s.score.toFixed(3)}</span>
-              </div>
-            ))}
-          </div>
-          {locked ? (
-            <Link href={lockHref} className="absolute inset-0 flex items-center justify-center">
-              <span className="inline-flex items-center gap-2 rounded-md border border-border bg-background/95 px-3 py-1.5 text-xs font-medium text-foreground shadow-sm">
-                <Lock size={14} />
-                Sign up to unlock
-              </span>
-            </Link>
-          ) : null}
-        </div>
-      </section>
-      <section className="mt-4 grid gap-4 lg:grid-cols-2">
-        <div className="relative rounded-xl border bg-card p-5">
-          <h2 className="text-lg font-semibold">Ticker sentiment in this article</h2>
-          <div className={locked ? "mt-4 space-y-2 blur-[2.5px] pointer-events-none select-none" : "mt-4 space-y-2"}>
+      <section className="mt-6 grid gap-6 lg:grid-cols-2">
+        <div className="relative border-b border-border/60 pb-5">
+          <h2 className="text-lg font-semibold">
+            Ticker sentiment in this article
+          </h2>
+          <div
+            className={
+              locked
+                ? "mt-4 space-y-2 blur-[2.5px] pointer-events-none select-none"
+                : "mt-4 space-y-2"
+            }
+          >
             {tickerSentiment.length === 0 ? (
-              <p className="text-sm text-muted-foreground">No ticker sentiment head found.</p>
-            ) : tickerSentiment.map((row) => (
-              <div key={row.ticker} className="text-sm">
-                <div className="flex items-center justify-between gap-3">
-                  <span className="font-medium">{row.ticker}</span>
-                  <span className={`font-mono ${scoreClass(row.score)}`}>
-                    {row.score >= 0 ? "+" : ""}{row.score.toFixed(2)}
-                  </span>
+              <p className="text-sm text-muted-foreground">
+                No ticker sentiment head found.
+              </p>
+            ) : (
+              tickerSentiment.map((row) => (
+                <div key={row.ticker} className="text-sm">
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="font-medium">{row.ticker}</span>
+                    <span className={`font-mono ${scoreClass(row.score)}`}>
+                      {row.score >= 0 ? "+" : ""}
+                      {row.score.toFixed(2)}
+                    </span>
+                  </div>
+                  {row.reason ? (
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      {row.reason}
+                    </p>
+                  ) : null}
                 </div>
-                {row.reason ? <p className="mt-1 text-xs text-muted-foreground">{row.reason}</p> : null}
-              </div>
-            ))}
+              ))
+            )}
           </div>
           {locked ? (
-            <Link href={lockHref} className="absolute inset-0 flex items-center justify-center">
-              <span className="inline-flex items-center gap-2 rounded-md border border-border bg-background/95 px-3 py-1.5 text-xs font-medium text-foreground shadow-sm">
+            <Link
+              href={lockHref}
+              className="absolute inset-0 flex items-center justify-center"
+            >
+              <span className="inline-flex items-center gap-2 rounded-md border border-border bg-background/95 px-3 py-1.5 text-xs font-medium text-foreground">
                 <Lock size={14} />
                 Sign up to unlock
               </span>
             </Link>
           ) : null}
         </div>
-        <div className="relative rounded-xl border bg-card p-5">
-          <h2 className="text-lg font-semibold">Ticker relationships in this article</h2>
-          <div className={locked ? "mt-4 space-y-2 blur-[2.5px] pointer-events-none select-none" : "mt-4 space-y-2"}>
+        <div className="relative border-b border-border/60 pb-5">
+          <h2 className="text-lg font-semibold">
+            Ticker relationships in this article
+          </h2>
+          <div
+            className={
+              locked
+                ? "mt-4 space-y-2 blur-[2.5px] pointer-events-none select-none"
+                : "mt-4 space-y-2"
+            }
+          >
             {tickerRelationships.length === 0 ? (
-              <p className="text-sm text-muted-foreground">No ticker relationship head found.</p>
-            ) : tickerRelationships.map((row, idx) => (
-              <div key={`${row.from}-${row.to}-${row.relType}-${idx}`} className="text-sm">
-                <div className="flex items-center justify-between gap-3">
-                  <span className="font-medium">
-                    {row.from} {"->"} {row.to} <span className="text-muted-foreground">({row.relType})</span>
-                  </span>
-                  <span className={`font-mono ${scoreClass(row.score)}`}>
-                    {row.score >= 0 ? "+" : ""}{row.score.toFixed(2)}
-                  </span>
+              <p className="text-sm text-muted-foreground">
+                No ticker relationship head found.
+              </p>
+            ) : (
+              tickerRelationships.map((row, idx) => (
+                <div
+                  key={`${row.from}-${row.to}-${row.relType}-${idx}`}
+                  className="text-sm"
+                >
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="font-medium">
+                      {row.from} {"->"} {row.to}{" "}
+                      <span className="text-muted-foreground">
+                        ({row.relType})
+                      </span>
+                    </span>
+                    <span className={`font-mono ${scoreClass(row.score)}`}>
+                      {row.score >= 0 ? "+" : ""}
+                      {row.score.toFixed(2)}
+                    </span>
+                  </div>
+                  {row.reason ? (
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      {row.reason}
+                    </p>
+                  ) : null}
                 </div>
-                {row.reason ? <p className="mt-1 text-xs text-muted-foreground">{row.reason}</p> : null}
-              </div>
-            ))}
+              ))
+            )}
           </div>
           {locked ? (
-            <Link href={lockHref} className="absolute inset-0 flex items-center justify-center">
-              <span className="inline-flex items-center gap-2 rounded-md border border-border bg-background/95 px-3 py-1.5 text-xs font-medium text-foreground shadow-sm">
+            <Link
+              href={lockHref}
+              className="absolute inset-0 flex items-center justify-center"
+            >
+              <span className="inline-flex items-center gap-2 rounded-md border border-border bg-background/95 px-3 py-1.5 text-xs font-medium text-foreground">
                 <Lock size={14} />
                 Sign up to unlock
               </span>
@@ -352,7 +537,9 @@ async function ArticleData({ params }: { params: Promise<{ slug?: string }> }) {
     dataClient
       .schema("swingtrader")
       .from("news_articles")
-      .select("id, slug, title, url, source, published_at, created_at, image_url")
+      .select(
+        "id, slug, title, url, source, published_at, created_at, image_url,publisher",
+      )
       .eq("slug", slug)
       .single<ArticleRow>(),
   ]);
@@ -362,11 +549,18 @@ async function ArticleData({ params }: { params: Promise<{ slug?: string }> }) {
     if (isAuthed) notFound();
     return (
       <div className="mx-auto max-w-5xl px-4 py-8 sm:px-6 sm:py-10">
-        <div className="rounded-xl border bg-card p-6">
-          <p className="text-xs uppercase tracking-wide text-muted-foreground">Article preview</p>
-          <h1 className="mt-2 text-2xl font-semibold tracking-tight">Sign in to view this article</h1>
+        <div className="py-2">
+          <p className="text-xs uppercase tracking-wide text-muted-foreground">
+            Article preview
+          </p>
+          <h1 className="mt-2 text-2xl font-semibold tracking-tight">
+            Sign in to view this article
+          </h1>
           <div className="mt-5">
-            <Link href={`/auth/login?next=/articles/${slug}`} className="inline-flex items-center gap-2 rounded-md border border-border bg-background px-4 py-2 text-sm font-medium hover:bg-muted">
+            <Link
+              href={`/auth/login?next=/articles/${slug}`}
+              className="inline-flex items-center gap-2 rounded-md border border-border bg-background px-4 py-2 text-sm font-medium hover:bg-muted"
+            >
               <Lock size={15} />
               Sign in to unlock
             </Link>
@@ -398,21 +592,35 @@ async function ArticleData({ params }: { params: Promise<{ slug?: string }> }) {
   const { winners, losers } = await fetchRankedStocks(impact);
   const heads = (headsRes.data ?? []) as HeadRow[];
   const sentimentHead = heads.find((h) => h.cluster === "TICKER_SENTIMENT");
-  const relationshipHead = heads.find((h) => h.cluster === "TICKER_RELATIONSHIPS");
+  const relationshipHead = heads.find(
+    (h) => h.cluster === "TICKER_RELATIONSHIPS",
+  );
 
   const sentimentScores = asNumberMap(sentimentHead?.scores_json ?? {});
   const sentimentReasoning = asStringMap(sentimentHead?.reasoning_json ?? {});
   const tickerSentiment = Object.entries(sentimentScores)
-    .map(([ticker, score]) => ({ ticker, score, reason: sentimentReasoning[ticker] ?? "" }))
+    .map(([ticker, score]) => ({
+      ticker,
+      score,
+      reason: sentimentReasoning[ticker] ?? "",
+    }))
     .sort((a, b) => Math.abs(b.score) - Math.abs(a.score))
     .slice(0, 12);
 
   const relationshipScores = asNumberMap(relationshipHead?.scores_json ?? {});
-  const relationshipReasoning = asStringMap(relationshipHead?.reasoning_json ?? {});
+  const relationshipReasoning = asStringMap(
+    relationshipHead?.reasoning_json ?? {},
+  );
   const tickerRelationships = Object.entries(relationshipScores)
     .map(([key, score]) => {
       const [from = "", to = "", relType = "related"] = key.split("__");
-      return { from, to, relType, score, reason: relationshipReasoning[key] ?? "" };
+      return {
+        from,
+        to,
+        relType,
+        score,
+        reason: relationshipReasoning[key] ?? "",
+      };
     })
     .filter((r) => r.from && r.to)
     .sort((a, b) => Math.abs(b.score) - Math.abs(a.score))
@@ -421,16 +629,62 @@ async function ArticleData({ params }: { params: Promise<{ slug?: string }> }) {
   return (
     <div className="mx-auto max-w-5xl px-4 py-8 sm:px-6 sm:py-10">
       <div className="mb-6">
-        <Link href="/" className="text-sm text-muted-foreground hover:text-foreground">← Back to home</Link>
+        <Link
+          href="/"
+          className="text-sm text-muted-foreground hover:text-foreground"
+        >
+          ← Back to home
+        </Link>
       </div>
-      <article className="rounded-xl border bg-card p-4 sm:p-6">
-        <p className="text-xs uppercase tracking-wide text-muted-foreground">{article.source || "Unknown source"} · scanned {formatUTC(article.created_at)} UTC</p>
-        <p className="mt-1 text-xs text-muted-foreground">
-          Published {formatUTC(article.published_at ?? article.created_at)} UTC · {formatAgeSince(article.published_at ?? article.created_at)}
-        </p>
-        <h1 className="mt-2 text-2xl font-semibold tracking-tight">{article.title || "Untitled article"}</h1>
-        {article.image_url ? <div className="mt-4 overflow-hidden rounded-lg border"><img src={article.image_url} alt="" className="h-56 w-full object-cover" /></div> : null}
-        <div className="mt-4">{article.url ? <Link href={article.url} target="_blank" rel="noreferrer" className="text-sm font-medium underline-offset-4 hover:underline">Read original article →</Link> : <p className="text-sm text-muted-foreground">Original article URL not available.</p>}</div>
+      <article className="pb-5 border-b border-border/60">
+        {article.image_url ? (
+          <div className="mb-4 overflow-hidden rounded-lg">
+            <img
+              src={article.image_url}
+              alt=""
+              className="h-56 w-full object-cover"
+            />
+          </div>
+        ) : null}
+        <h1 className="mt-2 text-2xl font-semibold tracking-tight">
+          {article.url ? (
+            <Link
+              href={article.url}
+              target="_blank"
+              rel="noreferrer"
+              className="hover:underline underline-offset-4"
+            >
+              {article.title || "Untitled article"}
+            </Link>
+          ) : (
+            article.title || "Untitled article"
+          )}
+        </h1>
+        <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
+          <div className="min-w-0">
+            <p className="text-xs text-muted-foreground">
+              Published {formatUTC(article.published_at ?? article.created_at)} UTC
+              {" · "}
+              {formatAgeSince(article.published_at ?? article.created_at)}
+            </p>
+            <p className="mt-1 text-sm text-muted-foreground">
+              Publisher:{" "}
+              <span className="font-medium text-foreground/85">
+                {article.publisher || "Unknown source"}
+              </span>
+            </p>
+          </div>
+          {article.url ? (
+            <Link
+              href={article.url}
+              target="_blank"
+              rel="noreferrer"
+              className="inline-flex shrink-0 items-center rounded-md border border-border px-3 py-1.5 text-sm font-medium text-foreground hover:bg-muted"
+            >
+              Read article
+            </Link>
+          ) : null}
+        </div>
       </article>
 
       <div className="relative mt-8">
@@ -452,7 +706,7 @@ async function ArticleData({ params }: { params: Promise<{ slug?: string }> }) {
 function ArticlePageFallback() {
   return (
     <div className="mx-auto max-w-5xl px-4 py-8 sm:px-6 sm:py-10">
-      <div className="rounded-xl border bg-card p-6 text-sm text-muted-foreground animate-pulse">
+      <div className="p-2 text-sm text-muted-foreground animate-pulse">
         Loading article analytics...
       </div>
     </div>
