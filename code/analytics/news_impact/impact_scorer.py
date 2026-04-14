@@ -349,7 +349,8 @@ async def _run_head(article_text: str, cluster: str) -> HeadOutput:
 _REL_SYSTEM = (
     "You are a financial analyst specialising in inter-company relationships, "
     "supply chains, and competitive dynamics. "
-    "Identify only relationships that are clearly supported by the article text."
+    "Identify only relationships that are clearly supported by the article text. "
+    "Prioritise ticker precision over completeness."
 )
 
 _REL_USER = """\
@@ -391,6 +392,10 @@ Return ONLY valid JSON, no markdown:
 Rules:
 - Include any publicly traded company regardless of exchange or country (NYSE, NASDAQ, LSE, Euronext, TSE, HKEX, etc.).
 - Use the company's primary ticker on its home exchange (e.g. "ASML" for ASML on Euronext, "7203" for Toyota on TSE). For companies with multiple listings, prefer the most liquid ticker.
+- Return ticker symbols only in `from` and `to` (no company names, sectors, countries, products, or generic labels).
+- If ticker mapping is uncertain, omit that relationship.
+- Do NOT emit placeholders like "COMPETITORS", "CUSTOMERS", "SUPPLIERS", "CHINA", etc.
+- Do NOT include self-edges (from == to).
 - Only include relationships clearly evidenced by the article.
 - Return {{"relationships": [], "confidence": 0.0}} if fewer than 2 companies are mentioned
   or no relationships are evident.
@@ -480,7 +485,8 @@ async def _run_relationship_head(article_text: str) -> HeadOutput:
 _SENTIMENT_SYSTEM = (
     "You are a financial analyst. "
     "For each publicly traded company mentioned in a news article, assess whether "
-    "the article is positive, negative, or neutral for that specific company."
+    "the article is positive, negative, or neutral for that specific company. "
+    "Prioritise ticker precision over completeness."
 )
 
 _SENTIMENT_USER = """\
@@ -511,6 +517,9 @@ Return ONLY valid JSON, no markdown:
 Rules:
 - Include any publicly traded company regardless of exchange or country.
 - Use the company's primary ticker on its home exchange.
+- Return ticker symbols only; do NOT return company names or generic entities.
+- If ticker mapping is uncertain, omit that company.
+- Do NOT emit non-ticker labels (e.g., countries, regions, sectors, placeholders).
 - Omit companies where |score| < 0.05 (truly neutral — no meaningful mention).
 - confidence = how clearly the article expresses sentiment toward specific companies (0.0–1.0).
 - Return {{"sentiments": [], "confidence": 0.0}} if no companies are meaningfully mentioned."""

@@ -146,10 +146,120 @@ logger  = logging.getLogger(__name__)
 console = Console()
 
 _CACHE_DIR = pathlib.Path(__file__).parent / "cache"
+_TICKER_TOKEN_RE = re.compile(r"^[A-Z0-9]{1,8}(?:\.[A-Z]{1,2})?$")
 
 # FMP stock / general news API limits (see fmp_fetcher)
 _FMP_NEWS_MAX_PAGE = 100
 _FMP_NEWS_MAX_LIMIT = 250
+
+
+def _load_identity_alias_maps() -> tuple[dict[str, str], dict[str, str]]:
+    """
+    Return (ticker_alias_map, company_name_alias_map), both keyed by normalized alias.
+    """
+    client = get_supabase_client()
+    res = (
+        client.schema(get_schema())
+        .table("security_identity_map")
+        .select("alias_kind,alias_value_norm,canonical_ticker")
+        .in_("alias_kind", ["ticker", "company_name"])
+        .execute()
+    )
+    ticker_alias: dict[str, str] = {}
+    company_alias: dict[str, str] = {}
+    for row in (res.data or []):
+        kind = str(row.get("alias_kind") or "").strip().lower()
+        alias_norm = str(row.get("alias_value_norm") or "").strip().lower()
+        canonical = str(row.get("canonical_ticker") or "").strip().upper()
+        if not alias_norm or not canonical:
+            continue
+        if kind == "ticker":
+            ticker_alias[alias_norm] = canonical
+        elif kind == "company_name":
+            company_alias[alias_norm] = canonical
+    return ticker_alias, company_alias
+
+
+def _canonicalize_ticker_token(
+    token: str,
+    ticker_alias: dict[str, str],
+    company_alias: dict[str, str],
+) -> str:
+    raw = (token or "").strip()
+    if not raw:
+        return ""
+    upper = raw.upper()
+    # Exact ticker alias map first (case-insensitive via normalized key).
+    alias_key = upper.lower()
+    mapped = ticker_alias.get(alias_key)
+    if mapped:
+        return mapped
+    # If token itself looks like a ticker, keep it as-is (uppercased).
+    if _TICKER_TOKEN_RE.fullmatch(upper):
+        return upper
+    # Fall back to company-name alias map for name-like tokens.
+    norm_name = re.sub(r"\s+", " ", raw).strip().lower()
+    mapped_name = company_alias.get(norm_name)
+    if mapped_name:
+        return mapped_name
+    return ""
+
+
+def _normalize_relationship_and_sentiment_heads(
+    heads: list[HeadOutput],
+    ticker_alias: dict[str, str],
+    company_alias: dict[str, str],
+) -> None:
+    """
+    In-place normalization:
+      - TICKER_RELATIONSHIPS keys: FROM__TO__type -> canonical tickers.
+      - TICKER_SENTIMENT keys: ticker -> canonical ticker.
+    Invalid/non-mappable tokens are dropped.
+    """
+    for head in heads:
+        if head.cluster == "TICKER_RELATIONSHIPS":
+            merged_scores: dict[str, float] = {}
+            merged_reasoning: dict[str, str] = {}
+            for key, raw_strength in (head.scores or {}).items():
+                parts = str(key).split("__")
+                if len(parts) != 3:
+                    continue
+                frm_raw, to_raw, rel_type = parts
+                frm = _canonicalize_ticker_token(frm_raw, ticker_alias, company_alias)
+                to = _canonicalize_ticker_token(to_raw, ticker_alias, company_alias)
+                rel_type_norm = str(rel_type).strip().lower()
+                if not frm or not to or not rel_type_norm or frm == to:
+                    continue
+                try:
+                    strength = max(0.0, min(1.0, float(raw_strength)))
+                except Exception:
+                    continue
+                nkey = f"{frm}__{to}__{rel_type_norm}"
+                prev = merged_scores.get(nkey)
+                if prev is None or strength > prev:
+                    merged_scores[nkey] = strength
+                    merged_reasoning[nkey] = (head.reasoning or {}).get(key, "")
+            head.scores = merged_scores
+            head.reasoning = merged_reasoning
+
+        elif head.cluster == "TICKER_SENTIMENT":
+            merged_scores: dict[str, float] = {}
+            merged_reasoning: dict[str, str] = {}
+            for token, raw_score in (head.scores or {}).items():
+                ticker = _canonicalize_ticker_token(str(token), ticker_alias, company_alias)
+                if not ticker:
+                    continue
+                try:
+                    score = max(-1.0, min(1.0, float(raw_score)))
+                except Exception:
+                    continue
+                prev = merged_scores.get(ticker)
+                # Keep stronger absolute sentiment when collisions occur.
+                if prev is None or abs(score) > abs(prev):
+                    merged_scores[ticker] = score
+                    merged_reasoning[ticker] = (head.reasoning or {}).get(token, "")
+            head.scores = merged_scores
+            head.reasoning = merged_reasoning
 
 
 def _merge_fmp_articles_by_url(*batches: list[dict]) -> list[dict]:
@@ -565,6 +675,11 @@ async def _main(argv: list[str] | None = None) -> None:
         console.print(
             "[yellow]Note: general-latest is market-wide; --tickers only adds explicit symbol tags after scoring.[/yellow]",
         )
+    try:
+        ticker_alias_map, company_alias_map = _load_identity_alias_maps()
+    except Exception as exc:
+        logger.warning("[score_news] failed to load identity alias maps: %s", exc)
+        ticker_alias_map, company_alias_map = {}, {}
 
     if args.sparse_fill is not None:
         if not args.fmp_news:
@@ -626,6 +741,14 @@ async def _main(argv: list[str] | None = None) -> None:
             score_article(article_text),
             extract_tickers(article_text),
         )
+        _normalize_relationship_and_sentiment_heads(heads, ticker_alias_map, company_alias_map)
+        extracted_tickers = [
+            t for t in (
+                _canonicalize_ticker_token(t, ticker_alias_map, company_alias_map)
+                for t in extracted_tickers
+            ) if t
+        ]
+        extracted_tickers = list(dict.fromkeys(extracted_tickers))
         impact = aggregate_heads(heads)
     else:
         # Check for existing article before showing status message
@@ -647,6 +770,14 @@ async def _main(argv: list[str] | None = None) -> None:
                 score_article(article_text),
                 extract_tickers(article_text),
             )
+            _normalize_relationship_and_sentiment_heads(heads, ticker_alias_map, company_alias_map)
+            extracted_tickers = [
+                t for t in (
+                    _canonicalize_ticker_token(t, ticker_alias_map, company_alias_map)
+                    for t in extracted_tickers
+                ) if t
+            ]
+            extracted_tickers = list(dict.fromkeys(extracted_tickers))
             impact = aggregate_heads(heads)
             article_id, impact = await ingest_article(
                 body=article_text,
@@ -665,7 +796,12 @@ async def _main(argv: list[str] | None = None) -> None:
 
     # 2b. Persist detected tickers to DB
     if not args.no_persist and article_id >= 0 and (extracted_tickers or args.tickers):
-        explicit_tickers_upper = [t.upper() for t in (args.tickers or [])]
+        explicit_tickers_upper = []
+        for t in (args.tickers or []):
+            ct = _canonicalize_ticker_token(t, ticker_alias_map, company_alias_map)
+            if ct:
+                explicit_tickers_upper.append(ct)
+        explicit_tickers_upper = list(dict.fromkeys(explicit_tickers_upper))
         try:
             client = get_supabase_client()
             if extracted_tickers:
@@ -682,7 +818,12 @@ async def _main(argv: list[str] | None = None) -> None:
             logger.warning("[score_news] failed to enqueue embedding job for article %s: %s", article_id, exc)
 
     # 3. Merge explicit --tickers with extracted ones
-    explicit_tickers = [t.upper() for t in (args.tickers or [])]
+    explicit_tickers = []
+    for t in (args.tickers or []):
+        ct = _canonicalize_ticker_token(t, ticker_alias_map, company_alias_map)
+        if ct:
+            explicit_tickers.append(ct)
+    explicit_tickers = list(dict.fromkeys(explicit_tickers))
     all_tickers = list(dict.fromkeys(explicit_tickers + extracted_tickers))  # dedupe, preserve order
 
     if extracted_tickers:
@@ -747,6 +888,8 @@ async def _process_one_fmp_article(
     article: dict,
     seen_urls: set[str],
     seen_hashes: set[str],
+    ticker_alias_map: dict[str, str],
+    company_alias_map: dict[str, str],
     *,
     index: int,
     batch_total: int,
@@ -831,10 +974,19 @@ async def _process_one_fmp_article(
             score_article(body),
             extract_tickers(body),
         )
+        _normalize_relationship_and_sentiment_heads(heads, ticker_alias_map, company_alias_map)
+        extracted_tickers = [
+            t for t in (
+                _canonicalize_ticker_token(t, ticker_alias_map, company_alias_map)
+                for t in extracted_tickers
+            ) if t
+        ]
+        extracted_tickers = list(dict.fromkeys(extracted_tickers))
         impact = aggregate_heads(heads)
 
-    if symbol and symbol not in extracted_tickers:
-        extracted_tickers = [symbol] + extracted_tickers
+    symbol_canonical = _canonicalize_ticker_token(symbol, ticker_alias_map, company_alias_map) if symbol else ""
+    if symbol_canonical and symbol_canonical not in extracted_tickers:
+        extracted_tickers = [symbol_canonical] + extracted_tickers
 
     if client is not None and not from_cache:
         if existing is not None and args.refresh:
@@ -878,7 +1030,12 @@ async def _process_one_fmp_article(
 
     if client is not None and article_id >= 0 and extracted_tickers:
         save_article_tickers(client, article_id, extracted_tickers, source="extracted")
-        explicit = [t.upper() for t in (args.tickers or [])]
+        explicit = []
+        for t in (args.tickers or []):
+            ct = _canonicalize_ticker_token(t, ticker_alias_map, company_alias_map)
+            if ct:
+                explicit.append(ct)
+        explicit = list(dict.fromkeys(explicit))
         if explicit:
             save_article_tickers(client, article_id, explicit, source="explicit")
 
@@ -923,6 +1080,8 @@ async def _process_one_x_post(
     post: dict,
     seen_ids: set[str],
     seen_hashes: set[str],
+    ticker_alias_map: dict[str, str],
+    company_alias_map: dict[str, str],
     *,
     index: int,
     batch_total: int,
@@ -982,10 +1141,19 @@ async def _process_one_x_post(
             score_article(text),
             extract_tickers(text),
         )
+        _normalize_relationship_and_sentiment_heads(heads, ticker_alias_map, company_alias_map)
+        extracted_tickers = [
+            t for t in (
+                _canonicalize_ticker_token(t, ticker_alias_map, company_alias_map)
+                for t in extracted_tickers
+            ) if t
+        ]
+        extracted_tickers = list(dict.fromkeys(extracted_tickers))
         impact = aggregate_heads(heads)
 
-    if symbol and symbol not in extracted_tickers:
-        extracted_tickers = [symbol] + extracted_tickers
+    symbol_canonical = _canonicalize_ticker_token(symbol, ticker_alias_map, company_alias_map) if symbol else ""
+    if symbol_canonical and symbol_canonical not in extracted_tickers:
+        extracted_tickers = [symbol_canonical] + extracted_tickers
 
     if client is not None and not from_cache:
         if existing is not None and args.refresh:
@@ -1012,7 +1180,12 @@ async def _process_one_x_post(
 
     if client is not None and article_id >= 0 and extracted_tickers:
         save_article_tickers(client, article_id, extracted_tickers, source="extracted")
-        explicit = [t.upper() for t in (args.tickers or [])]
+        explicit = []
+        for t in (args.tickers or []):
+            ct = _canonicalize_ticker_token(t, ticker_alias_map, company_alias_map)
+            if ct:
+                explicit.append(ct)
+        explicit = list(dict.fromkeys(explicit))
         if explicit:
             save_article_tickers(client, article_id, explicit, source="explicit")
 
@@ -1076,10 +1249,17 @@ async def _process_x_news(args: argparse.Namespace) -> None:
 
     seen_ids: set[str] = set()
     seen_hashes: set[str] = set()
+    try:
+        ticker_alias_map, company_alias_map = _load_identity_alias_maps()
+    except Exception as exc:
+        logger.warning("[score_news] failed to load identity alias maps: %s", exc)
+        ticker_alias_map, company_alias_map = {}, {}
 
     for i, post in enumerate(posts, 1):
         await _process_one_x_post(
-            args, post, seen_ids, seen_hashes, index=i, batch_total=len(posts),
+            args, post, seen_ids, seen_hashes,
+            ticker_alias_map, company_alias_map,
+            index=i, batch_total=len(posts),
         )
 
 
@@ -1097,10 +1277,17 @@ async def _process_fmp_news(args: argparse.Namespace) -> None:
 
     seen_urls: set[str] = set()
     seen_hashes: set[str] = set()
+    try:
+        ticker_alias_map, company_alias_map = _load_identity_alias_maps()
+    except Exception as exc:
+        logger.warning("[score_news] failed to load identity alias maps: %s", exc)
+        ticker_alias_map, company_alias_map = {}, {}
 
     for i, article in enumerate(articles, 1):
         await _process_one_fmp_article(
-            args, article, seen_urls, seen_hashes, index=i, batch_total=len(articles),
+            args, article, seen_urls, seen_hashes,
+            ticker_alias_map, company_alias_map,
+            index=i, batch_total=len(articles),
         )
 
 
@@ -1111,6 +1298,8 @@ async def _run_sparse_fill_for_day(
     m_new: int,
     seen_urls: set[str],
     seen_hashes: set[str],
+    ticker_alias_map: dict[str, str],
+    company_alias_map: dict[str, str],
 ) -> int:
     """Fetch/score FMP news for ``target_day`` until ``m_new`` new rows or FMP exhausted. Returns insert count."""
     day_iso = target_day.isoformat()
@@ -1140,7 +1329,9 @@ async def _run_sparse_fill_for_day(
 
         for i, article in enumerate(articles, 1):
             is_new = await _process_one_fmp_article(
-                args, article, seen_urls, seen_hashes, index=i, batch_total=len(articles),
+                args, article, seen_urls, seen_hashes,
+                ticker_alias_map, company_alias_map,
+                index=i, batch_total=len(articles),
             )
             if is_new:
                 added += 1
@@ -1175,6 +1366,11 @@ async def _process_fmp_sparse_fill(args: argparse.Namespace) -> None:
     fetcher = FMPFetcher()
     seen_urls: set[str] = set()
     seen_hashes: set[str] = set()
+    try:
+        ticker_alias_map, company_alias_map = _load_identity_alias_maps()
+    except Exception as exc:
+        logger.warning("[score_news] failed to load identity alias maps: %s", exc)
+        ticker_alias_map, company_alias_map = {}, {}
     excluded: set[date] = set()
     round_idx = 0
 
@@ -1215,6 +1411,7 @@ async def _process_fmp_sparse_fill(args: argparse.Namespace) -> None:
 
         await _run_sparse_fill_for_day(
             args, fetcher, target_day, m_new, seen_urls, seen_hashes,
+            ticker_alias_map, company_alias_map,
         )
 
         if not loop:

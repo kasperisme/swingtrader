@@ -12,6 +12,7 @@ import { CavemanToggle } from "@/components/caveman-toggle";
 const appLinks = [
   { href: "/protected", label: "Articles" },
   { href: "/protected/news-trends", label: "News Trends" },
+  { href: "/protected/relationships", label: "Relationships" },
   { href: "/protected/vectors", label: "Vectors" },
   { href: "/protected/screenings", label: "Screenings" },
   { href: "/protected/daily-narrative", label: "Daily Narrative" },
