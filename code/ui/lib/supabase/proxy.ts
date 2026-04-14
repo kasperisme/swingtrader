@@ -56,6 +56,8 @@ export async function updateSession(request: NextRequest) {
     pathname.startsWith("/docs") ||
     pathname.startsWith("/blog") ||
     pathname.startsWith("/articles") ||
+    pathname === "/terms" ||
+    pathname === "/privacy" ||
     pathname.startsWith("/api/v1") ||  // public API — uses its own Bearer auth
     pathname === "/api/telegram-webhook";  // Telegram webhook — authenticated by secret header
 
