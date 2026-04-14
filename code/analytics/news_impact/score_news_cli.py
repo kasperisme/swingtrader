@@ -343,14 +343,33 @@ async def _fmp_fetch_articles(
         r["__stream"] = "fmp_general"
     return _merge_fmp_articles_by_url(stock_arts, gen_arts)
 
-# ── HTML stripping (stdlib only) ─────────────────────────────────────────────
+# ── HTML / CSS stripping (stdlib only) ───────────────────────────────────────
 
-_TAG_RE   = re.compile(r"<[^>]+>")
-_SPACE_RE = re.compile(r"\s{2,}")
+# Remove <style>…</style> and <script>…</script> blocks including their content
+_STYLE_RE    = re.compile(r"<style[^>]*>.*?</style>",  re.DOTALL | re.IGNORECASE)
+_SCRIPT_RE   = re.compile(r"<script[^>]*>.*?</script>", re.DOTALL | re.IGNORECASE)
+_TAG_RE      = re.compile(r"<[^>]+>")
+_SPACE_RE    = re.compile(r"\s{2,}")
+# Raw CSS that survives tag stripping (stored in DB bodies or fetched pages)
+_CSS_AT_RE   = re.compile(r"@[\w-]+[^{;]*\{(?:[^{}]|\{[^}]*\})*\}", re.DOTALL)
+_CSS_RULE_RE = re.compile(
+    r"(?<!\w)[.#:_\[][\w\-\[\]().#:,\s>~+*=\"'@^\$|]{0,300}?\{[^{}]{0,5000}?\}",
+    re.DOTALL,
+)
+# Orphaned CSS tail at the very start (e.g. ";key:val}") left after partial rules
+_CSS_ORPHAN_RE = re.compile(r"^.*?\}(?=\s*[A-Z])", re.DOTALL)
 
 
 def _strip_html(html: str) -> str:
-    text = _TAG_RE.sub(" ", html)
+    """Strip HTML tags, style/script blocks, and raw CSS rule blocks."""
+    text = _STYLE_RE.sub(" ", html)
+    text = _SCRIPT_RE.sub(" ", text)
+    text = _TAG_RE.sub(" ", text)
+    # Strip any raw CSS blocks that survived tag removal (or were stored tag-free)
+    text = _CSS_AT_RE.sub(" ", text)
+    text = _CSS_RULE_RE.sub(" ", text)
+    # Strip orphaned CSS tail at the start if it precedes a capital letter
+    text = _CSS_ORPHAN_RE.sub("", text)
     text = _SPACE_RE.sub(" ", text)
     return text.strip()
 
