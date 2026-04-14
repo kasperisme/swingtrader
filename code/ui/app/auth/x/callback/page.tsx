@@ -1,17 +1,19 @@
-export const dynamic = "force-dynamic";
+"use client";
 
-export default async function XAuthCallbackPage({
-  searchParams,
-}: {
-  searchParams: Promise<Record<string, string | string[] | undefined>>;
-}) {
-  const params = await searchParams;
-  const hasCode = typeof params.code === "string" && params.code.length > 0;
-  const hasState = typeof params.state === "string" && params.state.length > 0;
-  const hasError = typeof params.error === "string" && params.error.length > 0;
+import { Suspense } from "react";
+import { useSearchParams } from "next/navigation";
+
+function CallbackContent() {
+  const params = useSearchParams();
+  const code = params.get("code");
+  const state = params.get("state");
+  const error = params.get("error");
+  const hasCode = Boolean(code);
+  const hasState = Boolean(state);
+  const hasError = Boolean(error);
 
   return (
-    <main className="mx-auto flex min-h-svh max-w-2xl flex-col justify-center gap-4 p-6">
+    <>
       <h1 className="text-2xl font-semibold">X Sign-In Callback</h1>
       <p className="text-sm text-muted-foreground">
         Dedicated callback route for future user sign-in with X.
@@ -26,8 +28,8 @@ export default async function XAuthCallbackPage({
               ? "authorization response received"
               : "missing expected OAuth params"}
         </p>
-        {typeof params.error === "string" ? (
-          <p className="mt-2 text-destructive">Error: {params.error}</p>
+        {error ? (
+          <p className="mt-2 text-destructive">Error: {error}</p>
         ) : null}
       </section>
 
@@ -35,6 +37,22 @@ export default async function XAuthCallbackPage({
         Next implementation step: exchange code for tokens server-side, validate
         state/nonce, then create an authenticated app session.
       </section>
+    </>
+  );
+}
+
+export default function XAuthCallbackPage() {
+  return (
+    <main className="mx-auto flex min-h-svh max-w-2xl flex-col justify-center gap-4 p-6">
+      <Suspense
+        fallback={
+          <p className="text-sm text-muted-foreground">
+            Reading OAuth callback parameters...
+          </p>
+        }
+      >
+        <CallbackContent />
+      </Suspense>
     </main>
   );
 }
