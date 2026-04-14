@@ -7,6 +7,42 @@ import { createGraphForceSimulation, type GraphForceNode } from "./d3-force-layo
 
 export type SelectedEdge = { from_ticker: string; to_ticker: string; rel_type?: string } | null;
 
+const EDGE_ARROW_MARKER_ID = "swingtrader-rel-edge-arrow";
+
+function directedEdgeEndpoints(
+  fromX: number,
+  fromY: number,
+  toX: number,
+  toY: number,
+  nodeR: number,
+): { x1: number; y1: number; x2: number; y2: number } {
+  const dx = toX - fromX;
+  const dy = toY - fromY;
+  const len = Math.hypot(dx, dy);
+  if (!Number.isFinite(len) || len < 1e-6) {
+    return { x1: fromX, y1: fromY, x2: toX, y2: toY };
+  }
+  const ux = dx / len;
+  const uy = dy / len;
+  const tailInset = nodeR + 1;
+  const headInset = nodeR + 10;
+  if (len < tailInset + headInset + 2) {
+    const half = Math.max(2, (len - 2) / 2);
+    return {
+      x1: fromX + ux * half,
+      y1: fromY + uy * half,
+      x2: toX - ux * half,
+      y2: toY - uy * half,
+    };
+  }
+  return {
+    x1: fromX + ux * tailInset,
+    y1: fromY + uy * tailInset,
+    x2: toX - ux * headInset,
+    y2: toY - uy * headInset,
+  };
+}
+
 export type NetworkGraphD3Props = {
   width: number;
   height: number;
@@ -18,6 +54,8 @@ export type NetworkGraphD3Props = {
   selectedNode: string | null;
   selectedEdge: SelectedEdge;
   connectedSet: Set<string>;
+  /** When false, node/link opacity ignores neighborhood dimming (full-graph view). */
+  dimDistantGraph: boolean;
   manualPositions: Record<string, { x: number; y: number }>;
   onManualPositionsMerge: (patch: Record<string, { x: number; y: number }>) => void;
   onNodeClick: (node: string) => void;
@@ -38,6 +76,7 @@ export function NetworkGraphD3({
   selectedNode,
   selectedEdge,
   connectedSet,
+  dimDistantGraph,
   manualPositions,
   onManualPositionsMerge,
   onNodeClick,
@@ -54,6 +93,20 @@ export function NetworkGraphD3({
 
     const svg = select(el);
     svg.selectAll("*").remove();
+
+    svg
+      .append("defs")
+      .append("marker")
+      .attr("id", EDGE_ARROW_MARKER_ID)
+      .attr("viewBox", "0 -4 10 8")
+      .attr("refX", 9)
+      .attr("refY", 0)
+      .attr("markerWidth", 6)
+      .attr("markerHeight", 6)
+      .attr("orient", "auto")
+      .append("path")
+      .attr("d", "M0,-3.25L9,0L0,3.25z")
+      .attr("fill", "currentColor");
 
     const layoutEdges = visibleEdges.map((e) => ({
       from: e.from_ticker,
@@ -79,12 +132,18 @@ export function NetworkGraphD3({
     const linkLayer = viewport.append("g").attr("class", "links");
     const nodeLayer = viewport.append("g").attr("class", "nodes");
 
+    function edgeStroke(d: RelationshipEdge) {
+      return REL_COLORS[d.rel_type] ?? "hsl(var(--muted-foreground))";
+    }
+
     const linkSel = linkLayer
       .selectAll<SVGLineElement, RelationshipEdge>("line.link")
       .data(visibleEdges, (d) => `${d.from_ticker}|${d.to_ticker}|${d.rel_type}`)
       .join("line")
       .attr("class", "link cursor-pointer")
-      .attr("stroke", (d) => REL_COLORS[d.rel_type] ?? "hsl(var(--muted-foreground))")
+      .attr("stroke", (d) => edgeStroke(d))
+      .style("color", (d) => edgeStroke(d))
+      .attr("marker-end", `url(#${EDGE_ARROW_MARKER_ID})`)
       .attr("stroke-width", (d) => 1 + d.strength_avg * 3)
       .on("click", (event, d) => {
         event.stopPropagation();
@@ -110,21 +169,28 @@ export function NetworkGraphD3({
         selectedEdge.to_ticker === d.to_ticker &&
         selectedEdge.rel_type === d.rel_type;
       if (selectedEdge) return isSelected ? 1 : 0.08;
+      if (!dimDistantGraph) return 0.45;
       const isFocused =
         selectedNode && (d.from_ticker === selectedNode || d.to_ticker === selectedNode);
-      if (isSelected) return 1;
       if (isFocused) return 0.85;
       if (selectedNode) return 0.12;
       return 0.45;
     }
 
     function syncLinks() {
-      linkSel
-        .attr("x1", (d) => byId.get(d.from_ticker)?.x ?? 0)
-        .attr("y1", (d) => byId.get(d.from_ticker)?.y ?? 0)
-        .attr("x2", (d) => byId.get(d.to_ticker)?.x ?? 0)
-        .attr("y2", (d) => byId.get(d.to_ticker)?.y ?? 0)
-        .attr("stroke-opacity", linkOpacity);
+      linkSel.each(function (d) {
+        const fx = byId.get(d.from_ticker)?.x ?? 0;
+        const fy = byId.get(d.from_ticker)?.y ?? 0;
+        const tx = byId.get(d.to_ticker)?.x ?? 0;
+        const ty = byId.get(d.to_ticker)?.y ?? 0;
+        const { x1, y1, x2, y2 } = directedEdgeEndpoints(fx, fy, tx, ty, NODE_R);
+        select<SVGLineElement, RelationshipEdge>(this)
+          .attr("x1", x1)
+          .attr("y1", y1)
+          .attr("x2", x2)
+          .attr("y2", y2)
+          .attr("stroke-opacity", linkOpacity(d));
+      });
     }
 
     const nodeSel = nodeLayer
@@ -139,6 +205,7 @@ export function NetworkGraphD3({
             d.id === selectedEdge.from_ticker || d.id === selectedEdge.to_ticker;
           return isEndpoint ? 1 : 0.2;
         }
+        if (!dimDistantGraph) return 1;
         if (!selectedNode) return 1;
         if (d.id === selectedNode) return 1;
         if (connectedSet.has(d.id)) return 1;
@@ -279,6 +346,7 @@ export function NetworkGraphD3({
       ? `${selectedEdge.from_ticker}|${selectedEdge.to_ticker}|${selectedEdge.rel_type ?? ""}`
       : "",
     [...connectedSet].sort().join("|"),
+    dimDistantGraph,
     onManualPositionsMerge,
     onNodeClick,
     onNodeDoubleClick,
