@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from "react";
+import { useCallback, useEffect, useMemo, useState, type Dispatch, type SetStateAction } from "react";
 import {
   relationshipsGetAliases,
   relationshipsGetAliasesBulk,
@@ -17,8 +17,10 @@ import {
   type NodeSentimentWindow,
   type RelationshipEdge,
 } from "@/app/actions/relationships";
+import { fmpGetCompanyProfile, type FmpCompanyProfile } from "@/app/actions/fmp";
 import { TickerSearchCombobox } from "@/components/ticker-search-combobox";
 import { VectorsUI, type TickerRow } from "../vectors/vectors-ui";
+import { NetworkGraphD3 } from "./network-graph-d3";
 
 const REL_COLORS: Record<string, string> = {
   competitor: "hsl(var(--chart-3))",
@@ -37,84 +39,88 @@ const NODE_R = 18;
 
 type SelectedEdge = { from_ticker: string; to_ticker: string; rel_type?: string } | null;
 
-function runForceLayout(
-  nodeIds: string[],
-  edges: Array<{ from: string; to: string; strength: number }>,
-): Record<string, { x: number; y: number }> {
-  if (nodeIds.length === 0) return {};
-  const cx = GW / 2;
-  const cy = GH / 2;
-  const repulsion = 6400;
-  const damping = 0.86;
-  const springK = 0.03;
-  const centerK = 0.01;
-  const steps = 280;
-  const radius = Math.min(GW, GH) * 0.34;
-  const pos: Record<string, { x: number; y: number; vx: number; vy: number }> = {};
+function GraphDetailsEdgeEvidence({
+  selectedEdge,
+  evidencePage,
+  setEvidencePage,
+  evidenceRows,
+  listMaxClass,
+}: {
+  selectedEdge: SelectedEdge;
+  evidencePage: number;
+  setEvidencePage: Dispatch<SetStateAction<number>>;
+  evidenceRows: EdgeEvidence[];
+  listMaxClass: string;
+}) {
+  return (
+    <div>
+      <div className="flex items-center justify-between">
+        <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Edge Evidence</p>
+        {selectedEdge ? (
+          <div className="flex items-center gap-1">
+            <button
+              type="button"
+              onClick={() => setEvidencePage((p) => Math.max(1, p - 1))}
+              className="rounded border border-border px-2 py-0.5 text-xs"
+            >
+              Prev
+            </button>
+            <span className="text-xs text-muted-foreground">{evidencePage}</span>
+            <button
+              type="button"
+              onClick={() => setEvidencePage((p) => p + 1)}
+              className="rounded border border-border px-2 py-0.5 text-xs"
+            >
+              Next
+            </button>
+          </div>
+        ) : null}
+      </div>
+      <div className={`mt-1 overflow-auto ${listMaxClass}`}>
+        {evidenceRows.length === 0 ? (
+          <p className="p-2 text-xs text-muted-foreground">Select an edge to load article provenance.</p>
+        ) : (
+          <div className="divide-y divide-border">
+            {evidenceRows.map((row) => (
+              <div key={`${row.edge_id}-${row.article_id}`} className="p-2">
+                <a
+                  href={row.article_url ?? "#"}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="text-xs font-medium text-foreground hover:underline"
+                >
+                  {row.article_title ?? `Article #${row.article_id}`}
+                </a>
+                <p className="mt-0.5 text-[11px] text-muted-foreground">
+                  {row.published_at ? new Date(row.published_at).toLocaleString() : "Unknown date"} · confidence{" "}
+                  {row.head_confidence == null ? "—" : row.head_confidence.toFixed(2)}
+                </p>
+                {row.reasoning_text ? (
+                  <p className="mt-1 text-[11px] text-muted-foreground line-clamp-3">{row.reasoning_text}</p>
+                ) : null}
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
 
-  nodeIds.forEach((id, i) => {
-    const angle = (2 * Math.PI * i) / nodeIds.length - Math.PI / 2;
-    pos[id] = { x: cx + radius * Math.cos(angle), y: cy + radius * Math.sin(angle), vx: 0, vy: 0 };
-  });
+function formatCompactNumber(n: number | undefined): string {
+  if (n == null || !Number.isFinite(n)) return "—";
+  return new Intl.NumberFormat(undefined, { notation: "compact", maximumFractionDigits: 1 }).format(n);
+}
 
-  const validEdges = edges.filter((e) => pos[e.from] && pos[e.to]);
-  for (let step = 0; step < steps; step += 1) {
-    const cool = 1 - step / steps;
-    for (let i = 0; i < nodeIds.length; i += 1) {
-      for (let j = i + 1; j < nodeIds.length; j += 1) {
-        const a = pos[nodeIds[i]!]!;
-        const b = pos[nodeIds[j]!]!;
-        const dx = a.x - b.x || 0.001;
-        const dy = a.y - b.y || 0.001;
-        const dist2 = Math.max(1, dx * dx + dy * dy);
-        const dist = Math.sqrt(dist2);
-        const f = repulsion / dist2;
-        const fx = (dx / dist) * f;
-        const fy = (dy / dist) * f;
-        a.vx += fx;
-        a.vy += fy;
-        b.vx -= fx;
-        b.vy -= fy;
-      }
-    }
-
-    for (const e of validEdges) {
-      const a = pos[e.from]!;
-      const b = pos[e.to]!;
-      const dx = b.x - a.x;
-      const dy = b.y - a.y;
-      const dist = Math.sqrt(dx * dx + dy * dy) || 0.001;
-      const rest = 90 + 80 * (1 - Math.max(0, Math.min(1, e.strength)));
-      const disp = dist - rest;
-      const f = springK * disp;
-      const fx = (dx / dist) * f;
-      const fy = (dy / dist) * f;
-      a.vx += fx;
-      a.vy += fy;
-      b.vx -= fx;
-      b.vy -= fy;
-    }
-
-    for (const id of nodeIds) {
-      const n = pos[id]!;
-      n.vx += (cx - n.x) * centerK;
-      n.vy += (cy - n.y) * centerK;
-      n.vx *= damping;
-      n.vy *= damping;
-      n.x += n.vx * cool;
-      n.y += n.vy * cool;
-      n.x = Math.max(NODE_R + 6, Math.min(GW - NODE_R - 6, n.x));
-      n.y = Math.max(NODE_R + 6, Math.min(GH - NODE_R - 6, n.y));
-    }
-  }
-
-  return Object.fromEntries(nodeIds.map((id) => [id, { x: pos[id]!.x, y: pos[id]!.y }]));
+function formatFixed(n: number | undefined, digits: number): string {
+  if (n == null || !Number.isFinite(n)) return "—";
+  return n.toFixed(digits);
 }
 
 export function RelationshipsUI({ vectors = [] }: { vectors?: TickerRow[] }) {
   const FIXED_MIN_STRENGTH = 0.25;
   const FIXED_MIN_MENTIONS = 1;
-  const [sideTab, setSideTab] = useState<"details" | "vectors" | "sentiment">("details");
+  const [sideTab, setSideTab] = useState<"overview" | "details" | "vectors" | "sentiment">("overview");
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
   const [seedInput, setSeedInput] = useState("AAPL");
   const [loading, setLoading] = useState(false);
@@ -142,11 +148,21 @@ export function RelationshipsUI({ vectors = [] }: { vectors?: TickerRow[] }) {
   const [sentimentError, setSentimentError] = useState<string | null>(null);
   const [evidenceRows, setEvidenceRows] = useState<EdgeEvidence[]>([]);
   const [evidencePage, setEvidencePage] = useState(1);
-  const [draggingNode, setDraggingNode] = useState<string | null>(null);
-  const [dragGroup, setDragGroup] = useState<string[]>([]);
-  const [lastDragPoint, setLastDragPoint] = useState<{ x: number; y: number } | null>(null);
   const [manualPositions, setManualPositions] = useState<Record<string, { x: number; y: number }>>({});
-  const suppressNodeClickRef = useRef(false);
+  const [fmpProfile, setFmpProfile] = useState<FmpCompanyProfile | null>(null);
+  const [fmpProfileLoading, setFmpProfileLoading] = useState(false);
+  const [fmpProfileError, setFmpProfileError] = useState<string | null>(null);
+  /** Ticker the current `fmpProfile` / `fmpProfileError` belongs to (after last completed request). */
+  const [fmpProfileForTicker, setFmpProfileForTicker] = useState<string | null>(null);
+
+  const fmpOverviewBusy = useMemo(
+    () =>
+      Boolean(
+        selectedNode &&
+          (fmpProfileLoading || fmpProfileForTicker?.toUpperCase() !== selectedNode.toUpperCase()),
+      ),
+    [fmpProfileLoading, fmpProfileForTicker, selectedNode],
+  );
 
   const filteredEdges = useMemo(
     () => edges.filter((e) => selectedRelTypes.includes(e.rel_type)),
@@ -178,23 +194,6 @@ export function RelationshipsUI({ vectors = [] }: { vectors?: TickerRow[] }) {
     );
     return { nodes: visibleNodes, edges: visibleEdges };
   }, [filteredEdges, nodes, selectedNode]);
-
-  const basePositions = useMemo(
-    () =>
-      runForceLayout(
-        visibleGraph.nodes,
-        visibleGraph.edges.map((e) => ({
-          from: e.from_ticker,
-          to: e.to_ticker,
-          strength: e.strength_avg,
-        })),
-      ),
-    [visibleGraph.nodes, visibleGraph.edges],
-  );
-  const positions = useMemo(
-    () => ({ ...basePositions, ...manualPositions }),
-    [basePositions, manualPositions],
-  );
 
   const connectedSet = useMemo(() => {
     if (!selectedNode) return new Set<string>();
@@ -242,6 +241,8 @@ export function RelationshipsUI({ vectors = [] }: { vectors?: TickerRow[] }) {
     return vectors.filter((row) => allowed.has(row.ticker.toUpperCase()));
   }, [aliasesByNode, selectedNode, vectors]);
 
+  const edgeFocusMode = Boolean(selectedEdge && !selectedNode);
+
   async function loadNeighborhood(resetSelection = true, seedOverride?: string) {
     setLoading(true);
     setError(null);
@@ -283,7 +284,7 @@ export function RelationshipsUI({ vectors = [] }: { vectors?: TickerRow[] }) {
     }
   }
 
-  async function expandAroundNode(node: string) {
+  const expandAroundNode = useCallback(async (node: string) => {
     const result = await relationshipsGetNeighborhood({
       seedTicker: node,
       hops,
@@ -310,7 +311,57 @@ export function RelationshipsUI({ vectors = [] }: { vectors?: TickerRow[] }) {
       return Array.from(byKey.values());
     });
     setTruncated((prev) => prev || result.data.truncated);
-  }
+  }, [hops, selectedRelTypes]);
+
+  const onManualPositionsMerge = useCallback((patch: Record<string, { x: number; y: number }>) => {
+    setManualPositions((prev) => ({ ...prev, ...patch }));
+  }, []);
+
+  const onGraphNodeClick = useCallback(
+    (node: string) => {
+      void (async () => {
+        setSelectedNode(node);
+        setSelectedEdge(null);
+        setEvidenceRows([]);
+        setNodeNewsPage(1);
+        setSentimentPage(1);
+        await expandAroundNode(node);
+      })();
+    },
+    [expandAroundNode],
+  );
+
+  const onGraphNodeDoubleClick = useCallback((node: string) => {
+    setSelectedNode(node);
+    setIsDrawerOpen((prev) => !prev);
+  }, []);
+
+  const onGraphEdgeClick = useCallback(
+    (edge: { from_ticker: string; to_ticker: string; rel_type: string }) => {
+      setSelectedNode(null);
+      setSelectedEdge(edge);
+      setEvidencePage(1);
+    },
+    [],
+  );
+
+  const onGraphEdgeDoubleClick = useCallback(
+    (edge: { from_ticker: string; to_ticker: string; rel_type: string }) => {
+      setSelectedNode(null);
+      setSelectedEdge(edge);
+      setEvidencePage(1);
+      setSideTab("details");
+      setIsDrawerOpen((prev) => !prev);
+    },
+    [],
+  );
+
+  const onGraphSvgBackgroundDoubleClick = useCallback(() => {
+    setIsDrawerOpen((prev) => {
+      if (prev) return false;
+      return prev;
+    });
+  }, []);
 
   useEffect(() => {
     void loadNeighborhood(true);
@@ -400,6 +451,35 @@ export function RelationshipsUI({ vectors = [] }: { vectors?: TickerRow[] }) {
   }, [selectedEdge, evidencePage]);
 
   useEffect(() => {
+    if (!selectedNode) {
+      setFmpProfile(null);
+      setFmpProfileError(null);
+      setFmpProfileLoading(false);
+      setFmpProfileForTicker(null);
+      return;
+    }
+    const ticker = selectedNode;
+    let cancelled = false;
+    setFmpProfileLoading(true);
+    setFmpProfileError(null);
+    fmpGetCompanyProfile(ticker).then((res) => {
+      if (cancelled) return;
+      setFmpProfileLoading(false);
+      setFmpProfileForTicker(ticker);
+      if (!res.ok) {
+        setFmpProfile(null);
+        setFmpProfileError(res.error);
+        return;
+      }
+      setFmpProfile(res.data);
+      setFmpProfileError(null);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedNode]);
+
+  useEffect(() => {
     setManualPositions((prev) => {
       const next: Record<string, { x: number; y: number }> = {};
       for (const id of nodes) {
@@ -408,21 +488,6 @@ export function RelationshipsUI({ vectors = [] }: { vectors?: TickerRow[] }) {
       return next;
     });
   }, [nodes]);
-
-  function toSvgCoords(event: ReactMouseEvent<SVGSVGElement>) {
-    const svg = event.currentTarget;
-    const rect = svg.getBoundingClientRect();
-    const x = ((event.clientX - rect.left) / rect.width) * GW;
-    const y = ((event.clientY - rect.top) / rect.height) * GH;
-    return { x, y };
-  }
-
-  function clampNodePosition(x: number, y: number) {
-    return {
-      x: Math.max(NODE_R + 6, Math.min(GW - NODE_R - 6, x)),
-      y: Math.max(NODE_R + 6, Math.min(GH - NODE_R - 6, y)),
-    };
-  }
 
   return (
     <div className="flex flex-col gap-4">
@@ -494,162 +559,52 @@ export function RelationshipsUI({ vectors = [] }: { vectors?: TickerRow[] }) {
         <button
           type="button"
           onClick={() => setIsDrawerOpen((prev) => !prev)}
-          className="absolute right-3 top-3 z-20 rounded-md border border-border bg-background px-2.5 py-1 text-xs font-medium text-foreground transition-colors hover:bg-muted"
+          className="absolute right-3 top-3 z-40 rounded-md border border-border bg-background px-2.5 py-1 text-xs font-medium text-foreground transition-colors hover:bg-muted"
         >
           {isDrawerOpen ? "Hide Panel" : "Show Panel"}
         </button>
-        <div className="overflow-hidden rounded-xl bg-card">
-          <svg
-            viewBox={`0 0 ${GW} ${GH}`}
-            className="w-full"
-            onDoubleClick={() => {
-              if (isDrawerOpen) setIsDrawerOpen(false);
-            }}
-            onMouseMove={(e) => {
-              if (!draggingNode || !lastDragPoint) return;
-              const p = toSvgCoords(e);
-              const dx = p.x - lastDragPoint.x;
-              const dy = p.y - lastDragPoint.y;
-              if (Math.abs(dx) + Math.abs(dy) > 0.5) {
-                suppressNodeClickRef.current = true;
-              }
-              setLastDragPoint(p);
-              setManualPositions((prev) => {
-                const next = { ...prev };
-                for (const nodeId of dragGroup) {
-                  const current = prev[nodeId] ?? positions[nodeId];
-                  if (!current) continue;
-                  next[nodeId] = clampNodePosition(current.x + dx, current.y + dy);
-                }
-                return next;
-              });
-            }}
-            onMouseUp={() => {
-              setDraggingNode(null);
-              setDragGroup([]);
-              setLastDragPoint(null);
-              setTimeout(() => {
-                suppressNodeClickRef.current = false;
-              }, 0);
-            }}
-            onMouseLeave={() => {
-              setDraggingNode(null);
-              setDragGroup([]);
-              setLastDragPoint(null);
-              setTimeout(() => {
-                suppressNodeClickRef.current = false;
-              }, 0);
-            }}
-          >
-            {visibleGraph.edges.map((edge, idx) => {
-              const p0 = positions[edge.from_ticker];
-              const p1 = positions[edge.to_ticker];
-              if (!p0 || !p1) return null;
-              const isSelected =
-                selectedEdge &&
-                selectedEdge.from_ticker === edge.from_ticker &&
-                selectedEdge.to_ticker === edge.to_ticker &&
-                selectedEdge.rel_type === edge.rel_type;
-              const isFocused =
-                selectedNode && (edge.from_ticker === selectedNode || edge.to_ticker === selectedNode);
-              return (
-                <line
-                  key={`${edge.from_ticker}-${edge.to_ticker}-${edge.rel_type}-${idx}`}
-                  x1={p0.x}
-                  y1={p0.y}
-                  x2={p1.x}
-                  y2={p1.y}
-                  stroke={REL_COLORS[edge.rel_type] ?? "hsl(var(--muted-foreground))"}
-                  strokeWidth={1 + edge.strength_avg * 3}
-                  strokeOpacity={isSelected ? 1 : isFocused ? 0.85 : selectedNode ? 0.12 : 0.45}
-                  className="cursor-pointer"
-                  onClick={() => {
-                    setSelectedEdge({
-                      from_ticker: edge.from_ticker,
-                      to_ticker: edge.to_ticker,
-                      rel_type: edge.rel_type,
-                    });
-                    setEvidencePage(1);
-                  }}
-                />
-              );
-            })}
-            {visibleGraph.nodes.map((node) => {
-              const p = positions[node];
-              if (!p) return null;
-              const isSelected = node === selectedNode;
-              const isConnected = connectedSet.has(node);
-              const dimmed = selectedNode && !isSelected && !isConnected;
-              return (
-                <g
-                  key={node}
-                  transform={`translate(${p.x},${p.y})`}
-                  className="cursor-pointer"
-                  style={{ opacity: dimmed ? 0.3 : 1 }}
-                  onMouseDown={(e) => {
-                    e.stopPropagation();
-                    suppressNodeClickRef.current = false;
-                    setDraggingNode(node);
-                    const connected = new Set<string>([node]);
-                    for (const edge of edges) {
-                      if (edge.from_ticker === node) connected.add(edge.to_ticker);
-                      if (edge.to_ticker === node) connected.add(edge.from_ticker);
-                    }
-                    setDragGroup(Array.from(connected));
-                    // capture initial pointer point for delta-based group dragging
-                    const svg = (e.currentTarget.ownerSVGElement ?? e.currentTarget.closest("svg")) as SVGSVGElement | null;
-                    if (svg) {
-                      const rect = svg.getBoundingClientRect();
-                      setLastDragPoint({
-                        x: ((e.clientX - rect.left) / rect.width) * GW,
-                        y: ((e.clientY - rect.top) / rect.height) * GH,
-                      });
-                    }
-                  }}
-                  onClick={() => void (async () => {
-                    if (suppressNodeClickRef.current) {
-                      suppressNodeClickRef.current = false;
-                      return;
-                    }
-                    setSelectedNode(node);
-                    setSelectedEdge(null);
-                    setEvidenceRows([]);
-                    setNodeNewsPage(1);
-                    setSentimentPage(1);
-                    // Keep current graph and append neighborhood from clicked node.
-                    await expandAroundNode(node);
-                  })()}
-                  onDoubleClick={(e) => {
-                    e.stopPropagation();
-                    setSelectedNode(node);
-                    setIsDrawerOpen((prev) => !prev);
-                  }}
-                >
-                  <circle
-                    r={NODE_R}
-                    fill={isSelected ? "hsl(var(--foreground))" : "hsl(var(--muted))"}
-                    stroke="hsl(var(--border))"
-                  />
-                  <text
-                    textAnchor="middle"
-                    dominantBaseline="middle"
-                    fontSize={node.length > 4 ? 8 : 9}
-                    fontWeight="700"
-                    fontFamily="monospace"
-                    fill={isSelected ? "hsl(var(--background))" : "hsl(var(--foreground))"}
-                    className="select-none pointer-events-none"
-                  >
-                    {node}
-                  </text>
-                </g>
-              );
-            })}
-          </svg>
+        <div className="relative z-0 isolate overflow-hidden rounded-xl bg-card">
+          <NetworkGraphD3
+            width={GW}
+            height={GH}
+            nodeRadius={NODE_R}
+            relColors={REL_COLORS}
+            nodes={visibleGraph.nodes}
+            edges={visibleGraph.edges}
+            allEdges={edges}
+            selectedNode={selectedNode}
+            selectedEdge={selectedEdge}
+            connectedSet={connectedSet}
+            manualPositions={manualPositions}
+            onManualPositionsMerge={onManualPositionsMerge}
+            onNodeClick={onGraphNodeClick}
+            onNodeDoubleClick={onGraphNodeDoubleClick}
+            onEdgeClick={onGraphEdgeClick}
+            onEdgeDoubleClick={onGraphEdgeDoubleClick}
+            onSvgBackgroundDoubleClick={onGraphSvgBackgroundDoubleClick}
+          />
         </div>
 
         {isDrawerOpen ? (
-          <div className="absolute right-0 top-0 z-10 h-full w-full max-w-[30rem] overflow-y-auto border-l border-border bg-background/95 p-2 backdrop-blur-sm">
-          <div className="inline-flex w-fit items-center gap-1 rounded-md bg-muted/60 p-1">
+          <div className="absolute right-0 top-0 z-30 h-full w-full max-w-[30rem] overflow-y-auto border-l border-border bg-background/95 p-2 backdrop-blur-sm">
+          <div className="inline-flex w-fit flex-wrap items-center gap-1 rounded-md bg-muted/60 p-1">
+            <button
+              type="button"
+              onClick={() => setSideTab("overview")}
+              className={`inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${
+                sideTab === "overview"
+                  ? "bg-background text-foreground"
+                  : "text-muted-foreground hover:text-foreground"
+              }`}
+            >
+              Basic info
+              {selectedNode && fmpOverviewBusy ? (
+                <span
+                  className="inline-block size-1.5 shrink-0 animate-pulse rounded-full bg-muted-foreground/80"
+                  aria-hidden
+                />
+              ) : null}
+            </button>
             <button
               type="button"
               onClick={() => setSideTab("details")}
@@ -685,7 +640,165 @@ export function RelationshipsUI({ vectors = [] }: { vectors?: TickerRow[] }) {
             </button>
           </div>
 
-          {sideTab === "vectors" ? (
+          {sideTab === "overview" ? (
+            <div className="p-2">
+              {!selectedNode ? (
+                <p className="text-sm text-muted-foreground">Select a node to load company profile from Financial Modeling Prep.</p>
+              ) : fmpOverviewBusy ? (
+                <div className="flex flex-col gap-3" aria-busy="true" aria-live="polite">
+                  <p className="text-xs text-muted-foreground">
+                    Loading profile for <span className="font-mono text-foreground">{selectedNode}</span>…
+                  </p>
+                  <div className="flex gap-3 border-b border-border pb-3">
+                    <div className="h-12 w-12 shrink-0 animate-pulse rounded-md bg-muted" />
+                    <div className="min-w-0 flex-1 space-y-2 py-0.5">
+                      <div className="h-4 w-[min(100%,14rem)] animate-pulse rounded bg-muted" />
+                      <div className="h-3 w-24 animate-pulse rounded bg-muted" />
+                      <div className="h-3 w-16 animate-pulse rounded bg-muted" />
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-2 gap-2">
+                    {Array.from({ length: 10 }).map((_, i) => (
+                      <div key={`sk-${i}`} className="h-3 animate-pulse rounded bg-muted/80" />
+                    ))}
+                  </div>
+                </div>
+              ) : fmpProfileError ? (
+                <p className="text-xs text-rose-500">{fmpProfileError}</p>
+              ) : fmpProfile ? (
+                <div className="flex flex-col gap-3">
+                  <div className="flex gap-3 border-b border-border pb-3">
+                    {fmpProfile.image ? (
+                      <img
+                        src={fmpProfile.image}
+                        alt=""
+                        width={48}
+                        height={48}
+                        className="h-12 w-12 shrink-0 rounded-md border border-border bg-muted object-contain"
+                      />
+                    ) : (
+                      <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-md border border-border bg-muted font-mono text-xs font-semibold text-muted-foreground">
+                        {(fmpProfile.symbol ?? selectedNode).slice(0, 4)}
+                      </div>
+                    )}
+                    <div className="min-w-0 flex-1">
+                      <p className="text-sm font-semibold leading-tight text-foreground">
+                        {fmpProfile.companyName ?? selectedNode}
+                      </p>
+                      <p className="mt-0.5 font-mono text-xs text-muted-foreground">
+                        {fmpProfile.symbol ?? selectedNode}
+                        {fmpProfile.exchange ? ` · ${fmpProfile.exchange}` : ""}
+                      </p>
+                      {fmpProfile.website ? (
+                        <a
+                          href={fmpProfile.website}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="mt-1 inline-block truncate text-xs font-medium text-foreground hover:underline"
+                        >
+                          Website
+                        </a>
+                      ) : null}
+                    </div>
+                  </div>
+
+                  <dl className="grid grid-cols-[minmax(0,1fr)_minmax(0,1.1fr)] gap-x-2 gap-y-1.5 text-xs">
+                    <dt className="text-muted-foreground">Price</dt>
+                    <dd className="text-right font-mono tabular-nums">
+                      {fmpProfile.price != null && Number.isFinite(fmpProfile.price)
+                        ? `${formatFixed(fmpProfile.price, 2)}${fmpProfile.currency ? ` ${fmpProfile.currency}` : ""}`
+                        : "—"}
+                    </dd>
+                    <dt className="text-muted-foreground">Change</dt>
+                    <dd
+                      className={`text-right font-mono tabular-nums ${
+                        (fmpProfile.change ?? 0) > 0
+                          ? "text-emerald-600"
+                          : (fmpProfile.change ?? 0) < 0
+                            ? "text-rose-600"
+                            : ""
+                      }`}
+                    >
+                      {fmpProfile.change != null && Number.isFinite(fmpProfile.change)
+                        ? `${fmpProfile.change > 0 ? "+" : ""}${formatFixed(fmpProfile.change, 2)}`
+                        : "—"}
+                      {fmpProfile.changePercentage != null && Number.isFinite(fmpProfile.changePercentage)
+                        ? ` (${fmpProfile.changePercentage > 0 ? "+" : ""}${formatFixed(fmpProfile.changePercentage, 2)}%)`
+                        : ""}
+                    </dd>
+                    <dt className="text-muted-foreground">Market cap</dt>
+                    <dd className="text-right font-mono tabular-nums">{formatCompactNumber(fmpProfile.marketCap)}</dd>
+                    <dt className="text-muted-foreground">52W range</dt>
+                    <dd className="text-right font-mono text-[11px] tabular-nums">{fmpProfile.range ?? "—"}</dd>
+                    <dt className="text-muted-foreground">Beta</dt>
+                    <dd className="text-right font-mono tabular-nums">{formatFixed(fmpProfile.beta, 3)}</dd>
+                    <dt className="text-muted-foreground">Volume</dt>
+                    <dd className="text-right font-mono tabular-nums">{formatCompactNumber(fmpProfile.volume)}</dd>
+                    <dt className="text-muted-foreground">Avg volume</dt>
+                    <dd className="text-right font-mono tabular-nums">{formatCompactNumber(fmpProfile.averageVolume)}</dd>
+                    <dt className="text-muted-foreground">Last dividend</dt>
+                    <dd className="text-right font-mono tabular-nums">{formatFixed(fmpProfile.lastDividend, 2)}</dd>
+                    <dt className="text-muted-foreground">Sector</dt>
+                    <dd className="text-right">{fmpProfile.sector ?? "—"}</dd>
+                    <dt className="text-muted-foreground">Industry</dt>
+                    <dd className="text-right">{fmpProfile.industry ?? "—"}</dd>
+                    <dt className="text-muted-foreground">CEO</dt>
+                    <dd className="text-right">{fmpProfile.ceo ?? "—"}</dd>
+                    <dt className="text-muted-foreground">Employees</dt>
+                    <dd className="text-right tabular-nums">{fmpProfile.fullTimeEmployees ?? "—"}</dd>
+                    <dt className="text-muted-foreground">IPO</dt>
+                    <dd className="text-right font-mono text-[11px]">{fmpProfile.ipoDate ?? "—"}</dd>
+                    <dt className="text-muted-foreground">Country</dt>
+                    <dd className="text-right">{fmpProfile.country ?? "—"}</dd>
+                    <dt className="text-muted-foreground">Exchange</dt>
+                    <dd className="text-right text-[11px] leading-snug">{fmpProfile.exchangeFullName ?? fmpProfile.exchange ?? "—"}</dd>
+                    <dt className="text-muted-foreground">CIK / ISIN</dt>
+                    <dd className="break-all text-right font-mono text-[10px]">
+                      {[fmpProfile.cik, fmpProfile.isin].filter(Boolean).join(" · ") || "—"}
+                    </dd>
+                  </dl>
+
+                  {(fmpProfile.address || fmpProfile.city || fmpProfile.phone) ? (
+                    <div className="border-t border-border pt-2 text-xs text-muted-foreground">
+                      {fmpProfile.address ? <p>{fmpProfile.address}</p> : null}
+                      {(fmpProfile.city || fmpProfile.state || fmpProfile.zip) ? (
+                        <p>
+                          {[fmpProfile.city, fmpProfile.state, fmpProfile.zip].filter(Boolean).join(", ")}
+                        </p>
+                      ) : null}
+                      {fmpProfile.phone ? <p className="mt-1 font-mono">{fmpProfile.phone}</p> : null}
+                    </div>
+                  ) : null}
+
+                  <div className="flex flex-wrap gap-1.5 text-[10px] text-muted-foreground">
+                    {fmpProfile.isEtf ? <span className="rounded border border-border px-1.5 py-0.5">ETF</span> : null}
+                    {fmpProfile.isFund ? <span className="rounded border border-border px-1.5 py-0.5">Fund</span> : null}
+                    {fmpProfile.isAdr ? <span className="rounded border border-border px-1.5 py-0.5">ADR</span> : null}
+                    {fmpProfile.isActivelyTrading === false ? (
+                      <span className="rounded border border-amber-500/50 px-1.5 py-0.5 text-amber-700 dark:text-amber-400">
+                        Not actively trading
+                      </span>
+                    ) : null}
+                  </div>
+
+                  {fmpProfile.description ? (
+                    <div>
+                      <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Description</p>
+                      <p className="mt-1 max-h-48 overflow-y-auto text-xs leading-relaxed text-muted-foreground">
+                        {fmpProfile.description}
+                      </p>
+                    </div>
+                  ) : null}
+
+                  <p className="text-[10px] text-muted-foreground">
+                    Data: Financial Modeling Prep company profile. Cached up to ~1 hour.
+                  </p>
+                </div>
+              ) : (
+                <p className="text-xs text-muted-foreground">No profile returned for this symbol.</p>
+              )}
+            </div>
+          ) : sideTab === "vectors" ? (
             <div className="p-2">
               {!selectedNode ? (
                 <p className="text-sm text-muted-foreground">
@@ -825,6 +938,17 @@ export function RelationshipsUI({ vectors = [] }: { vectors?: TickerRow[] }) {
             ) : null}
           </div>
 
+              {edgeFocusMode ? (
+                <GraphDetailsEdgeEvidence
+                  selectedEdge={selectedEdge}
+                  evidencePage={evidencePage}
+                  setEvidencePage={setEvidencePage}
+                  evidenceRows={evidenceRows}
+                  listMaxClass="max-h-[min(38rem,76vh)]"
+                />
+              ) : null}
+
+              {!edgeFocusMode ? (
               <div>
             <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Aliases</p>
             {aliases.length === 0 ? (
@@ -845,7 +969,9 @@ export function RelationshipsUI({ vectors = [] }: { vectors?: TickerRow[] }) {
               </div>
             )}
           </div>
+              ) : null}
 
+              {!edgeFocusMode ? (
               <div>
             <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
               Connections ({nodeConnections.length})
@@ -887,7 +1013,9 @@ export function RelationshipsUI({ vectors = [] }: { vectors?: TickerRow[] }) {
               </table>
             </div>
           </div>
+              ) : null}
 
+              {!edgeFocusMode ? (
               <div>
             <div className="flex items-center justify-between">
               <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Node News</p>
@@ -944,56 +1072,17 @@ export function RelationshipsUI({ vectors = [] }: { vectors?: TickerRow[] }) {
               )}
             </div>
           </div>
-
-              <div>
-            <div className="flex items-center justify-between">
-              <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Edge Evidence</p>
-              {selectedEdge ? (
-                <div className="flex items-center gap-1">
-                  <button
-                    onClick={() => setEvidencePage((p) => Math.max(1, p - 1))}
-                    className="rounded border border-border px-2 py-0.5 text-xs"
-                  >
-                    Prev
-                  </button>
-                  <span className="text-xs text-muted-foreground">{evidencePage}</span>
-                  <button
-                    onClick={() => setEvidencePage((p) => p + 1)}
-                    className="rounded border border-border px-2 py-0.5 text-xs"
-                  >
-                    Next
-                  </button>
-                </div>
               ) : null}
-            </div>
-            <div className="mt-1 max-h-48 overflow-auto">
-              {evidenceRows.length === 0 ? (
-                <p className="p-2 text-xs text-muted-foreground">Select an edge to load article provenance.</p>
-              ) : (
-                <div className="divide-y divide-border">
-                  {evidenceRows.map((row) => (
-                    <div key={`${row.edge_id}-${row.article_id}`} className="p-2">
-                      <a
-                        href={row.article_url ?? "#"}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="text-xs font-medium text-foreground hover:underline"
-                      >
-                        {row.article_title ?? `Article #${row.article_id}`}
-                      </a>
-                      <p className="mt-0.5 text-[11px] text-muted-foreground">
-                        {row.published_at ? new Date(row.published_at).toLocaleString() : "Unknown date"} · confidence{" "}
-                        {row.head_confidence == null ? "—" : row.head_confidence.toFixed(2)}
-                      </p>
-                      {row.reasoning_text ? (
-                        <p className="mt-1 text-[11px] text-muted-foreground line-clamp-3">{row.reasoning_text}</p>
-                      ) : null}
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-              </div>
+
+              {!edgeFocusMode ? (
+                <GraphDetailsEdgeEvidence
+                  selectedEdge={selectedEdge}
+                  evidencePage={evidencePage}
+                  setEvidencePage={setEvidencePage}
+                  evidenceRows={evidenceRows}
+                  listMaxClass="max-h-48"
+                />
+              ) : null}
             </div>
           )}
           </div>
