@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
 """
-generate_blog_post.py — Auto-generate and publish news impact blog posts to Sanity.
+generate_blog_post.py — Auto-generate and publish news impact blog posts to Sanity,
+then post an X (Twitter) thread summarising the analysis with a backlink.
 
 Queries the Supabase swingtrader schema for recently scored news articles,
 uses the local Ollama instance to write a structured analysis post, then
 publishes it to the newsimpactscreener Sanity project (project ID: y2lg8a3c).
+Optionally posts a 4-tweet X thread using the same research data.
 
 Modes:
   pre-market   — looks back 14 h (overnight news), run at 08:30 ET weekdays
@@ -14,18 +16,31 @@ Usage:
   python scripts/generate_blog_post.py --mode pre-market
   python scripts/generate_blog_post.py --mode intra-market
   python scripts/generate_blog_post.py --mode pre-market --dry-run
+  python scripts/generate_blog_post.py --mode pre-market --skip-x
 
 Required env vars (analytics/.env):
   SUPABASE_URL, SUPABASE_KEY, SUPABASE_SCHEMA
   SANITY_TOKEN   — Sanity write token (Editor role or above)
 
 Optional env vars:
-  SANITY_PROJECT_ID      (default: y2lg8a3c)
-  SANITY_DATASET         (default: production)
-  OLLAMA_BASE_URL        (default: http://localhost:11434)
-  OLLAMA_BLOG_MODEL      (default: OLLAMA_IMPACT_MODEL → gemma4:e4b)
-  NEWS_LOOKBACK_HOURS    (override default per mode)
-  NEWS_MAX_ARTICLES      (default: 20 — max articles pulled for analysis)
+  SANITY_PROJECT_ID        (default: y2lg8a3c)
+  SANITY_DATASET           (default: production)
+  OLLAMA_BASE_URL          (default: http://localhost:11434)
+  OLLAMA_BLOG_MODEL        (default: OLLAMA_IMPACT_MODEL → gemma4:e4b)
+  NEWS_LOOKBACK_HOURS      (override default per mode)
+  NEWS_MAX_ARTICLES        (default: 20 — max articles pulled for analysis)
+  SITE_BASE_URL            (default: https://newsimpactscreener.com)
+  X_CLIENT_ID              — OAuth2 PKCE client ID
+  X_REDIRECT_URI           — OAuth2 PKCE redirect URI
+                             (default: https://www.newsimpactscreener.com/x/oauth/callback-script)
+  X_OAUTH2_SCOPE           — OAuth2 scopes (default: tweet.read users.read offline.access)
+  X_OAUTH2_AUTH_RESPONSE_URL — Full callback URL to auto-complete PKCE exchange
+
+X OAuth setup note:
+  Register the script callback URL in your X app settings:
+    https://www.newsimpactscreener.com/x/oauth/callback-script
+  Use the generated auth_url from this script, complete consent, then paste the
+  full callback URL when prompted (must be from the same run to match OAuth state).
 """
 
 from __future__ import annotations
@@ -63,28 +78,52 @@ logging.basicConfig(
     datefmt="%H:%M:%S",
 )
 log = logging.getLogger(__name__)
-USE_SEMANTIC_RETRIEVAL = os.environ.get("USE_SEMANTIC_RETRIEVAL", "true").strip().lower() not in {"0", "false", "no", "off"}
+USE_SEMANTIC_RETRIEVAL = os.environ.get(
+    "USE_SEMANTIC_RETRIEVAL", "true"
+).strip().lower() not in {"0", "false", "no", "off"}
+
+try:
+    from xdk import Client as XClient  # type: ignore
+    from xdk.oauth2_auth import OAuth2PKCEAuth  # type: ignore
+
+    _XDK_AVAILABLE = True
+except ImportError:
+    _XDK_AVAILABLE = False
 
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
 
 SANITY_PROJECT_ID = os.environ.get("SANITY_PROJECT_ID", "y2lg8a3c")
-SANITY_DATASET    = os.environ.get("SANITY_DATASET", "production")
-SANITY_API_VER    = "2021-06-07"
-SANITY_TOKEN      = os.environ.get("SANITY_TOKEN", "")
+SANITY_DATASET = os.environ.get("SANITY_DATASET", "production")
+SANITY_API_VER = "2021-06-07"
+SANITY_TOKEN = os.environ.get("SANITY_TOKEN", "")
+
+SITE_BASE_URL = os.environ.get(
+    "SITE_BASE_URL", "https://newsimpactscreener.com"
+).rstrip("/")
+X_CLIENT_ID = os.environ.get("X_CLIENT_ID", "")
+X_REDIRECT_URI = os.environ.get(
+    "X_REDIRECT_URI",
+    "https://www.newsimpactscreener.com/x/oauth/callback-script",
+)
+X_OAUTH2_SCOPE = os.environ.get(
+    "X_OAUTH2_SCOPE",
+    "tweet.read users.read offline.access",
+)
+X_OAUTH2_AUTH_RESPONSE_URL = os.environ.get("X_OAUTH2_AUTH_RESPONSE_URL", "")
 
 AUTHOR_ID = "81d00698-faa2-4dc7-81b8-bec6ec3b8884"
 
 CATEGORY_IDS = {
-    "pre-market":    "1ca18181-78f8-4c58-8bf8-e9acc1c8c127",
-    "intra-market":  "3dcae939-2a2f-4768-aee0-adefd45f9f54",
-    "news-impact":   "728b9f28-2c16-4984-8764-c765fa27fa92",
+    "pre-market": "1ca18181-78f8-4c58-8bf8-e9acc1c8c127",
+    "intra-market": "3dcae939-2a2f-4768-aee0-adefd45f9f54",
+    "news-impact": "728b9f28-2c16-4984-8764-c765fa27fa92",
 }
 
 LOOKBACK_HOURS = {
-    "pre-market":   14,
-    "intra-market":  6,
+    "pre-market": 14,
+    "intra-market": 6,
 }
 
 EASTERN_TZ_OFFSET = timedelta(hours=-4)  # EDT; use -5 for EST (standard)
@@ -93,7 +132,10 @@ EASTERN_TZ_OFFSET = timedelta(hours=-4)  # EDT; use -5 for EST (standard)
 # Supabase helpers
 # ---------------------------------------------------------------------------
 
-def _fetch_recent_articles(mode: str, lookback_hours: int, max_articles: int) -> list[dict]:
+
+def _fetch_recent_articles(
+    mode: str, lookback_hours: int, max_articles: int
+) -> list[dict]:
     """
     Pull scored articles from Supabase: news_articles JOIN news_impact_vectors.
 
@@ -130,9 +172,7 @@ def _fetch_recent_articles(mode: str, lookback_hours: int, max_articles: int) ->
         .in_("article_id", article_ids)
         .execute()
     )
-    vectors_by_id: dict[int, dict] = {
-        v["article_id"]: v for v in (vec_res.data or [])
-    }
+    vectors_by_id: dict[int, dict] = {v["article_id"]: v for v in (vec_res.data or [])}
 
     # Attach impact data and filter to articles that have been scored
     enriched = []
@@ -140,13 +180,19 @@ def _fetch_recent_articles(mode: str, lookback_hours: int, max_articles: int) ->
         vec = vectors_by_id.get(a["id"])
         if vec is None:
             continue  # not yet scored — skip
-        enriched.append({
-            **a,
-            "impact_json":    _as_json(vec["impact_json"], default={}),
-            "top_dimensions": _as_json(vec["top_dimensions"], default=[]),
-        })
+        enriched.append(
+            {
+                **a,
+                "impact_json": _as_json(vec["impact_json"], default={}),
+                "top_dimensions": _as_json(vec["top_dimensions"], default=[]),
+            }
+        )
 
-    log.info("Fetched %d scored articles (of %d total in window).", len(enriched), len(articles))
+    log.info(
+        "Fetched %d scored articles (of %d total in window).",
+        len(enriched),
+        len(articles),
+    )
     return enriched
 
 
@@ -164,7 +210,7 @@ def _fetch_tickers_for_articles(article_ids: list[int]) -> dict[int, list[str]]:
         .execute()
     )
     out: dict[int, list[str]] = {}
-    for row in (res.data or []):
+    for row in res.data or []:
         out.setdefault(row["article_id"], []).append(row["ticker"])
     return out
 
@@ -194,6 +240,7 @@ def _fetch_company_metadata(tickers: list[str]) -> dict[str, dict]:
 # ---------------------------------------------------------------------------
 # Data analysis helpers
 # ---------------------------------------------------------------------------
+
 
 def _impact_magnitude(impact_json: dict) -> float:
     """Sum of abs values of all impact dimensions — used to rank articles."""
@@ -230,7 +277,10 @@ def _top_tickers(
         mag = _impact_magnitude(a.get("impact_json") or {})
         for t in tickers_map.get(a["id"], []):
             ticker_weight[t] = ticker_weight.get(t, 0.0) + mag
-    return [t for t, _ in sorted(ticker_weight.items(), key=lambda x: x[1], reverse=True)[:n]]
+    return [
+        t
+        for t, _ in sorted(ticker_weight.items(), key=lambda x: x[1], reverse=True)[:n]
+    ]
 
 
 def _fmt_dim(dim: str) -> str:
@@ -247,14 +297,25 @@ def _fmt_score(score: float) -> str:
 # Ollama blog post generation
 # ---------------------------------------------------------------------------
 
-def _build_prompt(mode: str, articles: list[dict], tickers_map: dict[int, list[str]], company_meta: dict[str, dict], now_et: datetime) -> str:
+
+def _build_prompt(
+    mode: str,
+    articles: list[dict],
+    tickers_map: dict[int, list[str]],
+    company_meta: dict[str, dict],
+    now_et: datetime,
+) -> str:
     """Build the user prompt for the Anthropic blog post generation call."""
 
     date_str = now_et.strftime("%A, %B %-d")
     period_label = "Pre-Market" if mode == "pre-market" else "Intra-Market"
 
     # Top 5 articles by impact magnitude
-    ranked = sorted(articles, key=lambda a: _impact_magnitude(a.get("impact_json") or {}), reverse=True)[:5]
+    ranked = sorted(
+        articles,
+        key=lambda a: _impact_magnitude(a.get("impact_json") or {}),
+        reverse=True,
+    )[:5]
 
     articles_block = ""
     for i, a in enumerate(ranked, 1):
@@ -279,10 +340,14 @@ def _build_prompt(mode: str, articles: list[dict], tickers_map: dict[int, list[s
     tickers_block = ""
     for t in top_tickers:
         meta = company_meta.get(t, {})
-        name   = meta.get("name") or t
+        name = meta.get("name") or t
         sector = meta.get("sector") or "Unknown sector"
         industry = meta.get("industry") or ""
-        tickers_block += f"  - {t} ({name}) — {sector}" + (f", {industry}" if industry else "") + "\n"
+        tickers_block += (
+            f"  - {t} ({name}) — {sector}"
+            + (f", {industry}" if industry else "")
+            + "\n"
+        )
 
     # Semantic evidence snippets (embedding retrieval over recent corpus).
     semantic_hits: list[dict] = []
@@ -395,6 +460,7 @@ async def _call_ollama(prompt: str) -> str:
 # Portable Text (Sanity blockContent) builder
 # ---------------------------------------------------------------------------
 
+
 def _key() -> str:
     return uuid.uuid4().hex[:12]
 
@@ -408,7 +474,9 @@ def _span(text: str, marks: Optional[list[str]] = None) -> dict:
     }
 
 
-def _block(children: list[dict], style: str = "normal", mark_defs: Optional[list] = None) -> dict:
+def _block(
+    children: list[dict], style: str = "normal", mark_defs: Optional[list] = None
+) -> dict:
     return {
         "_type": "block",
         "_key": _key(),
@@ -474,6 +542,7 @@ def _parse_inline(text: str) -> list[dict]:
 # Sanity publishing
 # ---------------------------------------------------------------------------
 
+
 def _slug_from_title(title: str) -> str:
     slug = title.lower()
     slug = re.sub(r"[^a-z0-9\s-]", "", slug)
@@ -493,7 +562,7 @@ def _publish_to_sanity(
         raise RuntimeError("SANITY_TOKEN is not set in .env")
 
     doc_id = f"blog-auto-{uuid.uuid4().hex[:16]}"
-    slug   = _slug_from_title(title)
+    slug = _slug_from_title(title)
 
     category_refs = [
         {"_type": "reference", "_ref": CATEGORY_IDS[mode], "_key": _key()},
@@ -503,14 +572,14 @@ def _publish_to_sanity(
     body_blocks = _markdown_to_portable_text(body_markdown)
 
     document = {
-        "_id":         doc_id,
-        "_type":       "post",
-        "title":       title,
-        "slug":        {"_type": "slug", "current": slug},
-        "author":      {"_type": "reference", "_ref": AUTHOR_ID},
-        "categories":  category_refs,
+        "_id": doc_id,
+        "_type": "post",
+        "title": title,
+        "slug": {"_type": "slug", "current": slug},
+        "author": {"_type": "reference", "_ref": AUTHOR_ID},
+        "categories": category_refs,
         "publishedAt": published_at,
-        "body":        body_blocks,
+        "body": body_blocks,
     }
 
     mutations = [{"createOrReplace": document}]
@@ -518,7 +587,7 @@ def _publish_to_sanity(
     url = f"https://{SANITY_PROJECT_ID}.api.sanity.io/v{SANITY_API_VER}/data/mutate/{SANITY_DATASET}"
     headers = {
         "Authorization": f"Bearer {SANITY_TOKEN}",
-        "Content-Type":  "application/json",
+        "Content-Type": "application/json",
     }
 
     if dry_run:
@@ -544,32 +613,261 @@ def _publish_to_sanity(
 
 
 # ---------------------------------------------------------------------------
+# X (Twitter) thread generation and posting
+# ---------------------------------------------------------------------------
+
+
+def _build_x_thread_prompt(
+    mode: str,
+    articles: list[dict],
+    tickers_map: dict[int, list[str]],
+    company_meta: dict[str, dict],
+    now_et: datetime,
+    blog_url: str,
+) -> str:
+    date_str = now_et.strftime("%b %-d")
+    period_label = "Pre-Market" if mode == "pre-market" else "Intra-Market"
+
+    ranked = sorted(
+        articles,
+        key=lambda a: _impact_magnitude(a.get("impact_json") or {}),
+        reverse=True,
+    )[:5]
+    top_tickers = _top_tickers(tickers_map, articles, n=5)
+    agg = _aggregate_dimensions(articles)[:5]
+
+    articles_block = ""
+    for i, a in enumerate(ranked[:3], 1):
+        title = (a.get("title") or "Untitled")[:80]
+        tickers = tickers_map.get(a["id"], [])
+        ticker_str = " ".join(f"${t}" for t in tickers[:3])
+        articles_block += f"\n{i}. {title} {ticker_str}"
+
+    dims_block = "\n".join(f"  {_fmt_dim(d)}: {_fmt_score(s)}" for d, s in agg)
+    ticker_list = " ".join(f"${t}" for t in top_tickers)
+
+    return f"""Write a 4-tweet X (Twitter) thread for the {period_label} News Impact update on {date_str}.
+
+Rules:
+- Each tweet must be under 280 characters.
+- No emojis. No hype.
+- Separate each tweet with the exact delimiter on its own line: ---TWEET---
+- Do NOT number the tweets or add any labels.
+
+Context:
+Top stories:{articles_block}
+
+Aggregate factor moves:
+{dims_block}
+
+Top tickers: {ticker_list}
+
+Thread structure:
+Tweet 1: 2-sentence hook — what moved and why it matters for {period_label.lower()} positioning. Mention 1-2 key tickers with $ prefix.
+Tweet 2: Top 2 factor dimension moves with direction (bullish/bearish) and which stocks or sectors are most exposed.
+Tweet 3: One sharp observation — a risk or setup that traders might be missing from this data.
+Tweet 4: "Full {period_label} analysis: {blog_url}" followed by hashtags #SwingTrading #MarketNews #NewsImpact
+
+Output only the 4 tweets separated by ---TWEET---. No other text before or after.
+"""
+
+
+async def _call_ollama_for_x(prompt: str) -> str:
+    """Call Ollama with a reduced token budget suited for short tweet content."""
+    model = (
+        os.environ.get("OLLAMA_BLOG_MODEL")
+        or os.environ.get("OLLAMA_IMPACT_MODEL")
+        or "gemma4:e4b"
+    )
+    base_url = os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434").rstrip("/")
+    url = f"{base_url}/api/chat"
+
+    payload = {
+        "model": model,
+        "stream": False,
+        "think": False,
+        "options": {"num_predict": 500},
+        "messages": [
+            {
+                "role": "system",
+                "content": (
+                    "You write short, factual X (Twitter) threads about market-moving news. "
+                    "Each tweet is strictly under 280 characters. No emojis. No filler. No numbering."
+                ),
+            },
+            {"role": "user", "content": prompt},
+        ],
+    }
+
+    log.info("Calling Ollama for X thread, model=%s", model)
+    async with httpx.AsyncClient() as client:
+        try:
+            r = await client.post(url, json=payload, timeout=60.0)
+        except httpx.TimeoutException:
+            raise RuntimeError("Ollama timed out generating X thread")
+        except httpx.RequestError as exc:
+            raise RuntimeError(f"Ollama connection error: {exc}") from exc
+
+    if r.status_code != 200:
+        raise RuntimeError(f"Ollama returned HTTP {r.status_code}: {r.text[:200]}")
+
+    return r.json()["message"]["content"].strip()
+
+
+def _parse_x_thread(raw: str) -> list[str]:
+    """Split Ollama output into individual tweets, enforcing 280-char hard cap."""
+    tweets = [t.strip() for t in raw.split("---TWEET---") if t.strip()]
+    return [t[:280] for t in tweets]
+
+
+def _post_x_thread(tweets: list[str], dry_run: bool = False) -> Optional[str]:
+    """
+    Post a tweet thread to X. Each tweet replies to the previous one.
+    Returns the ID of the root tweet, or None on failure/skip.
+    """
+    if not tweets:
+        log.warning("No tweets to post — skipping X thread.")
+        return None
+
+    if dry_run:
+        log.info("[dry-run] X thread (%d tweets):", len(tweets))
+        for i, t in enumerate(tweets, 1):
+            log.info("  [%d/%d] (%d chars) %s", i, len(tweets), len(t), t)
+        return "dry-run-id"
+
+    if not _XDK_AVAILABLE:
+        log.error("xdk is not installed — cannot post X thread. Run: pip install xdk")
+        return None
+
+    def _mask(s: str) -> str:
+        return s[:4] + "..." + s[-4:] if len(s) > 8 else "***"
+
+    if not X_CLIENT_ID or not X_REDIRECT_URI:
+        log.warning(
+            "Missing OAuth2 PKCE config. Set both X_CLIENT_ID and X_REDIRECT_URI — skipping X thread."
+        )
+        return None
+    if "supabase.co/auth/v1/callback" in X_REDIRECT_URI:
+        log.warning(
+            "X_REDIRECT_URI points to Supabase auth callback (%s), which can trigger bad_oauth_state "
+            "for this CLI PKCE flow. Use a redirect URI registered in your X app for this script.",
+            X_REDIRECT_URI,
+        )
+        return None
+    if "tweet.write" not in X_OAUTH2_SCOPE:
+        log.warning(
+            "X_OAUTH2_SCOPE is missing tweet.write; posting will fail. Current scope: %s",
+            X_OAUTH2_SCOPE,
+        )
+        return None
+    auth = OAuth2PKCEAuth(
+        client_id=X_CLIENT_ID,
+        redirect_uri=X_REDIRECT_URI,
+        scope=X_OAUTH2_SCOPE,
+    )
+    auth_url = auth.get_authorization_url()
+    log.warning("Complete X OAuth2 authorization in your browser: %s", auth_url)
+    callback_url = X_OAUTH2_AUTH_RESPONSE_URL.strip()
+    if not callback_url:
+        callback_url = input(
+            "Paste full OAuth callback URL (or set X_OAUTH2_AUTH_RESPONSE_URL): "
+        ).strip()
+    if not callback_url:
+        log.warning("No callback URL provided — skipping X thread.")
+        return None
+    try:
+        tokens = auth.fetch_token(authorization_response=callback_url)
+    except Exception as exc:
+        log.error(
+            "OAuth2 token exchange failed: %s. Ensure callback URL is from the latest auth_url in this run "
+            "(state must match) and uses the same X_REDIRECT_URI.",
+            exc,
+        )
+        return None
+    x_access_token = str(tokens.get("access_token") or "").strip()
+    if not x_access_token:
+        log.warning("OAuth2 token exchange returned no access_token — skipping X thread.")
+        return None
+    log.info("OAuth2 PKCE exchange succeeded — TOKEN=%s", _mask(x_access_token))
+
+    client = XClient(bearer_token=x_access_token)
+    root_id: Optional[str] = None
+    reply_to: Optional[str] = None
+
+    for i, text in enumerate(tweets):
+        try:
+            body: dict[str, Any] = {"text": text}
+            if reply_to:
+                body["reply"] = {"in_reply_to_tweet_id": reply_to}
+            response = client.posts.create(body=body)
+            tweet_id = str(response.data.id)
+            log.info("Posted tweet %d/%d id=%s", i + 1, len(tweets), tweet_id)
+            if root_id is None:
+                root_id = tweet_id
+            reply_to = tweet_id
+        except Exception as exc:
+            log.error("Failed to post tweet %d/%d: %s", i + 1, len(tweets), exc)
+            break
+
+    return root_id
+
+
+# ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 
+
 async def main() -> None:
-    parser = argparse.ArgumentParser(description="Auto-generate Sanity blog post from Supabase news impact data")
+    parser = argparse.ArgumentParser(
+        description="Auto-generate Sanity blog post from Supabase news impact data"
+    )
     parser.add_argument("--mode", choices=["pre-market", "intra-market"], required=True)
-    parser.add_argument("--dry-run", action="store_true", help="Build and log the post without publishing")
-    parser.add_argument("--lookback-hours", type=int, default=None, help="Override default lookback window")
-    parser.add_argument("--max-articles", type=int, default=int(os.environ.get("NEWS_MAX_ARTICLES", 20)))
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Build and log the post without publishing or posting",
+    )
+    parser.add_argument(
+        "--skip-x", action="store_true", help="Skip X thread generation and posting"
+    )
+    parser.add_argument(
+        "--skip-sanity",
+        action="store_true",
+        help="Skip blog post generation and Sanity publishing (X thread only)",
+    )
+    parser.add_argument(
+        "--lookback-hours",
+        type=int,
+        default=None,
+        help="Override default lookback window",
+    )
+    parser.add_argument(
+        "--max-articles", type=int, default=int(os.environ.get("NEWS_MAX_ARTICLES", 20))
+    )
     args = parser.parse_args()
 
-    lookback = args.lookback_hours or int(os.environ.get("NEWS_LOOKBACK_HOURS", LOOKBACK_HOURS[args.mode]))
+    lookback = args.lookback_hours or int(
+        os.environ.get("NEWS_LOOKBACK_HOURS", LOOKBACK_HOURS[args.mode])
+    )
 
     now_utc = datetime.now(timezone.utc)
-    now_et  = now_utc + EASTERN_TZ_OFFSET  # approximate ET
+    now_et = now_utc + EASTERN_TZ_OFFSET  # approximate ET
 
-    log.info("Mode: %s | Lookback: %d h | Now ET: %s", args.mode, lookback, now_et.strftime("%Y-%m-%d %H:%M"))
+    log.info(
+        "Mode: %s | Lookback: %d h | Now ET: %s",
+        args.mode,
+        lookback,
+        now_et.strftime("%Y-%m-%d %H:%M"),
+    )
 
     # 1. Pull data from Supabase
     articles = _fetch_recent_articles(args.mode, lookback, args.max_articles)
     if not articles:
-        log.warning("No scored articles found — skipping blog post generation.")
+        log.warning("No scored articles found — exiting.")
         sys.exit(0)
 
     article_ids = [a["id"] for a in articles]
-    tickers_map  = _fetch_tickers_for_articles(article_ids)
+    tickers_map = _fetch_tickers_for_articles(article_ids)
 
     all_tickers = list({t for ts in tickers_map.values() for t in ts})
     top_tickers = _top_tickers(tickers_map, articles, n=8)
@@ -577,33 +875,59 @@ async def main() -> None:
 
     log.info("Articles: %d | Unique tickers: %d", len(articles), len(all_tickers))
 
-    # 2. Generate blog post via Ollama
-    prompt = _build_prompt(args.mode, articles, tickers_map, company_meta, now_et)
-    body_markdown = await _call_ollama(prompt)
-
-    # 3. Build title
+    # 2. Derive title/slug/URL (needed by both blog and X thread)
     period_label = "Pre-Market" if args.mode == "pre-market" else "Intra-Market"
     date_str = now_et.strftime("%b %-d")
     title = f"{period_label} News Impact: {date_str}"
+    slug = _slug_from_title(title)
+    blog_url = f"{SITE_BASE_URL}/blog/{slug}"
 
-    log.info("Generated post: %r (%d chars)", title, len(body_markdown))
-    if args.dry_run:
-        print("\n" + "=" * 60)
-        print(f"TITLE: {title}")
-        print("=" * 60)
-        print(body_markdown)
-        print("=" * 60 + "\n")
+    # 3. Generate and publish blog post (unless skipped)
+    if not args.skip_sanity:
+        prompt = _build_prompt(args.mode, articles, tickers_map, company_meta, now_et)
+        body_markdown = await _call_ollama(prompt)
+        log.info("Generated post: %r (%d chars)", title, len(body_markdown))
+        if args.dry_run:
+            print("\n" + "=" * 60)
+            print(f"TITLE: {title}")
+            print(f"URL:   {blog_url}")
+            print("=" * 60)
+            print(body_markdown)
+            print("=" * 60 + "\n")
+        doc_id = _publish_to_sanity(
+            title=title,
+            body_markdown=body_markdown,
+            mode=args.mode,
+            published_at=now_utc.isoformat(),
+            dry_run=args.dry_run,
+        )
+        log.info("Sanity document ID: %s", doc_id)
+    else:
+        log.info("Skipping Sanity blog post (--skip-sanity). Blog URL: %s", blog_url)
 
-    # 4. Publish to Sanity
-    doc_id = _publish_to_sanity(
-        title=title,
-        body_markdown=body_markdown,
-        mode=args.mode,
-        published_at=now_utc.isoformat(),
-        dry_run=args.dry_run,
-    )
+    # 4. Generate and post X thread
+    if not args.skip_x:
+        x_prompt = _build_x_thread_prompt(
+            mode=args.mode,
+            articles=articles,
+            tickers_map=tickers_map,
+            company_meta=company_meta,
+            now_et=now_et,
+            blog_url=blog_url,
+        )
+        x_raw = await _call_ollama_for_x(x_prompt)
+        tweets = _parse_x_thread(x_raw)
+        log.info("Generated X thread: %d tweets", len(tweets))
+        if args.dry_run:
+            print("\n--- X THREAD ---")
+            for i, t in enumerate(tweets, 1):
+                print(f"[{i}] ({len(t)} chars) {t}\n")
+            print("--- END X THREAD ---\n")
+        root_id = _post_x_thread(tweets, dry_run=args.dry_run)
+        if root_id and not args.dry_run:
+            log.info("X thread posted. Root tweet ID: %s", root_id)
 
-    log.info("Done. Sanity document ID: %s", doc_id)
+    log.info("Done.")
 
 
 if __name__ == "__main__":
