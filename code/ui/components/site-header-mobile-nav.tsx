@@ -7,6 +7,7 @@ import { Menu, X, LogOut } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { useRouter } from "next/navigation";
 import { cn } from "@/lib/utils";
+import { CavemanToggle } from "@/components/caveman-toggle";
 
 const appLinks = [
   { href: "/protected", label: "Articles" },
@@ -173,6 +174,12 @@ export function SiteHeaderMobileNav({ isAuthed, userEmail }: Props) {
                 </div>
               )}
             </nav>
+
+            {/* Caveman toggle */}
+            <div className="shrink-0 border-t border-border px-4 py-3">
+              <p className={cn(sectionLabelClass, "mb-2")}>Mode</p>
+              <CavemanToggle showLabels className="w-full justify-center" />
+            </div>
 
             {/* Drawer footer */}
             <div className="shrink-0 border-t border-border p-4">

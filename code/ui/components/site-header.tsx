@@ -4,6 +4,7 @@ import { createClient } from "@/lib/supabase/server";
 import { Button } from "@/components/ui/button";
 import { LogoutButton } from "@/components/logout-button";
 import { SiteHeaderMobileNav } from "@/components/site-header-mobile-nav";
+import { CavemanToggle } from "@/components/caveman-toggle";
 
 function Logo() {
   return (
@@ -91,6 +92,7 @@ export async function SiteHeader() {
         <div className="hidden shrink-0 items-center gap-3 md:flex">
           <Link href="/docs" className={navLinkClass}>Docs</Link>
           <Link href="/blog" className={navLinkClass}>Blog</Link>
+          <CavemanToggle />
           <Link
             href="/protected/profile"
             className="text-sm text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
@@ -103,6 +105,7 @@ export async function SiteHeader() {
         <div className="hidden shrink-0 items-center gap-2 md:flex">
           <Link href="/docs" className={navLinkClass}>Docs</Link>
           <Link href="/blog" className={navLinkClass}>Blog</Link>
+          <CavemanToggle />
           <Button asChild size="sm" variant="outline">
             <Link href="/auth/login">Sign in</Link>
           </Button>

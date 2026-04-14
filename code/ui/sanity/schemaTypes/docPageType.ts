@@ -45,6 +45,12 @@ export const docPageType = defineType({
       title: 'Body',
       type: 'blockContent',
     }),
+    defineField({
+      name: 'cavemanBody',
+      title: 'Caveman Body',
+      type: 'blockContent',
+      description: 'Compressed, terse version for caveman mode. Less word. More understand.',
+    }),
   ],
   orderings: [
     {
