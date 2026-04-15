@@ -42,6 +42,17 @@ def _upsert_job(job_name: str, fields: dict[str, Any]) -> None:
         logger.warning("[health] upsert failed for %s: %s", job_name, exc)
 
 
+def update_job_metadata(job_name: str, metadata: dict[str, Any]) -> None:
+    """
+    Merge extra metadata into an existing job_health row.
+    Call this after JobHeartbeat exits to attach run-time stats.
+
+    Example:
+        update_job_metadata("watchdog", {"alerts_fired": 2, "jobs_checked": 8})
+    """
+    _upsert_job(job_name, {"metadata": metadata})
+
+
 def _get_consecutive_fails(job_name: str) -> int:
     try:
         from src.db import get_supabase_client, get_schema

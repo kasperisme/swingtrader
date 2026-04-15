@@ -224,17 +224,22 @@ def check_health() -> tuple[list[str], list[str]]:
     return alerts, ok_lines
 
 
-def main() -> None:
+def main() -> dict:
+    """Run all checks and return a summary dict written to job_health metadata."""
     from src.health import send_whatsapp_alert
 
     logger.info("━━━ Watchdog started ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
 
     alerts: list[str] = []
+    jobs_checked = 0
+    logs_clean: list[str] = []
+    logs_with_errors: list[str] = []
 
     # ── 1. Supabase job_health ─────────────────────────────────────────────
     logger.info("Checking Supabase job_health...")
     try:
         health_alerts, ok_lines = check_health()
+        jobs_checked = len(ok_lines) + len(health_alerts)
         if ok_lines:
             logger.info("  Jobs screened:")
             for line in ok_lines:
@@ -260,16 +265,26 @@ def main() -> None:
                 logger.info("  %-20s not found (no log yet)", filename)
             elif label_alerts:
                 logger.warning("  %-20s ERRORS detected", filename)
+                logs_with_errors.append(filename)
             else:
                 logger.info("  %-20s clean ✓", filename)
+                logs_clean.append(filename)
         alerts += log_alerts
     except Exception as exc:
         logger.error("  Log scan failed: %s", exc)
 
     # ── Summary ────────────────────────────────────────────────────────────
+    summary = {
+        "jobs_checked": jobs_checked,
+        "alerts_fired": len(alerts),
+        "logs_clean": logs_clean,
+        "logs_with_errors": logs_with_errors,
+        "checked_at": datetime.now(timezone.utc).isoformat(),
+    }
+
     if not alerts:
         logger.info("━━━ All clear. No alerts. ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
-        return
+        return summary
 
     logger.warning("━━━ %d alert(s) — sending WhatsApp ━━━━━━━━━━━━━━━━━━━━━━", len(alerts))
     for a in alerts:
@@ -277,7 +292,14 @@ def main() -> None:
 
     msg = "[SwingTrader Watchdog]\n\n" + "\n\n".join(f"• {a}" for a in alerts)
     send_whatsapp_alert(msg)
+    return summary
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        from src.health import JobHeartbeat, update_job_metadata
+        with JobHeartbeat("watchdog", expected_interval=15 / 60):  # every 15 min
+            summary = main()
+        update_job_metadata("watchdog", summary)
+    except ImportError:
+        main()
