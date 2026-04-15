@@ -953,7 +953,7 @@ if __name__ == "__main__":
     _job_name = f"blog_post_{_mode.replace('-', '_')}"  # blog_post_pre_market / blog_post_intra_market
     try:
         from src.health import JobHeartbeat
-        with JobHeartbeat(_job_name, expected_interval_h=24.0):
+        with JobHeartbeat(_job_name, expected_interval=24.0):
             asyncio.run(main())
     except ImportError:
         asyncio.run(main())

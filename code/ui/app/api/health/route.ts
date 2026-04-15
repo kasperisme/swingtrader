@@ -1,8 +1,6 @@
 import { NextResponse } from "next/server";
 import { createServiceClient } from "@/lib/supabase/service";
 
-export const dynamic = "force-dynamic";
-
 export interface JobHealth {
   job_name: string;
   last_started_at: string | null;
@@ -10,7 +8,7 @@ export interface JobHealth {
   last_status: "running" | "success" | "failed" | null;
   last_error: string | null;
   consecutive_fails: number;
-  expected_interval_h: number | null;
+  expected_interval: number | null;
 }
 
 export interface DataFreshness {
@@ -36,7 +34,7 @@ export async function GET() {
     .schema("swingtrader")
     .from("job_health")
     .select(
-      "job_name,last_started_at,last_finished_at,last_status,last_error,consecutive_fails,expected_interval_h",
+      "job_name,last_started_at,last_finished_at,last_status,last_error,consecutive_fails,expected_interval",
     )
     .order("job_name");
 
@@ -50,17 +48,17 @@ export async function GET() {
   for (const job of jobRows) {
     if (job.last_status === "failed") {
       alerts.push(`${job.job_name} last run FAILED (${job.consecutive_fails} consecutive)`);
-    } else if (job.expected_interval_h && job.last_finished_at) {
+    } else if (job.expected_interval && job.last_finished_at) {
       const finishedAt = new Date(job.last_finished_at);
       const ageH = (now.getTime() - finishedAt.getTime()) / 3_600_000;
-      const threshold = job.expected_interval_h * 1.5;
+      const threshold = job.expected_interval * 1.5;
       if (ageH > threshold) {
         const ageStr = ageH < 24
           ? `${ageH.toFixed(1)}h ago`
           : `${(ageH / 24).toFixed(1)}d ago`;
-        alerts.push(`${job.job_name} is stale — last success ${ageStr} (expected every ${job.expected_interval_h}h)`);
+        alerts.push(`${job.job_name} is stale — last success ${ageStr} (expected every ${job.expected_interval}h)`);
       }
-    } else if (job.expected_interval_h && !job.last_finished_at) {
+    } else if (job.expected_interval && !job.last_finished_at) {
       alerts.push(`${job.job_name} has never completed a run`);
     }
   }

@@ -55,7 +55,7 @@ def check_health() -> list[str]:
         .table("job_health")
         .select(
             "job_name,last_started_at,last_finished_at,last_status,"
-            "consecutive_fails,expected_interval_h"
+            "consecutive_fails,expected_interval"
         )
         .execute()
     )
@@ -64,7 +64,7 @@ def check_health() -> list[str]:
     for job in res.data or []:
         name = job["job_name"]
         status = job.get("last_status")
-        interval_h = job.get("expected_interval_h")
+        interval_h = job.get("expected_interval")
         finished_at = job.get("last_finished_at")
         started_at = job.get("last_started_at")
         fails = job.get("consecutive_fails", 0) or 0

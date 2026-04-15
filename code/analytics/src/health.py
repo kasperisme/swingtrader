@@ -7,7 +7,7 @@ On failure, fires a WhatsApp alert via OpenClaw CLI (OPENCLAW_CMD env var).
 Usage:
     from src.health import JobHeartbeat
 
-    with JobHeartbeat("news_ingest", expected_interval_h=1.0):
+    with JobHeartbeat("news_ingest", expected_interval=1.0):
         run_news_pipeline()
 
 Environment variables:
@@ -90,7 +90,7 @@ def send_whatsapp_alert(message: str) -> None:
 @contextmanager
 def JobHeartbeat(
     job_name: str,
-    expected_interval_h: Optional[float] = None,
+    expected_interval: Optional[float] = None,
     metadata: Optional[dict] = None,
 ) -> Generator[None, None, None]:
     """
@@ -103,7 +103,7 @@ def JobHeartbeat(
 
     Args:
         job_name: Unique stable identifier, e.g. "news_ingest", "daily_narrative".
-        expected_interval_h: Expected run cadence in hours (stored for dashboard
+        expected_interval: Expected run cadence in hours (stored for dashboard
                              staleness checks). e.g. 1.0 for hourly, 24.0 for daily.
         metadata: Optional dict stored as JSONB (e.g. args, counts).
     """
@@ -114,8 +114,8 @@ def JobHeartbeat(
         "last_status": "running",
         "last_error": None,
     }
-    if expected_interval_h is not None:
-        start_fields["expected_interval_h"] = expected_interval_h
+    if expected_interval is not None:
+        start_fields["expected_interval"] = expected_interval
     if metadata:
         start_fields["metadata"] = metadata
 

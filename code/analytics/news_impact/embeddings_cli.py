@@ -55,7 +55,7 @@ def main(argv: list[str] | None = None) -> None:
         from contextlib import nullcontext as _heartbeat  # type: ignore[assignment]
 
     if args.enqueue_missing:
-        with _heartbeat("embeddings_enqueue", expected_interval_h=24.0):
+        with _heartbeat("embeddings_enqueue", expected_interval=24.0):
             n = enqueue_missing_embedding_jobs(limit=args.limit)
             print(f"enqueued_missing={n}")
         return
@@ -63,7 +63,7 @@ def main(argv: list[str] | None = None) -> None:
     if args.process_pending:
         job_name = "embeddings_retry" if args.retry_failed else "embeddings_process"
         interval = 24.0 if args.retry_failed else 10 / 60  # 10 min in fractional hours
-        with _heartbeat(job_name, expected_interval_h=interval):
+        with _heartbeat(job_name, expected_interval=interval):
             ok, bad = process_embedding_jobs(
                 limit=args.limit,
                 retry_failed=bool(args.retry_failed),
@@ -73,7 +73,7 @@ def main(argv: list[str] | None = None) -> None:
             print(f"completed={ok} failed={bad}")
         return
 
-    with _heartbeat("embeddings_cleanup", expected_interval_h=168.0):  # weekly
+    with _heartbeat("embeddings_cleanup", expected_interval=168.0):  # weekly
         deleted_emb, deleted_jobs = cleanup_embedding_orphans()
         print(f"deleted_embeddings={deleted_emb} deleted_jobs={deleted_jobs}")
 

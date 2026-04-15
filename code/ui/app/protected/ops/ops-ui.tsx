@@ -32,10 +32,10 @@ function StatusBadge({ status }: { status: JobHealth["last_status"] }) {
 
 function JobCard({ job }: { job: JobHealth }) {
   const isStale =
-    job.expected_interval_h &&
+    job.expected_interval &&
     job.last_finished_at &&
     (Date.now() - new Date(job.last_finished_at).getTime()) / 3_600_000 >
-      job.expected_interval_h * 1.5;
+      job.expected_interval * 1.5;
 
   const borderColor =
     job.last_status === "failed"
@@ -66,13 +66,13 @@ function JobCard({ job }: { job: JobHealth }) {
             : "—"}
         </span>
 
-        {job.expected_interval_h && (
+        {job.expected_interval && (
           <>
             <span>Expected every</span>
             <span className="text-zinc-200">
-              {job.expected_interval_h < 24
-                ? `${job.expected_interval_h}h`
-                : `${job.expected_interval_h / 24}d`}
+              {job.expected_interval < 24
+                ? `${job.expected_interval}h`
+                : `${job.expected_interval / 24}d`}
             </span>
           </>
         )}

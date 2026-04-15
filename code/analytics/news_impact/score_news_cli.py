@@ -1475,7 +1475,7 @@ def main(argv: list[str] | None = None) -> None:
     if job_name:
         try:
             from src.health import JobHeartbeat
-            with JobHeartbeat(job_name, expected_interval_h=1.0):
+            with JobHeartbeat(job_name, expected_interval=1.0):
                 asyncio.run(_main(argv))
         except ImportError:
             asyncio.run(_main(argv))

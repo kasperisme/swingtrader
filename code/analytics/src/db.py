@@ -379,7 +379,7 @@ def ensure_schema(client: Optional[Client] = None) -> None:
                 last_status         TEXT,
                 last_error          TEXT,
                 consecutive_fails   INTEGER NOT NULL DEFAULT 0,
-                expected_interval_h DOUBLE PRECISION,
+                expected_interval DOUBLE PRECISION,
                 metadata            JSONB
             )
         """)
