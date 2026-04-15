@@ -67,6 +67,25 @@ def _insert_run(
         logger.warning("[health] job_runs insert failed for %s: %s", job_name, exc)
 
 
+def _is_already_running(job_name: str) -> bool:
+    """Return True if job_health shows this job is currently running."""
+    try:
+        from src.db import get_supabase_client, get_schema
+        client = get_supabase_client()
+        schema = get_schema()
+        res = (
+            client.schema(schema)
+            .table("job_health")
+            .select("last_status")
+            .eq("job_name", job_name)
+            .limit(1)
+            .execute()
+        )
+        return (res.data or [{}])[0].get("last_status") == "running"
+    except Exception:
+        return False
+
+
 def update_job_metadata(job_name: str, metadata: dict[str, Any]) -> None:
     """
     Merge extra metadata into an existing job_health row.
@@ -145,17 +164,21 @@ def JobHeartbeat(
     """
     started_at = datetime.now(timezone.utc)
 
-    start_fields: dict[str, Any] = {
-        "last_started_at": started_at.isoformat(),
-        "last_status": "running",
-        "last_error": None,
-    }
-    if expected_interval is not None:
-        start_fields["expected_interval"] = expected_interval
-    if metadata:
-        start_fields["metadata"] = metadata
-
-    _upsert_job(job_name, start_fields)
+    # Only mark as 'running' if no other instance is already running.
+    # This prevents concurrent cron runs from clobbering each other's state —
+    # the first instance to start owns the row until it finishes.
+    already_running = _is_already_running(job_name)
+    if not already_running:
+        start_fields: dict[str, Any] = {
+            "last_started_at": started_at.isoformat(),
+            "last_status": "running",
+            "last_error": None,
+        }
+        if expected_interval is not None:
+            start_fields["expected_interval"] = expected_interval
+        if metadata:
+            start_fields["metadata"] = metadata
+        _upsert_job(job_name, start_fields)
     error_text: Optional[str] = None
     try:
         yield
