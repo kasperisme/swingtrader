@@ -131,6 +131,8 @@ export function RelationshipsUI({ vectors = [] }: { vectors?: TickerRow[] }) {
   const [truncated, setTruncated] = useState(false);
 
   const [hops] = useState<2>(2);
+  /** Full graph vs 2-hop subgraph around the selected node (requires a selected node). */
+  const [graphScope, setGraphScope] = useState<"full" | "twoHop">("full");
   const [selectedRelTypes, setSelectedRelTypes] = useState<string[]>([...REL_TYPES]);
 
   const [selectedNode, setSelectedNode] = useState<string | null>(null);
@@ -170,7 +172,11 @@ export function RelationshipsUI({ vectors = [] }: { vectors?: TickerRow[] }) {
   );
 
   const visibleGraph = useMemo(() => {
-    if (!selectedNode) return { nodes, edges };
+    // "Entire network": every node and every edge from the loaded neighborhood (ignore legend rel-type filters).
+    const fullGraph = { nodes, edges };
+    if (graphScope === "full" || !selectedNode) {
+      return fullGraph;
+    }
     const visited = new Set<string>([selectedNode]);
     const depth = new Map<string, number>([[selectedNode, 0]]);
     const queue: string[] = [selectedNode];
@@ -193,7 +199,7 @@ export function RelationshipsUI({ vectors = [] }: { vectors?: TickerRow[] }) {
       (e) => visited.has(e.from_ticker) && visited.has(e.to_ticker),
     );
     return { nodes: visibleNodes, edges: visibleEdges };
-  }, [filteredEdges, nodes, selectedNode]);
+  }, [edges, filteredEdges, graphScope, nodes, selectedNode]);
 
   const connectedSet = useMemo(() => {
     if (!selectedNode) return new Set<string>();
@@ -273,7 +279,7 @@ export function RelationshipsUI({ vectors = [] }: { vectors?: TickerRow[] }) {
     setEdges(result.data.edges);
     setTruncated(result.data.truncated);
     if (resetSelection) {
-      setSelectedNode(result.data.seedTicker);
+      setSelectedNode(null);
       setSelectedEdge(null);
       setEvidenceRows([]);
       setEvidencePage(1);
@@ -544,11 +550,45 @@ export function RelationshipsUI({ vectors = [] }: { vectors?: TickerRow[] }) {
             );
           })}
         </div>
+        <div className="mt-2 flex flex-wrap items-center gap-2">
+          <span className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Graph</span>
+          <div className="inline-flex rounded-md border border-border bg-muted/40 p-0.5">
+            <button
+              type="button"
+              onClick={() => setGraphScope("full")}
+              className={`rounded px-2.5 py-1 text-[11px] font-medium transition-colors ${
+                graphScope === "full"
+                  ? "bg-background text-foreground"
+                  : "text-muted-foreground hover:text-foreground"
+              }`}
+              title="Show every node and every edge in the loaded neighborhood (edge-type legend does not hide edges)"
+            >
+              Entire network
+            </button>
+            <button
+              type="button"
+              onClick={() => setGraphScope("twoHop")}
+              className={`rounded px-2.5 py-1 text-[11px] font-medium transition-colors ${
+                graphScope === "twoHop"
+                  ? "bg-background text-foreground"
+                  : "text-muted-foreground hover:text-foreground"
+              }`}
+              title={
+                selectedNode
+                  ? "Show only nodes within 2 hops of the selected node"
+                  : "Select a node on the graph, then use this to show a 2-hop neighborhood"
+              }
+            >
+              2-hop neighbors
+            </button>
+          </div>
+        </div>
         {seedTicker && (
           <p className="mt-2 text-xs text-muted-foreground">
             Seed: <span className="font-mono text-foreground">{seedTicker}</span> · Nodes {visibleGraph.nodes.length} · Edges{" "}
             {visibleGraph.edges.length}
             {truncated ? " (capped)" : ""}
+            {graphScope === "twoHop" && !selectedNode ? " · 2-hop view needs a selected node — showing full graph" : ""}
           </p>
         )}
       </div>
@@ -575,6 +615,7 @@ export function RelationshipsUI({ vectors = [] }: { vectors?: TickerRow[] }) {
             selectedNode={selectedNode}
             selectedEdge={selectedEdge}
             connectedSet={connectedSet}
+            dimDistantGraph={graphScope === "twoHop" && Boolean(selectedNode) && !selectedEdge}
             manualPositions={manualPositions}
             onManualPositionsMerge={onManualPositionsMerge}
             onNodeClick={onGraphNodeClick}
@@ -789,10 +830,6 @@ export function RelationshipsUI({ vectors = [] }: { vectors?: TickerRow[] }) {
                       </p>
                     </div>
                   ) : null}
-
-                  <p className="text-[10px] text-muted-foreground">
-                    Data: Financial Modeling Prep company profile. Cached up to ~1 hour.
-                  </p>
                 </div>
               ) : (
                 <p className="text-xs text-muted-foreground">No profile returned for this symbol.</p>

@@ -1685,21 +1685,6 @@ export function NewsTrendsUI({ articles, chartHeight = 400 }: { articles: Articl
         />
       )}
 
-      {/* Guide */}
-      <div className="flex items-center gap-4 text-[11px] text-muted-foreground flex-wrap">
-        <span className="font-medium text-foreground/70">
-          Reading this chart:
-        </span>
-        <span className="flex items-center gap-1">
-          <TrendingUp size={10} className="text-emerald-500" /> positive = news
-          favors companies with high scores on this dimension
-        </span>
-        <span className="flex items-center gap-1">
-          <TrendingDown size={10} className="text-rose-500" /> negative = news
-          is a headwind for this dimension
-        </span>
-      </div>
-
       {/* Articles modal */}
       {articleModalDate && (
         <div
