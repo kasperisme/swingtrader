@@ -48,6 +48,7 @@ export function SiteHeaderFallback() {
         {/* Desktop-only inline links */}
         <Link href="/docs" className={`${navLinkClass} hidden md:inline`}>Docs</Link>
         <Link href="/blog" className={`${navLinkClass} hidden md:inline`}>Blog</Link>
+        <Link href="/changelog" className={`${navLinkClass} hidden md:inline`}>Changelog</Link>
         <Button asChild size="sm" variant="outline" className="hidden md:inline-flex">
           <Link href="/auth/login">Sign in</Link>
         </Button>
@@ -92,6 +93,7 @@ export async function SiteHeader() {
         <div className="hidden shrink-0 items-center gap-3 md:flex">
           <Link href="/docs" className={navLinkClass}>Docs</Link>
           <Link href="/blog" className={navLinkClass}>Blog</Link>
+          <Link href="/changelog" className={navLinkClass}>Changelog</Link>
           <CavemanToggle />
           <Link
             href="/protected/profile"
@@ -105,6 +107,7 @@ export async function SiteHeader() {
         <div className="hidden shrink-0 items-center gap-2 md:flex">
           <Link href="/docs" className={navLinkClass}>Docs</Link>
           <Link href="/blog" className={navLinkClass}>Blog</Link>
+          <Link href="/changelog" className={navLinkClass}>Changelog</Link>
           <CavemanToggle />
           <Button asChild size="sm" variant="outline">
             <Link href="/auth/login">Sign in</Link>

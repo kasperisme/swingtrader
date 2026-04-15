@@ -67,6 +67,17 @@ export const legalPageBySlugQuery = `
   }
 `;
 
+export const changelogEntriesQuery = `
+  *[_type == "changelogEntry"] | order(date desc) {
+    _id,
+    title,
+    date,
+    tags,
+    body,
+    cavemanBody
+  }
+`;
+
 export const blogPostBySlugQuery = `
   *[_type == "post" && slug.current == $slug][0] {
     _id,

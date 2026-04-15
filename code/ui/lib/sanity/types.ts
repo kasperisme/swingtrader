@@ -32,6 +32,17 @@ export type LegalPage = {
   body: any[];
 };
 
+export type ChangelogEntry = {
+  _id: string;
+  title: string;
+  date: string;
+  tags: string[] | null;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  body: any[];
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  cavemanBody?: any[];
+};
+
 export type BlogPostPreview = {
   _id: string;
   title: string;

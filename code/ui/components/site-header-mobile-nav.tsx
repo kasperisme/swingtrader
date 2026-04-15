@@ -21,6 +21,7 @@ const appLinks = [
 const publicLinks = [
   { href: "/docs", label: "Docs" },
   { href: "/blog", label: "Blog" },
+  { href: "/changelog", label: "Changelog" },
 ] as const;
 
 const linkClass =
