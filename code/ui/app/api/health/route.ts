@@ -1,6 +1,14 @@
 import { NextResponse } from "next/server";
 import { createServiceClient } from "@/lib/supabase/service";
 
+export interface WatchdogMeta {
+  jobs_checked?: number;
+  alerts_fired?: number;
+  logs_clean?: string[];
+  logs_with_errors?: string[];
+  checked_at?: string;
+}
+
 export interface JobHealth {
   job_name: string;
   last_started_at: string | null;
@@ -9,6 +17,7 @@ export interface JobHealth {
   last_error: string | null;
   consecutive_fails: number;
   expected_interval: number | null;
+  metadata: Record<string, unknown> | null;
 }
 
 export interface DataFreshness {
@@ -34,7 +43,7 @@ export async function GET() {
     .schema("swingtrader")
     .from("job_health")
     .select(
-      "job_name,last_started_at,last_finished_at,last_status,last_error,consecutive_fails,expected_interval",
+      "job_name,last_started_at,last_finished_at,last_status,last_error,consecutive_fails,expected_interval,metadata",
     )
     .order("job_name");
 

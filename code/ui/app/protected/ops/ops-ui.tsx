@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
-import type { HealthResponse, JobHealth } from "@/app/api/health/route";
+import type { HealthResponse, JobHealth, WatchdogMeta } from "@/app/api/health/route";
 
 const REFRESH_INTERVAL_MS = 60_000;
 
@@ -84,6 +84,55 @@ function JobCard({ job }: { job: JobHealth }) {
           </>
         )}
       </div>
+
+      {/* Watchdog-specific metadata */}
+      {job.job_name === "watchdog" && job.metadata && (() => {
+        const m = job.metadata as WatchdogMeta;
+        return (
+          <div className="mt-1 pt-2 border-t border-zinc-800 space-y-1.5">
+            <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs text-zinc-400">
+              {m.jobs_checked != null && (
+                <>
+                  <span>Jobs checked</span>
+                  <span className="text-zinc-200">{m.jobs_checked}</span>
+                </>
+              )}
+              {m.alerts_fired != null && (
+                <>
+                  <span>Alerts fired</span>
+                  <span className={m.alerts_fired > 0 ? "text-yellow-400 font-semibold" : "text-zinc-200"}>
+                    {m.alerts_fired}
+                  </span>
+                </>
+              )}
+            </div>
+            {m.logs_with_errors && m.logs_with_errors.length > 0 && (
+              <div className="text-xs text-red-400">
+                Log errors: {m.logs_with_errors.join(", ")}
+              </div>
+            )}
+            {m.logs_clean && m.logs_clean.length > 0 && (
+              <div className="text-xs text-zinc-600">
+                Clean: {m.logs_clean.join(", ")}
+              </div>
+            )}
+          </div>
+        );
+      })()}
+
+      {/* Generic metadata for other jobs */}
+      {job.job_name !== "watchdog" && job.metadata && Object.keys(job.metadata).length > 0 && (
+        <details className="mt-1">
+          <summary className="cursor-pointer text-xs text-zinc-500 hover:text-zinc-300">
+            Metadata
+          </summary>
+          <div className="mt-2 grid grid-cols-2 gap-x-4 gap-y-1 text-xs text-zinc-400">
+            {Object.entries(job.metadata).map(([k, v]) => (
+              <><span key={k}>{k}</span><span className="text-zinc-300">{String(v)}</span></>
+            ))}
+          </div>
+        </details>
+      )}
 
       {job.last_error && (
         <details className="mt-1">
