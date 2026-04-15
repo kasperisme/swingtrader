@@ -944,4 +944,16 @@ async def main() -> None:
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    import sys as _sys
+    _args_preview = _sys.argv[1:]
+    _mode = next(
+        (_args_preview[i + 1] for i, a in enumerate(_args_preview) if a == "--mode" and i + 1 < len(_args_preview)),
+        "unknown",
+    )
+    _job_name = f"blog_post_{_mode.replace('-', '_')}"  # blog_post_pre_market / blog_post_intra_market
+    try:
+        from src.health import JobHeartbeat
+        with JobHeartbeat(_job_name, expected_interval_h=24.0):
+            asyncio.run(main())
+    except ImportError:
+        asyncio.run(main())

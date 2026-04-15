@@ -371,6 +371,19 @@ def ensure_schema(client: Optional[Client] = None) -> None:
         """)
         cur.execute(f"CREATE INDEX IF NOT EXISTS idx_article_tickers_ticker ON {schema}.news_article_tickers(ticker)")
 
+        cur.execute(f"""
+            CREATE TABLE IF NOT EXISTS {schema}.job_health (
+                job_name            TEXT PRIMARY KEY,
+                last_started_at     TIMESTAMPTZ,
+                last_finished_at    TIMESTAMPTZ,
+                last_status         TEXT,
+                last_error          TEXT,
+                consecutive_fails   INTEGER NOT NULL DEFAULT 0,
+                expected_interval_h DOUBLE PRECISION,
+                metadata            JSONB
+            )
+        """)
+
         conn.commit()
     finally:
         conn.close()

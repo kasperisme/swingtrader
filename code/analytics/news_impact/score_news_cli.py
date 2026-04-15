@@ -1444,8 +1444,43 @@ async def _process_fmp_sparse_fill(args: argparse.Namespace) -> None:
             break
 
 
+def _health_job_name(args_preview: list[str]) -> str | None:
+    """
+    Derive a distinct job_health name from CLI flags so concurrent cron jobs
+    don't overwrite each other's rows.
+
+    Returns None for single-article invocations (no tracking needed).
+    """
+    if not any(a in args_preview for a in ("--fmp-news", "--x-news", "--sparse-fill")):
+        return None
+
+    # Determine feed (stock vs general; default: stock)
+    feed = "stock"
+    for i, a in enumerate(args_preview):
+        if a == "--fmp-news-feed" and i + 1 < len(args_preview):
+            feed = args_preview[i + 1]
+            break
+
+    is_backfill = "--sparse-fill" in args_preview
+
+    if is_backfill:
+        return f"news_backfill_{feed}"
+    return f"news_ingest_{feed}"
+
+
 def main(argv: list[str] | None = None) -> None:
-    asyncio.run(_main(argv))
+    import sys as _sys
+    args_preview = list(argv if argv is not None else _sys.argv[1:])
+    job_name = _health_job_name(args_preview)
+    if job_name:
+        try:
+            from src.health import JobHeartbeat
+            with JobHeartbeat(job_name, expected_interval_h=1.0):
+                asyncio.run(_main(argv))
+        except ImportError:
+            asyncio.run(_main(argv))
+    else:
+        asyncio.run(_main(argv))
 
 
 if __name__ == "__main__":

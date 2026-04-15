@@ -368,4 +368,9 @@ if __name__ == "__main__":
     )
     args = parser.parse_args()
 
-    asyncio.run(_main(args.user_id, args.lookback_hours, args.deliver))
+    try:
+        from src.health import JobHeartbeat
+        with JobHeartbeat("daily_narrative", expected_interval_h=24.0):
+            asyncio.run(_main(args.user_id, args.lookback_hours, args.deliver))
+    except ImportError:
+        asyncio.run(_main(args.user_id, args.lookback_hours, args.deliver))
