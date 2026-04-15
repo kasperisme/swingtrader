@@ -144,6 +144,64 @@ export function NetworkGraphD3({
     const linkLayer = viewport.append("g").attr("class", "links");
     const nodeLayer = viewport.append("g").attr("class", "nodes");
 
+    const distanceByNode = new Map<string, number>();
+    if (selectedNode) {
+      const adjacency = new Map<string, string[]>();
+      for (const edge of visibleEdges) {
+        const from = adjacency.get(edge.from_ticker) ?? [];
+        from.push(edge.to_ticker);
+        adjacency.set(edge.from_ticker, from);
+        const to = adjacency.get(edge.to_ticker) ?? [];
+        to.push(edge.from_ticker);
+        adjacency.set(edge.to_ticker, to);
+      }
+      const queue: string[] = [selectedNode];
+      distanceByNode.set(selectedNode, 0);
+      while (queue.length > 0) {
+        const current = queue.shift();
+        if (!current) continue;
+        const depth = distanceByNode.get(current) ?? 0;
+        const neighbors = adjacency.get(current) ?? [];
+        for (const neighbor of neighbors) {
+          if (distanceByNode.has(neighbor)) continue;
+          distanceByNode.set(neighbor, depth + 1);
+          queue.push(neighbor);
+        }
+      }
+    }
+
+    function nodeOpacityByDistance(nodeId: string): number {
+      if (!selectedNode) return 1;
+      if (nodeId === selectedNode) return 1;
+      const depth = distanceByNode.get(nodeId);
+      if (depth == null) return 0.16;
+      const minOpacity = 0.24;
+      const step = 0.14;
+      return Math.max(minOpacity, 1 - depth * step);
+    }
+
+    function edgeOpacityByDistance(fromId: string, toId: string): number {
+      if (!selectedNode) return 0.45;
+      const fromDepth = distanceByNode.get(fromId);
+      const toDepth = distanceByNode.get(toId);
+      const from = fromDepth == null ? 7 : fromDepth;
+      const to = toDepth == null ? 7 : toDepth;
+      const avgDepth = (from + to) / 2;
+      const minOpacity = 0.16;
+      const step = 0.12;
+      return Math.max(minOpacity, 0.9 - avgDepth * step);
+    }
+
+    function textOpacity(d: GraphForceNode): number {
+      if (selectedEdge) {
+        const isEndpoint =
+          d.id === selectedEdge.from_ticker || d.id === selectedEdge.to_ticker;
+        return isEndpoint ? 1 : 0.2;
+      }
+      if (!dimDistantGraph) return 1;
+      return nodeOpacityByDistance(d.id);
+    }
+
     function edgeStroke(d: RelationshipEdge) {
       return REL_COLORS[d.rel_type] ?? "hsl(var(--muted-foreground))";
     }
@@ -181,11 +239,8 @@ export function NetworkGraphD3({
         selectedEdge.rel_type === d.rel_type;
       if (selectedEdge) return isSelected ? 1 : 0.08;
       if (!dimDistantGraph) return 0.45;
-      const isFocused =
-        selectedNode && (d.from_ticker === selectedNode || d.to_ticker === selectedNode);
-      if (isFocused) return 0.85;
-      if (selectedNode) return 0.12;
-      return 0.45;
+      if (!selectedNode) return 0.45;
+      return edgeOpacityByDistance(d.from_ticker, d.to_ticker);
     }
 
     function syncLinks() {
@@ -218,9 +273,8 @@ export function NetworkGraphD3({
         }
         if (!dimDistantGraph) return 1;
         if (!selectedNode) return 1;
-        if (d.id === selectedNode) return 1;
-        if (connectedSet.has(d.id)) return 1;
-        return 0.3;
+        if (connectedSet.has(d.id)) return Math.max(0.92, nodeOpacityByDistance(d.id));
+        return nodeOpacityByDistance(d.id);
       });
 
     nodeSel
@@ -249,6 +303,7 @@ export function NetworkGraphD3({
         if (edgeFocused || d.id === selectedNode) return "hsl(var(--background))";
         return "hsl(var(--foreground))";
       })
+      .attr("fill-opacity", (d) => textOpacity(d))
       .attr("class", "select-none pointer-events-none")
       .text((d) => d.id);
 

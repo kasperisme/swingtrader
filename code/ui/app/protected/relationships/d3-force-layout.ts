@@ -34,7 +34,8 @@ export function createGraphForceSimulation(
 
   const cx = width / 2;
   const cy = height / 2;
-  const ring = Math.min(width, height) * 0.4;
+  // Start farther out so initial settle has less overlap pressure.
+  const ring = Math.min(width, height) * 0.46;
 
   const nodes: GraphForceNode[] = nodeIds.map((id, i) => {
     const seed = initialPositions[id];
@@ -61,15 +62,13 @@ export function createGraphForceSimulation(
       "link",
       forceLink<GraphForceNode, GraphLink>(links)
         .id((d) => d.id)
-        .distance((d) => {
-          const s = Math.max(0, Math.min(1, d.strength ?? 0));
-          return 90 + 80 * (1 - s);
-        })
-        .strength(0.45),
+        // Uniform target length improves visual consistency across the graph.
+        .distance(180)
+        .strength(0.38),
     )
-    .force("charge", forceManyBody<GraphForceNode>().strength(-520))
+    .force("charge", forceManyBody<GraphForceNode>().strength(-760))
     .force("center", forceCenter(cx, cy))
-    .force("collide", forceCollide<GraphForceNode>(nodeRadius + 4))
+    .force("collide", forceCollide<GraphForceNode>(nodeRadius + 10))
     .velocityDecay(0.35)
     .alphaDecay(0.0228);
 
