@@ -23,6 +23,30 @@ logger = logging.getLogger(__name__)
 _DEFAULT_OLLAMA_BASE = "http://localhost:11434"
 _DEFAULT_EMBED_MODEL = "mxbai-embed-large"
 
+# ── HTML / CSS stripping (stdlib only) ───────────────────────────────────────
+_STYLE_RE      = re.compile(r"<style[^>]*>.*?</style>",  re.DOTALL | re.IGNORECASE)
+_SCRIPT_RE     = re.compile(r"<script[^>]*>.*?</script>", re.DOTALL | re.IGNORECASE)
+_TAG_RE        = re.compile(r"<[^>]+>")
+_SPACE_RE      = re.compile(r"\s{2,}")
+_CSS_AT_RE     = re.compile(r"@[\w-]+[^{;]*\{(?:[^{}]|\{[^}]*\})*\}", re.DOTALL)
+_CSS_RULE_RE   = re.compile(
+    r"(?<!\w)[.#:_\[][\w\-\[\]().#:,\s>~+*=\"'@^\$|]{0,300}?\{[^{}]{0,5000}?\}",
+    re.DOTALL,
+)
+_CSS_ORPHAN_RE = re.compile(r"^.*?\}(?=\s*[A-Z])", re.DOTALL)
+
+
+def _strip_html(html: str) -> str:
+    """Strip HTML tags, style/script blocks, and raw CSS rule blocks."""
+    text = _STYLE_RE.sub(" ", html)
+    text = _SCRIPT_RE.sub(" ", text)
+    text = _TAG_RE.sub(" ", text)
+    text = _CSS_AT_RE.sub(" ", text)
+    text = _CSS_RULE_RE.sub(" ", text)
+    text = _CSS_ORPHAN_RE.sub("", text)
+    text = _SPACE_RE.sub(" ", text)
+    return text.strip()
+
 
 def _chunk_text(text: str, max_chars: int = 900, overlap_chars: int = 120) -> list[str]:
     text = (text or "").strip()
@@ -185,6 +209,7 @@ def process_embedding_jobs(
                     raise RuntimeError("Article not found")
 
                 title, body = row[0] or "", row[1] or ""
+                body = _strip_html(body)
                 combined = f"{title}\n\n{body}".strip()
                 chunks = _chunk_text(combined)
                 if not chunks:
