@@ -48,6 +48,7 @@ logger = logging.getLogger(__name__)
 
 _EASTERN = ZoneInfo("America/New_York")
 _DEFAULT_LOOKBACK_HOURS = 24
+_DEFAULT_NETWORK_LOOKBACK_DAYS = max(1, int(os.environ.get("NARRATIVE_NETWORK_LOOKBACK_DAYS", "365")))
 _OLLAMA_NARRATIVE_MODEL = os.environ.get("OLLAMA_NARRATIVE_MODEL") or os.environ.get("OLLAMA_IMPACT_MODEL", "devstral")
 _OLLAMA_NARRATIVE_TOKENS = int(os.environ.get("OLLAMA_NARRATIVE_TOKENS", "3072"))
 _OLLAMA_NARRATIVE_TIMEOUT = float(os.environ.get("OLLAMA_NARRATIVE_TIMEOUT", "180"))
@@ -57,6 +58,11 @@ _REL_DECAY = max(0.0, min(1.0, float(os.environ.get("NARRATIVE_REL_DECAY", "0.7"
 _REL_MIN_SCORE = max(0.0, min(1.0, float(os.environ.get("NARRATIVE_REL_MIN_SCORE", "0.35"))))
 _REL_MAX_TICKERS = max(1, int(os.environ.get("NARRATIVE_REL_MAX_TICKERS", "8")))
 _REL_ARTICLES_PER_TICKER = max(1, int(os.environ.get("NARRATIVE_REL_ARTICLES_PER_TICKER", "2")))
+_REL_MIN_STRENGTH = max(0.0, min(1.0, float(os.environ.get("NARRATIVE_REL_MIN_STRENGTH", "0.25"))))
+_REL_MIN_MENTIONS = max(1, int(os.environ.get("NARRATIVE_REL_MIN_MENTIONS", "1")))
+_REL_LIMIT_NODES = max(20, int(os.environ.get("NARRATIVE_REL_LIMIT_NODES", "140")))
+_REL_LIMIT_EDGES = max(50, int(os.environ.get("NARRATIVE_REL_LIMIT_EDGES", "360")))
+_BLOCKED_NODE_LABELS = {"N/A"}
 
 
 # ── Data containers ───────────────────────────────────────────────────────────
@@ -101,9 +107,11 @@ class UserContext:
     related_news: dict[str, list[TickerNewsItem]] = field(default_factory=dict)
     related_ticker_scores: dict[str, float] = field(default_factory=dict)
     related_ticker_paths: dict[str, list[str]] = field(default_factory=dict)
+    related_seed_diagnostics: list[dict[str, Any]] = field(default_factory=list)
     alert_items: list[AlertItem] = field(default_factory=list)
     semantic_evidence: list[dict] = field(default_factory=list)
     lookback_hours: int = _DEFAULT_LOOKBACK_HOURS
+    network_lookback_days: int = _DEFAULT_NETWORK_LOOKBACK_DAYS
 
 
 # ── DB queries ────────────────────────────────────────────────────────────────
@@ -114,72 +122,106 @@ class RelationshipEdge:
     to_ticker: str
     rel_type: str
     strength: float
+    mention_count: int = 0
 
 
 def _normalize_ticker(ticker: Any) -> str:
     return str(ticker or "").upper().strip()
 
 
-def _fetch_relationship_edges(conn, lookback_hours: int) -> list[RelationshipEdge]:
-    """Build a recent ticker-relationship edge list from relationship heads."""
+def _fetch_relationship_edges(conn, lookback_days: int) -> list[RelationshipEdge]:
+    """
+    Load canonicalized graph edges from ticker_relationship_network_resolved_v.
+    Mirrors UI relationshipsGetNeighborhood() data source + filters.
+    """
     schema = get_schema()
-    since = datetime.now(_EASTERN) - timedelta(hours=lookback_hours)
+    since = datetime.now(_EASTERN) - timedelta(days=max(1, lookback_days))
     sql = f"""
-        SELECT h.scores_json
-        FROM {schema}.news_impact_heads h
-        JOIN {schema}.news_articles a ON a.id = h.article_id
-        WHERE h.cluster = 'TICKER_RELATIONSHIPS'
-          AND COALESCE(a.published_at, a.created_at) >= %s
+        SELECT
+            from_ticker,
+            to_ticker,
+            rel_type,
+            strength_avg,
+            mention_count
+        FROM {schema}.ticker_relationship_network_resolved_v
+        WHERE strength_avg >= %s
+          AND mention_count >= %s
+          AND last_seen_at >= %s
+        ORDER BY strength_avg DESC
+        LIMIT 5000
     """
     cur = conn.cursor()
-    cur.execute(sql, (since,))
+    cur.execute(sql, (_REL_MIN_STRENGTH, _REL_MIN_MENTIONS, since))
     rows = cur.fetchall() or []
-    pair_agg: dict[tuple[str, str, str], tuple[float, int]] = {}
-
-    for row in rows:
-        scores = row[0] or {}
-        if not isinstance(scores, dict):
+    merged_by_key: dict[tuple[str, str, str], RelationshipEdge] = {}
+    for from_raw, to_raw, rel_raw, strength_raw, mention_raw in rows:
+        from_ticker = _normalize_ticker(from_raw)
+        to_ticker = _normalize_ticker(to_raw)
+        rel_type = str(rel_raw or "").lower().strip()
+        if (
+            not from_ticker
+            or not to_ticker
+            or not rel_type
+            or from_ticker == to_ticker
+            or from_ticker in _BLOCKED_NODE_LABELS
+            or to_ticker in _BLOCKED_NODE_LABELS
+        ):
             continue
-        for key, raw in scores.items():
-            parts = str(key).split("__")
-            if len(parts) != 3:
-                continue
-            from_ticker = _normalize_ticker(parts[0])
-            to_ticker = _normalize_ticker(parts[1])
-            rel_type = str(parts[2]).strip() or "related"
-            if not from_ticker or not to_ticker:
-                continue
-            try:
-                strength = max(0.0, min(1.0, float(raw)))
-            except (TypeError, ValueError):
-                continue
-            agg_key = (from_ticker, to_ticker, rel_type)
-            strength_sum, count = pair_agg.get(agg_key, (0.0, 0))
-            pair_agg[agg_key] = (strength_sum + strength, count + 1)
-
-    edges: list[RelationshipEdge] = []
-    for (from_ticker, to_ticker, rel_type), (strength_sum, count) in pair_agg.items():
-        if count <= 0:
+        try:
+            strength = max(0.0, min(1.0, float(strength_raw)))
+        except (TypeError, ValueError):
             continue
-        avg_strength = strength_sum / count
-        edges.append(
-            RelationshipEdge(
-                from_ticker=from_ticker,
-                to_ticker=to_ticker,
-                rel_type=rel_type,
-                strength=avg_strength,
-            )
+        try:
+            mention_count = max(0, int(mention_raw or 0))
+        except (TypeError, ValueError):
+            mention_count = 0
+        edge = RelationshipEdge(
+            from_ticker=from_ticker,
+            to_ticker=to_ticker,
+            rel_type=rel_type,
+            strength=strength,
+            mention_count=mention_count,
         )
-        # Treat relationship edges as bidirectional for related-news expansion.
-        edges.append(
-            RelationshipEdge(
-                from_ticker=to_ticker,
-                to_ticker=from_ticker,
-                rel_type=rel_type,
-                strength=avg_strength,
-            )
+        key = (from_ticker, to_ticker, rel_type)
+        prev = merged_by_key.get(key)
+        if prev is None:
+            merged_by_key[key] = edge
+            continue
+        prev_weight = max(1, prev.mention_count)
+        next_weight = max(1, edge.mention_count)
+        merged_by_key[key] = RelationshipEdge(
+            from_ticker=from_ticker,
+            to_ticker=to_ticker,
+            rel_type=rel_type,
+            strength=((prev.strength * prev_weight) + (edge.strength * next_weight))
+            / (prev_weight + next_weight),
+            mention_count=prev.mention_count + edge.mention_count,
         )
-    return edges
+    return list(merged_by_key.values())
+
+
+def _resolve_canonical_tickers(conn, tickers: list[str]) -> list[str]:
+    """Resolve ticker aliases to canonical tickers like the UI does."""
+    normalized = list(dict.fromkeys(_normalize_ticker(t) for t in tickers if _normalize_ticker(t)))
+    if not normalized:
+        return []
+    schema = get_schema()
+    sql = f"""
+        SELECT alias_value_norm, canonical_ticker
+        FROM {schema}.security_identity_map
+        WHERE alias_kind = 'ticker'
+          AND alias_value_norm = ANY(%s)
+        ORDER BY verified DESC, confidence DESC, id ASC
+    """
+    alias_norms = [t.lower() for t in normalized]
+    cur = conn.cursor()
+    cur.execute(sql, (alias_norms,))
+    rows = cur.fetchall() or []
+    best: dict[str, str] = {}
+    for alias_norm, canonical in rows:
+        if alias_norm not in best:
+            best[str(alias_norm)] = _normalize_ticker(canonical)
+    return [best.get(t.lower(), t) for t in normalized]
 
 
 def _expand_related_tickers(
@@ -263,6 +305,46 @@ def _expand_related_tickers(
             segments.append(f"{src} -{rel}-> {dst}")
         final_paths[ticker] = segments or [ticker]
     return final_scores, final_paths
+
+
+def _build_neighborhood_from_seed(
+    seed_ticker: str,
+    all_edges: list[RelationshipEdge],
+    hops: int = _REL_GRAPH_HOPS,
+    limit_nodes: int = _REL_LIMIT_NODES,
+    limit_edges: int = _REL_LIMIT_EDGES,
+) -> tuple[set[str], list[RelationshipEdge], dict[str, int], dict[str, str]]:
+    """
+    Match UI neighborhood traversal:
+    - BFS from seed
+    - hop cap (UI enforces <=2)
+    - global caps for node and edge count
+    """
+    bounded_hops = max(1, min(2, int(hops)))
+    visited: set[str] = {seed_ticker}
+    depth_by: dict[str, int] = {seed_ticker: 0}
+    parent_by: dict[str, str] = {}
+    queue: deque[str] = deque([seed_ticker])
+    kept_edges: list[RelationshipEdge] = []
+
+    while queue and len(visited) < limit_nodes and len(kept_edges) < limit_edges:
+        current = queue.popleft()
+        current_depth = depth_by.get(current, 0)
+        if current_depth >= bounded_hops:
+            continue
+        neighbors = [e for e in all_edges if e.from_ticker == current or e.to_ticker == current]
+        for edge in neighbors:
+            if len(kept_edges) >= limit_edges:
+                break
+            kept_edges.append(edge)
+            next_ticker = edge.to_ticker if edge.from_ticker == current else edge.from_ticker
+            if next_ticker not in visited and len(visited) < limit_nodes:
+                visited.add(next_ticker)
+                depth_by[next_ticker] = current_depth + 1
+                parent_by[next_ticker] = current
+                queue.append(next_ticker)
+
+    return visited, kept_edges, depth_by, parent_by
 
 def _fetch_open_positions(conn, user_id: str) -> list[OpenPosition]:
     """
@@ -453,6 +535,153 @@ def _fetch_ticker_news(
                 relationships=relevant_rels,
             ))
 
+    return result
+
+
+def _merge_news_maps(
+    base: dict[str, list[TickerNewsItem]],
+    incoming: dict[str, list[TickerNewsItem]],
+) -> dict[str, list[TickerNewsItem]]:
+    merged: dict[str, list[TickerNewsItem]] = {}
+    all_tickers = set(base.keys()) | set(incoming.keys())
+    for ticker in all_tickers:
+        by_article: dict[int, TickerNewsItem] = {}
+        for item in base.get(ticker, []):
+            by_article[item.article_id] = item
+        for item in incoming.get(ticker, []):
+            by_article.setdefault(item.article_id, item)
+        merged[ticker] = sorted(
+            by_article.values(),
+            key=lambda item: item.published_at or datetime.min,
+            reverse=True,
+        )
+    return merged
+
+
+def _fetch_related_news_from_relationship_edges(
+    conn,
+    candidate_tickers: list[str],
+    network_nodes: set[str],
+    lookback_hours: int,
+) -> dict[str, list[TickerNewsItem]]:
+    """
+    Pull related news directly from TICKER_RELATIONSHIPS heads for the constructed network.
+    This captures edge evidence even when news_article_tickers lacks certain entities (e.g. OPENAI).
+    """
+    normalized_candidates = list(
+        dict.fromkeys(_normalize_ticker(t) for t in candidate_tickers if _normalize_ticker(t))
+    )
+    if not normalized_candidates or not network_nodes:
+        return {}
+    node_set = {_normalize_ticker(t) for t in network_nodes if _normalize_ticker(t)}
+    if not node_set:
+        return {}
+
+    schema = get_schema()
+    since = datetime.now(_EASTERN) - timedelta(hours=lookback_hours)
+    cur = conn.cursor()
+
+    sql_rel = f"""
+        SELECT
+            h.article_id,
+            na.title,
+            na.url,
+            na.published_at,
+            h.scores_json,
+            h.reasoning_json
+        FROM {schema}.news_impact_heads h
+        JOIN {schema}.news_articles na ON na.id = h.article_id
+        WHERE h.cluster = 'TICKER_RELATIONSHIPS'
+          AND COALESCE(na.published_at, na.created_at) >= %s
+        ORDER BY COALESCE(na.published_at, na.created_at) DESC
+        LIMIT 5000
+    """
+    cur.execute(sql_rel, (since,))
+    relationship_rows = cur.fetchall() or []
+
+    article_ids = list({int(r[0]) for r in relationship_rows if r and r[0] is not None})
+    sentiment_by_article: dict[int, tuple[dict, dict]] = {}
+    if article_ids:
+        sql_sentiment = f"""
+            SELECT article_id, scores_json, reasoning_json
+            FROM {schema}.news_impact_heads
+            WHERE article_id = ANY(%s)
+              AND cluster = 'TICKER_SENTIMENT'
+        """
+        cur.execute(sql_sentiment, (article_ids,))
+        for article_id, scores_json, reasoning_json in (cur.fetchall() or []):
+            sentiment_by_article[int(article_id)] = (scores_json or {}, reasoning_json or {})
+
+    result: dict[str, list[TickerNewsItem]] = {t: [] for t in normalized_candidates}
+    seen: set[tuple[str, int]] = set()
+    candidate_set = set(normalized_candidates)
+
+    for article_id_raw, title, url, published_at, scores_json, reasoning_json in relationship_rows:
+        article_id = int(article_id_raw)
+        rel_scores = scores_json or {}
+        rel_reasons = reasoning_json or {}
+        if not isinstance(rel_scores, dict):
+            continue
+
+        candidate_relationships: dict[str, list[dict[str, Any]]] = {t: [] for t in normalized_candidates}
+        connected_candidates: set[str] = set()
+
+        for key, strength in rel_scores.items():
+            parts = str(key).split("__")
+            if len(parts) != 3:
+                continue
+            from_ticker = _normalize_ticker(parts[0])
+            to_ticker = _normalize_ticker(parts[1])
+            rel_type = str(parts[2]).strip().lower() or "related"
+            if (
+                not from_ticker
+                or not to_ticker
+                or from_ticker == to_ticker
+                or from_ticker not in node_set
+                or to_ticker not in node_set
+            ):
+                continue
+            rel_obj = {
+                "from": from_ticker,
+                "to": to_ticker,
+                "type": rel_type,
+                "strength": strength,
+                "notes": rel_reasons.get(key, ""),
+            }
+            if from_ticker in candidate_set:
+                candidate_relationships[from_ticker].append(rel_obj)
+                connected_candidates.add(from_ticker)
+            if to_ticker in candidate_set:
+                candidate_relationships[to_ticker].append(rel_obj)
+                connected_candidates.add(to_ticker)
+
+        if not connected_candidates:
+            continue
+
+        sentiment_scores, sentiment_reasons = sentiment_by_article.get(article_id, ({}, {}))
+        for ticker in connected_candidates:
+            row_key = (ticker, article_id)
+            if row_key in seen:
+                continue
+            seen.add(row_key)
+            result[ticker].append(
+                TickerNewsItem(
+                    article_id=article_id,
+                    title=title or "",
+                    url=url or "",
+                    published_at=published_at,
+                    sentiment_score=float(sentiment_scores.get(ticker, 0.0)),
+                    sentiment_reason=str(sentiment_reasons.get(ticker, "") or ""),
+                    relationships=candidate_relationships.get(ticker, []),
+                )
+            )
+
+    for ticker in list(result.keys()):
+        result[ticker] = sorted(
+            result[ticker],
+            key=lambda item: item.published_at or datetime.min,
+            reverse=True,
+        )
     return result
 
 
@@ -995,28 +1224,30 @@ def _save_narrative(
 
 # ── Main entry point ──────────────────────────────────────────────────────────
 
-async def generate_for_user(user_id: str, narrative_date: Optional[date] = None, lookback_hours: int = _DEFAULT_LOOKBACK_HOURS) -> dict:
+def _build_user_context(
+    user_id: str,
+    narrative_date: date,
+    lookback_hours: int,
+    network_lookback_days: int = _DEFAULT_NETWORK_LOOKBACK_DAYS,
+) -> UserContext:
     """
-    Generate and persist the daily narrative for one user.
-    Returns the saved narrative dict.
+    Fetch all DB/embedding data for one user and return a populated UserContext.
+    Does NOT call Ollama — safe to call for dry-run / inspection.
     """
-    if narrative_date is None:
-        narrative_date = datetime.now(_EASTERN).date()
-
-    logger.info("[narrative] generating for user=%s date=%s lookback=%dh", user_id, narrative_date, lookback_hours)
     conn = get_pg_connection()
     try:
         ctx = UserContext(
             user_id=user_id,
             narrative_date=narrative_date,
             lookback_hours=lookback_hours,
+            network_lookback_days=max(1, int(network_lookback_days)),
         )
 
         ctx.open_positions = _fetch_open_positions(conn, user_id)
         ctx.active_screen_tickers = _fetch_active_screen_tickers(conn, user_id)
         ctx.alert_items = _fetch_alert_items(conn, user_id)
 
-        portfolio_tickers = [p.ticker for p in ctx.open_positions]
+        portfolio_tickers = _resolve_canonical_tickers(conn, [p.ticker for p in ctx.open_positions])
         all_tickers = list(dict.fromkeys(portfolio_tickers + ctx.active_screen_tickers))
 
         if all_tickers:
@@ -1025,19 +1256,103 @@ async def generate_for_user(user_id: str, narrative_date: Optional[date] = None,
             ctx.portfolio_news = {t: v for t, v in news_map.items() if t in portfolio_set}
             ctx.screening_news = {t: v for t, v in news_map.items() if t not in portfolio_set}
 
-            relationship_edges = _fetch_relationship_edges(conn, lookback_hours=lookback_hours)
-            related_scores, related_paths = _expand_related_tickers(
-                all_tickers,
-                relationship_edges,
-                hops=_REL_GRAPH_HOPS,
-                decay=_REL_DECAY,
-                min_score=_REL_MIN_SCORE,
-                max_tickers=_REL_MAX_TICKERS,
+            relationship_edges = _fetch_relationship_edges(
+                conn,
+                lookback_days=ctx.network_lookback_days,
             )
+            related_scores: dict[str, float] = {}
+            related_paths: dict[str, list[str]] = {}
+            network_nodes_all: set[str] = set()
+
+            # Portfolio-first neighborhood expansion: mirrors UI graph construction and focuses
+            # related context on held names instead of broad screening-only expansion.
+            seed_tickers = portfolio_tickers or all_tickers
+            for seed in seed_tickers:
+                seed_norm = _normalize_ticker(seed)
+                if not seed_norm:
+                    continue
+                seed_candidate_scores: dict[str, float] = {}
+                seed_candidate_paths: dict[str, str] = {}
+                visited, kept_edges, depth_by, parent_by = _build_neighborhood_from_seed(
+                    seed_norm,
+                    relationship_edges,
+                    hops=_REL_GRAPH_HOPS,
+                    limit_nodes=_REL_LIMIT_NODES,
+                    limit_edges=_REL_LIMIT_EDGES,
+                )
+                network_nodes_all.update(visited)
+                incident: dict[str, list[RelationshipEdge]] = defaultdict(list)
+                for edge in kept_edges:
+                    incident[edge.from_ticker].append(edge)
+                    incident[edge.to_ticker].append(edge)
+                for ticker in visited:
+                    if ticker == seed_norm:
+                        continue
+                    depth = depth_by.get(ticker, _REL_GRAPH_HOPS)
+                    depth_penalty = 0.85 ** max(0, depth - 1)
+                    score = max(
+                        (e.strength * depth_penalty for e in incident.get(ticker, [])),
+                        default=0.0,
+                    )
+                    if score < _REL_MIN_SCORE:
+                        continue
+                    path_nodes: list[str] = [ticker]
+                    parent = parent_by.get(ticker)
+                    while parent:
+                        path_nodes.append(parent)
+                        if parent == seed_norm:
+                            break
+                        parent = parent_by.get(parent)
+                    path_nodes.reverse()
+                    candidate_path = " -> ".join(path_nodes)
+                    if score > seed_candidate_scores.get(ticker, 0.0):
+                        seed_candidate_scores[ticker] = score
+                        seed_candidate_paths[ticker] = candidate_path
+                    if score > related_scores.get(ticker, 0.0):
+                        related_scores[ticker] = score
+                        related_paths[ticker] = [candidate_path]
+                seed_ranked = sorted(
+                    seed_candidate_scores.items(),
+                    key=lambda x: x[1],
+                    reverse=True,
+                )[:5]
+                ctx.related_seed_diagnostics.append(
+                    {
+                        "seed_ticker": seed_norm,
+                        "visited_nodes": len(visited),
+                        "traversed_edges": len(kept_edges),
+                        "qualified_candidates": len(
+                            [
+                                ticker
+                                for ticker in visited
+                                if ticker != seed_norm and ticker in related_scores
+                            ]
+                        ),
+                        "top_candidates": [
+                            {
+                                "ticker": ticker,
+                                "score": score,
+                                "path": seed_candidate_paths.get(ticker, ""),
+                            }
+                            for ticker, score in seed_ranked
+                        ],
+                    }
+                )
+
             if related_scores:
-                related_map = _fetch_ticker_news(conn, list(related_scores.keys()), lookback_hours)
+                ranked = sorted(related_scores.items(), key=lambda x: x[1], reverse=True)[:_REL_MAX_TICKERS]
+                related_scores = {t: s for t, s in ranked}
+                related_paths = {t: related_paths.get(t, []) for t in related_scores}
+            if related_scores:
+                related_map_mentions = _fetch_ticker_news(conn, list(related_scores.keys()), lookback_hours)
+                related_map_relationships = _fetch_related_news_from_relationship_edges(
+                    conn,
+                    candidate_tickers=list(related_scores.keys()),
+                    network_nodes=network_nodes_all,
+                    lookback_hours=lookback_hours,
+                )
+                related_map = _merge_news_maps(related_map_mentions, related_map_relationships)
                 related_map = {t: items[:_REL_ARTICLES_PER_TICKER] for t, items in related_map.items() if items}
-                # Keep only related tickers that have retrievable article context.
                 ctx.related_news = related_map
                 ctx.related_ticker_scores = {t: s for t, s in related_scores.items() if t in related_map}
                 ctx.related_ticker_paths = {t: related_paths.get(t, []) for t in related_map}
@@ -1046,7 +1361,6 @@ async def generate_for_user(user_id: str, narrative_date: Optional[date] = None,
                     logger.info("[narrative] user=%s related candidates=%s", user_id, top_related)
 
             if _USE_SEMANTIC_RETRIEVAL:
-                # Add semantic retrieval evidence to improve grounding/recall.
                 retrieval_query = (
                     f"Portfolio: {', '.join(portfolio_tickers) or 'none'}. "
                     f"Screening: {', '.join(ctx.active_screen_tickers) or 'none'}. "
@@ -1063,6 +1377,79 @@ async def generate_for_user(user_id: str, narrative_date: Optional[date] = None,
             logger.info("[narrative] user=%s has no positions or active screens", user_id)
     finally:
         conn.close()
+
+    return ctx
+
+
+def build_prompt_for_user(
+    user_id: str,
+    narrative_date: Optional[date] = None,
+    lookback_hours: int = _DEFAULT_LOOKBACK_HOURS,
+    network_lookback_days: int = _DEFAULT_NETWORK_LOOKBACK_DAYS,
+) -> tuple["UserContext", str]:
+    """
+    Build and return the full Ollama prompt for one user without calling the model.
+    Useful for dry-run inspection and input validation.
+
+    Returns (ctx, prompt_string).
+    """
+    if narrative_date is None:
+        narrative_date = datetime.now(_EASTERN).date()
+    ctx = _build_user_context(
+        user_id,
+        narrative_date,
+        lookback_hours,
+        network_lookback_days=network_lookback_days,
+    )
+    portfolio_block = _build_portfolio_block(ctx.open_positions)
+    screening_block = _build_screening_block(ctx.active_screen_tickers)
+    news_block = _build_news_block(ctx.portfolio_news, ctx.screening_news)
+    related_news_block = _build_related_news_block(
+        ctx.related_news,
+        ctx.related_ticker_scores,
+        ctx.related_ticker_paths,
+    )
+    alerts_block = _build_alerts_block(ctx.alert_items)
+    semantic_block = _build_semantic_block(ctx.semantic_evidence)
+    prompt = _NARRATIVE_USER_TEMPLATE.format(
+        date=ctx.narrative_date.strftime("%A %B %-d, %Y"),
+        portfolio_block=portfolio_block,
+        screening_block=screening_block,
+        news_block=news_block,
+        related_news_block=related_news_block,
+        alerts_block=alerts_block,
+        semantic_block=semantic_block,
+        lookback_hours=ctx.lookback_hours,
+    )
+    return ctx, prompt
+
+
+async def generate_for_user(
+    user_id: str,
+    narrative_date: Optional[date] = None,
+    lookback_hours: int = _DEFAULT_LOOKBACK_HOURS,
+    network_lookback_days: int = _DEFAULT_NETWORK_LOOKBACK_DAYS,
+) -> dict:
+    """
+    Generate and persist the daily narrative for one user.
+    Returns the saved narrative dict.
+    """
+    if narrative_date is None:
+        narrative_date = datetime.now(_EASTERN).date()
+
+    logger.info(
+        "[narrative] generating for user=%s date=%s lookback=%dh network_lookback=%dd",
+        user_id,
+        narrative_date,
+        lookback_hours,
+        network_lookback_days,
+    )
+    ctx = _build_user_context(
+        user_id,
+        narrative_date,
+        lookback_hours,
+        network_lookback_days=network_lookback_days,
+    )
 
     narrative, latency_ms = await _generate_narrative_text(ctx)
     related_section = narrative.get("related_network_update", [])
@@ -1095,7 +1482,9 @@ async def generate_for_user(user_id: str, narrative_date: Optional[date] = None,
     return narrative
 
 
-async def generate_all() -> tuple[list[str], list[str]]:
+async def generate_all(
+    network_lookback_days: int = _DEFAULT_NETWORK_LOOKBACK_DAYS,
+) -> tuple[list[str], list[str]]:
     """
     Generate narratives for all opted-in users (sequentially — Ollama is single-GPU).
     Returns (processed_user_ids, failed_user_ids).
@@ -1114,7 +1503,11 @@ async def generate_all() -> tuple[list[str], list[str]]:
     failed: list[str] = []
     for user_id, lookback_hours in users:
         try:
-            await generate_for_user(user_id, lookback_hours=lookback_hours)
+            await generate_for_user(
+                user_id,
+                lookback_hours=lookback_hours,
+                network_lookback_days=network_lookback_days,
+            )
             processed.append(user_id)
         except Exception as exc:
             logger.error("[narrative] failed for user=%s: %s", user_id, exc)
@@ -1133,11 +1526,18 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Generate daily narrative")
     parser.add_argument("--user-id", help="Generate for a specific user UUID only")
     parser.add_argument("--lookback-hours", type=int, default=_DEFAULT_LOOKBACK_HOURS)
+    parser.add_argument("--network-lookback-days", type=int, default=_DEFAULT_NETWORK_LOOKBACK_DAYS)
     args = parser.parse_args()
 
     if args.user_id:
-        result = asyncio.run(generate_for_user(args.user_id, lookback_hours=args.lookback_hours))
+        result = asyncio.run(
+            generate_for_user(
+                args.user_id,
+                lookback_hours=args.lookback_hours,
+                network_lookback_days=args.network_lookback_days,
+            )
+        )
         print(json.dumps(result, indent=2))
     else:
-        processed = asyncio.run(generate_all())
+        processed = asyncio.run(generate_all(network_lookback_days=args.network_lookback_days))
         print(f"Generated narratives for {len(processed)} users: {processed}")

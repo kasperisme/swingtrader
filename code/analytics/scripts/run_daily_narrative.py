@@ -48,7 +48,13 @@ if str(_ANALYTICS) not in sys.path:
 
 load_dotenv(_ANALYTICS / ".env")
 
-from news_impact.narrative_generator import generate_for_user, generate_all, _DEFAULT_LOOKBACK_HOURS  # noqa: E402
+from news_impact.narrative_generator import (
+    generate_for_user,
+    generate_all,
+    build_prompt_for_user,
+    _DEFAULT_LOOKBACK_HOURS,
+    _DEFAULT_NETWORK_LOOKBACK_DAYS,
+)  # noqa: E402
 from src.health import PartialJobFailure  # noqa: E402
 from src.db import get_supabase_client, get_schema  # noqa: E402
 
@@ -312,17 +318,119 @@ def _deliver_if_needed(user_id: str, narrative: dict, narrative_date: str) -> No
 
 # ── CLI ───────────────────────────────────────────────────────────────────────
 
-async def _main(user_id: str | None, lookback_hours: int, deliver: bool) -> None:
+def _print_dry_run(user_id: str, lookback_hours: int, network_lookback_days: int) -> None:
+    """Print the full model prompt and article context without calling Ollama."""
+    ctx, prompt = build_prompt_for_user(
+        user_id,
+        lookback_hours=lookback_hours,
+        network_lookback_days=network_lookback_days,
+    )
+    sep = "=" * 72
+
+    print(f"\n{sep}")
+    print(
+        f"DRY RUN — user={user_id}  lookback={lookback_hours}h  network_lookback={network_lookback_days}d  date={ctx.narrative_date}"
+    )
+    print(sep)
+
+    print(f"\n── Positions ({len(ctx.open_positions)}) ──")
+    for p in ctx.open_positions:
+        print(f"  {p.ticker:6s}  qty={p.net_qty:+.2f}  avg={p.avg_cost}")
+
+    print(f"\n── Active screens ({len(ctx.active_screen_tickers)}) ──")
+    print("  " + (", ".join(ctx.active_screen_tickers) or "(none)"))
+
+    print(f"\n── Alerts ({len(ctx.alert_items)}) ──")
+    for a in ctx.alert_items:
+        print(f"  {a.ticker}  {a.alert_type}  @ {a.alert_price}")
+
+    portfolio_article_count = sum(len(v) for v in ctx.portfolio_news.values())
+    screening_article_count = sum(len(v) for v in ctx.screening_news.values())
+    related_article_count = sum(len(v) for v in ctx.related_news.values())
+
+    print(f"\n── Portfolio news  ({portfolio_article_count} articles across {len(ctx.portfolio_news)} tickers) ──")
+    for ticker, items in sorted(ctx.portfolio_news.items()):
+        for it in items:
+            ts = it.published_at.strftime("%Y-%m-%d %H:%M") if it.published_at else "?"
+            score = f"{it.sentiment_score:+.2f}" if it.sentiment_score else "  n/a"
+            print(f"  [{ticker}] id={it.article_id} {ts} sentiment={score}  {it.title[:90]}")
+
+    print(f"\n── Screening news  ({screening_article_count} articles across {len(ctx.screening_news)} tickers) ──")
+    for ticker, items in sorted(ctx.screening_news.items()):
+        for it in items:
+            ts = it.published_at.strftime("%Y-%m-%d %H:%M") if it.published_at else "?"
+            score = f"{it.sentiment_score:+.2f}" if it.sentiment_score else "  n/a"
+            print(f"  [{ticker}] id={it.article_id} {ts} sentiment={score}  {it.title[:90]}")
+
+    print(f"\n── Related-network traversal diagnostics  ({len(ctx.related_seed_diagnostics)} seed runs) ──")
+    if ctx.related_seed_diagnostics:
+        for diag in ctx.related_seed_diagnostics:
+            seed = str(diag.get("seed_ticker") or "?")
+            visited_nodes = int(diag.get("visited_nodes") or 0)
+            traversed_edges = int(diag.get("traversed_edges") or 0)
+            qualified = int(diag.get("qualified_candidates") or 0)
+            print(
+                f"  seed={seed}  visited_nodes={visited_nodes}  traversed_edges={traversed_edges}  qualified_candidates={qualified}"
+            )
+            top_candidates = diag.get("top_candidates") or []
+            for c in top_candidates[:5]:
+                ticker = str(c.get("ticker") or "?")
+                score = float(c.get("score") or 0.0)
+                path = str(c.get("path") or "")
+                print(f"    -> {ticker}  score={score:.3f}  path: {path}")
+    else:
+        print("  (no traversal diagnostics captured)")
+
+    print(f"\n── Related-network news  ({related_article_count} articles across {len(ctx.related_news)} tickers) ──")
+    for ticker, items in sorted(ctx.related_news.items(), key=lambda kv: ctx.related_ticker_scores.get(kv[0], 0), reverse=True):
+        score = ctx.related_ticker_scores.get(ticker, 0)
+        path = " → ".join(ctx.related_ticker_paths.get(ticker, []))
+        print(f"  [{ticker}] graph_score={score:.3f}  path: {path}")
+        for it in items:
+            ts = it.published_at.strftime("%Y-%m-%d %H:%M") if it.published_at else "?"
+            print(f"    id={it.article_id} {ts}  {it.title[:90]}")
+
+    print(f"\n── Semantic evidence  ({len(ctx.semantic_evidence)} snippets) ──")
+    for ev in ctx.semantic_evidence:
+        print(f"  id={ev.get('article_id')}  {str(ev.get('title',''))[:80]}")
+        if ev.get("snippet"):
+            print(f"    {str(ev['snippet'])[:120]}")
+
+    print(f"\n{sep}")
+    print("FULL PROMPT SENT TO MODEL")
+    print(sep)
+    print(prompt)
+    print(sep + "\n")
+
+
+async def _main(
+    user_id: str | None,
+    lookback_hours: int,
+    network_lookback_days: int,
+    deliver: bool,
+    dry_run: bool = False,
+) -> None:
     today = datetime.now(_EASTERN).date().isoformat()
 
+    if dry_run:
+        if not user_id:
+            logger.error("--dry-run requires --user-id")
+            sys.exit(1)
+        _print_dry_run(user_id, lookback_hours, network_lookback_days)
+        return
+
     if user_id:
-        narrative = await generate_for_user(user_id, lookback_hours=lookback_hours)
+        narrative = await generate_for_user(
+            user_id,
+            lookback_hours=lookback_hours,
+            network_lookback_days=network_lookback_days,
+        )
         logger.info("[run_daily_narrative] done for user=%s", user_id)
         print(json.dumps(narrative, indent=2, default=str))
         if deliver:
             _deliver_if_needed(user_id, narrative, today)
     else:
-        processed, failed = await generate_all()
+        processed, failed = await generate_all(network_lookback_days=network_lookback_days)
         logger.info("[run_daily_narrative] done for %d users (%d failed)", len(processed), len(failed))
         if deliver:
             client = get_supabase_client()
@@ -370,16 +478,48 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Generate and optionally deliver the daily narrative")
     parser.add_argument("--user-id", help="Generate for a specific user UUID only")
     parser.add_argument("--lookback-hours", type=int, default=_DEFAULT_LOOKBACK_HOURS)
+    parser.add_argument("--network-lookback-days", type=int, default=_DEFAULT_NETWORK_LOOKBACK_DAYS)
     parser.add_argument(
         "--deliver",
         action="store_true",
         help="Send Telegram message if user has telegram delivery configured",
     )
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Print articles and full model prompt without calling Ollama or writing to DB. Requires --user-id.",
+    )
     args = parser.parse_args()
 
-    try:
-        from src.health import JobHeartbeat
-        with JobHeartbeat("daily_narrative", expected_interval=24.0):
-            asyncio.run(_main(args.user_id, args.lookback_hours, args.deliver))
-    except ImportError:
-        asyncio.run(_main(args.user_id, args.lookback_hours, args.deliver))
+    if args.dry_run:
+        # Dry-run bypasses health tracking entirely — no DB writes, no Ollama.
+        asyncio.run(
+            _main(
+                args.user_id,
+                args.lookback_hours,
+                args.network_lookback_days,
+                deliver=False,
+                dry_run=True,
+            )
+        )
+    else:
+        try:
+            from src.health import JobHeartbeat
+            with JobHeartbeat("daily_narrative", expected_interval=24.0):
+                asyncio.run(
+                    _main(
+                        args.user_id,
+                        args.lookback_hours,
+                        args.network_lookback_days,
+                        args.deliver,
+                    )
+                )
+        except ImportError:
+            asyncio.run(
+                _main(
+                    args.user_id,
+                    args.lookback_hours,
+                    args.network_lookback_days,
+                    args.deliver,
+                )
+            )
