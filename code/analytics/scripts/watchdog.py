@@ -156,8 +156,11 @@ def check_logs() -> list[str]:
     return alerts
 
 
-def check_health() -> list[str]:
-    """Query Supabase job_health for stuck/failed/stale jobs."""
+def check_health() -> tuple[list[str], list[str]]:
+    """
+    Query Supabase job_health for stuck/failed/stale jobs.
+    Returns (alerts, ok_lines) where ok_lines are per-job status summaries.
+    """
     from src.db import get_supabase_client, get_schema
 
     client = get_supabase_client()
@@ -171,10 +174,13 @@ def check_health() -> list[str]:
             "job_name,last_started_at,last_finished_at,last_status,"
             "consecutive_fails,expected_interval"
         )
+        .order("job_name")
         .execute()
     )
 
     alerts: list[str] = []
+    ok_lines: list[str] = []
+
     for job in res.data or []:
         name = job["job_name"]
         status = job.get("last_status")
@@ -183,6 +189,13 @@ def check_health() -> list[str]:
         started_at = job.get("last_started_at")
         fails = job.get("consecutive_fails", 0) or 0
 
+        def _age(iso: str) -> str:
+            dt = datetime.fromisoformat(iso)
+            mins = (now - dt).total_seconds() / 60
+            if mins < 90:
+                return f"{mins:.0f}min ago"
+            return f"{mins / 60:.1f}h ago"
+
         if status == "running" and started_at:
             age_min = (now - datetime.fromisoformat(started_at)).total_seconds() / 60
             if age_min > MAX_RUNNING_MINUTES:
@@ -190,52 +203,77 @@ def check_health() -> list[str]:
                     f"[STUCK] {name} has been 'running' for {age_min:.0f}min — "
                     f"likely crashed without reporting."
                 )
+            else:
+                ok_lines.append(f"  {name:<35} running  (started {_age(started_at)})")
         elif status == "failed":
             alerts.append(f"[FAILED] {name} — {fails} consecutive failure(s).")
         elif interval_h and finished_at:
             age_h = (now - datetime.fromisoformat(finished_at)).total_seconds() / 3600
             if age_h > interval_h * 1.5:
                 alerts.append(
-                    f"[STALE] {name} — last success {age_h:.1f}h ago "
+                    f"[STALE] {name} — last success {_age(finished_at)} "
                     f"(expected every {interval_h}h)."
                 )
+            else:
+                ok_lines.append(f"  {name:<35} ok       (last success {_age(finished_at)})")
         elif interval_h and not finished_at:
             alerts.append(f"[NEVER RUN] {name} — no successful run recorded.")
+        else:
+            ok_lines.append(f"  {name:<35} {status or 'unknown':<8} (last success {_age(finished_at) if finished_at else 'never'})")
 
-    return alerts
+    return alerts, ok_lines
 
 
 def main() -> None:
     from src.health import send_whatsapp_alert
 
-    logger.info("Watchdog running...")
+    logger.info("━━━ Watchdog started ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
 
     alerts: list[str] = []
 
     # ── 1. Supabase job_health ─────────────────────────────────────────────
+    logger.info("Checking Supabase job_health...")
     try:
-        alerts += check_health()
+        health_alerts, ok_lines = check_health()
+        if ok_lines:
+            logger.info("  Jobs screened:")
+            for line in ok_lines:
+                logger.info(line)
+        if health_alerts:
+            for a in health_alerts:
+                logger.warning("  ALERT: %s", a.splitlines()[0])
+        else:
+            logger.info("  All tracked jobs healthy ✓")
+        alerts += health_alerts
     except Exception as exc:
-        logger.error("job_health query failed: %s", exc)
+        logger.error("  job_health query failed: %s", exc)
         alerts.append(f"[WATCHDOG ERROR] Could not query job_health: {exc}")
 
     # ── 2. Local log files ─────────────────────────────────────────────────
+    logger.info("Scanning log files (last %dmin)...", SCAN_WINDOW_MINUTES)
     try:
         log_alerts = check_logs()
-        if log_alerts:
-            logger.warning("%d log file alert(s)", len(log_alerts))
+        for label, filename in LOG_FILES.items():
+            path = _LOGS_DIR / filename
+            label_alerts = [a for a in log_alerts if f"[LOG:{label}]" in a]
+            if not path.exists():
+                logger.info("  %-20s not found (no log yet)", filename)
+            elif label_alerts:
+                logger.warning("  %-20s ERRORS detected", filename)
+            else:
+                logger.info("  %-20s clean ✓", filename)
         alerts += log_alerts
     except Exception as exc:
-        logger.error("Log scan failed: %s", exc)
+        logger.error("  Log scan failed: %s", exc)
 
-    # ── Report ─────────────────────────────────────────────────────────────
+    # ── Summary ────────────────────────────────────────────────────────────
     if not alerts:
-        logger.info("All healthy.")
+        logger.info("━━━ All clear. No alerts. ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
         return
 
-    logger.warning("%d total alert(s):", len(alerts))
+    logger.warning("━━━ %d alert(s) — sending WhatsApp ━━━━━━━━━━━━━━━━━━━━━━", len(alerts))
     for a in alerts:
-        logger.warning("  %s", a.splitlines()[0])  # log first line only to keep log clean
+        logger.warning("  → %s", a.splitlines()[0])
 
     msg = "[SwingTrader Watchdog]\n\n" + "\n\n".join(f"• {a}" for a in alerts)
     send_whatsapp_alert(msg)
