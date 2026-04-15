@@ -414,6 +414,67 @@ Use markdown headers (##). Be specific with dimension names. Scores range from -
     return prompt
 
 
+def _build_caveman_prompt(body_markdown: str) -> str:
+    """Build prompt to compress a blog post body into caveman style."""
+    return f"""Compress the blog post below into caveman style. Same structure and sections. ~70% fewer words.
+
+Rules:
+- Drop: articles (a/an/the), filler words (just/basically/really), hedging, pleasantries
+- Keep: technical terms exact, ticker symbols, numbers, dimension names, direction (bullish/bearish)
+- Pattern: [thing] [action] [reason]. [next step].
+- Fragments OK. Short synonyms. Active voice only.
+- Preserve all ## headings. Preserve bold (**text**).
+- Output ONLY the compressed markdown. No preamble, no commentary.
+
+Original post:
+{body_markdown}
+"""
+
+
+async def _call_ollama_caveman(body_markdown: str) -> str:
+    """Call Ollama to produce a caveman-compressed version of the blog post."""
+    model = (
+        os.environ.get("OLLAMA_BLOG_MODEL")
+        or os.environ.get("OLLAMA_IMPACT_MODEL")
+        or "gemma4:e4b"
+    )
+    base_url = os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434").rstrip("/")
+    url = f"{base_url}/api/chat"
+    num_predict = int(os.environ.get("OLLAMA_CAVEMAN_NUM_PREDICT", "600"))
+
+    payload = {
+        "model": model,
+        "stream": False,
+        "think": False,
+        "options": {"num_predict": num_predict},
+        "messages": [
+            {
+                "role": "system",
+                "content": (
+                    "You compress financial blog posts into ultra-terse caveman prose. "
+                    "Same structure, ~70% fewer words. No articles, no filler, no hedging. "
+                    "Keep all technical terms, tickers, numbers, and dimension names exact."
+                ),
+            },
+            {"role": "user", "content": _build_caveman_prompt(body_markdown)},
+        ],
+    }
+
+    log.info("Calling Ollama for caveman body, model=%s", model)
+    async with httpx.AsyncClient() as client:
+        try:
+            r = await client.post(url, json=payload, timeout=120.0)
+        except httpx.TimeoutException:
+            raise RuntimeError("Ollama timed out generating caveman body")
+        except httpx.RequestError as exc:
+            raise RuntimeError(f"Ollama connection error: {exc}") from exc
+
+    if r.status_code != 200:
+        raise RuntimeError(f"Ollama returned HTTP {r.status_code}: {r.text[:200]}")
+
+    return r.json()["message"]["content"].strip()
+
+
 async def _call_ollama(prompt: str) -> str:
     """Call the local Ollama instance and return the blog post markdown."""
     model = (
@@ -555,6 +616,7 @@ def _slug_from_title(title: str) -> str:
 def _publish_to_sanity(
     title: str,
     body_markdown: str,
+    caveman_markdown: str,
     mode: str,
     published_at: str,
     dry_run: bool = False,
@@ -572,6 +634,7 @@ def _publish_to_sanity(
     ]
 
     body_blocks = _markdown_to_portable_text(body_markdown)
+    caveman_blocks = _markdown_to_portable_text(caveman_markdown)
 
     document = {
         "_id": doc_id,
@@ -582,6 +645,7 @@ def _publish_to_sanity(
         "categories": category_refs,
         "publishedAt": published_at,
         "body": body_blocks,
+        "cavemanBody": caveman_blocks,
     }
 
     mutations = [{"createOrReplace": document}]
@@ -900,16 +964,23 @@ async def main() -> None:
         prompt = _build_prompt(args.mode, articles, tickers_map, company_meta, now_et)
         body_markdown = await _call_ollama(prompt)
         log.info("Generated post: %r (%d chars)", title, len(body_markdown))
+
+        caveman_markdown = await _call_ollama_caveman(body_markdown)
+        log.info("Generated caveman body (%d chars)", len(caveman_markdown))
+
         if args.dry_run:
             print("\n" + "=" * 60)
             print(f"TITLE: {title}")
             print(f"URL:   {blog_url}")
             print("=" * 60)
             print(body_markdown)
+            print("\n--- CAVEMAN BODY ---")
+            print(caveman_markdown)
             print("=" * 60 + "\n")
         doc_id = _publish_to_sanity(
             title=title,
             body_markdown=body_markdown,
+            caveman_markdown=caveman_markdown,
             mode=args.mode,
             published_at=now_utc.isoformat(),
             dry_run=args.dry_run,
