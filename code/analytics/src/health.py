@@ -28,6 +28,22 @@ from typing import Any, Generator, Optional
 logger = logging.getLogger(__name__)
 
 
+class PartialJobFailure(Exception):
+    """
+    Raise inside a JobHeartbeat block when some work items failed but others
+    succeeded.  JobHeartbeat records status='partial_fail' (instead of
+    'failed') and still fires a WhatsApp alert, but does NOT re-raise so the
+    cron process exits 0.
+
+    Example:
+        processed, failed = await generate_all()
+        if failed and processed:
+            raise PartialJobFailure(f"{len(failed)} users failed: {failed}")
+        elif failed:
+            raise RuntimeError(f"All {len(failed)} users failed: {failed}")
+    """
+
+
 def _upsert_job(job_name: str, fields: dict[str, Any]) -> None:
     """Write job health fields to Supabase, silently swallowing errors."""
     try:
@@ -180,8 +196,13 @@ def JobHeartbeat(
             start_fields["metadata"] = metadata
         _upsert_job(job_name, start_fields)
     error_text: Optional[str] = None
+    partial_failure: Optional[PartialJobFailure] = None
     try:
         yield
+    except PartialJobFailure as exc:
+        # Capture but do NOT re-raise — partial failures are not fatal.
+        partial_failure = exc
+        error_text = str(exc)
     except Exception:
         error_text = traceback.format_exc()
         raise
@@ -189,7 +210,13 @@ def JobHeartbeat(
         finished_at = datetime.now(timezone.utc)
         finished_iso = finished_at.isoformat()
         duration_s = (finished_at - started_at).total_seconds()
-        status = "failed" if error_text else "success"
+
+        if partial_failure is not None:
+            status = "partial_fail"
+        elif error_text:
+            status = "failed"
+        else:
+            status = "success"
 
         # ── Append to job_runs history ─────────────────────────────────────
         _insert_run(
@@ -202,18 +229,19 @@ def JobHeartbeat(
         )
 
         # ── Update job_health current state ────────────────────────────────
-        if error_text:
+        if status in ("failed", "partial_fail"):
             fails = _get_consecutive_fails(job_name) + 1
             _upsert_job(job_name, {
                 "last_finished_at": finished_iso,
-                "last_status": "failed",
-                "last_error": error_text[:2000],
+                "last_status": status,
+                "last_error": error_text[:2000] if error_text else None,
                 "consecutive_fails": fails,
             })
+            alert_prefix = "Job PARTIAL FAIL" if status == "partial_fail" else "Job FAILED"
             send_whatsapp_alert(
-                f"[SwingTrader] Job FAILED: {job_name}\n"
+                f"[SwingTrader] {alert_prefix}: {job_name}\n"
                 f"Consecutive failures: {fails}\n\n"
-                f"{error_text[:600]}"
+                f"{(error_text or '')[:600]}"
             )
         else:
             _upsert_job(job_name, {

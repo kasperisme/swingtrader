@@ -1095,10 +1095,10 @@ async def generate_for_user(user_id: str, narrative_date: Optional[date] = None,
     return narrative
 
 
-async def generate_all() -> list[str]:
+async def generate_all() -> tuple[list[str], list[str]]:
     """
     Generate narratives for all opted-in users (sequentially — Ollama is single-GPU).
-    Returns list of user_ids processed.
+    Returns (processed_user_ids, failed_user_ids).
     """
     conn = get_pg_connection()
     try:
@@ -1108,16 +1108,18 @@ async def generate_all() -> list[str]:
 
     if not users:
         logger.info("[narrative] no opted-in users found")
-        return []
+        return [], []
 
     processed: list[str] = []
+    failed: list[str] = []
     for user_id, lookback_hours in users:
         try:
             await generate_for_user(user_id, lookback_hours=lookback_hours)
             processed.append(user_id)
         except Exception as exc:
             logger.error("[narrative] failed for user=%s: %s", user_id, exc)
-    return processed
+            failed.append(user_id)
+    return processed, failed
 
 
 if __name__ == "__main__":

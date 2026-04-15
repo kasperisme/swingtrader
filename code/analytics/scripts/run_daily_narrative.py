@@ -49,6 +49,7 @@ if str(_ANALYTICS) not in sys.path:
 load_dotenv(_ANALYTICS / ".env")
 
 from news_impact.narrative_generator import generate_for_user, generate_all, _DEFAULT_LOOKBACK_HOURS  # noqa: E402
+from src.health import PartialJobFailure  # noqa: E402
 from src.db import get_supabase_client, get_schema  # noqa: E402
 
 _EASTERN = ZoneInfo("America/New_York")
@@ -321,8 +322,8 @@ async def _main(user_id: str | None, lookback_hours: int, deliver: bool) -> None
         if deliver:
             _deliver_if_needed(user_id, narrative, today)
     else:
-        processed = await generate_all()
-        logger.info("[run_daily_narrative] done for %d users", len(processed))
+        processed, failed = await generate_all()
+        logger.info("[run_daily_narrative] done for %d users (%d failed)", len(processed), len(failed))
         if deliver:
             client = get_supabase_client()
             for uid in processed:
@@ -349,6 +350,14 @@ async def _main(user_id: str | None, lookback_hours: int, deliver: bool) -> None
                     _deliver_if_needed(uid, narrative, today)
                 except Exception as exc:
                     logger.error("[delivery] failed for user=%s: %s", uid, exc)
+        if failed and processed:
+            raise PartialJobFailure(
+                f"{len(failed)}/{len(processed) + len(failed)} users failed: {failed}"
+            )
+        elif failed:
+            raise RuntimeError(
+                f"All {len(failed)} user(s) failed: {failed}"
+            )
 
 
 if __name__ == "__main__":
