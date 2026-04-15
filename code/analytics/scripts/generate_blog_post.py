@@ -30,18 +30,11 @@ Optional env vars:
   NEWS_LOOKBACK_HOURS      (override default per mode)
   NEWS_MAX_ARTICLES        (default: 20 — max articles pulled for analysis)
   SITE_BASE_URL            (default: https://newsimpactscreener.com)
-  X_CLIENT_ID              — OAuth2 PKCE client ID
-  X_CLIENT_SECRET          — OAuth2 client secret (for confidential clients)
-  X_REDIRECT_URI           — OAuth2 PKCE redirect URI
-                             (default: https://www.newsimpactscreener.com/x/oauth/callback-script)
-  X_OAUTH2_SCOPE           — OAuth2 scopes (default: tweet.read users.read offline.access)
-  X_OAUTH2_AUTH_RESPONSE_URL — Full callback URL to auto-complete PKCE exchange
-
-X OAuth setup note:
-  Register the script callback URL in your X app settings:
-    https://www.newsimpactscreener.com/x/oauth/callback-script
-  Use the generated auth_url from this script, complete consent, then paste the
-  full callback URL when prompted (must be from the same run to match OAuth state).
+  X_CONSUMER_KEY           — OAuth 1.0a API Key
+  X_CONSUMER_SECRET        — OAuth 1.0a API Secret
+  X_ACCESS_TOKEN           — OAuth 1.0a Access Token
+  X_ACCESS_SECRET          — OAuth 1.0a Access Token Secret
+  X_OAUTH1_CALLBACK        — OAuth 1.0a callback URL (default: oob)
 """
 
 from __future__ import annotations
@@ -85,7 +78,7 @@ USE_SEMANTIC_RETRIEVAL = os.environ.get(
 
 try:
     from xdk import Client as XClient  # type: ignore
-    from xdk.oauth2_auth import OAuth2PKCEAuth  # type: ignore
+    from xdk.oauth1_auth import OAuth1  # type: ignore
 
     _XDK_AVAILABLE = True
 except ImportError:
@@ -103,17 +96,11 @@ SANITY_TOKEN = os.environ.get("SANITY_TOKEN", "")
 SITE_BASE_URL = os.environ.get(
     "SITE_BASE_URL", "https://newsimpactscreener.com"
 ).rstrip("/")
-X_CLIENT_ID = os.environ.get("X_CLIENT_ID", "")
-X_CLIENT_SECRET = os.environ.get("X_CLIENT_SECRET", "")
-X_REDIRECT_URI = os.environ.get(
-    "X_REDIRECT_URI",
-    "https://www.newsimpactscreener.com/x/oauth/callback-script",
-)
-X_OAUTH2_SCOPE = os.environ.get(
-    "X_OAUTH2_SCOPE",
-    "tweet.read users.read offline.access",
-)
-X_OAUTH2_AUTH_RESPONSE_URL = os.environ.get("X_OAUTH2_AUTH_RESPONSE_URL", "")
+X_ACCESS_TOKEN = os.environ.get("X_ACCESS_TOKEN", "")
+X_ACCESS_SECRET = os.environ.get("X_ACCESS_SECRET", "")
+X_CONSUMER_KEY = os.environ.get("X_CONSUMER_KEY", "")
+X_CONSUMER_SECRET = os.environ.get("X_CONSUMER_SECRET", "")
+X_OAUTH1_CALLBACK = os.environ.get("X_OAUTH1_CALLBACK", "oob")
 
 AUTHOR_ID = "81d00698-faa2-4dc7-81b8-bec6ec3b8884"
 
@@ -808,69 +795,25 @@ def _post_x_thread(tweets: list[str], dry_run: bool = False) -> Optional[str]:
     def _mask(s: str) -> str:
         return s[:4] + "..." + s[-4:] if len(s) > 8 else "***"
 
-    if not X_CLIENT_ID or not X_REDIRECT_URI:
+    if not X_ACCESS_TOKEN or not X_ACCESS_SECRET or not X_CONSUMER_KEY or not X_CONSUMER_SECRET:
         log.warning(
-            "Missing OAuth2 PKCE config. Set both X_CLIENT_ID and X_REDIRECT_URI — skipping X thread."
+            "Missing OAuth 1.0a credentials. Set X_ACCESS_TOKEN, X_ACCESS_SECRET, "
+            "X_CONSUMER_KEY, and X_CONSUMER_SECRET — skipping X thread."
         )
         return None
-
-    if "tweet.write" not in X_OAUTH2_SCOPE:
-        log.warning(
-            "X_OAUTH2_SCOPE is missing tweet.write; posting will fail. Current scope: %s",
-            X_OAUTH2_SCOPE,
-        )
-        return None
-    auth_kwargs: dict[str, str] = {
-        "client_id": X_CLIENT_ID,
-        "redirect_uri": X_REDIRECT_URI,
-        "scope": X_OAUTH2_SCOPE,
-    }
-    if X_CLIENT_SECRET:
-        auth_kwargs["client_secret"] = X_CLIENT_SECRET
-    try:
-        auth = OAuth2PKCEAuth(**auth_kwargs)
-    except TypeError:
-        # Some xdk versions may not accept client_secret in constructor.
-        auth_kwargs.pop("client_secret", None)
-        auth = OAuth2PKCEAuth(**auth_kwargs)
-        if X_CLIENT_SECRET:
-            log.warning(
-                "Installed xdk does not accept client_secret in OAuth2PKCEAuth constructor."
-            )
-    auth_url = auth.get_authorization_url()
-    log.warning("Complete X OAuth2 authorization in your browser: %s", auth_url)
-    callback_url = X_OAUTH2_AUTH_RESPONSE_URL.strip()
-    if not callback_url:
-        callback_url = input(
-            "Paste full OAuth callback URL (or set X_OAUTH2_AUTH_RESPONSE_URL): "
-        ).strip()
-    if not callback_url:
-        log.warning("No callback URL provided — skipping X thread.")
-        return None
-    try:
-        tokens = auth.fetch_token(authorization_response=callback_url)
-    except Exception as exc:
-        msg = str(exc)
-        if "unauthorized_client" in msg or "Missing valid authorization header" in msg:
-            log.error(
-                "OAuth2 token exchange rejected client authentication: %s. "
-                "If your X app is confidential, ensure X_CLIENT_SECRET is set and your xdk supports "
-                "passing it; otherwise configure the X app/client type for PKCE public client flow.",
-                exc,
-            )
-            return None
-        log.error(
-            "OAuth2 token exchange failed: %s. Ensure callback URL is from the latest auth_url in this run "
-            "(state must match) and uses the same X_REDIRECT_URI.",
-            exc,
-        )
-        return None
-    x_access_token = tokens["access_token"]
-    client = XClient(bearer_token=x_access_token)
-
-    log.info("OAuth2 PKCE exchange succeeded — TOKEN=%s", _mask(x_access_token))
-    # Some xdk versions expose OAuth2PKCEAuth without request-header helpers.
-    # In that case, use the exchanged access token directly.
+    oauth1 = OAuth1(
+        api_key=X_CONSUMER_KEY,
+        api_secret=X_CONSUMER_SECRET,
+        callback=X_OAUTH1_CALLBACK,
+        access_token=X_ACCESS_TOKEN,
+        access_token_secret=X_ACCESS_SECRET,
+    )
+    client = XClient(auth=oauth1)
+    log.info(
+        "Using OAuth 1.0a user context for X posting (api_key=%s, access_token=%s).",
+        _mask(X_CONSUMER_KEY),
+        _mask(X_ACCESS_TOKEN),
+    )
 
     root_id: Optional[str] = None
     reply_to: Optional[str] = None
