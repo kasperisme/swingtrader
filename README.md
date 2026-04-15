@@ -142,6 +142,16 @@ curl "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/setWebhook" \
 
 No bot process needed on the Mac Mini — Telegram pushes updates directly to Vercel.
 
+### Register bot command options
+
+```bash
+cd code/analytics
+chmod +x scripts/register_telegram_commands.sh
+./scripts/register_telegram_commands.sh
+```
+
+This registers `/start`, `/update`, `/search`, and `/health` in the Telegram command menu for private chats.
+
 ### User connection flow
 
 Each user connects their own Telegram account via the UI:

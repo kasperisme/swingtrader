@@ -57,6 +57,9 @@ export async function POST(req: NextRequest) {
     const query = text.slice("/search".length).trim();
     await handleSearch(chat_id, first_name, query);
   }
+  if (text.startsWith("/health")) {
+    await handleHealth(chat_id);
+  }
 
   // Always return 200 so Telegram doesn't retry
   return NextResponse.json({ ok: true });
@@ -224,4 +227,106 @@ async function enqueueTelegramRequest(
   });
 
   return !insertErr;
+}
+
+function _parseIntervalH(raw: unknown): number | null {
+  if (raw == null) return null;
+  if (typeof raw === "number") return raw;
+  if (typeof raw === "string") {
+    try {
+      let days = 0;
+      let s = raw;
+      if (s.includes("day")) {
+        const [dayPart, rest] = s.split("day");
+        days = parseInt(dayPart.trim(), 10);
+        s = rest.replace(/^s/, "").trim();
+      }
+      const [h, m, sec] = s.split(":").map(Number);
+      return days * 24 + h + m / 60 + sec / 3600;
+    } catch { return null; }
+  }
+  return null;
+}
+
+function _fmtAge(isoStr: string | null): string {
+  if (!isoStr) return "never";
+  const diffMs = Date.now() - new Date(isoStr).getTime();
+  const mins = Math.floor(diffMs / 60_000);
+  if (mins < 90) return `${mins}m ago`;
+  const h = diffMs / 3_600_000;
+  if (h < 48) return `${h.toFixed(1)}h ago`;
+  return `${(h / 24).toFixed(1)}d ago`;
+}
+
+async function handleHealth(chat_id: number): Promise<void> {
+  const supabase = createServiceClient();
+  const now = Date.now();
+
+  const { data: jobs, error } = await supabase
+    .schema(SCHEMA)
+    .from("job_health")
+    .select("job_name,last_finished_at,last_status,consecutive_fails,expected_interval,metadata")
+    .order("job_name");
+
+  if (error || !jobs) {
+    await sendTelegramMessage(chat_id, "⚠️ Could not fetch health data from database.");
+    return;
+  }
+
+  const alerts: string[] = [];
+  const lines: string[] = [];
+
+  for (const job of jobs) {
+    const intervalH = _parseIntervalH(job.expected_interval);
+    const status: string = job.last_status ?? "unknown";
+    const finishedAt: string | null = job.last_finished_at;
+    const fails: number = job.consecutive_fails ?? 0;
+
+    let icon = "✅";
+    let note = finishedAt ? _fmtAge(finishedAt) : "never run";
+
+    if (status === "failed") {
+      icon = "❌";
+      note = `failed (×${fails})`;
+      alerts.push(job.job_name);
+    } else if (status === "running") {
+      icon = "⏳";
+      note = "running";
+    } else if (intervalH && finishedAt) {
+      const ageH = (now - new Date(finishedAt).getTime()) / 3_600_000;
+      if (ageH > intervalH * 1.5) {
+        icon = "⚠️";
+        note = `stale — ${_fmtAge(finishedAt)}`;
+        alerts.push(job.job_name);
+      }
+    } else if (intervalH && !finishedAt) {
+      icon = "⚠️";
+      note = "never finished";
+      alerts.push(job.job_name);
+    }
+
+    lines.push(`${icon} <code>${job.job_name}</code> — ${note}`);
+  }
+
+  // Watchdog metadata summary
+  const watchdog = jobs.find((j) => j.job_name === "watchdog");
+  const meta = watchdog?.metadata as Record<string, unknown> | null;
+  const watchdogLine = meta
+    ? `\n🐾 <b>Watchdog</b>: checked ${meta.jobs_checked ?? "?"} jobs, ` +
+      `${meta.alerts_fired ?? 0} alert(s), ` +
+      `${(meta.logs_clean as string[] | undefined)?.length ?? 0} log(s) clean`
+    : "";
+
+  const header = alerts.length === 0
+    ? "✅ <b>All systems go</b>"
+    : `⚠️ <b>${alerts.length} alert(s)</b>: ${alerts.join(", ")}`;
+
+  const msg = [
+    header,
+    "",
+    ...lines,
+    watchdogLine,
+  ].filter((l) => l !== undefined).join("\n").trim();
+
+  await sendTelegramMessage(chat_id, msg);
 }
