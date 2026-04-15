@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
-import type { HealthResponse, JobHealth, WatchdogMeta } from "@/app/api/health/route";
+import type { HealthResponse, JobHealth, JobRun, WatchdogMeta } from "@/app/api/health/route";
 
 const REFRESH_INTERVAL_MS = 60_000;
 
@@ -46,6 +46,37 @@ function parseIntervalH(raw: number | string | null | undefined): number | null 
   } catch {
     return null;
   }
+}
+
+function RunDot({ run }: { run: JobRun }) {
+  const isSuccess = run.status === "success";
+  const age = formatAge(run.started_at);
+  const dur = run.duration_s != null
+    ? run.duration_s < 60
+      ? `${run.duration_s.toFixed(1)}s`
+      : `${(run.duration_s / 60).toFixed(1)}m`
+    : null;
+  const title = `${run.status} · ${age}${dur ? ` · ${dur}` : ""}${run.error ? `\n${run.error.slice(0, 120)}` : ""}`;
+  return (
+    <div
+      title={title}
+      className={`h-2.5 w-2.5 rounded-full shrink-0 cursor-default transition-opacity hover:opacity-70 ${
+        isSuccess ? "bg-green-500" : "bg-red-500"
+      }`}
+    />
+  );
+}
+
+function RunHistory({ runs }: { runs: JobRun[] }) {
+  if (runs.length === 0) return null;
+  return (
+    <div className="mt-2 pt-2 border-t border-zinc-800">
+      <div className="flex items-center gap-1.5">
+        <span className="text-xs text-zinc-600 mr-1">Last {runs.length}</span>
+        {runs.map((r) => <RunDot key={r.id} run={r} />)}
+      </div>
+    </div>
+  );
 }
 
 function JobCard({ job }: { job: JobHealth }) {
@@ -165,6 +196,8 @@ function JobCard({ job }: { job: JobHealth }) {
           </pre>
         </details>
       )}
+
+      <RunHistory runs={job.recent_runs} />
     </div>
   );
 }

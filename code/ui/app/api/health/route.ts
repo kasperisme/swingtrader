@@ -9,6 +9,15 @@ export interface WatchdogMeta {
   checked_at?: string;
 }
 
+export interface JobRun {
+  id: number;
+  started_at: string;
+  finished_at: string;
+  status: "success" | "failed";
+  duration_s: number | null;
+  error: string | null;
+}
+
 export interface JobHealth {
   job_name: string;
   last_started_at: string | null;
@@ -18,6 +27,7 @@ export interface JobHealth {
   consecutive_fails: number;
   expected_interval: number | string | null;
   metadata: Record<string, unknown> | null;
+  recent_runs: JobRun[];
 }
 
 export interface DataFreshness {
@@ -51,7 +61,25 @@ export async function GET() {
     console.error("[health] jobs query failed:", jobsErr);
   }
 
-  const jobRows: JobHealth[] = (jobs ?? []) as JobHealth[];
+  // ── Recent job runs (last 10 per job, grouped in memory) ──────────────────
+  const { data: runs } = await supabase
+    .schema("swingtrader")
+    .from("job_runs")
+    .select("id,job_name,started_at,finished_at,status,duration_s,error")
+    .order("started_at", { ascending: false })
+    .limit(200);
+
+  const runsByJob = new Map<string, JobRun[]>();
+  for (const run of runs ?? []) {
+    const list = runsByJob.get(run.job_name) ?? [];
+    if (list.length < 10) list.push(run as JobRun);
+    runsByJob.set(run.job_name, list);
+  }
+
+  const jobRows: JobHealth[] = (jobs ?? []).map((j) => ({
+    ...(j as Omit<JobHealth, "recent_runs">),
+    recent_runs: runsByJob.get(j.job_name) ?? [],
+  }));
 
   // Parse expected_interval — may be a float (hours) or Postgres INTERVAL string "HH:MM:SS"
   function parseIntervalH(raw: number | string | null): number | null {

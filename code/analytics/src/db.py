@@ -384,6 +384,25 @@ def ensure_schema(client: Optional[Client] = None) -> None:
             )
         """)
 
+        cur.execute(f"""
+            CREATE TABLE IF NOT EXISTS {schema}.job_runs (
+                id          BIGSERIAL PRIMARY KEY,
+                job_name    TEXT NOT NULL,
+                started_at  TIMESTAMPTZ NOT NULL,
+                finished_at TIMESTAMPTZ NOT NULL,
+                status      TEXT NOT NULL,
+                duration_s  DOUBLE PRECISION,
+                error       TEXT,
+                created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )
+        """)
+        cur.execute(
+            f"CREATE INDEX IF NOT EXISTS idx_job_runs_job_name ON {schema}.job_runs(job_name)"
+        )
+        cur.execute(
+            f"CREATE INDEX IF NOT EXISTS idx_job_runs_started ON {schema}.job_runs(started_at DESC)"
+        )
+
         conn.commit()
     finally:
         conn.close()

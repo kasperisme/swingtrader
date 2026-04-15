@@ -42,6 +42,31 @@ def _upsert_job(job_name: str, fields: dict[str, Any]) -> None:
         logger.warning("[health] upsert failed for %s: %s", job_name, exc)
 
 
+def _insert_run(
+    job_name: str,
+    started_at: str,
+    finished_at: str,
+    status: str,
+    duration_s: float,
+    error: Optional[str],
+) -> None:
+    """Append one row to job_runs. Silently swallows errors."""
+    try:
+        from src.db import get_supabase_client, get_schema
+        client = get_supabase_client()
+        schema = get_schema()
+        client.schema(schema).table("job_runs").insert({
+            "job_name": job_name,
+            "started_at": started_at,
+            "finished_at": finished_at,
+            "status": status,
+            "duration_s": round(duration_s, 2),
+            "error": error,
+        }).execute()
+    except Exception as exc:
+        logger.warning("[health] job_runs insert failed for %s: %s", job_name, exc)
+
+
 def update_job_metadata(job_name: str, metadata: dict[str, Any]) -> None:
     """
     Merge extra metadata into an existing job_health row.
@@ -118,10 +143,10 @@ def JobHeartbeat(
                              staleness checks). e.g. 1.0 for hourly, 24.0 for daily.
         metadata: Optional dict stored as JSONB (e.g. args, counts).
     """
-    now_iso = datetime.now(timezone.utc).isoformat()
+    started_at = datetime.now(timezone.utc)
 
     start_fields: dict[str, Any] = {
-        "last_started_at": now_iso,
+        "last_started_at": started_at.isoformat(),
         "last_status": "running",
         "last_error": None,
     }
@@ -131,7 +156,6 @@ def JobHeartbeat(
         start_fields["metadata"] = metadata
 
     _upsert_job(job_name, start_fields)
-
     error_text: Optional[str] = None
     try:
         yield
@@ -139,7 +163,22 @@ def JobHeartbeat(
         error_text = traceback.format_exc()
         raise
     finally:
-        finished_iso = datetime.now(timezone.utc).isoformat()
+        finished_at = datetime.now(timezone.utc)
+        finished_iso = finished_at.isoformat()
+        duration_s = (finished_at - started_at).total_seconds()
+        status = "failed" if error_text else "success"
+
+        # ── Append to job_runs history ─────────────────────────────────────
+        _insert_run(
+            job_name=job_name,
+            started_at=started_at.isoformat(),
+            finished_at=finished_iso,
+            status=status,
+            duration_s=duration_s,
+            error=error_text[:2000] if error_text else None,
+        )
+
+        # ── Update job_health current state ────────────────────────────────
         if error_text:
             fails = _get_consecutive_fails(job_name) + 1
             _upsert_job(job_name, {
@@ -148,12 +187,11 @@ def JobHeartbeat(
                 "last_error": error_text[:2000],
                 "consecutive_fails": fails,
             })
-            alert_msg = (
+            send_whatsapp_alert(
                 f"[SwingTrader] Job FAILED: {job_name}\n"
                 f"Consecutive failures: {fails}\n\n"
                 f"{error_text[:600]}"
             )
-            send_whatsapp_alert(alert_msg)
         else:
             _upsert_job(job_name, {
                 "last_finished_at": finished_iso,
