@@ -50,13 +50,13 @@ SCAN_WINDOW_MINUTES = 20  # slightly wider than 15-min cron to avoid gaps at bou
 MAX_RUNNING_MINUTES = 60
 
 # Log files to monitor: label → filename inside swingtrader/logs/
+# watchdog.log is intentionally excluded — it would always contain its own ERROR lines
 LOG_FILES: dict[str, str] = {
     "news_ingest":      "swingtrader-news.log",
     "embeddings":       "embeddings.log",
     "blog_post":        "generate_blog_post.log",
     "daily_narrative":  "narrative.log",
     "telegram_updates": "telegram_updates.log",
-    "watchdog":         "watchdog.log",
 }
 
 # Lines matching these patterns (case-insensitive) are flagged as errors.
@@ -184,10 +184,29 @@ def check_health() -> tuple[list[str], list[str]]:
     for job in res.data or []:
         name = job["job_name"]
         status = job.get("last_status")
-        interval_h = job.get("expected_interval")
         finished_at = job.get("last_finished_at")
         started_at = job.get("last_started_at")
         fails = job.get("consecutive_fails", 0) or 0
+
+        # expected_interval may be DOUBLE PRECISION (float) or INTERVAL (string "HH:MM:SS")
+        raw_interval = job.get("expected_interval")
+        interval_h: float | None = None
+        if raw_interval is not None:
+            try:
+                interval_h = float(raw_interval)
+            except (TypeError, ValueError):
+                # Postgres INTERVAL string e.g. "0:15:00" or "1 day 02:00:00"
+                try:
+                    s = str(raw_interval)
+                    days = 0
+                    if "day" in s:
+                        parts = s.split("day")
+                        days = int(parts[0].strip())
+                        s = parts[1].strip().lstrip("s").strip()
+                    h, m, sec = (float(x) for x in s.split(":"))
+                    interval_h = days * 24 + h + m / 60 + sec / 3600
+                except Exception:
+                    interval_h = None
 
         def _age(iso: str) -> str:
             dt = datetime.fromisoformat(iso)

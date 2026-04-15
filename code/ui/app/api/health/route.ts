@@ -16,7 +16,7 @@ export interface JobHealth {
   last_status: "running" | "success" | "failed" | null;
   last_error: string | null;
   consecutive_fails: number;
-  expected_interval: number | null;
+  expected_interval: number | string | null;
   metadata: Record<string, unknown> | null;
 }
 
@@ -53,21 +53,42 @@ export async function GET() {
 
   const jobRows: JobHealth[] = (jobs ?? []) as JobHealth[];
 
+  // Parse expected_interval — may be a float (hours) or Postgres INTERVAL string "HH:MM:SS"
+  function parseIntervalH(raw: number | string | null): number | null {
+    if (raw == null) return null;
+    if (typeof raw === "number") return raw;
+    try {
+      // "0:15:00" or "1 day 02:00:00"
+      let days = 0;
+      let s = raw;
+      if (s.includes("day")) {
+        const [dayPart, rest] = s.split("day");
+        days = parseInt(dayPart.trim(), 10);
+        s = rest.replace(/^s/, "").trim();
+      }
+      const [h, m, sec] = s.split(":").map(Number);
+      return days * 24 + h + m / 60 + sec / 3600;
+    } catch {
+      return null;
+    }
+  }
+
   // Check staleness: if a job hasn't succeeded within 1.5× its expected interval
   for (const job of jobRows) {
+    const intervalH = parseIntervalH(job.expected_interval);
     if (job.last_status === "failed") {
       alerts.push(`${job.job_name} last run FAILED (${job.consecutive_fails} consecutive)`);
-    } else if (job.expected_interval && job.last_finished_at) {
+    } else if (intervalH && job.last_finished_at) {
       const finishedAt = new Date(job.last_finished_at);
       const ageH = (now.getTime() - finishedAt.getTime()) / 3_600_000;
-      const threshold = job.expected_interval * 1.5;
+      const threshold = intervalH * 1.5;
       if (ageH > threshold) {
         const ageStr = ageH < 24
           ? `${ageH.toFixed(1)}h ago`
           : `${(ageH / 24).toFixed(1)}d ago`;
-        alerts.push(`${job.job_name} is stale — last success ${ageStr} (expected every ${job.expected_interval}h)`);
+        alerts.push(`${job.job_name} is stale — last success ${ageStr} (expected every ${intervalH.toFixed(2)}h)`);
       }
-    } else if (job.expected_interval && !job.last_finished_at) {
+    } else if (intervalH && !job.last_finished_at) {
       alerts.push(`${job.job_name} has never completed a run`);
     }
   }

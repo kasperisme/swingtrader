@@ -30,12 +30,31 @@ function StatusBadge({ status }: { status: JobHealth["last_status"] }) {
   );
 }
 
+function parseIntervalH(raw: number | string | null | undefined): number | null {
+  if (raw == null) return null;
+  if (typeof raw === "number") return raw;
+  try {
+    let days = 0;
+    let s = raw;
+    if (s.includes("day")) {
+      const [dayPart, rest] = s.split("day");
+      days = parseInt(dayPart.trim(), 10);
+      s = rest.replace(/^s/, "").trim();
+    }
+    const [h, m, sec] = s.split(":").map(Number);
+    return days * 24 + h + m / 60 + sec / 3600;
+  } catch {
+    return null;
+  }
+}
+
 function JobCard({ job }: { job: JobHealth }) {
+  const intervalH = parseIntervalH(job.expected_interval);
   const isStale =
-    job.expected_interval &&
+    intervalH &&
     job.last_finished_at &&
     (Date.now() - new Date(job.last_finished_at).getTime()) / 3_600_000 >
-      job.expected_interval * 1.5;
+      intervalH * 1.5;
 
   const borderColor =
     job.last_status === "failed"
@@ -66,13 +85,15 @@ function JobCard({ job }: { job: JobHealth }) {
             : "—"}
         </span>
 
-        {job.expected_interval && (
+        {intervalH && (
           <>
             <span>Expected every</span>
             <span className="text-zinc-200">
-              {job.expected_interval < 24
-                ? `${job.expected_interval}h`
-                : `${job.expected_interval / 24}d`}
+              {intervalH < 1
+                ? `${Math.round(intervalH * 60)}m`
+                : intervalH < 24
+                ? `${intervalH.toFixed(intervalH % 1 === 0 ? 0 : 1)}h`
+                : `${(intervalH / 24).toFixed(intervalH / 24 % 1 === 0 ? 0 : 1)}d`}
             </span>
           </>
         )}
