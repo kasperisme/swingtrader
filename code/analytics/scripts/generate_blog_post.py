@@ -698,7 +698,8 @@ def _build_x_thread_prompt(
         articles_block += f"\n{i}. {title} {ticker_str}"
 
     dims_block = "\n".join(f"  {_fmt_dim(d)}: {_fmt_score(s)}" for d, s in agg)
-    ticker_list = " ".join(f"${t}" for t in top_tickers)
+    ticker_list = ", ".join(f"{i + 1}. ${t}" for i, t in enumerate(top_tickers))
+    lead_ticker = f"${top_tickers[0]}" if top_tickers else "the top ticker"
 
     return f"""Write a 4-tweet X (Twitter) thread for the {period_label} News Impact update on {date_str}.
 
@@ -707,6 +708,9 @@ Rules:
 - No emojis. No hype.
 - Separate each tweet with the exact delimiter on its own line: ---TWEET---
 - Do NOT number the tweets or add any labels.
+- Each tweet may contain at most ONE cashtag like $NVDA.
+- If multiple tickers should be mentioned, place them in separate tweets instead of using multiple cashtags in one tweet.
+- Use the highest-priority ticker first and lower-priority tickers only in later tweets.
 
 Context:
 Top stories:{articles_block}
@@ -714,12 +718,12 @@ Top stories:{articles_block}
 Aggregate factor moves:
 {dims_block}
 
-Top tickers: {ticker_list}
+Ticker priority (highest first): {ticker_list}
 
 Thread structure:
-Tweet 1: 2-sentence hook — what moved and why it matters for {period_label.lower()} positioning. Mention 1-2 key tickers with $ prefix.
-Tweet 2: Top 2 factor dimension moves with direction (bullish/bearish) and which stocks or sectors are most exposed.
-Tweet 3: One sharp observation — a risk or setup that traders might be missing from this data.
+Tweet 1: 2-sentence hook — what moved and why it matters for {period_label.lower()} positioning. Mention exactly one ticker with $ prefix, and it must be {lead_ticker}.
+Tweet 2: Top factor dimension move with direction (bullish/bearish) and one next-most-important stock or sector that is exposed. Use at most one cashtag.
+Tweet 3: One sharp observation — a risk or setup that traders might be missing from this data. If you mention a ticker, use at most one cashtag and prefer a lower-priority ticker than earlier tweets.
 Tweet 4: "Full {period_label} analysis: {blog_url}" followed by hashtags #SwingTrading #MarketNews #NewsImpact
 
 Output only the 4 tweets separated by ---TWEET---. No other text before or after.
@@ -772,6 +776,37 @@ def _parse_x_thread(raw: str) -> list[str]:
     """Split Ollama output into individual tweets, enforcing 280-char hard cap."""
     tweets = [t.strip() for t in raw.split("---TWEET---") if t.strip()]
     return [t[:280] for t in tweets]
+
+
+def _enforce_single_cashtag(text: str) -> str:
+    """
+    X allows at most one cashtag per post.
+    Keep the first cashtag and convert later cashtags to plain ticker text.
+    """
+    kept_first = False
+
+    def replace(match: re.Match[str]) -> str:
+        nonlocal kept_first
+        ticker = match.group(1)
+        if not kept_first:
+            kept_first = True
+            return f"${ticker}"
+        return ticker
+
+    return re.sub(r"\$([A-Z][A-Z0-9]{0,9})\b", replace, text)[:280]
+
+
+def _sanitize_x_thread(tweets: list[str]) -> list[str]:
+    sanitized = [_enforce_single_cashtag(tweet) for tweet in tweets]
+    for i, (before, after) in enumerate(zip(tweets, sanitized), 1):
+        if before != after:
+            log.info(
+                "Sanitized tweet %d to enforce single cashtag. before=%s after=%s",
+                i,
+                before,
+                after,
+            )
+    return sanitized
 
 
 def _build_x_client() -> Optional[Any]:
@@ -849,7 +884,21 @@ def _post_x_thread(tweets: list[str], dry_run: bool = False) -> Optional[str]:
         body: dict[str, Any] = {"text": text}
         if reply_to:
             body["reply"] = {"in_reply_to_tweet_id": reply_to}
-        response = client.posts.create(body=body)
+        log.info("Posting tweet %d/%d payload: %s", i + 1, len(tweets), json.dumps(body, ensure_ascii=False))
+        try:
+            response = client.posts.create(body=body)
+        except Exception as exc:
+            response_obj = getattr(exc, "response", None)
+            log.error(
+                "X post failed for tweet %d/%d. body=%s status=%s response=%s error=%s",
+                i + 1,
+                len(tweets),
+                json.dumps(body, ensure_ascii=False),
+                getattr(response_obj, "status_code", "unknown"),
+                getattr(response_obj, "text", "n/a"),
+                exc,
+            )
+            raise
         tweet_id = str(response.data.id)
         log.info("Posted tweet %d/%d id=%s", i + 1, len(tweets), tweet_id)
         if root_id is None:
@@ -982,6 +1031,7 @@ async def main() -> None:
         )
         x_raw = await _call_ollama_for_x(x_prompt)
         tweets = _parse_x_thread(x_raw)
+        tweets = _sanitize_x_thread(tweets)
         log.info("Generated X thread: %d tweets", len(tweets))
         if args.dry_run:
             print("\n--- X THREAD ---")
