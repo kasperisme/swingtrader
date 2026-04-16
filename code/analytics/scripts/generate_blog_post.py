@@ -953,6 +953,12 @@ async def main() -> None:
         root_id = _post_x_thread(tweets, dry_run=args.dry_run)
         if root_id and not args.dry_run:
             log.info("X thread posted. Root tweet ID: %s", root_id)
+        elif not args.dry_run and tweets:
+            try:
+                from src.health import PartialJobFailure  # noqa: E402
+                raise PartialJobFailure("X thread was not posted (xdk unavailable or missing credentials)")
+            except ImportError:
+                pass
 
     log.info("Done.")
 
