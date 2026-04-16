@@ -49,6 +49,7 @@ import asyncio
 import json
 import logging
 import os
+import random
 import pathlib
 import re
 import sys
@@ -149,8 +150,13 @@ _CACHE_DIR = pathlib.Path(__file__).parent / "cache"
 _TICKER_TOKEN_RE = re.compile(r"^[A-Z0-9]{1,8}(?:\.[A-Z]{1,2})?$")
 
 # FMP stock / general news API limits (see fmp_fetcher)
-_FMP_NEWS_MAX_PAGE = 100
 _FMP_NEWS_MAX_LIMIT = 250
+# Sparse-fill (--sparse-fill): FMP returns date-filtered news sorted newest-first; total
+# pages unknown. Randomize start page (inclusive) for uniform coverage; then paginate
+# forward with no fixed page ceiling until a short/empty response or m_new is reached.
+_FMP_SPARSE_FILL_RANDOM_PAGE_MAX = 120
+# If every random page is empty, the day likely has no FMP rows — stop retrying.
+_FMP_SPARSE_FILL_RANDOM_TRIES = 250
 
 
 def _load_identity_alias_maps() -> tuple[dict[str, str], dict[str, str]]:
@@ -1324,9 +1330,11 @@ async def _run_sparse_fill_for_day(
     day_iso = target_day.isoformat()
     page_limit = min(_FMP_NEWS_MAX_LIMIT, max(1, args.limit))
     added = 0
+    articles: list[dict] = []
     page = 0
 
-    while added < m_new and page <= _FMP_NEWS_MAX_PAGE:
+    for attempt in range(1, _FMP_SPARSE_FILL_RANDOM_TRIES + 1):
+        page = random.randint(0, _FMP_SPARSE_FILL_RANDOM_PAGE_MAX)
         articles = await _fmp_fetch_articles(
             fetcher,
             args,
@@ -1335,12 +1343,23 @@ async def _run_sparse_fill_for_day(
             from_date=day_iso,
             to_date=day_iso,
         )
-        if not articles:
+        if articles:
             console.print(
-                f"[yellow]No articles returned from FMP for {day_iso} at page {page} — stopping.[/yellow]",
+                f"[dim]Sparse-fill for {day_iso}: starting at random page {page}[/dim]",
             )
             break
+        console.print(
+            f"[dim]No FMP articles for {day_iso} at random page {page} "
+            f"(try {attempt}/{_FMP_SPARSE_FILL_RANDOM_TRIES}) — retrying[/dim]",
+        )
+    else:
+        console.print(
+            f"[yellow]No articles returned from FMP for {day_iso} after "
+            f"{_FMP_SPARSE_FILL_RANDOM_TRIES} random pages — giving up.[/yellow]",
+        )
+        return 0
 
+    while added < m_new:
         console.print(
             f"\n[dim]Page {page}[/dim]: fetched [bold]{len(articles)}[/bold] articles from FMP "
             f"({added}/{m_new} new so far)\n",
@@ -1365,11 +1384,24 @@ async def _run_sparse_fill_for_day(
             )
             break
         page += 1
+        articles = await _fmp_fetch_articles(
+            fetcher,
+            args,
+            page=page,
+            limit=page_limit,
+            from_date=day_iso,
+            to_date=day_iso,
+        )
+        if not articles:
+            console.print(
+                f"[yellow]No articles returned from FMP for {day_iso} at page {page} — stopping.[/yellow]",
+            )
+            break
 
     if added < m_new:
         console.print(
             f"\n[yellow]This day stopped at {added}/{m_new} new articles "
-            f"(FMP exhausted or page cap {_FMP_NEWS_MAX_PAGE}).[/yellow]",
+            f"(FMP exhausted).[/yellow]",
         )
     else:
         console.print(f"\n[green]Day complete: {added} new article(s) inserted.[/green]")
