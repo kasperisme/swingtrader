@@ -317,8 +317,9 @@ def main() -> dict:
 if __name__ == "__main__":
     try:
         from src.health import JobHeartbeat, update_job_metadata
+    except ImportError:
+        main()
+    else:
         with JobHeartbeat("watchdog", expected_interval=15 / 60):  # every 15 min
             summary = main()
         update_job_metadata("watchdog", summary)
-    except ImportError:
-        main()

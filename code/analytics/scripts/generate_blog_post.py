@@ -913,7 +913,7 @@ def _post_x_thread(tweets: list[str], dry_run: bool = False) -> Optional[str]:
 # ---------------------------------------------------------------------------
 
 
-async def main() -> None:
+def parse_blog_post_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Auto-generate Sanity blog post from Supabase news impact data"
     )
@@ -945,14 +945,13 @@ async def main() -> None:
     parser.add_argument(
         "--max-articles", type=int, default=int(os.environ.get("NEWS_MAX_ARTICLES", 20))
     )
-    args = parser.parse_args()
-
-    if args.check_x_auth:
-        sys.exit(0 if _check_x_auth() else 1)
-
-    if not args.mode:
+    args = parser.parse_args(argv)
+    if not args.check_x_auth and not args.mode:
         parser.error("--mode is required unless --check-x-auth is used")
+    return args
 
+
+async def main(args: argparse.Namespace) -> None:
     lookback = args.lookback_hours or int(
         os.environ.get("NEWS_LOOKBACK_HOURS", LOOKBACK_HOURS[args.mode])
     )
@@ -1052,16 +1051,13 @@ async def main() -> None:
 
 
 if __name__ == "__main__":
-    import sys as _sys
-    _args_preview = _sys.argv[1:]
-    _mode = next(
-        (_args_preview[i + 1] for i, a in enumerate(_args_preview) if a == "--mode" and i + 1 < len(_args_preview)),
-        "unknown",
-    )
-    _job_name = f"blog_post_{_mode.replace('-', '_')}"  # blog_post_pre_market / blog_post_intra_market
+    _args = parse_blog_post_args(sys.argv[1:])
+    if _args.check_x_auth:
+        sys.exit(0 if _check_x_auth() else 1)
+    _job_name = f"blog_post_{_args.mode.replace('-', '_')}"
     try:
         from src.health import JobHeartbeat
         with JobHeartbeat(_job_name, expected_interval=24.0):
-            asyncio.run(main())
+            asyncio.run(main(_args))
     except ImportError:
-        asyncio.run(main())
+        asyncio.run(main(_args))

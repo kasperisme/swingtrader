@@ -685,9 +685,7 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
 # ── Main ─────────────────────────────────────────────────────────────────────
 
-async def _main(argv: list[str] | None = None) -> None:
-    args = _parse_args(argv)
-
+async def _main(args: argparse.Namespace) -> None:
     if args.news_impact_backend is not None:
         set_news_impact_backend(args.news_impact_backend)
 
@@ -1476,43 +1474,34 @@ async def _process_fmp_sparse_fill(args: argparse.Namespace) -> None:
             break
 
 
-def _health_job_name(args_preview: list[str]) -> str | None:
+def _health_job_name_from_namespace(args: argparse.Namespace) -> str | None:
     """
-    Derive a distinct job_health name from CLI flags so concurrent cron jobs
-    don't overwrite each other's rows.
-
-    Returns None for single-article invocations (no tracking needed).
+    Distinct job_health name from parsed CLI so concurrent cron jobs do not
+    clobber each other's rows. None for single-article invocations (no tracking).
     """
-    if not any(a in args_preview for a in ("--fmp-news", "--x-news", "--sparse-fill")):
+    if not (args.fmp_news or args.x_news or args.sparse_fill is not None):
         return None
-
-    # Determine feed (stock vs general; default: stock)
-    feed = "stock"
-    for i, a in enumerate(args_preview):
-        if a == "--fmp-news-feed" and i + 1 < len(args_preview):
-            feed = args_preview[i + 1]
-            break
-
-    is_backfill = "--sparse-fill" in args_preview
-
-    if is_backfill:
+    feed = getattr(args, "fmp_news_feed", None) or "stock"
+    if args.sparse_fill is not None:
         return f"news_backfill_{feed}"
     return f"news_ingest_{feed}"
 
 
 def main(argv: list[str] | None = None) -> None:
     import sys as _sys
-    args_preview = list(argv if argv is not None else _sys.argv[1:])
-    job_name = _health_job_name(args_preview)
+    argv_list = list(argv if argv is not None else _sys.argv[1:])
+    # Parse before JobHeartbeat so bad flags never mark the job running / success.
+    args = _parse_args(argv_list)
+    job_name = _health_job_name_from_namespace(args)
     if job_name:
         try:
             from src.health import JobHeartbeat
             with JobHeartbeat(job_name, expected_interval=1.0):
-                asyncio.run(_main(argv))
+                asyncio.run(_main(args))
         except ImportError:
-            asyncio.run(_main(argv))
+            asyncio.run(_main(args))
     else:
-        asyncio.run(_main(argv))
+        asyncio.run(_main(args))
 
 
 if __name__ == "__main__":

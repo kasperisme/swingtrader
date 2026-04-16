@@ -28,6 +28,17 @@ from typing import Any, Generator, Optional
 logger = logging.getLogger(__name__)
 
 
+def _system_exit_is_failure(exc: SystemExit) -> bool:
+    """True when ``SystemExit`` should be recorded as a failed job (e.g. argparse code 2)."""
+    code = exc.code
+    if code is None or code is False:
+        return False
+    if isinstance(code, int):
+        return code != 0
+    # ``sys.exit("message")`` stores a string (truthy) — treat as failure.
+    return True
+
+
 class PartialJobFailure(Exception):
     """
     Raise inside a JobHeartbeat block when some work items failed but others
@@ -171,6 +182,9 @@ def JobHeartbeat(
     - On clean exit: upserts status='success', resets consecutive_fails.
     - On exception: upserts status='failed', increments consecutive_fails,
       sends a WhatsApp alert, then re-raises.
+    - ``SystemExit`` with a non-zero / non-clean code (e.g. argparse) is recorded
+      as ``failed`` then re-raised so the process exit code is preserved.
+    - ``KeyboardInterrupt`` is recorded as ``failed`` then re-raised.
 
     Args:
         job_name: Unique stable identifier, e.g. "news_ingest", "daily_narrative".
@@ -203,6 +217,13 @@ def JobHeartbeat(
         # Capture but do NOT re-raise — partial failures are not fatal.
         partial_failure = exc
         error_text = str(exc)
+    except SystemExit as exc:
+        if _system_exit_is_failure(exc):
+            error_text = f"SystemExit({exc.code!r})"
+        raise
+    except KeyboardInterrupt as exc:
+        error_text = f"KeyboardInterrupt: {exc!r}"
+        raise
     except Exception:
         error_text = traceback.format_exc()
         raise
