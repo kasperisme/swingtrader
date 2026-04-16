@@ -17,6 +17,7 @@ Usage:
   python scripts/generate_blog_post.py --mode intra-market
   python scripts/generate_blog_post.py --mode pre-market --dry-run
   python scripts/generate_blog_post.py --mode pre-market --skip-x
+  python scripts/generate_blog_post.py --check-x-auth
 
 Required env vars (analytics/.env):
   SUPABASE_URL, SUPABASE_KEY, SUPABASE_SCHEMA
@@ -773,6 +774,54 @@ def _parse_x_thread(raw: str) -> list[str]:
     return [t[:280] for t in tweets]
 
 
+def _build_x_client() -> Optional[Any]:
+    """Create an authenticated X client using OAuth 1.0a user context."""
+    if not _XDK_AVAILABLE:
+        log.error("xdk is not installed — cannot use X API. Run: pip install xdk")
+        return None
+
+    if not X_ACCESS_TOKEN or not X_ACCESS_SECRET or not X_CONSUMER_KEY or not X_CONSUMER_SECRET:
+        log.warning(
+            "Missing OAuth 1.0a credentials. Set X_ACCESS_TOKEN, X_ACCESS_SECRET, "
+            "X_CONSUMER_KEY, and X_CONSUMER_SECRET."
+        )
+        return None
+
+    oauth1 = OAuth1(
+        api_key=X_CONSUMER_KEY,
+        api_secret=X_CONSUMER_SECRET,
+        callback=X_OAUTH1_CALLBACK,
+        access_token=X_ACCESS_TOKEN,
+        access_token_secret=X_ACCESS_SECRET,
+    )
+    return XClient(auth=oauth1)
+
+
+def _check_x_auth() -> bool:
+    """Validate OAuth 1.0a credentials by calling the authenticated user endpoint."""
+    client = _build_x_client()
+    if client is None:
+        return False
+
+    try:
+        response = client.users.get_me()
+        user = response.data
+    except Exception as exc:
+        log.error("X OAuth 1.0a auth check failed: %s", exc)
+        return False
+
+    username = getattr(user, "username", None) or getattr(user, "user_name", None)
+    user_id = getattr(user, "id", None)
+    name = getattr(user, "name", None)
+    log.info(
+        "X OAuth 1.0a auth check succeeded. user_id=%s username=%s name=%s",
+        user_id or "unknown",
+        username or "unknown",
+        name or "unknown",
+    )
+    return True
+
+
 def _post_x_thread(tweets: list[str], dry_run: bool = False) -> Optional[str]:
     """
     Post a tweet thread to X. Each tweet replies to the previous one.
@@ -788,32 +837,10 @@ def _post_x_thread(tweets: list[str], dry_run: bool = False) -> Optional[str]:
             log.info("  [%d/%d] (%d chars) %s", i, len(tweets), len(t), t)
         return "dry-run-id"
 
-    if not _XDK_AVAILABLE:
-        log.error("xdk is not installed — cannot post X thread. Run: pip install xdk")
+    client = _build_x_client()
+    if client is None:
+        log.warning("Skipping X thread because OAuth 1.0a client could not be created.")
         return None
-
-    def _mask(s: str) -> str:
-        return s[:4] + "..." + s[-4:] if len(s) > 8 else "***"
-
-    if not X_ACCESS_TOKEN or not X_ACCESS_SECRET or not X_CONSUMER_KEY or not X_CONSUMER_SECRET:
-        log.warning(
-            "Missing OAuth 1.0a credentials. Set X_ACCESS_TOKEN, X_ACCESS_SECRET, "
-            "X_CONSUMER_KEY, and X_CONSUMER_SECRET — skipping X thread."
-        )
-        return None
-    oauth1 = OAuth1(
-        api_key=X_CONSUMER_KEY,
-        api_secret=X_CONSUMER_SECRET,
-        callback=X_OAUTH1_CALLBACK,
-        access_token=X_ACCESS_TOKEN,
-        access_token_secret=X_ACCESS_SECRET,
-    )
-    client = XClient(auth=oauth1)
-    log.info(
-        "Using OAuth 1.0a user context for X posting (api_key=%s, access_token=%s).",
-        _mask(X_CONSUMER_KEY),
-        _mask(X_ACCESS_TOKEN),
-    )
 
     root_id: Optional[str] = None
     reply_to: Optional[str] = None
@@ -841,11 +868,16 @@ async def main() -> None:
     parser = argparse.ArgumentParser(
         description="Auto-generate Sanity blog post from Supabase news impact data"
     )
-    parser.add_argument("--mode", choices=["pre-market", "intra-market"], required=True)
+    parser.add_argument("--mode", choices=["pre-market", "intra-market"])
     parser.add_argument(
         "--dry-run",
         action="store_true",
         help="Build and log the post without publishing or posting",
+    )
+    parser.add_argument(
+        "--check-x-auth",
+        action="store_true",
+        help="Only verify X OAuth 1.0a credentials and exit",
     )
     parser.add_argument(
         "--skip-x", action="store_true", help="Skip X thread generation and posting"
@@ -865,6 +897,12 @@ async def main() -> None:
         "--max-articles", type=int, default=int(os.environ.get("NEWS_MAX_ARTICLES", 20))
     )
     args = parser.parse_args()
+
+    if args.check_x_auth:
+        sys.exit(0 if _check_x_auth() else 1)
+
+    if not args.mode:
+        parser.error("--mode is required unless --check-x-auth is used")
 
     lookback = args.lookback_hours or int(
         os.environ.get("NEWS_LOOKBACK_HOURS", LOOKBACK_HOURS[args.mode])
