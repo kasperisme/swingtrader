@@ -9,10 +9,13 @@ import { useRouter } from "next/navigation";
 import { cn } from "@/lib/utils";
 import { CavemanToggle } from "@/components/caveman-toggle";
 
-const appLinks = [
+const researchLinks = [
   { href: "/protected", label: "Articles" },
   { href: "/protected/news-trends", label: "News Trends" },
   { href: "/protected/relationships", label: "Explore" },
+] as const;
+
+const operationsLinks = [
   { href: "/protected/screenings", label: "Screenings" },
   { href: "/protected/daily-narrative", label: "Daily Narrative" },
   { href: "/protected/trades", label: "Trades" },
@@ -146,9 +149,18 @@ export function SiteHeaderMobileNav({ isAuthed, userEmail }: Props) {
               {isLoggedIn ? (
                 <>
                   <div>
-                    <p className={sectionLabelClass}>App</p>
+                    <p className={sectionLabelClass}>Research</p>
                     <ul className="space-y-0.5">
-                      {appLinks.map(({ href, label }) => (
+                      {researchLinks.map(({ href, label }) => (
+                        <NavLink key={href} href={href} label={label} onClick={close} />
+                      ))}
+                    </ul>
+                  </div>
+
+                  <div>
+                    <p className={sectionLabelClass}>Operations</p>
+                    <ul className="space-y-0.5">
+                      {operationsLinks.map(({ href, label }) => (
                         <NavLink key={href} href={href} label={label} onClick={close} />
                       ))}
                     </ul>

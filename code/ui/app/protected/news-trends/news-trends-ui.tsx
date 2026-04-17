@@ -8,6 +8,8 @@ import {
   ComposedChart,
   Line,
   Bar,
+  Scatter,
+  ErrorBar,
   XAxis,
   YAxis,
   CartesianGrid,
@@ -18,7 +20,7 @@ import {
   ResponsiveContainer,
 } from "recharts";
 import type { MouseHandlerDataParam } from "recharts";
-import { TrendingUp, TrendingDown, Minus, ChevronRight, Sparkles, X, Search } from "lucide-react";
+import { TrendingUp, TrendingDown, Minus, ChevronRight, Sparkles, X } from "lucide-react";
 import { CLUSTERS } from "../vectors/dimensions";
 import { fmpGetOhlc } from "@/app/actions/fmp";
 import { ArticlesGrid } from "@/components/articles-grid";
@@ -36,19 +38,6 @@ export interface ArticleImpact {
   image_url?: string | null;
   created_at?: string | null;
 }
-
-type SemanticSearchItem = {
-  article_id: number;
-  title: string | null;
-  url: string | null;
-  source: string | null;
-  slug: string | null;
-  image_url: string | null;
-  article_stream: string | null;
-  published_at: string | null;
-  snippet: string | null;
-  similarity: number;
-};
 
 // ── cluster palette ──────────────────────────────────────────────────────────
 const CLUSTER_COLORS: Record<string, string> = {
@@ -85,6 +74,9 @@ type AggregationMode = "period" | "cumulative";
 
 type OhlcPoint = {
   date: string;
+  open: number;
+  high: number;
+  low: number;
   close: number;
 };
 
@@ -132,6 +124,166 @@ function formatBucket(bucket: string, mode: ViewMode): string {
   return bucket.slice(5); // "2024-01-15" → "01-15"
 }
 
+type DateParts = {
+  year: number;
+  month: number;
+  day: number;
+  hour: number;
+  minute: number;
+};
+
+function getTimeZoneParts(date: Date, timeZone: string): DateParts {
+  const dtf = new Intl.DateTimeFormat("en-US", {
+    timeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  });
+  const parts = dtf.formatToParts(date);
+  const map = Object.fromEntries(parts.map((p) => [p.type, p.value]));
+  return {
+    year: Number.parseInt(map.year ?? "0", 10),
+    month: Number.parseInt(map.month ?? "0", 10),
+    day: Number.parseInt(map.day ?? "0", 10),
+    hour: Number.parseInt(map.hour ?? "0", 10),
+    minute: Number.parseInt(map.minute ?? "0", 10),
+  };
+}
+
+function compareDateOnly(a: { year: number; month: number; day: number }, b: { year: number; month: number; day: number }): number {
+  if (a.year !== b.year) return a.year - b.year;
+  if (a.month !== b.month) return a.month - b.month;
+  return a.day - b.day;
+}
+
+function addDaysDateOnly(
+  d: { year: number; month: number; day: number },
+  deltaDays: number,
+): { year: number; month: number; day: number } {
+  const tmp = new Date(Date.UTC(d.year, d.month - 1, d.day));
+  tmp.setUTCDate(tmp.getUTCDate() + deltaDays);
+  return {
+    year: tmp.getUTCFullYear(),
+    month: tmp.getUTCMonth() + 1,
+    day: tmp.getUTCDate(),
+  };
+}
+
+function nthWeekdayOfMonth(
+  year: number,
+  month1to12: number,
+  weekday: number,
+  n: number,
+): { year: number; month: number; day: number } {
+  const first = new Date(Date.UTC(year, month1to12 - 1, 1));
+  const firstWeekday = first.getUTCDay();
+  const delta = (weekday - firstWeekday + 7) % 7;
+  const day = 1 + delta + (n - 1) * 7;
+  return { year, month: month1to12, day };
+}
+
+function lastWeekdayOfMonth(
+  year: number,
+  month1to12: number,
+  weekday: number,
+): { year: number; month: number; day: number } {
+  const last = new Date(Date.UTC(year, month1to12, 0));
+  const lastDay = last.getUTCDate();
+  const lastWeekday = last.getUTCDay();
+  const delta = (lastWeekday - weekday + 7) % 7;
+  return { year, month: month1to12, day: lastDay - delta };
+}
+
+function easterSundayUtc(year: number): { year: number; month: number; day: number } {
+  // Anonymous Gregorian algorithm
+  const a = year % 19;
+  const b = Math.floor(year / 100);
+  const c = year % 100;
+  const d = Math.floor(b / 4);
+  const e = b % 4;
+  const f = Math.floor((b + 8) / 25);
+  const g = Math.floor((b - f + 1) / 3);
+  const h = (19 * a + b - d - g + 15) % 30;
+  const i = Math.floor(c / 4);
+  const k = c % 4;
+  const l = (32 + 2 * e + 2 * i - h - k) % 7;
+  const m = Math.floor((a + 11 * h + 22 * l) / 451);
+  const month = Math.floor((h + l - 7 * m + 114) / 31); // 3=Mar, 4=Apr
+  const day = ((h + l - 7 * m + 114) % 31) + 1;
+  return { year, month, day };
+}
+
+function observedFixedHoliday(
+  year: number,
+  month: number,
+  day: number,
+): { year: number; month: number; day: number } {
+  const d = new Date(Date.UTC(year, month - 1, day));
+  const dow = d.getUTCDay();
+  if (dow === 6) return addDaysDateOnly({ year, month, day }, -1); // Saturday -> Friday
+  if (dow === 0) return addDaysDateOnly({ year, month, day }, 1); // Sunday -> Monday
+  return { year, month, day };
+}
+
+function isUsMarketHolidayNyDate(year: number, month: number, day: number): boolean {
+  const target = { year, month, day };
+  const same = (x: { year: number; month: number; day: number }) => compareDateOnly(x, target) === 0;
+
+  const newYears = observedFixedHoliday(year, 1, 1);
+  const mlk = nthWeekdayOfMonth(year, 1, 1, 3); // 3rd Monday Jan
+  const presidents = nthWeekdayOfMonth(year, 2, 1, 3); // 3rd Monday Feb
+  const easter = easterSundayUtc(year);
+  const goodFriday = addDaysDateOnly(easter, -2);
+  const memorial = lastWeekdayOfMonth(year, 5, 1); // last Monday May
+  const juneteenth = observedFixedHoliday(year, 6, 19);
+  const independence = observedFixedHoliday(year, 7, 4);
+  const labor = nthWeekdayOfMonth(year, 9, 1, 1); // 1st Monday Sep
+  const thanksgiving = nthWeekdayOfMonth(year, 11, 4, 4); // 4th Thursday Nov
+  const christmas = observedFixedHoliday(year, 12, 25);
+
+  return (
+    same(newYears) ||
+    same(mlk) ||
+    same(presidents) ||
+    same(goodFriday) ||
+    same(memorial) ||
+    same(juneteenth) ||
+    same(independence) ||
+    same(labor) ||
+    same(thanksgiving) ||
+    same(christmas)
+  );
+}
+
+function isUsMarketTradingDayNyDate(year: number, month: number, day: number): boolean {
+  const dow = new Date(Date.UTC(year, month - 1, day)).getUTCDay();
+  if (dow === 0 || dow === 6) return false;
+  return !isUsMarketHolidayNyDate(year, month, day);
+}
+
+function nyTimeToUtcDate(
+  year: number,
+  month: number,
+  day: number,
+  hour: number,
+  minute: number,
+): Date {
+  // Resolve local NY wall-clock to UTC with iterative timezone-part correction.
+  let guessUtcMs = Date.UTC(year, month - 1, day, hour, minute, 0, 0);
+  const desiredMs = Date.UTC(year, month - 1, day, hour, minute, 0, 0);
+  for (let i = 0; i < 5; i += 1) {
+    const current = getTimeZoneParts(new Date(guessUtcMs), "America/New_York");
+    const currentMs = Date.UTC(current.year, current.month - 1, current.day, current.hour, current.minute, 0, 0);
+    const diffMs = desiredMs - currentMs;
+    if (diffMs === 0) break;
+    guessUtcMs += diffMs;
+  }
+  return new Date(guessUtcMs);
+}
+
 /** Articles whose time bucket falls in [startBucket, endBucket] (inclusive), using the same bucketing as the chart. */
 function articlesInBucketRange(
   rows: ArticleImpact[],
@@ -145,6 +297,17 @@ function articlesInBucketRange(
     const b = toBucket(a.published_at, mode);
     return b >= lo && b <= hi;
   });
+}
+
+/** Mean of available dimension scores in ``impact_json`` for one cluster (matches chart bucket logic). */
+function clusterMeanImpact(article: ArticleImpact, clusterId: string): number | null {
+  const cluster = CLUSTERS.find((c) => c.id === clusterId);
+  if (!cluster) return null;
+  const scores = cluster.dimensions
+    .map((d) => article.impact_json[d.key])
+    .filter((v): v is number => typeof v === "number" && Number.isFinite(v));
+  if (scores.length === 0) return null;
+  return scores.reduce((a, b) => a + b, 0) / scores.length;
 }
 
 /**
@@ -415,13 +578,9 @@ function Leaderboard({
   });
 
   return (
-    <div className="flex flex-col gap-1">
-      <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-2">
-        {cumulative
-          ? "Latest cumulative score"
-          : maOff
-            ? "Latest score"
-            : "Latest MA score"}
+    <div className="flex flex-col gap-0.5">
+      <p className="text-[10px] font-semibold text-muted-foreground/70 uppercase tracking-widest mb-2 px-2">
+        {cumulative ? "Cumulative" : maOff ? "Latest" : "MA Score"}
       </p>
       {sorted.map(({ cluster, score }) => {
         const color = CLUSTER_COLORS[cluster.id];
@@ -433,7 +592,7 @@ function Leaderboard({
         return (
           <div
             key={cluster.id}
-            className={`flex items-center gap-1 px-2 py-1.5 rounded-lg transition-colors ${
+            className={`group flex items-center gap-1 px-2 py-1.5 rounded-lg transition-colors cursor-pointer ${
               isDrilled ? "bg-muted ring-1 ring-border" : "hover:bg-muted/50"
             }`}
           >
@@ -479,10 +638,10 @@ function Leaderboard({
             <button
               onClick={() => onDrilldown(cluster.id)}
               title={isDrilled ? "Close drill-down" : "Drill into dimensions"}
-              className={`shrink-0 p-0.5 rounded transition-colors ${
+              className={`shrink-0 p-0.5 rounded transition-all cursor-pointer ${
                 isDrilled
-                  ? "text-foreground bg-background"
-                  : "text-muted-foreground hover:text-foreground"
+                  ? "text-foreground bg-background opacity-100"
+                  : "text-muted-foreground opacity-0 group-hover:opacity-100 hover:text-foreground"
               }`}
             >
               {isDrilled ? <X size={12} /> : <ChevronRight size={12} />}
@@ -490,9 +649,8 @@ function Leaderboard({
           </div>
         );
       })}
-      <p className="text-[10px] text-muted-foreground mt-1 px-2">
-        Click score to toggle · <ChevronRight size={8} className="inline" /> to
-        drill down
+      <p className="text-[10px] text-muted-foreground/40 mt-2 px-2 leading-snug">
+        Click to toggle · hover <ChevronRight size={8} className="inline" /> to drill
       </p>
     </div>
   );
@@ -514,8 +672,8 @@ function CustomTooltip({
   const articleCount = payload.find((p) => p.name === "__articleCount")?.value ?? null;
   const sorted = [...payload]
     .filter((p) => p.name !== "__articleCount")
-    .filter((p) => p.value != null)
-    .sort((a, b) => (b.value ?? 0) - (a.value ?? 0));
+    .filter((p) => typeof p.value === "number" && Number.isFinite(p.value))
+    .sort((a, b) => (b.value as number) - (a.value as number));
 
   return (
     <div className="bg-background border rounded-lg shadow-lg p-3 text-xs max-w-[220px]">
@@ -526,9 +684,11 @@ function CustomTooltip({
         </p>
       ) : null}
       {sorted.map((p) => {
+        const numericValue = typeof p.value === "number" && Number.isFinite(p.value) ? p.value : null;
+        if (numericValue == null) return null;
         const displayLabel = labelMap[p.name] ?? p.name;
-        const isPos = (p.value ?? 0) > 0.05;
-        const isNeg = (p.value ?? 0) < -0.05;
+        const isPos = numericValue > 0.05;
+        const isNeg = numericValue < -0.05;
         return (
           <div key={p.name} className="flex items-center gap-1.5 py-0.5">
             <span
@@ -541,13 +701,77 @@ function CustomTooltip({
             <span
               className={`font-mono tabular-nums ${isPos ? "text-emerald-500" : isNeg ? "text-rose-500" : "text-muted-foreground"}`}
             >
-              {(p.value ?? 0) >= 0 ? "+" : ""}
-              {(p.value ?? 0).toFixed(3)}
+              {numericValue >= 0 ? "+" : ""}
+              {numericValue.toFixed(3)}
             </span>
           </div>
         );
       })}
     </div>
+  );
+}
+
+function BenchmarkOpenTick({
+  cx,
+  cy,
+  payload,
+}: {
+  cx?: number;
+  cy?: number;
+  payload?: {
+    __benchmarkOpen?: number | null;
+    __benchmarkClose?: number | null;
+  };
+}) {
+  if (!Number.isFinite(cx) || !Number.isFinite(cy)) return null;
+  const x = cx as number;
+  const y = cy as number;
+  const open = payload?.__benchmarkOpen;
+  const close = payload?.__benchmarkClose;
+  const isUp = typeof open === "number" && typeof close === "number" && close >= open;
+  const color = isUp ? "#10b981" : "#ef4444";
+  return (
+    <line
+      x1={x - 6}
+      x2={x - 1}
+      y1={y}
+      y2={y}
+      stroke={color}
+      strokeWidth={1.6}
+      strokeLinecap="round"
+    />
+  );
+}
+
+function BenchmarkCloseTick({
+  cx,
+  cy,
+  payload,
+}: {
+  cx?: number;
+  cy?: number;
+  payload?: {
+    __benchmarkOpen?: number | null;
+    __benchmarkClose?: number | null;
+  };
+}) {
+  if (!Number.isFinite(cx) || !Number.isFinite(cy)) return null;
+  const x = cx as number;
+  const y = cy as number;
+  const open = payload?.__benchmarkOpen;
+  const close = payload?.__benchmarkClose;
+  const isUp = typeof open === "number" && typeof close === "number" && close >= open;
+  const color = isUp ? "#10b981" : "#ef4444";
+  return (
+    <line
+      x1={x + 1}
+      x2={x + 6}
+      y1={y}
+      y2={y}
+      stroke={color}
+      strokeWidth={1.8}
+      strokeLinecap="round"
+    />
   );
 }
 
@@ -605,15 +829,16 @@ function DimensionDrilldown({
       className="border border-border rounded-xl p-4 flex flex-col gap-4"
       style={{ borderLeftColor: clusterColor, borderLeftWidth: 3 }}
     >
-      <div>
-        <p className="text-sm font-semibold">
-          {cluster.label} — Dimension Breakdown
-        </p>
-        <p className="text-xs text-muted-foreground mt-0.5">
-          {maWindow === 0
-            ? `Per-period dimension scores (no MA) · ${dims.length} dimensions`
-            : `${maWindow}${mode === "hourly" ? "h" : "d"} MA of individual dimension impact scores · ${dims.length} dimensions`}
-        </p>
+      <div className="flex items-center justify-between">
+        <div>
+          <p className="text-sm font-semibold">{cluster.label}</p>
+          <p className="text-[11px] text-muted-foreground mt-0.5">
+            {dims.length} dimensions ·{" "}
+            {maWindow === 0
+              ? "no smoothing"
+              : `${maWindow}${mode === "hourly" ? "h" : "d"} MA`}
+          </p>
+        </div>
       </div>
 
       <div className="flex gap-6">
@@ -736,7 +961,7 @@ const MA_OPTIONS: Record<ViewMode, { label: string; value: number }[]> = {
 
 const DEFAULT_MA: Record<ViewMode, number> = { daily: 7, hourly: 6 };
 
-type QuickRange = "7d" | "30d" | "90d" | "all";
+type QuickRange = "7d" | "30d" | "90d" | "1y" | "custom";
 
 function toDateInputValue(iso: string): string {
   const d = new Date(iso);
@@ -762,30 +987,23 @@ export function NewsTrendsUI({ articles, chartHeight = 400 }: { articles: Articl
 
   const [dateFrom, setDateFrom] = useState<string>("");
   const [dateTo, setDateTo] = useState<string>("");
-  const [quickRange, setQuickRange] = useState<QuickRange>("all");
+  const [quickRange, setQuickRange] = useState<QuickRange>("1y");
   const [benchmark, setBenchmark] = useState<BenchmarkId>("none");
   const [benchmarkData, setBenchmarkData] = useState<OhlcPoint[]>([]);
   const [showClusterMean, setShowClusterMean] = useState(true);
   const [showArticleCount, setShowArticleCount] = useState(true);
-  const [semanticQuery, setSemanticQuery] = useState("");
-  const [semanticLoading, setSemanticLoading] = useState(false);
-  const [semanticResults, setSemanticResults] = useState<SemanticSearchItem[]>([]);
-  const [semanticNote, setSemanticNote] = useState<string | null>(null);
+  const [showUsSessionMarkers, setShowUsSessionMarkers] = useState(true);
 
   function applyQuickRange(range: QuickRange) {
     setQuickRange(range);
-    if (range === "all") {
-      setDateFrom("");
-      setDateTo("");
-    } else {
-      const days = range === "7d" ? 7 : range === "30d" ? 30 : 90;
-      const [ey, em, ed] = (maxDate || localDateStr(new Date())).split("-").map(Number);
-      const end = new Date(ey, em - 1, ed); // local midnight
-      const start = new Date(end);
-      start.setDate(start.getDate() - days);
-      setDateFrom(localDateStr(start));
-      setDateTo(localDateStr(end));
-    }
+    if (range === "custom") return;
+    const days = range === "7d" ? 7 : range === "30d" ? 30 : range === "90d" ? 90 : 365;
+    const [ey, em, ed] = (maxDate || localDateStr(new Date())).split("-").map(Number);
+    const end = new Date(ey, em - 1, ed); // local midnight
+    const start = new Date(end);
+    start.setDate(start.getDate() - days);
+    setDateFrom(localDateStr(start));
+    setDateTo(localDateStr(end));
   }
 
   const filteredArticles = useMemo(() => {
@@ -839,9 +1057,19 @@ export function NewsTrendsUI({ articles, chartHeight = 400 }: { articles: Articl
         return raw
           .map((r) => ({
             date: String(r.date ?? ""),
+            open: Number(r.open),
+            high: Number(r.high),
+            low: Number(r.low),
             close: Number(r.close),
           }))
-          .filter((r) => r.date && Number.isFinite(r.close));
+          .filter(
+            (r) =>
+              r.date &&
+              Number.isFinite(r.open) &&
+              Number.isFinite(r.high) &&
+              Number.isFinite(r.low) &&
+              Number.isFinite(r.close),
+          );
       })
       .then((rows) => {
         if (!cancelled) setBenchmarkData(rows);
@@ -857,31 +1085,53 @@ export function NewsTrendsUI({ articles, chartHeight = 400 }: { articles: Articl
 
   const benchmarkByBucket = useMemo(() => {
     if (benchmark === "none" || benchmarkData.length === 0 || daily.length === 0) {
-      return new Map<string, number>();
+      return new Map<string, { open: number; high: number; low: number; close: number }>();
     }
 
     const startBucket = daily[0]?.date;
     const endBucket = daily[daily.length - 1]?.date;
-    if (!startBucket || !endBucket) return new Map<string, number>();
+    if (!startBucket || !endBucket) {
+      return new Map<string, { open: number; high: number; low: number; close: number }>();
+    }
 
-    const bucketValues = new Map<string, number>();
+    const bucketValues = new Map<
+      string,
+      { open: number; high: number; low: number; close: number }
+    >();
     for (const p of benchmarkData) {
       const bucket = normalizeToBucket(p.date, viewMode);
       if (!bucket) continue;
       if (bucket < startBucket || bucket > endBucket) continue;
-      bucketValues.set(bucket, p.close);
+      bucketValues.set(bucket, {
+        open: p.open,
+        high: p.high,
+        low: p.low,
+        close: p.close,
+      });
     }
 
     const sortedBuckets = Array.from(bucketValues.keys()).sort((a, b) => a.localeCompare(b));
-    if (sortedBuckets.length === 0) return new Map<string, number>();
+    if (sortedBuckets.length === 0) {
+      return new Map<string, { open: number; high: number; low: number; close: number }>();
+    }
 
-    const base = bucketValues.get(sortedBuckets[0]) ?? Number.NaN;
-    if (!Number.isFinite(base) || Math.abs(base) < 1e-9) return new Map<string, number>();
+    const base = bucketValues.get(sortedBuckets[0])?.open ?? Number.NaN;
+    if (!Number.isFinite(base) || Math.abs(base) < 1e-9) {
+      return new Map<string, { open: number; high: number; low: number; close: number }>();
+    }
 
     return new Map(
       sortedBuckets.map((bucket) => {
-        const close = bucketValues.get(bucket)!;
-        return [bucket, (close - base) / base] as const;
+        const ohlc = bucketValues.get(bucket)!;
+        return [
+          bucket,
+          {
+            open: (ohlc.open - base) / base,
+            high: (ohlc.high - base) / base,
+            low: (ohlc.low - base) / base,
+            close: (ohlc.close - base) / base,
+          },
+        ] as const;
       }),
     );
   }, [benchmark, benchmarkData, daily, viewMode]);
@@ -889,13 +1139,76 @@ export function NewsTrendsUI({ articles, chartHeight = 400 }: { articles: Articl
   const chartDataWithBenchmark = useMemo(() => {
     if (benchmark === "none" || benchmarkByBucket.size === 0) return chartData;
     return chartData.map((point) => {
-      const benchmarkValue = benchmarkByBucket.get(String(point.date)) ?? null;
+      const benchmarkValue = benchmarkByBucket.get(String(point.date));
       return {
         ...point,
-        __benchmark: benchmarkValue,
+        __benchmarkOpen: benchmarkValue?.open ?? null,
+        __benchmarkHigh: benchmarkValue?.high ?? null,
+        __benchmarkLow: benchmarkValue?.low ?? null,
+        __benchmarkClose: benchmarkValue?.close ?? null,
+        __benchmarkMid:
+          benchmarkValue != null ? (benchmarkValue.high + benchmarkValue.low) / 2 : null,
+        __benchmarkRangeLow:
+          benchmarkValue != null ? (benchmarkValue.high - benchmarkValue.low) / 2 : null,
+        __benchmarkRangeHigh:
+          benchmarkValue != null ? (benchmarkValue.high - benchmarkValue.low) / 2 : null,
       };
     });
   }, [benchmark, benchmarkByBucket, chartData]);
+
+  const usSessionMarkers = useMemo(() => {
+    if (!showUsSessionMarkers || viewMode !== "hourly" || chartDataWithBenchmark.length === 0) {
+      return {
+        openBuckets: [] as string[],
+        closeBuckets: [] as string[],
+        sessions: [] as Array<{ start: string; end: string }>,
+      };
+    }
+
+    const tradingDays = new Map<
+      string,
+      { year: number; month: number; day: number }
+    >();
+    for (const point of chartDataWithBenchmark) {
+      const dateStr = String(point.date);
+      const [localDatePart] = dateStr.split("T");
+      if (!localDatePart) continue;
+      const localMidnight = new Date(`${localDatePart}T00:00:00`);
+      if (Number.isNaN(localMidnight.getTime())) continue;
+      const ny = getTimeZoneParts(localMidnight, "America/New_York");
+      const nyKey = `${ny.year}-${pad2(ny.month)}-${pad2(ny.day)}`;
+      if (!tradingDays.has(nyKey) && isUsMarketTradingDayNyDate(ny.year, ny.month, ny.day)) {
+        tradingDays.set(nyKey, { year: ny.year, month: ny.month, day: ny.day });
+      }
+    }
+
+    const dataBuckets = new Set(chartDataWithBenchmark.map((p) => String(p.date)));
+    const openBuckets = new Set<string>();
+    const closeBuckets = new Set<string>();
+    const sessions: Array<{ start: string; end: string }> = [];
+
+    for (const day of tradingDays.values()) {
+      const openLocalBucket = localBucket(
+        nyTimeToUtcDate(day.year, day.month, day.day, 9, 30),
+        "hourly",
+      );
+      const closeLocalBucket = localBucket(
+        nyTimeToUtcDate(day.year, day.month, day.day, 16, 0),
+        "hourly",
+      );
+      if (dataBuckets.has(openLocalBucket)) openBuckets.add(openLocalBucket);
+      if (dataBuckets.has(closeLocalBucket)) closeBuckets.add(closeLocalBucket);
+      if (dataBuckets.has(openLocalBucket) && dataBuckets.has(closeLocalBucket)) {
+        sessions.push({ start: openLocalBucket, end: closeLocalBucket });
+      }
+    }
+
+    return {
+      openBuckets: Array.from(openBuckets).sort((a, b) => a.localeCompare(b)),
+      closeBuckets: Array.from(closeBuckets).sort((a, b) => a.localeCompare(b)),
+      sessions: sessions.sort((a, b) => a.start.localeCompare(b.start)),
+    };
+  }, [chartDataWithBenchmark, showUsSessionMarkers, viewMode]);
 
   const [articleModalDate, setArticleModalDate] = useState<string | null>(null);
 
@@ -927,6 +1240,10 @@ export function NewsTrendsUI({ articles, chartHeight = 400 }: { articles: Articl
     end: number;
   } | null>(null);
   const [periodZeitgeistOpen, setPeriodZeitgeistOpen] = useState(false);
+  const [periodModalSortCluster, setPeriodModalSortCluster] = useState<string>(
+    () => CLUSTERS[0]?.id ?? "",
+  );
+  const [periodModalSortDir, setPeriodModalSortDir] = useState<"desc" | "asc">("desc");
   const rangeDragRef = useRef<{ start: number; cur: number } | null>(null);
   const brushBlockRef = useRef(false);
   /** Outer chart stack (plot uses full width); used with clientX for stable index mapping. */
@@ -953,11 +1270,35 @@ export function NewsTrendsUI({ articles, chartHeight = 400 }: { articles: Articl
   const brushStart = brushRange?.startIndex ?? 0;
   const brushEnd = brushRange?.endIndex ?? lastIdx;
 
-  const handleBrushChange = (next: { startIndex: number; endIndex: number }) => {
-    if (next.startIndex === 0 && next.endIndex === lastIdx) {
+  const clampedBrushStart = Number.isFinite(brushStart)
+    ? Math.max(0, Math.min(lastIdx, brushStart))
+    : 0;
+  const clampedBrushEnd = Number.isFinite(brushEnd)
+    ? Math.max(0, Math.min(lastIdx, brushEnd))
+    : lastIdx;
+  const normalizedBrushStart = Math.min(clampedBrushStart, clampedBrushEnd);
+  const normalizedBrushEnd = Math.max(clampedBrushStart, clampedBrushEnd);
+  const hasValidControlledBrush =
+    brushRange != null &&
+    Number.isFinite(normalizedBrushStart) &&
+    Number.isFinite(normalizedBrushEnd) &&
+    normalizedBrushStart >= 0 &&
+    normalizedBrushEnd <= lastIdx;
+
+  const handleBrushChange = (next: { startIndex?: number; endIndex?: number } | null) => {
+    if (!next) {
+      setBrushRange(null);
+      return;
+    }
+    const nextStartRaw = next.startIndex;
+    const nextEndRaw = next.endIndex;
+    if (!Number.isFinite(nextStartRaw) || !Number.isFinite(nextEndRaw)) return;
+    const nextStart = Math.max(0, Math.min(lastIdx, nextStartRaw as number));
+    const nextEnd = Math.max(0, Math.min(lastIdx, nextEndRaw as number));
+    if (nextStart === 0 && nextEnd === lastIdx) {
       setBrushRange(null);
     } else {
-      setBrushRange(next);
+      setBrushRange({ startIndex: nextStart, endIndex: nextEnd });
     }
   };
 
@@ -1093,6 +1434,25 @@ export function NewsTrendsUI({ articles, chartHeight = 400 }: { articles: Articl
       );
   }, [periodSelection, chartDataWithBenchmark, filteredArticles, viewMode]);
 
+  const sortedPeriodArticles = useMemo(() => {
+    if (periodArticles.length === 0) return periodArticles;
+    const cid = periodModalSortCluster || CLUSTERS[0]?.id;
+    if (!cid) return periodArticles;
+    const dir = periodModalSortDir;
+    return [...periodArticles].sort((a, b) => {
+      const sa = clusterMeanImpact(a, cid);
+      const sb = clusterMeanImpact(b, cid);
+      const aNull = sa == null;
+      const bNull = sb == null;
+      if (aNull && bNull) return 0;
+      if (aNull) return 1;
+      if (bNull) return -1;
+      const diff = sa - sb;
+      if (diff !== 0) return dir === "desc" ? -diff : diff;
+      return new Date(b.published_at).getTime() - new Date(a.published_at).getTime();
+    });
+  }, [periodArticles, periodModalSortCluster, periodModalSortDir]);
+
   const explainIconIndex =
     periodSelection && !rangeSelectDrag
       ? Math.max(periodSelection.start, periodSelection.end)
@@ -1166,21 +1526,10 @@ export function NewsTrendsUI({ articles, chartHeight = 400 }: { articles: Articl
     return (
       <div className="text-center py-16 text-muted-foreground">
         <p className="text-sm">No news impact data found.</p>
-        <p className="text-xs mt-1">
-          Run{" "}
-          <code className="font-mono bg-muted px-1 rounded">
-            python -m news_impact.score_news_cli
-          </code>{" "}
-          to score articles.
-        </p>
       </div>
     );
   }
 
-  const dateRange =
-    chartData.length > 0
-      ? `${chartData[0].date} → ${chartData[chartData.length - 1].date}`
-      : "";
 
   const totalArticles = daily.reduce((sum, d) => sum + d.count, 0);
 
@@ -1193,50 +1542,63 @@ export function NewsTrendsUI({ articles, chartHeight = 400 }: { articles: Articl
     [],
   );
 
-  const runSemanticSearch = useCallback(async () => {
-    const q = semanticQuery.trim();
-    if (q.length < 3) {
-      setSemanticResults([]);
-      setSemanticNote("Type at least 3 characters.");
-      return;
-    }
-    setSemanticLoading(true);
-    setSemanticNote(null);
-    try {
-      const r = await fetch("/api/news/semantic-search", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ query: q, limit: 16, lookback_days: 90 }),
-      });
-      const data = await r.json();
-      if (!r.ok) throw new Error(data?.error ?? "Search failed");
-      setSemanticResults((data?.results ?? []) as SemanticSearchItem[]);
-      setSemanticNote(data?.note ?? null);
-    } catch (err) {
-      setSemanticResults([]);
-      setSemanticNote(err instanceof Error ? err.message : "Search failed");
-    } finally {
-      setSemanticLoading(false);
-    }
-  }, [semanticQuery]);
-
   return (
     <div className="flex flex-col gap-6">
-      {/* Controls */}
-      <div className="flex flex-wrap items-end gap-3 rounded-xl border border-border bg-card/60 p-3">
-        <div className="flex flex-col gap-1.5">
-          <span className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
-            Granularity
-          </span>
-          <div className="flex rounded-md border border-border overflow-hidden text-xs">
+      {/* Controls toolbar */}
+      <div className="flex items-stretch rounded-xl border border-border bg-card overflow-x-auto">
+        {/* Date range + granularity first */}
+        <div className="flex items-center px-3 py-2 border-r border-border shrink-0">
+          <span className="text-[10px] font-medium text-muted-foreground/60 uppercase tracking-wide">Range</span>
+        </div>
+        {(["7d", "30d", "90d", "1y"] as QuickRange[]).map((r) => (
+          <button
+            key={r}
+            onClick={() => applyQuickRange(r)}
+            className={`text-[11px] px-3 py-2 transition-colors cursor-pointer border-r border-border ${
+              quickRange === r
+                ? "bg-foreground text-background"
+                : "text-muted-foreground hover:text-foreground"
+            }`}
+          >
+            {r}
+          </button>
+        ))}
+        <div className="flex items-center gap-1.5 px-3 py-2 border-r border-border shrink-0">
+          <input
+            type="date"
+            value={dateFrom}
+            min={minDate}
+            max={dateTo || maxDate}
+            onChange={(e) => {
+              setDateFrom(e.target.value);
+              setQuickRange("custom");
+            }}
+            className="text-[11px] bg-transparent text-foreground focus:outline-none cursor-pointer"
+          />
+          <span className="text-[10px] text-muted-foreground/40">—</span>
+          <input
+            type="date"
+            value={dateTo}
+            min={dateFrom || minDate}
+            max={maxDate}
+            onChange={(e) => {
+              setDateTo(e.target.value);
+              setQuickRange("custom");
+            }}
+            className="text-[11px] bg-transparent text-foreground focus:outline-none cursor-pointer"
+          />
+        </div>
+        <div className="flex items-center gap-2 px-3 py-2 border-r border-border shrink-0">
+          <span className="text-[10px] font-medium text-muted-foreground/60 uppercase tracking-wide">View</span>
+          <div className="flex rounded border border-border overflow-hidden">
             {(["daily", "hourly"] as ViewMode[]).map((mode) => (
               <button
                 key={mode}
                 onClick={() => switchMode(mode)}
-                className={`px-3 py-1 capitalize transition-colors ${
+                className={`text-[11px] px-3 py-1 capitalize transition-colors cursor-pointer ${
                   viewMode === mode
                     ? "bg-foreground text-background"
-                    : "bg-background text-muted-foreground hover:text-foreground"
+                    : "text-muted-foreground hover:text-foreground"
                 }`}
               >
                 {mode}
@@ -1245,19 +1607,18 @@ export function NewsTrendsUI({ articles, chartHeight = 400 }: { articles: Articl
           </div>
         </div>
 
-        <div className="flex flex-col gap-1.5">
-          <span className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
-            Smoothing
-          </span>
-          <div className="flex flex-wrap items-center gap-1.5">
+        {/* MA smoothing */}
+        <div className="flex items-center gap-2 px-3 py-2 border-r border-border shrink-0">
+          <span className="text-[10px] font-medium text-muted-foreground/60 shrink-0">MA</span>
+          <div className="flex items-center gap-0.5">
             {MA_OPTIONS[viewMode].map((opt) => (
               <button
                 key={opt.value}
                 onClick={() => setMaWindow(opt.value)}
-                className={`text-xs px-2.5 py-1 rounded-md border transition-colors ${
+                className={`text-[11px] px-2 py-1 rounded transition-colors cursor-pointer ${
                   maWindow === opt.value
-                    ? "bg-foreground text-background border-foreground"
-                    : "bg-background text-muted-foreground border-border hover:border-foreground/40"
+                    ? "bg-foreground text-background"
+                    : "text-muted-foreground hover:text-foreground"
                 }`}
               >
                 {opt.label}
@@ -1266,193 +1627,122 @@ export function NewsTrendsUI({ articles, chartHeight = 400 }: { articles: Articl
           </div>
         </div>
 
-        <div className="flex flex-col gap-1.5">
-          <span className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
-            Series Mode
-          </span>
-          <div className="flex rounded-md border border-border overflow-hidden text-xs">
-            <button
-              onClick={() => setAggregationMode("period")}
-              className={`px-2.5 py-1 transition-colors ${
-                aggregationMode === "period"
-                  ? "bg-foreground text-background"
-                  : "bg-background text-muted-foreground hover:text-foreground"
-              }`}
-            >
-              Period
-            </button>
-            <button
-              onClick={() => setAggregationMode("cumulative")}
-              className={`px-2.5 py-1 transition-colors ${
-                aggregationMode === "cumulative"
-                  ? "bg-foreground text-background"
-                  : "bg-background text-muted-foreground hover:text-foreground"
-              }`}
-            >
-              Cumulative
-            </button>
-          </div>
-        </div>
-
-        <div className="flex flex-col gap-1.5">
-          <span className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
-            Overlay
-          </span>
-          <div className="flex items-center gap-2">
-            <select
-              value={benchmark}
-              onChange={(e) => setBenchmark(e.target.value as BenchmarkId)}
-              className="text-xs border rounded-md px-2 py-1 bg-background focus:outline-none focus:ring-2 focus:ring-ring"
-            >
-              {BENCHMARK_OPTIONS.map((b) => (
-                <option key={b.id} value={b.id}>
-                  {b.label}
-                </option>
-              ))}
-            </select>
-            <label className="flex items-center gap-1.5 text-xs text-muted-foreground cursor-pointer select-none">
-              <input
-                type="checkbox"
-                checked={showClusterMean}
-                onChange={(e) => setShowClusterMean(e.target.checked)}
-                className="rounded border-border"
-              />
-              Mean line
-            </label>
-            <label className="flex items-center gap-1.5 text-xs text-muted-foreground cursor-pointer select-none">
-              <input
-                type="checkbox"
-                checked={showArticleCount}
-                onChange={(e) => setShowArticleCount(e.target.checked)}
-                className="rounded border-border"
-              />
-              Article count
-            </label>
-          </div>
-        </div>
-
-        <span className="ml-auto text-sm text-muted-foreground">
-          <span className="font-medium text-foreground/80">{totalArticles}</span> articles · {dateRange}
-        </span>
-      </div>
-
-      {/* Date range filter */}
-      <div className="flex flex-wrap items-center gap-3">
-        <span className="text-xs text-muted-foreground">Range:</span>
-        {(["7d", "30d", "90d", "all"] as QuickRange[]).map((r) => (
-          <button
-            key={r}
-            onClick={() => applyQuickRange(r)}
-            className={`text-xs px-2.5 py-1 rounded-md border transition-colors ${
-              quickRange === r
-                ? "bg-foreground text-background border-foreground"
-                : "bg-background text-muted-foreground border-border hover:border-foreground/40"
-            }`}
-          >
-            {r === "all" ? "All" : r}
-          </button>
-        ))}
-        <div className="flex items-center gap-1.5 ml-2">
-          <input
-            type="date"
-            value={dateFrom}
-            min={minDate}
-            max={dateTo || maxDate}
-            onChange={(e) => {
-              setDateFrom(e.target.value);
-              setQuickRange("all");
-            }}
-            className="text-xs px-2 py-1 rounded-md border border-border bg-background text-foreground"
-          />
-          <span className="text-xs text-muted-foreground">→</span>
-          <input
-            type="date"
-            value={dateTo}
-            min={dateFrom || minDate}
-            max={maxDate}
-            onChange={(e) => {
-              setDateTo(e.target.value);
-              setQuickRange("all");
-            }}
-            className="text-xs px-2 py-1 rounded-md border border-border bg-background text-foreground"
-          />
-        </div>
-      </div>
-
-      {/* Semantic article search */}
-      <div className="rounded-xl border border-border p-3">
-        <div className="flex flex-wrap items-center gap-2">
-          <div className="relative min-w-[260px] flex-1">
-            <Search className="pointer-events-none absolute left-2.5 top-2.5 h-3.5 w-3.5 text-muted-foreground" />
-            <input
-              value={semanticQuery}
-              onChange={(e) => setSemanticQuery(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") {
-                  e.preventDefault();
-                  void runSemanticSearch();
-                }
-              }}
-              placeholder="Semantic search (e.g. tariff impact on semis)"
-              className="w-full rounded-md border border-border bg-background py-2 pl-8 pr-2 text-sm"
-            />
-          </div>
-          <button
-            type="button"
-            onClick={() => void runSemanticSearch()}
-            disabled={semanticLoading}
-            className="rounded-md border border-border px-3 py-2 text-xs font-medium text-muted-foreground hover:text-foreground disabled:opacity-60"
-          >
-            {semanticLoading ? "Searching..." : "Search"}
-          </button>
-        </div>
-        {semanticNote && (
-          <p className="mt-2 text-xs text-muted-foreground">{semanticNote}</p>
-        )}
-        {semanticResults.length > 0 && (
-          <div className="mt-3 grid gap-2 sm:grid-cols-2">
-            {semanticResults.map((item) => (
-              <a
-                key={`${item.article_id}-${item.published_at ?? ""}`}
-                href={item.slug ? `/articles/${item.slug}` : `/articles/${item.article_id}`}
-                className="rounded-lg border border-border bg-card p-3 transition-colors hover:border-amber-500/40"
+        {/* Toggle overlays */}
+        <div className="flex items-center px-3 py-2 shrink-0">
+          <details className="group relative">
+            <summary className="inline-flex list-none items-center rounded border border-border px-2.5 py-1 text-[11px] text-muted-foreground transition-colors hover:text-foreground cursor-pointer [&::-webkit-details-marker]:hidden">
+              Advanced
+              <ChevronRight className="ml-1 h-3 w-3 transition-transform group-open:rotate-90" />
+            </summary>
+            <div className="absolute right-0 top-full z-20 mt-1.5 hidden min-w-[180px] rounded-md border border-border bg-background p-1.5 shadow-lg group-open:block">
+              <div className="px-2.5 py-1">
+                <p className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground/60">
+                  Series
+                </p>
+                <div className="mt-1.5 flex rounded border border-border overflow-hidden">
+                  <button
+                    onClick={() => setAggregationMode("period")}
+                    className={`text-[11px] px-2.5 py-1 transition-colors cursor-pointer ${
+                      aggregationMode === "period"
+                        ? "bg-foreground text-background"
+                        : "text-muted-foreground hover:text-foreground"
+                    }`}
+                  >
+                    Period
+                  </button>
+                  <button
+                    onClick={() => setAggregationMode("cumulative")}
+                    className={`text-[11px] px-2.5 py-1 transition-colors cursor-pointer ${
+                      aggregationMode === "cumulative"
+                        ? "bg-foreground text-background"
+                        : "text-muted-foreground hover:text-foreground"
+                    }`}
+                  >
+                    Cumul.
+                  </button>
+                </div>
+              </div>
+              <div className="px-2.5 py-1">
+                <p className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground/60">
+                  Index
+                </p>
+                <select
+                  value={benchmark}
+                  onChange={(e) => setBenchmark(e.target.value as BenchmarkId)}
+                  className="mt-1.5 w-full text-[11px] border border-border rounded px-1.5 py-1 bg-background cursor-pointer focus:outline-none focus:ring-1 focus:ring-ring"
+                >
+                  {BENCHMARK_OPTIONS.map((b) => (
+                    <option key={b.id} value={b.id}>{b.label}</option>
+                  ))}
+                </select>
+              </div>
+              <button
+                onClick={() => setShowClusterMean((v) => !v)}
+                className={`w-full text-left text-[11px] px-2.5 py-1.5 rounded transition-colors cursor-pointer ${
+                  showClusterMean
+                    ? "bg-foreground/10 text-foreground"
+                    : "text-muted-foreground hover:bg-muted hover:text-foreground"
+                }`}
               >
-                <p className="line-clamp-2 text-sm font-medium">
-                  {item.title || item.url || `Article ${item.article_id}`}
-                </p>
-                {item.snippet && (
-                  <p className="mt-1 line-clamp-3 text-xs text-muted-foreground">
-                    {item.snippet}
-                  </p>
-                )}
-                <p className="mt-2 text-[10px] uppercase tracking-wide text-muted-foreground">
-                  {(item.article_stream || "unknown").replaceAll("_", " ")}
-                  {item.similarity > 0 ? ` · ${(item.similarity * 100).toFixed(0)}%` : ""}
-                </p>
-              </a>
-            ))}
+                Mean
+              </button>
+              <button
+                onClick={() => setShowArticleCount((v) => !v)}
+                className={`w-full text-left text-[11px] px-2.5 py-1.5 rounded transition-colors cursor-pointer ${
+                  showArticleCount
+                    ? "bg-foreground/10 text-foreground"
+                    : "text-muted-foreground hover:bg-muted hover:text-foreground"
+                }`}
+              >
+                Volume
+              </button>
+              <button
+                onClick={() => viewMode === "hourly" && setShowUsSessionMarkers((v) => !v)}
+                disabled={viewMode !== "hourly"}
+                className={`w-full text-left text-[11px] px-2.5 py-1.5 rounded transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed ${
+                  showUsSessionMarkers && viewMode === "hourly"
+                    ? "bg-foreground/10 text-foreground"
+                    : "text-muted-foreground hover:bg-muted hover:text-foreground"
+                }`}
+              >
+                Sessions
+              </button>
+            </div>
+          </details>
+        </div>
+
+        {/* Article count */}
+        <div className="ml-auto flex items-center px-4 py-2 border-l border-border shrink-0 bg-muted/20">
+          <div className="text-right">
+            <p className="text-[9px] font-medium uppercase tracking-wide text-muted-foreground/50 leading-none">Articles</p>
+            <p className="text-sm font-semibold tabular-nums leading-tight">{totalArticles.toLocaleString()}</p>
           </div>
-        )}
+        </div>
       </div>
 
-      <div className="flex gap-6">
+      <div className="flex gap-4">
         {/* Main cluster chart */}
         <div className="flex-1 min-w-0">
           <div className="border rounded-xl p-4">
-            <p className="text-xs text-muted-foreground mb-4">
-              {aggregationMode === "cumulative"
-                ? "Cumulative impact over time"
-                : "Impact score −1 (bearish) → +1 (bullish)"}{" "}
-              · Dashed line = cross-cluster
-              {aggregationMode === "cumulative" ? " cumulative mean" : " mean per period"}
-              {maWindow === 0 ? " (no MA smoothing)" : ""} · Click score to show/hide ·{" "}
-              <ChevronRight size={10} className="inline" /> to drill into
-              dimensions · Drag on the chart to select a time range (highlight); use
-              the strip below to zoom · Click the{" "}
-              <Sparkles size={10} className="inline text-primary" /> icon on the
-              selection for articles in that range (AI period summary later) ·
-              Double-click a point to view articles for that bucket
-            </p>
+            <div className="flex items-start justify-between mb-3">
+              <div>
+                <p className="text-sm font-medium text-foreground/90">
+                  {aggregationMode === "cumulative" ? "Cumulative Impact" : "Period Impact"}
+                  {maWindow > 0 && (
+                    <span className="ml-2 text-[11px] font-normal text-muted-foreground">
+                      {maWindow}{viewMode === "hourly" ? "h" : "d"} MA
+                    </span>
+                  )}
+                  {maWindow === 0 && (
+                    <span className="ml-2 text-[11px] font-normal text-muted-foreground">no smoothing</span>
+                  )}
+                </p>
+                <p className="text-[11px] text-muted-foreground/70 mt-0.5">
+                  −1 bearish → +1 bullish · drag chart to select range · dbl-click for articles
+                  {benchmark !== "none" ? " · OHLC ticks = benchmark" : ""}
+                </p>
+              </div>
+            </div>
             <div
               ref={chartSelectAreaRef}
               className="relative select-none [&_.recharts-wrapper]:cursor-crosshair [&_.recharts-brush]:cursor-grab"
@@ -1461,6 +1751,19 @@ export function NewsTrendsUI({ articles, chartHeight = 400 }: { articles: Articl
                 brushBlockRef.current = !!t?.closest?.(".recharts-brush");
               }}
             >
+              {viewMode === "hourly" && showUsSessionMarkers ? (
+                <div className="pointer-events-none absolute left-2 top-2 z-10 rounded-md border border-border bg-background/90 px-2 py-1 text-[10px] text-muted-foreground shadow-sm">
+                  <span className="inline-flex items-center gap-1">
+                    <span className="inline-block h-2 w-2 rounded-full bg-[hsl(var(--chart-2))]" />
+                    Open 09:30 ET
+                  </span>
+                  <span className="mx-1.5 opacity-50">|</span>
+                  <span className="inline-flex items-center gap-1">
+                    <span className="inline-block h-2 w-2 rounded-full bg-[hsl(var(--chart-5))]" />
+                    Close 16:00 ET
+                  </span>
+                </div>
+              ) : null}
               {explainIconIndex !== null &&
                 dataLen > 1 &&
                 !Number.isNaN(explainIconIndex) && (
@@ -1595,6 +1898,42 @@ export function NewsTrendsUI({ articles, chartHeight = 400 }: { articles: Articl
                     connectNulls
                   />
                 ) : null}
+                {viewMode === "hourly" &&
+                  showUsSessionMarkers &&
+                  usSessionMarkers.sessions.map((session) => (
+                    <ReferenceArea
+                      key={`us-session-${session.start}`}
+                      x1={session.start}
+                      x2={session.end}
+                      fill="hsl(var(--chart-2) / 0.07)"
+                      ifOverflow="visible"
+                      zIndex={0}
+                    />
+                  ))}
+                {viewMode === "hourly" &&
+                  showUsSessionMarkers &&
+                  usSessionMarkers.openBuckets.map((bucket) => (
+                    <ReferenceLine
+                      key={`us-open-${bucket}`}
+                      x={bucket}
+                      stroke="hsl(var(--chart-2))"
+                      strokeOpacity={0.75}
+                      strokeDasharray="4 3"
+                      strokeWidth={1.4}
+                    />
+                  ))}
+                {viewMode === "hourly" &&
+                  showUsSessionMarkers &&
+                  usSessionMarkers.closeBuckets.map((bucket) => (
+                    <ReferenceLine
+                      key={`us-close-${bucket}`}
+                      x={bucket}
+                      stroke="hsl(var(--chart-5))"
+                      strokeOpacity={0.75}
+                      strokeDasharray="4 3"
+                      strokeWidth={1.4}
+                    />
+                  ))}
                 {CLUSTERS.filter((c) => selected.has(c.id)).map((cluster) => (
                   <Line
                     key={cluster.id}
@@ -1611,18 +1950,49 @@ export function NewsTrendsUI({ articles, chartHeight = 400 }: { articles: Articl
                   />
                 ))}
                 {benchmark !== "none" && (
-                  <Line
+                  <Scatter
                     yAxisId="benchmark"
-                    type="monotone"
-                    dataKey="__benchmark"
+                    dataKey="__benchmarkMid"
                     name={
                       BENCHMARK_OPTIONS.find((b) => b.id === benchmark)?.label ?? "Benchmark"
                     }
-                    stroke="#9ca3af"
-                    dot={false}
-                    strokeWidth={2}
-                    strokeDasharray="6 4"
-                    connectNulls
+                    fill="hsl(var(--muted-foreground))"
+                    shape={() => null}
+                  >
+                    <ErrorBar
+                      dataKey={(
+                        entry: {
+                          __benchmarkRangeLow?: number | null;
+                          __benchmarkRangeHigh?: number | null;
+                        },
+                      ) => [
+                        entry.__benchmarkRangeLow ?? 0,
+                        entry.__benchmarkRangeHigh ?? 0,
+                      ]}
+                      direction="y"
+                      width={0}
+                      stroke="hsl(var(--muted-foreground))"
+                      strokeWidth={1.1}
+                      opacity={0.8}
+                    />
+                  </Scatter>
+                )}
+                {benchmark !== "none" && (
+                  <Scatter
+                    yAxisId="benchmark"
+                    dataKey="__benchmarkOpen"
+                    name="Benchmark open"
+                    shape={<BenchmarkOpenTick />}
+                    fill="hsl(var(--chart-2))"
+                  />
+                )}
+                {benchmark !== "none" && (
+                  <Scatter
+                    yAxisId="benchmark"
+                    dataKey="__benchmarkClose"
+                    name="Benchmark close"
+                    shape={<BenchmarkCloseTick />}
+                    fill="hsl(var(--chart-5))"
                   />
                 )}
                 {showArticleCount && (
@@ -1644,8 +2014,8 @@ export function NewsTrendsUI({ articles, chartHeight = 400 }: { articles: Articl
                     stroke="hsl(var(--border))"
                     fill="hsl(var(--muted))"
                     travellerWidth={6}
-                    startIndex={brushStart}
-                    endIndex={brushEnd}
+                    startIndex={hasValidControlledBrush ? normalizedBrushStart : undefined}
+                    endIndex={hasValidControlledBrush ? normalizedBrushEnd : undefined}
                     onChange={handleBrushChange}
                     tickFormatter={(v: string) => formatBucket(v, viewMode)}
                   />
@@ -1780,6 +2150,40 @@ export function NewsTrendsUI({ articles, chartHeight = 400 }: { articles: Articl
                 <X size={16} />
               </button>
             </div>
+            {periodArticles.length > 0 && (
+              <div className="flex flex-wrap items-center gap-3 px-5 py-3 border-b bg-muted/20 text-xs">
+                <span className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                  Sort by impact
+                </span>
+                <label className="flex items-center gap-1.5 text-muted-foreground">
+                  <span className="sr-only">Cluster</span>
+                  <select
+                    className="rounded-md border border-border bg-background px-2 py-1.5 text-xs text-foreground max-w-[200px]"
+                    value={periodModalSortCluster}
+                    onChange={(e) => setPeriodModalSortCluster(e.target.value)}
+                  >
+                    {CLUSTERS.map((c) => (
+                      <option key={c.id} value={c.id}>
+                        {c.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="flex items-center gap-1.5 text-muted-foreground">
+                  <span className="sr-only">Direction</span>
+                  <select
+                    className="rounded-md border border-border bg-background px-2 py-1.5 text-xs text-foreground"
+                    value={periodModalSortDir}
+                    onChange={(e) =>
+                      setPeriodModalSortDir(e.target.value === "asc" ? "asc" : "desc")
+                    }
+                  >
+                    <option value="desc">High → low</option>
+                    <option value="asc">Low → high</option>
+                  </select>
+                </label>
+              </div>
+            )}
             <div className="overflow-y-auto p-4">
               {periodArticles.length === 0 ? (
                 <p className="text-sm text-muted-foreground text-center py-8">
@@ -1788,7 +2192,7 @@ export function NewsTrendsUI({ articles, chartHeight = 400 }: { articles: Articl
                 </p>
               ) : (
                 <ArticlesGrid
-                  articles={periodArticles.map((a) => ({
+                  articles={sortedPeriodArticles.map((a) => ({
                     id: a.id ?? 0,
                     slug: a.slug ?? null,
                     title: a.title ?? null,
