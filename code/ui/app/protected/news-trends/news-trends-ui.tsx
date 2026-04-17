@@ -21,7 +21,14 @@ import {
   ResponsiveContainer,
 } from "recharts";
 import type { MouseHandlerDataParam } from "recharts";
-import { TrendingUp, TrendingDown, Minus, ChevronRight, Sparkles, X } from "lucide-react";
+import {
+  TrendingUp,
+  TrendingDown,
+  Minus,
+  ChevronRight,
+  Sparkles,
+  X,
+} from "lucide-react";
 import { CLUSTERS } from "../vectors/dimensions";
 import { fmpGetOhlc } from "@/app/actions/fmp";
 import { ArticlesGrid } from "@/components/articles-grid";
@@ -81,7 +88,11 @@ type OhlcPoint = {
   close: number;
 };
 
-const BENCHMARK_OPTIONS: Array<{ id: BenchmarkId; label: string; symbol: string | null }> = [
+const BENCHMARK_OPTIONS: Array<{
+  id: BenchmarkId;
+  label: string;
+  symbol: string | null;
+}> = [
   { id: "none", label: "No index", symbol: null },
   { id: "sp500", label: "S&P 500 (^GSPC)", symbol: "^GSPC" },
   { id: "nasdaq100", label: "Nasdaq 100 (QQQ)", symbol: "QQQ" },
@@ -154,7 +165,10 @@ function getTimeZoneParts(date: Date, timeZone: string): DateParts {
   };
 }
 
-function compareDateOnly(a: { year: number; month: number; day: number }, b: { year: number; month: number; day: number }): number {
+function compareDateOnly(
+  a: { year: number; month: number; day: number },
+  b: { year: number; month: number; day: number },
+): number {
   if (a.year !== b.year) return a.year - b.year;
   if (a.month !== b.month) return a.month - b.month;
   return a.day - b.day;
@@ -198,7 +212,11 @@ function lastWeekdayOfMonth(
   return { year, month: month1to12, day: lastDay - delta };
 }
 
-function easterSundayUtc(year: number): { year: number; month: number; day: number } {
+function easterSundayUtc(year: number): {
+  year: number;
+  month: number;
+  day: number;
+} {
   // Anonymous Gregorian algorithm
   const a = year % 19;
   const b = Math.floor(year / 100);
@@ -229,9 +247,14 @@ function observedFixedHoliday(
   return { year, month, day };
 }
 
-function isUsMarketHolidayNyDate(year: number, month: number, day: number): boolean {
+function isUsMarketHolidayNyDate(
+  year: number,
+  month: number,
+  day: number,
+): boolean {
   const target = { year, month, day };
-  const same = (x: { year: number; month: number; day: number }) => compareDateOnly(x, target) === 0;
+  const same = (x: { year: number; month: number; day: number }) =>
+    compareDateOnly(x, target) === 0;
 
   const newYears = observedFixedHoliday(year, 1, 1);
   const mlk = nthWeekdayOfMonth(year, 1, 1, 3); // 3rd Monday Jan
@@ -259,7 +282,11 @@ function isUsMarketHolidayNyDate(year: number, month: number, day: number): bool
   );
 }
 
-function isUsMarketTradingDayNyDate(year: number, month: number, day: number): boolean {
+function isUsMarketTradingDayNyDate(
+  year: number,
+  month: number,
+  day: number,
+): boolean {
   const dow = new Date(Date.UTC(year, month - 1, day)).getUTCDay();
   if (dow === 0 || dow === 6) return false;
   return !isUsMarketHolidayNyDate(year, month, day);
@@ -277,7 +304,15 @@ function nyTimeToUtcDate(
   const desiredMs = Date.UTC(year, month - 1, day, hour, minute, 0, 0);
   for (let i = 0; i < 5; i += 1) {
     const current = getTimeZoneParts(new Date(guessUtcMs), "America/New_York");
-    const currentMs = Date.UTC(current.year, current.month - 1, current.day, current.hour, current.minute, 0, 0);
+    const currentMs = Date.UTC(
+      current.year,
+      current.month - 1,
+      current.day,
+      current.hour,
+      current.minute,
+      0,
+      0,
+    );
     const diffMs = desiredMs - currentMs;
     if (diffMs === 0) break;
     guessUtcMs += diffMs;
@@ -301,7 +336,10 @@ function articlesInBucketRange(
 }
 
 /** Mean of available dimension scores in ``impact_json`` for one cluster (matches chart bucket logic). */
-function clusterMeanImpact(article: ArticleImpact, clusterId: string): number | null {
+function clusterMeanImpact(
+  article: ArticleImpact,
+  clusterId: string,
+): number | null {
   const cluster = CLUSTERS.find((c) => c.id === clusterId);
   if (!cluster) return null;
   const scores = cluster.dimensions
@@ -338,7 +376,9 @@ function impactConfidenceWeight(confidence: number | null | undefined): number {
 }
 
 /** sum(value × weight) / sum(weight); if all weights are 0, plain mean of values. */
-function weightedMeanPairs(pairs: { value: number; weight: number }[]): number | null {
+function weightedMeanPairs(
+  pairs: { value: number; weight: number }[],
+): number | null {
   if (pairs.length === 0) return null;
   let sumW = 0;
   let sumVW = 0;
@@ -400,7 +440,10 @@ function buildPeriodData(
       for (const row of rows) {
         const v = row.impact_json[key];
         if (v == null || isNaN(v)) continue;
-        pairs.push({ value: v, weight: impactConfidenceWeight(row.confidence) });
+        pairs.push({
+          value: v,
+          weight: impactConfidenceWeight(row.confidence),
+        });
       }
       dimensions[key] = weightedMeanPairs(pairs);
     }
@@ -433,7 +476,8 @@ function fillDateGaps(
   const toHourlyBucket = (bucket: string, endOfDay: boolean): string | null => {
     // Accept either "YYYY-MM-DD" or "YYYY-MM-DDTHH".
     if (/^\d{4}-\d{2}-\d{2}T\d{2}$/.test(bucket)) return bucket;
-    if (/^\d{4}-\d{2}-\d{2}$/.test(bucket)) return `${bucket}T${endOfDay ? "23" : "00"}`;
+    if (/^\d{4}-\d{2}-\d{2}$/.test(bucket))
+      return `${bucket}T${endOfDay ? "23" : "00"}`;
     return null;
   };
 
@@ -492,9 +536,9 @@ function applyClusterMA(
       result[cluster.id] =
         vals.length > 0 ? vals.reduce((a, b) => a + b, 0) / vals.length : null;
     }
-    const clusterVals = CLUSTERS.map((c) => result[c.id] as number | null).filter(
-      (v): v is number => v != null,
-    );
+    const clusterVals = CLUSTERS.map(
+      (c) => result[c.id] as number | null,
+    ).filter((v): v is number => v != null);
     result.__clusterMean =
       clusterVals.length > 0
         ? clusterVals.reduce((a, b) => a + b, 0) / clusterVals.length
@@ -530,11 +574,17 @@ function accumulateSeries(
   data: Array<{ date: string; [key: string]: number | string | null }>,
   keys: string[],
 ): Array<{ date: string; [key: string]: number | string | null }> {
-  const running: Record<string, number> = Object.fromEntries(keys.map((k) => [k, 0]));
-  const seen: Record<string, boolean> = Object.fromEntries(keys.map((k) => [k, false]));
+  const running: Record<string, number> = Object.fromEntries(
+    keys.map((k) => [k, 0]),
+  );
+  const seen: Record<string, boolean> = Object.fromEntries(
+    keys.map((k) => [k, false]),
+  );
 
   return data.map((point) => {
-    const next: { date: string; [key: string]: number | string | null } = { date: point.date };
+    const next: { date: string; [key: string]: number | string | null } = {
+      date: point.date,
+    };
     for (const key of keys) {
       const raw = point[key];
       if (typeof raw === "number" && Number.isFinite(raw)) {
@@ -600,7 +650,10 @@ function Leaderboard({
             {/* Toggle visibility */}
             <button
               onClick={() => onToggle(cluster.id)}
-              onDoubleClick={(e) => { e.preventDefault(); onFocus(cluster.id); }}
+              onDoubleClick={(e) => {
+                e.preventDefault();
+                onFocus(cluster.id);
+              }}
               className={`flex items-center gap-2 flex-1 text-left min-w-0 ${!isSelected ? "opacity-50" : ""}`}
               title="Click to toggle · Double-click to focus"
             >
@@ -651,7 +704,8 @@ function Leaderboard({
         );
       })}
       <p className="text-[10px] text-muted-foreground/40 mt-2 px-2 leading-snug">
-        Click to toggle · hover <ChevronRight size={8} className="inline" /> to drill
+        Click to toggle · hover <ChevronRight size={8} className="inline" /> to
+        drill
       </p>
     </div>
   );
@@ -670,7 +724,8 @@ function CustomTooltip({
 }) {
   if (!active || !payload?.length) return null;
 
-  const articleCount = payload.find((p) => p.name === "__articleCount")?.value ?? null;
+  const articleCount =
+    payload.find((p) => p.name === "__articleCount")?.value ?? null;
   const sorted = [...payload]
     .filter((p) => p.name !== "__articleCount")
     .filter((p) => typeof p.value === "number" && Number.isFinite(p.value))
@@ -681,11 +736,15 @@ function CustomTooltip({
       <p className="font-semibold mb-2 text-muted-foreground">{label}</p>
       {typeof articleCount === "number" ? (
         <p className="mb-2 text-[11px] text-muted-foreground">
-          Articles: <span className="font-mono tabular-nums">{articleCount}</span>
+          Articles:{" "}
+          <span className="font-mono tabular-nums">{articleCount}</span>
         </p>
       ) : null}
       {sorted.map((p) => {
-        const numericValue = typeof p.value === "number" && Number.isFinite(p.value) ? p.value : null;
+        const numericValue =
+          typeof p.value === "number" && Number.isFinite(p.value)
+            ? p.value
+            : null;
         if (numericValue == null) return null;
         const displayLabel = labelMap[p.name] ?? p.name;
         const isPos = numericValue > 0.05;
@@ -729,7 +788,8 @@ function BenchmarkOpenTick({
   const y = cy as number;
   const open = payload?.__benchmarkOpen;
   const close = payload?.__benchmarkClose;
-  const isUp = typeof open === "number" && typeof close === "number" && close >= open;
+  const isUp =
+    typeof open === "number" && typeof close === "number" && close >= open;
   const color = isUp ? "#10b981" : "#ef4444";
   return (
     <line
@@ -761,7 +821,8 @@ function BenchmarkCloseTick({
   const y = cy as number;
   const open = payload?.__benchmarkOpen;
   const close = payload?.__benchmarkClose;
-  const isUp = typeof open === "number" && typeof close === "number" && close >= open;
+  const isUp =
+    typeof open === "number" && typeof close === "number" && close >= open;
   const color = isUp ? "#10b981" : "#ef4444";
   return (
     <line
@@ -803,8 +864,9 @@ function DimensionDrilldown({
   function toggleDim(key: string) {
     setSelectedDims((prev) => {
       const next = new Set(prev);
-      if (next.has(key)) { if (next.size > 1) next.delete(key); }
-      else next.add(key);
+      if (next.has(key)) {
+        if (next.size > 1) next.delete(key);
+      } else next.add(key);
       return next;
     });
   }
@@ -911,7 +973,10 @@ function DimensionDrilldown({
               <button
                 key={dim.key}
                 onClick={() => toggleDim(dim.key)}
-                onDoubleClick={(e) => { e.preventDefault(); focusDim(dim.key); }}
+                onDoubleClick={(e) => {
+                  e.preventDefault();
+                  focusDim(dim.key);
+                }}
                 className={`flex items-center gap-2 px-2 py-1 rounded text-xs w-full text-left transition-opacity hover:bg-muted/50 ${!isSelected ? "opacity-40" : ""}`}
                 title={`${dim.description} · Click to toggle · Double-click to focus`}
               >
@@ -969,10 +1034,17 @@ function toDateInputValue(iso: string): string {
   return Number.isNaN(d.getTime()) ? iso.slice(0, 10) : localDateStr(d);
 }
 
-export function NewsTrendsUI({ articles, chartHeight = 400 }: { articles: ArticleImpact[]; chartHeight?: number }) {
+export function NewsTrendsUI({
+  articles,
+  chartHeight = 400,
+}: {
+  articles: ArticleImpact[];
+  chartHeight?: number;
+}) {
   const [viewMode, setViewMode] = useState<ViewMode>("daily");
   const [maWindow, setMaWindow] = useState(7);
-  const [aggregationMode, setAggregationMode] = useState<AggregationMode>("period");
+  const [aggregationMode, setAggregationMode] =
+    useState<AggregationMode>("period");
   const [selected, setSelected] = useState<Set<string>>(
     new Set(CLUSTERS.map((c) => c.id)),
   );
@@ -997,7 +1069,10 @@ export function NewsTrendsUI({ articles, chartHeight = 400 }: { articles: Articl
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const advancedMenuRef = useRef<HTMLDivElement | null>(null);
   const advancedButtonRef = useRef<HTMLButtonElement | null>(null);
-  const [advancedMenuPos, setAdvancedMenuPos] = useState<{ top: number; left: number } | null>(null);
+  const [advancedMenuPos, setAdvancedMenuPos] = useState<{
+    top: number;
+    left: number;
+  } | null>(null);
 
   useEffect(() => {
     if (!advancedOpen) return;
@@ -1043,8 +1118,11 @@ export function NewsTrendsUI({ articles, chartHeight = 400 }: { articles: Articl
   function applyQuickRange(range: QuickRange) {
     setQuickRange(range);
     if (range === "custom") return;
-    const days = range === "7d" ? 7 : range === "30d" ? 30 : range === "90d" ? 90 : 365;
-    const [ey, em, ed] = (maxDate || localDateStr(new Date())).split("-").map(Number);
+    const days =
+      range === "7d" ? 7 : range === "30d" ? 30 : range === "90d" ? 90 : 365;
+    const [ey, em, ed] = (maxDate || localDateStr(new Date()))
+      .split("-")
+      .map(Number);
     const end = new Date(ey, em - 1, ed); // local midnight
     const start = new Date(end);
     start.setDate(start.getDate() - days);
@@ -1081,10 +1159,10 @@ export function NewsTrendsUI({ articles, chartHeight = 400 }: { articles: Articl
   );
   const chartData = useMemo(() => {
     if (aggregationMode === "period") return chartDataBase;
-    return accumulateSeries(
-      chartDataBase,
-      [...CLUSTERS.map((c) => c.id), "__clusterMean"],
-    );
+    return accumulateSeries(chartDataBase, [
+      ...CLUSTERS.map((c) => c.id),
+      "__clusterMean",
+    ]);
   }, [aggregationMode, chartDataBase]);
 
   useEffect(() => {
@@ -1130,14 +1208,24 @@ export function NewsTrendsUI({ articles, chartHeight = 400 }: { articles: Articl
   }, [benchmark, viewMode]);
 
   const benchmarkByBucket = useMemo(() => {
-    if (benchmark === "none" || benchmarkData.length === 0 || daily.length === 0) {
-      return new Map<string, { open: number; high: number; low: number; close: number }>();
+    if (
+      benchmark === "none" ||
+      benchmarkData.length === 0 ||
+      daily.length === 0
+    ) {
+      return new Map<
+        string,
+        { open: number; high: number; low: number; close: number }
+      >();
     }
 
     const startBucket = daily[0]?.date;
     const endBucket = daily[daily.length - 1]?.date;
     if (!startBucket || !endBucket) {
-      return new Map<string, { open: number; high: number; low: number; close: number }>();
+      return new Map<
+        string,
+        { open: number; high: number; low: number; close: number }
+      >();
     }
 
     const bucketValues = new Map<
@@ -1156,14 +1244,22 @@ export function NewsTrendsUI({ articles, chartHeight = 400 }: { articles: Articl
       });
     }
 
-    const sortedBuckets = Array.from(bucketValues.keys()).sort((a, b) => a.localeCompare(b));
+    const sortedBuckets = Array.from(bucketValues.keys()).sort((a, b) =>
+      a.localeCompare(b),
+    );
     if (sortedBuckets.length === 0) {
-      return new Map<string, { open: number; high: number; low: number; close: number }>();
+      return new Map<
+        string,
+        { open: number; high: number; low: number; close: number }
+      >();
     }
 
     const base = bucketValues.get(sortedBuckets[0])?.open ?? Number.NaN;
     if (!Number.isFinite(base) || Math.abs(base) < 1e-9) {
-      return new Map<string, { open: number; high: number; low: number; close: number }>();
+      return new Map<
+        string,
+        { open: number; high: number; low: number; close: number }
+      >();
     }
 
     return new Map(
@@ -1193,17 +1289,27 @@ export function NewsTrendsUI({ articles, chartHeight = 400 }: { articles: Articl
         __benchmarkLow: benchmarkValue?.low ?? null,
         __benchmarkClose: benchmarkValue?.close ?? null,
         __benchmarkMid:
-          benchmarkValue != null ? (benchmarkValue.high + benchmarkValue.low) / 2 : null,
+          benchmarkValue != null
+            ? (benchmarkValue.high + benchmarkValue.low) / 2
+            : null,
         __benchmarkRangeLow:
-          benchmarkValue != null ? (benchmarkValue.high - benchmarkValue.low) / 2 : null,
+          benchmarkValue != null
+            ? (benchmarkValue.high - benchmarkValue.low) / 2
+            : null,
         __benchmarkRangeHigh:
-          benchmarkValue != null ? (benchmarkValue.high - benchmarkValue.low) / 2 : null,
+          benchmarkValue != null
+            ? (benchmarkValue.high - benchmarkValue.low) / 2
+            : null,
       };
     });
   }, [benchmark, benchmarkByBucket, chartData]);
 
   const usSessionMarkers = useMemo(() => {
-    if (!showUsSessionMarkers || viewMode !== "hourly" || chartDataWithBenchmark.length === 0) {
+    if (
+      !showUsSessionMarkers ||
+      viewMode !== "hourly" ||
+      chartDataWithBenchmark.length === 0
+    ) {
       return {
         openBuckets: [] as string[],
         closeBuckets: [] as string[],
@@ -1223,12 +1329,17 @@ export function NewsTrendsUI({ articles, chartHeight = 400 }: { articles: Articl
       if (Number.isNaN(localMidnight.getTime())) continue;
       const ny = getTimeZoneParts(localMidnight, "America/New_York");
       const nyKey = `${ny.year}-${pad2(ny.month)}-${pad2(ny.day)}`;
-      if (!tradingDays.has(nyKey) && isUsMarketTradingDayNyDate(ny.year, ny.month, ny.day)) {
+      if (
+        !tradingDays.has(nyKey) &&
+        isUsMarketTradingDayNyDate(ny.year, ny.month, ny.day)
+      ) {
         tradingDays.set(nyKey, { year: ny.year, month: ny.month, day: ny.day });
       }
     }
 
-    const dataBuckets = new Set(chartDataWithBenchmark.map((p) => String(p.date)));
+    const dataBuckets = new Set(
+      chartDataWithBenchmark.map((p) => String(p.date)),
+    );
     const openBuckets = new Set<string>();
     const closeBuckets = new Set<string>();
     const sessions: Array<{ start: string; end: string }> = [];
@@ -1244,7 +1355,10 @@ export function NewsTrendsUI({ articles, chartHeight = 400 }: { articles: Articl
       );
       if (dataBuckets.has(openLocalBucket)) openBuckets.add(openLocalBucket);
       if (dataBuckets.has(closeLocalBucket)) closeBuckets.add(closeLocalBucket);
-      if (dataBuckets.has(openLocalBucket) && dataBuckets.has(closeLocalBucket)) {
+      if (
+        dataBuckets.has(openLocalBucket) &&
+        dataBuckets.has(closeLocalBucket)
+      ) {
         sessions.push({ start: openLocalBucket, end: closeLocalBucket });
       }
     }
@@ -1268,7 +1382,9 @@ export function NewsTrendsUI({ articles, chartHeight = 400 }: { articles: Articl
     return map;
   }, [articles, viewMode]);
 
-  const modalArticles = articleModalDate ? (articlesByBucket.get(articleModalDate) ?? []) : [];
+  const modalArticles = articleModalDate
+    ? (articlesByBucket.get(articleModalDate) ?? [])
+    : [];
 
   /** X-axis zoom: Brush strip below the chart */
   const [brushRange, setBrushRange] = useState<{
@@ -1289,7 +1405,9 @@ export function NewsTrendsUI({ articles, chartHeight = 400 }: { articles: Articl
   const [periodModalSortCluster, setPeriodModalSortCluster] = useState<string>(
     () => CLUSTERS[0]?.id ?? "",
   );
-  const [periodModalSortDir, setPeriodModalSortDir] = useState<"desc" | "asc">("desc");
+  const [periodModalSortDir, setPeriodModalSortDir] = useState<"desc" | "asc">(
+    "desc",
+  );
   const rangeDragRef = useRef<{ start: number; cur: number } | null>(null);
   const brushBlockRef = useRef(false);
   /** Outer chart stack (plot uses full width); used with clientX for stable index mapping. */
@@ -1331,7 +1449,9 @@ export function NewsTrendsUI({ articles, chartHeight = 400 }: { articles: Articl
     normalizedBrushStart >= 0 &&
     normalizedBrushEnd <= lastIdx;
 
-  const handleBrushChange = (next: { startIndex?: number; endIndex?: number } | null) => {
+  const handleBrushChange = (
+    next: { startIndex?: number; endIndex?: number } | null,
+  ) => {
     if (!next) {
       setBrushRange(null);
       return;
@@ -1362,7 +1482,9 @@ export function NewsTrendsUI({ articles, chartHeight = 400 }: { articles: Articl
         plotRightGutterPx,
       );
       rangeDragRef.current = { start: d.start, cur: idx };
-      setRangeSelectDrag((prev) => (prev ? { start: prev.start, cur: idx } : null));
+      setRangeSelectDrag((prev) =>
+        prev ? { start: prev.start, cur: idx } : null,
+      );
     },
     [dataLen, plotLeftGutterPx, plotRightGutterPx],
   );
@@ -1472,11 +1594,17 @@ export function NewsTrendsUI({ articles, chartHeight = 400 }: { articles: Articl
     const startBucket = String(chartDataWithBenchmark[lo]?.date ?? "");
     const endBucket = String(chartDataWithBenchmark[hi]?.date ?? "");
     if (!startBucket || !endBucket) return [];
-    return articlesInBucketRange(filteredArticles, startBucket, endBucket, viewMode)
+    return articlesInBucketRange(
+      filteredArticles,
+      startBucket,
+      endBucket,
+      viewMode,
+    )
       .slice()
       .sort(
         (a, b) =>
-          new Date(b.published_at).getTime() - new Date(a.published_at).getTime(),
+          new Date(b.published_at).getTime() -
+          new Date(a.published_at).getTime(),
       );
   }, [periodSelection, chartDataWithBenchmark, filteredArticles, viewMode]);
 
@@ -1495,7 +1623,9 @@ export function NewsTrendsUI({ articles, chartHeight = 400 }: { articles: Articl
       if (bNull) return -1;
       const diff = sa - sb;
       if (diff !== 0) return dir === "desc" ? -diff : diff;
-      return new Date(b.published_at).getTime() - new Date(a.published_at).getTime();
+      return (
+        new Date(b.published_at).getTime() - new Date(a.published_at).getTime()
+      );
     });
   }, [periodArticles, periodModalSortCluster, periodModalSortDir]);
 
@@ -1521,8 +1651,12 @@ export function NewsTrendsUI({ articles, chartHeight = 400 }: { articles: Articl
     );
   }, [daily, effectiveMaWindow, drilldownDims]);
   const dimensionChartData = useMemo(() => {
-    if (aggregationMode === "period" || !drilldownDims) return dimensionChartDataBase;
-    return accumulateSeries(dimensionChartDataBase, drilldownDims.map((d) => d.key));
+    if (aggregationMode === "period" || !drilldownDims)
+      return dimensionChartDataBase;
+    return accumulateSeries(
+      dimensionChartDataBase,
+      drilldownDims.map((d) => d.key),
+    );
   }, [aggregationMode, dimensionChartDataBase, drilldownDims]);
 
   // Latest dimension scores for the drilled-down cluster
@@ -1576,7 +1710,6 @@ export function NewsTrendsUI({ articles, chartHeight = 400 }: { articles: Articl
     );
   }
 
-
   const totalArticles = daily.reduce((sum, d) => sum + d.count, 0);
 
   const clusterLabelMap = useMemo(
@@ -1594,7 +1727,9 @@ export function NewsTrendsUI({ articles, chartHeight = 400 }: { articles: Articl
       <div className="flex items-stretch rounded-xl border border-border bg-card overflow-x-auto overflow-y-visible">
         {/* Date range + granularity first */}
         <div className="flex items-center px-3 py-2 border-r border-border shrink-0">
-          <span className="text-[10px] font-medium text-muted-foreground/60 uppercase tracking-wide">Range</span>
+          <span className="text-[10px] font-medium text-muted-foreground/60 uppercase tracking-wide">
+            Range
+          </span>
         </div>
         {(["7d", "30d", "90d", "1y"] as QuickRange[]).map((r) => (
           <button
@@ -1635,7 +1770,9 @@ export function NewsTrendsUI({ articles, chartHeight = 400 }: { articles: Articl
           />
         </div>
         <div className="flex items-center gap-2 px-3 py-2 border-r border-border shrink-0">
-          <span className="text-[10px] font-medium text-muted-foreground/60 uppercase tracking-wide">View</span>
+          <span className="text-[10px] font-medium text-muted-foreground/60 uppercase tracking-wide">
+            View
+          </span>
           <div className="flex rounded border border-border overflow-hidden">
             {(["daily", "hourly"] as ViewMode[]).map((mode) => (
               <button
@@ -1655,7 +1792,9 @@ export function NewsTrendsUI({ articles, chartHeight = 400 }: { articles: Articl
 
         {/* MA smoothing */}
         <div className="flex items-center gap-2 px-3 py-2 border-r border-border shrink-0">
-          <span className="text-[10px] font-medium text-muted-foreground/60 shrink-0">MA</span>
+          <span className="text-[10px] font-medium text-muted-foreground/60 shrink-0">
+            MA
+          </span>
           <div className="flex items-center gap-0.5">
             {MA_OPTIONS[viewMode].map((opt) => (
               <button
@@ -1683,87 +1822,99 @@ export function NewsTrendsUI({ articles, chartHeight = 400 }: { articles: Articl
               className="inline-flex items-center rounded border border-border px-2.5 py-1 text-[11px] text-muted-foreground transition-colors hover:text-foreground cursor-pointer"
             >
               Advanced
-              <ChevronRight className={`ml-1 h-3 w-3 transition-transform ${advancedOpen ? "rotate-90" : ""}`} />
+              <ChevronRight
+                className={`ml-1 h-3 w-3 transition-transform ${advancedOpen ? "rotate-90" : ""}`}
+              />
             </button>
             {advancedOpen && advancedMenuPos
               ? createPortal(
                   <div
                     ref={advancedMenuRef}
                     className="fixed z-[60] min-w-[200px] rounded-md border border-border bg-background p-1.5 shadow-lg"
-                    style={{ top: advancedMenuPos.top, left: advancedMenuPos.left }}
+                    style={{
+                      top: advancedMenuPos.top,
+                      left: advancedMenuPos.left,
+                    }}
                   >
-              <div className="px-2.5 py-1">
-                <p className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground/60">
-                  Series
-                </p>
-                <div className="mt-1.5 flex rounded border border-border overflow-hidden">
-                  <button
-                    onClick={() => setAggregationMode("period")}
-                    className={`text-[11px] px-2.5 py-1 transition-colors cursor-pointer ${
-                      aggregationMode === "period"
-                        ? "bg-foreground text-background"
-                        : "text-muted-foreground hover:text-foreground"
-                    }`}
-                  >
-                    Period
-                  </button>
-                  <button
-                    onClick={() => setAggregationMode("cumulative")}
-                    className={`text-[11px] px-2.5 py-1 transition-colors cursor-pointer ${
-                      aggregationMode === "cumulative"
-                        ? "bg-foreground text-background"
-                        : "text-muted-foreground hover:text-foreground"
-                    }`}
-                  >
-                    Cumul.
-                  </button>
-                </div>
-              </div>
-              <div className="px-2.5 py-1">
-                <p className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground/60">
-                  Index
-                </p>
-                <select
-                  value={benchmark}
-                  onChange={(e) => setBenchmark(e.target.value as BenchmarkId)}
-                  className="mt-1.5 w-full text-[11px] border border-border rounded px-1.5 py-1 bg-background cursor-pointer focus:outline-none focus:ring-1 focus:ring-ring"
-                >
-                  {BENCHMARK_OPTIONS.map((b) => (
-                    <option key={b.id} value={b.id}>{b.label}</option>
-                  ))}
-                </select>
-              </div>
-              <button
-                onClick={() => setShowClusterMean((v) => !v)}
-                className={`w-full text-left text-[11px] px-2.5 py-1.5 rounded transition-colors cursor-pointer ${
-                  showClusterMean
-                    ? "bg-foreground/10 text-foreground"
-                    : "text-muted-foreground hover:bg-muted hover:text-foreground"
-                }`}
-              >
-                Mean
-              </button>
-              <button
-                onClick={() => setShowArticleCount((v) => !v)}
-                className={`w-full text-left text-[11px] px-2.5 py-1.5 rounded transition-colors cursor-pointer ${
-                  showArticleCount
-                    ? "bg-foreground/10 text-foreground"
-                    : "text-muted-foreground hover:bg-muted hover:text-foreground"
-                }`}
-              >
-                Volume
-              </button>
-              <button
-                onClick={() => viewMode === "hourly" && setShowUsSessionMarkers((v) => !v)}
-                disabled={viewMode !== "hourly"}
-                className={`w-full text-left text-[11px] px-2.5 py-1.5 rounded transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed ${
-                  showUsSessionMarkers && viewMode === "hourly"
-                    ? "bg-foreground/10 text-foreground"
-                    : "text-muted-foreground hover:bg-muted hover:text-foreground"
-                }`}
-              >
-                Sessions
-              </button>
+                    <div className="px-2.5 py-1">
+                      <p className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground/60">
+                        Series
+                      </p>
+                      <div className="mt-1.5 flex rounded border border-border overflow-hidden">
+                        <button
+                          onClick={() => setAggregationMode("period")}
+                          className={`text-[11px] px-2.5 py-1 transition-colors cursor-pointer ${
+                            aggregationMode === "period"
+                              ? "bg-foreground text-background"
+                              : "text-muted-foreground hover:text-foreground"
+                          }`}
+                        >
+                          Period
+                        </button>
+                        <button
+                          onClick={() => setAggregationMode("cumulative")}
+                          className={`text-[11px] px-2.5 py-1 transition-colors cursor-pointer ${
+                            aggregationMode === "cumulative"
+                              ? "bg-foreground text-background"
+                              : "text-muted-foreground hover:text-foreground"
+                          }`}
+                        >
+                          Cumul.
+                        </button>
+                      </div>
+                    </div>
+                    <div className="px-2.5 py-1">
+                      <p className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground/60">
+                        Index
+                      </p>
+                      <select
+                        value={benchmark}
+                        onChange={(e) =>
+                          setBenchmark(e.target.value as BenchmarkId)
+                        }
+                        className="mt-1.5 w-full text-[11px] border border-border rounded px-1.5 py-1 bg-background cursor-pointer focus:outline-none focus:ring-1 focus:ring-ring"
+                      >
+                        {BENCHMARK_OPTIONS.map((b) => (
+                          <option key={b.id} value={b.id}>
+                            {b.label}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    <button
+                      onClick={() => setShowClusterMean((v) => !v)}
+                      className={`w-full text-left text-[11px] px-2.5 py-1.5 rounded transition-colors cursor-pointer ${
+                        showClusterMean
+                          ? "bg-foreground/10 text-foreground"
+                          : "text-muted-foreground hover:bg-muted hover:text-foreground"
+                      }`}
+                    >
+                      Mean
+                    </button>
+                    <button
+                      onClick={() => setShowArticleCount((v) => !v)}
+                      className={`w-full text-left text-[11px] px-2.5 py-1.5 rounded transition-colors cursor-pointer ${
+                        showArticleCount
+                          ? "bg-foreground/10 text-foreground"
+                          : "text-muted-foreground hover:bg-muted hover:text-foreground"
+                      }`}
+                    >
+                      Volume
+                    </button>
+                    <button
+                      onClick={() =>
+                        viewMode === "hourly" &&
+                        setShowUsSessionMarkers((v) => !v)
+                      }
+                      disabled={viewMode !== "hourly"}
+                      className={`w-full text-left text-[11px] px-2.5 py-1.5 rounded transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed ${
+                        showUsSessionMarkers && viewMode === "hourly"
+                          ? "bg-foreground/10 text-foreground"
+                          : "text-muted-foreground hover:bg-muted hover:text-foreground"
+                      }`}
+                    >
+                      Sessions
+                    </button>
                   </div>,
                   document.body,
                 )
@@ -1774,8 +1925,12 @@ export function NewsTrendsUI({ articles, chartHeight = 400 }: { articles: Articl
         {/* Article count */}
         <div className="ml-auto flex items-center px-4 py-2 border-l border-border shrink-0 bg-muted/20">
           <div className="text-right">
-            <p className="text-[9px] font-medium uppercase tracking-wide text-muted-foreground/50 leading-none">Articles</p>
-            <p className="text-sm font-semibold tabular-nums leading-tight">{totalArticles.toLocaleString()}</p>
+            <p className="text-[9px] font-medium uppercase tracking-wide text-muted-foreground/50 leading-none">
+              Articles
+            </p>
+            <p className="text-sm font-semibold tabular-nums leading-tight">
+              {totalArticles.toLocaleString()}
+            </p>
           </div>
         </div>
       </div>
@@ -1787,18 +1942,24 @@ export function NewsTrendsUI({ articles, chartHeight = 400 }: { articles: Articl
             <div className="flex items-start justify-between mb-3">
               <div>
                 <p className="text-sm font-medium text-foreground/90">
-                  {aggregationMode === "cumulative" ? "Cumulative Impact" : "Period Impact"}
+                  {aggregationMode === "cumulative"
+                    ? "Cumulative Impact"
+                    : "Period Impact"}
                   {maWindow > 0 && (
                     <span className="ml-2 text-[11px] font-normal text-muted-foreground">
-                      {maWindow}{viewMode === "hourly" ? "h" : "d"} MA
+                      {maWindow}
+                      {viewMode === "hourly" ? "h" : "d"} MA
                     </span>
                   )}
                   {maWindow === 0 && (
-                    <span className="ml-2 text-[11px] font-normal text-muted-foreground">no smoothing</span>
+                    <span className="ml-2 text-[11px] font-normal text-muted-foreground">
+                      no smoothing
+                    </span>
                   )}
                 </p>
                 <p className="text-[11px] text-muted-foreground/70 mt-0.5">
-                  −1 bearish → +1 bullish · drag chart to select range · dbl-click for articles
+                  −1 bearish → +1 bullish · drag chart to select range ·
+                  dbl-click for articles
                   {benchmark !== "none" ? " · OHLC ticks = benchmark" : ""}
                 </p>
               </div>
@@ -1868,219 +2029,234 @@ export function NewsTrendsUI({ articles, chartHeight = 400 }: { articles: Articl
                   </div>
                 )}
               <ResponsiveContainer width="100%" height={chartHeight}>
-              <ComposedChart
+                <ComposedChart
                   data={chartDataWithBenchmark}
                   margin={{ top: 5, right: 10, left: 0, bottom: 8 }}
                   onMouseDown={handleChartMouseDown}
                   onMouseMove={handleChartMouseMove}
                   onDoubleClick={handleChartDoubleClick}
                 >
-                <CartesianGrid
-                  strokeDasharray="3 3"
-                  stroke="currentColor"
-                  strokeOpacity={0.1}
-                />
-                <XAxis
-                  dataKey="date"
-                  tick={{ fontSize: 10, fill: "currentColor", opacity: 0.5 }}
-                  tickLine={false}
-                  tickFormatter={(v: string) => formatBucket(v, viewMode)}
-                  interval="preserveStartEnd"
-                />
-                <YAxis
-                  domain={["auto", "auto"]}
-                  allowDataOverflow={false}
-                  tick={{ fontSize: 10, fill: "currentColor", opacity: 0.5 }}
-                  tickLine={false}
-                  axisLine={false}
-                  tickFormatter={(v: number) =>
-                    (v >= 0 ? "+" : "") + v.toFixed(1)
-                  }
-                  width={38}
-                />
-                {benchmark !== "none" && (
+                  <CartesianGrid
+                    strokeDasharray="3 3"
+                    stroke="currentColor"
+                    strokeOpacity={0.1}
+                  />
+                  <XAxis
+                    dataKey="date"
+                    tick={{ fontSize: 10, fill: "currentColor", opacity: 0.5 }}
+                    tickLine={false}
+                    tickFormatter={(v: string) => formatBucket(v, viewMode)}
+                    interval="preserveStartEnd"
+                  />
                   <YAxis
-                    yAxisId="benchmark"
-                    orientation="right"
                     domain={["auto", "auto"]}
+                    allowDataOverflow={false}
                     tick={{ fontSize: 10, fill: "currentColor", opacity: 0.5 }}
                     tickLine={false}
                     axisLine={false}
-                    tickFormatter={(v: number) => `${v >= 0 ? "+" : ""}${(v * 100).toFixed(0)}%`}
-                    width={44}
+                    tickFormatter={(v: number) =>
+                      (v >= 0 ? "+" : "") + v.toFixed(1)
+                    }
+                    width={38}
                   />
-                )}
-                {showArticleCount && benchmark === "none" && (
-                  <YAxis
-                    yAxisId="count"
-                    orientation="right"
-                    domain={[0, "auto"]}
-                    allowDataOverflow={false}
-                    tick={{ fontSize: 10, fill: "currentColor", opacity: 0.45 }}
-                    tickLine={false}
-                    axisLine={false}
-                    width={34}
-                  />
-                )}
-                <ReferenceLine
-                  y={0}
-                  stroke="currentColor"
-                  strokeOpacity={0.3}
-                  strokeWidth={1}
-                />
-                {highlightLoHi &&
-                dataLen > 1 &&
-                chartDataWithBenchmark[highlightLoHi.lo]?.date != null &&
-                chartDataWithBenchmark[highlightLoHi.hi]?.date != null ? (
-                  <ReferenceArea
-                    x1={chartDataWithBenchmark[highlightLoHi.lo]!.date}
-                    x2={chartDataWithBenchmark[highlightLoHi.hi]!.date}
-                    stroke="hsl(var(--primary) / 0.4)"
+                  {benchmark !== "none" && (
+                    <YAxis
+                      yAxisId="benchmark"
+                      orientation="right"
+                      domain={["auto", "auto"]}
+                      tick={{
+                        fontSize: 10,
+                        fill: "currentColor",
+                        opacity: 0.5,
+                      }}
+                      tickLine={false}
+                      axisLine={false}
+                      tickFormatter={(v: number) =>
+                        `${v >= 0 ? "+" : ""}${(v * 100).toFixed(0)}%`
+                      }
+                      width={44}
+                    />
+                  )}
+                  {showArticleCount && benchmark === "none" && (
+                    <YAxis
+                      yAxisId="count"
+                      orientation="right"
+                      domain={[0, "auto"]}
+                      allowDataOverflow={false}
+                      tick={{
+                        fontSize: 10,
+                        fill: "currentColor",
+                        opacity: 0.45,
+                      }}
+                      tickLine={false}
+                      axisLine={false}
+                      width={34}
+                    />
+                  )}
+                  <ReferenceLine
+                    y={0}
+                    stroke="currentColor"
+                    strokeOpacity={0.3}
                     strokeWidth={1}
-                    fill="hsl(var(--primary) / 0.1)"
-                    fillOpacity={1}
-                    ifOverflow="visible"
-                    zIndex={0}
                   />
-                ) : null}
-                <Tooltip
-                  content={<CustomTooltip labelMap={clusterLabelMap} />}
-                />
-                {showClusterMean ? (
-                  <Line
-                    type="monotone"
-                    dataKey="__clusterMean"
-                    name="__clusterMean"
-                    stroke="hsl(var(--muted-foreground))"
-                    dot={false}
-                    strokeWidth={2}
-                    strokeDasharray="6 4"
-                    connectNulls
-                  />
-                ) : null}
-                {viewMode === "hourly" &&
-                  showUsSessionMarkers &&
-                  usSessionMarkers.sessions.map((session) => (
+                  {highlightLoHi &&
+                  dataLen > 1 &&
+                  chartDataWithBenchmark[highlightLoHi.lo]?.date != null &&
+                  chartDataWithBenchmark[highlightLoHi.hi]?.date != null ? (
                     <ReferenceArea
-                      key={`us-session-${session.start}`}
-                      x1={session.start}
-                      x2={session.end}
-                      fill="hsl(var(--chart-2) / 0.07)"
+                      x1={chartDataWithBenchmark[highlightLoHi.lo]!.date}
+                      x2={chartDataWithBenchmark[highlightLoHi.hi]!.date}
+                      stroke="hsl(var(--primary) / 0.4)"
+                      strokeWidth={1}
+                      fill="hsl(var(--primary) / 0.1)"
+                      fillOpacity={1}
                       ifOverflow="visible"
                       zIndex={0}
                     />
-                  ))}
-                {viewMode === "hourly" &&
-                  showUsSessionMarkers &&
-                  usSessionMarkers.openBuckets.map((bucket) => (
-                    <ReferenceLine
-                      key={`us-open-${bucket}`}
-                      x={bucket}
-                      stroke="hsl(var(--chart-2))"
-                      strokeOpacity={0.75}
-                      strokeDasharray="4 3"
-                      strokeWidth={1.4}
-                    />
-                  ))}
-                {viewMode === "hourly" &&
-                  showUsSessionMarkers &&
-                  usSessionMarkers.closeBuckets.map((bucket) => (
-                    <ReferenceLine
-                      key={`us-close-${bucket}`}
-                      x={bucket}
-                      stroke="hsl(var(--chart-5))"
-                      strokeOpacity={0.75}
-                      strokeDasharray="4 3"
-                      strokeWidth={1.4}
-                    />
-                  ))}
-                {CLUSTERS.filter((c) => selected.has(c.id)).map((cluster) => (
-                  <Line
-                    key={cluster.id}
-                    type="monotone"
-                    dataKey={cluster.id}
-                    name={cluster.id}
-                    stroke={CLUSTER_COLORS[cluster.id]}
-                    dot={false}
-                    strokeWidth={drilldownId === cluster.id ? 2.5 : 1.5}
-                    strokeOpacity={
-                      drilldownId && drilldownId !== cluster.id ? 0.3 : 1
-                    }
-                    connectNulls
+                  ) : null}
+                  <Tooltip
+                    content={<CustomTooltip labelMap={clusterLabelMap} />}
                   />
-                ))}
-                {benchmark !== "none" && (
-                  <Scatter
-                    yAxisId="benchmark"
-                    dataKey="__benchmarkMid"
-                    name={
-                      BENCHMARK_OPTIONS.find((b) => b.id === benchmark)?.label ?? "Benchmark"
-                    }
-                    fill="hsl(var(--muted-foreground))"
-                    shape={() => null}
-                  >
-                    <ErrorBar
-                      dataKey={(
-                        entry: {
+                  {showClusterMean ? (
+                    <Line
+                      type="monotone"
+                      dataKey="__clusterMean"
+                      name="__clusterMean"
+                      stroke="hsl(var(--muted-foreground))"
+                      dot={false}
+                      strokeWidth={2}
+                      strokeDasharray="6 4"
+                      connectNulls
+                    />
+                  ) : null}
+                  {viewMode === "hourly" &&
+                    showUsSessionMarkers &&
+                    usSessionMarkers.sessions.map((session) => (
+                      <ReferenceArea
+                        key={`us-session-${session.start}`}
+                        x1={session.start}
+                        x2={session.end}
+                        fill="hsl(var(--chart-2) / 0.07)"
+                        ifOverflow="visible"
+                        zIndex={0}
+                      />
+                    ))}
+                  {viewMode === "hourly" &&
+                    showUsSessionMarkers &&
+                    usSessionMarkers.openBuckets.map((bucket) => (
+                      <ReferenceLine
+                        key={`us-open-${bucket}`}
+                        x={bucket}
+                        stroke="hsl(var(--chart-2))"
+                        strokeOpacity={0.75}
+                        strokeDasharray="4 3"
+                        strokeWidth={1.4}
+                      />
+                    ))}
+                  {viewMode === "hourly" &&
+                    showUsSessionMarkers &&
+                    usSessionMarkers.closeBuckets.map((bucket) => (
+                      <ReferenceLine
+                        key={`us-close-${bucket}`}
+                        x={bucket}
+                        stroke="hsl(var(--chart-5))"
+                        strokeOpacity={0.75}
+                        strokeDasharray="4 3"
+                        strokeWidth={1.4}
+                      />
+                    ))}
+                  {CLUSTERS.filter((c) => selected.has(c.id)).map((cluster) => (
+                    <Line
+                      key={cluster.id}
+                      type="monotone"
+                      dataKey={cluster.id}
+                      name={cluster.id}
+                      stroke={CLUSTER_COLORS[cluster.id]}
+                      dot={false}
+                      strokeWidth={drilldownId === cluster.id ? 2.5 : 1.5}
+                      strokeOpacity={
+                        drilldownId && drilldownId !== cluster.id ? 0.3 : 1
+                      }
+                      connectNulls
+                    />
+                  ))}
+                  {benchmark !== "none" && (
+                    <Scatter
+                      yAxisId="benchmark"
+                      dataKey="__benchmarkMid"
+                      name={
+                        BENCHMARK_OPTIONS.find((b) => b.id === benchmark)
+                          ?.label ?? "Benchmark"
+                      }
+                      fill="hsl(var(--muted-foreground))"
+                      shape={() => null}
+                    >
+                      <ErrorBar
+                        dataKey={(entry: {
                           __benchmarkRangeLow?: number | null;
                           __benchmarkRangeHigh?: number | null;
-                        },
-                      ) => [
-                        entry.__benchmarkRangeLow ?? 0,
-                        entry.__benchmarkRangeHigh ?? 0,
-                      ]}
-                      direction="y"
-                      width={0}
-                      stroke="hsl(var(--muted-foreground))"
-                      strokeWidth={1.1}
-                      opacity={0.8}
+                        }) => [
+                          entry.__benchmarkRangeLow ?? 0,
+                          entry.__benchmarkRangeHigh ?? 0,
+                        ]}
+                        direction="y"
+                        width={0}
+                        stroke="hsl(var(--muted-foreground))"
+                        strokeWidth={1.1}
+                        opacity={0.8}
+                      />
+                    </Scatter>
+                  )}
+                  {benchmark !== "none" && (
+                    <Scatter
+                      yAxisId="benchmark"
+                      dataKey="__benchmarkOpen"
+                      name="Benchmark open"
+                      shape={<BenchmarkOpenTick />}
+                      fill="hsl(var(--chart-2))"
                     />
-                  </Scatter>
-                )}
-                {benchmark !== "none" && (
-                  <Scatter
-                    yAxisId="benchmark"
-                    dataKey="__benchmarkOpen"
-                    name="Benchmark open"
-                    shape={<BenchmarkOpenTick />}
-                    fill="hsl(var(--chart-2))"
-                  />
-                )}
-                {benchmark !== "none" && (
-                  <Scatter
-                    yAxisId="benchmark"
-                    dataKey="__benchmarkClose"
-                    name="Benchmark close"
-                    shape={<BenchmarkCloseTick />}
-                    fill="hsl(var(--chart-5))"
-                  />
-                )}
-                {showArticleCount && (
-                  <Bar
-                    yAxisId="count"
-                    dataKey="__articleCount"
-                    name="__articleCount"
-                    fill="hsl(var(--muted-foreground))"
-                    fillOpacity={0.28}
-                    stroke="hsl(var(--muted-foreground))"
-                    strokeOpacity={0.45}
-                    barSize={10}
-                  />
-                )}
-                {dataLen > 1 ? (
-                  <Brush
-                    dataKey="date"
-                    height={32}
-                    stroke="hsl(var(--border))"
-                    fill="hsl(var(--muted))"
-                    travellerWidth={6}
-                    startIndex={hasValidControlledBrush ? normalizedBrushStart : undefined}
-                    endIndex={hasValidControlledBrush ? normalizedBrushEnd : undefined}
-                    onChange={handleBrushChange}
-                    tickFormatter={(v: string) => formatBucket(v, viewMode)}
-                  />
-                ) : null}
-              </ComposedChart>
+                  )}
+                  {benchmark !== "none" && (
+                    <Scatter
+                      yAxisId="benchmark"
+                      dataKey="__benchmarkClose"
+                      name="Benchmark close"
+                      shape={<BenchmarkCloseTick />}
+                      fill="hsl(var(--chart-5))"
+                    />
+                  )}
+                  {showArticleCount && (
+                    <Bar
+                      yAxisId="count"
+                      dataKey="__articleCount"
+                      name="__articleCount"
+                      fill="hsl(var(--muted-foreground))"
+                      fillOpacity={0.28}
+                      stroke="hsl(var(--muted-foreground))"
+                      strokeOpacity={0.45}
+                      barSize={10}
+                    />
+                  )}
+                  {dataLen > 1 ? (
+                    <Brush
+                      dataKey="date"
+                      height={32}
+                      stroke="hsl(var(--border))"
+                      fill="hsl(var(--muted))"
+                      travellerWidth={6}
+                      startIndex={
+                        hasValidControlledBrush
+                          ? normalizedBrushStart
+                          : undefined
+                      }
+                      endIndex={
+                        hasValidControlledBrush ? normalizedBrushEnd : undefined
+                      }
+                      onChange={handleBrushChange}
+                      tickFormatter={(v: string) => formatBucket(v, viewMode)}
+                    />
+                  ) : null}
+                </ComposedChart>
               </ResponsiveContainer>
             </div>
           </div>
@@ -2130,7 +2306,8 @@ export function NewsTrendsUI({ articles, chartHeight = 400 }: { articles: Articl
                 Articles · {formatBucket(articleModalDate, viewMode)}
               </h2>
               <span className="text-xs text-muted-foreground mr-auto ml-3">
-                {modalArticles.length} article{modalArticles.length !== 1 ? "s" : ""}
+                {modalArticles.length} article
+                {modalArticles.length !== 1 ? "s" : ""}
               </span>
               <button
                 onClick={() => setArticleModalDate(null)}
@@ -2159,115 +2336,124 @@ export function NewsTrendsUI({ articles, chartHeight = 400 }: { articles: Articl
       )}
 
       {/* Selected period — article list (placeholder for future AI zeitgeist + citations) */}
-      {periodZeitgeistOpen && periodSelection && chartDataWithBenchmark.length > 0 && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
-          onClick={() => setPeriodZeitgeistOpen(false)}
-        >
+      {periodZeitgeistOpen &&
+        periodSelection &&
+        chartDataWithBenchmark.length > 0 && (
           <div
-            className="bg-background border rounded-xl shadow-xl w-full max-w-2xl max-h-[80vh] flex flex-col mx-4"
-            onClick={(e) => e.stopPropagation()}
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
+            onClick={() => setPeriodZeitgeistOpen(false)}
           >
-            <div className="flex items-center justify-between px-5 py-4 border-b shrink-0 gap-3">
-              <div className="min-w-0 flex-1">
-                <h2 className="font-semibold text-sm flex items-center gap-2">
-                  <Sparkles className="h-4 w-4 shrink-0 text-primary" aria-hidden />
-                  Period context
-                </h2>
-                <p className="text-xs text-muted-foreground mt-1">
-                  {formatBucket(
-                    String(
-                      chartDataWithBenchmark[
-                        Math.min(periodSelection.start, periodSelection.end)
-                      ]?.date ?? "",
-                    ),
-                    viewMode,
-                  )}
-                  {" → "}
-                  {formatBucket(
-                    String(
-                      chartDataWithBenchmark[
-                        Math.max(periodSelection.start, periodSelection.end)
-                      ]?.date ?? "",
-                    ),
-                    viewMode,
-                  )}
-                  {" · "}
-                  {periodArticles.length} article
-                  {periodArticles.length !== 1 ? "s" : ""}
-                </p>
-                <p className="text-[11px] text-muted-foreground/90 mt-2 leading-snug">
-                  For now this lists headlines in the selected range. Later, an AI
-                  summary of the period&apos;s zeitgeist will appear here with links back
-                  to these articles.
-                </p>
+            <div
+              className="bg-background border rounded-xl shadow-xl w-full max-w-2xl max-h-[80vh] flex flex-col mx-4"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="flex items-center justify-between px-5 py-4 border-b shrink-0 gap-3">
+                <div className="min-w-0 flex-1">
+                  <h2 className="font-semibold text-sm flex items-center gap-2">
+                    <Sparkles
+                      className="h-4 w-4 shrink-0 text-primary"
+                      aria-hidden
+                    />
+                    Period context
+                  </h2>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    {formatBucket(
+                      String(
+                        chartDataWithBenchmark[
+                          Math.min(periodSelection.start, periodSelection.end)
+                        ]?.date ?? "",
+                      ),
+                      viewMode,
+                    )}
+                    {" → "}
+                    {formatBucket(
+                      String(
+                        chartDataWithBenchmark[
+                          Math.max(periodSelection.start, periodSelection.end)
+                        ]?.date ?? "",
+                      ),
+                      viewMode,
+                    )}
+                    {" · "}
+                    {periodArticles.length} article
+                    {periodArticles.length !== 1 ? "s" : ""}
+                  </p>
+                  <p className="text-[11px] text-muted-foreground/90 mt-2 leading-snug">
+                    For now this lists headlines in the selected range. Later,
+                    an AI summary of the period&apos;s zeitgeist will appear
+                    here with links back to these articles.
+                  </p>
+                </div>
+                <button
+                  onClick={() => setPeriodZeitgeistOpen(false)}
+                  className="text-muted-foreground hover:text-foreground transition-colors shrink-0"
+                  aria-label="Close"
+                >
+                  <X size={16} />
+                </button>
               </div>
-              <button
-                onClick={() => setPeriodZeitgeistOpen(false)}
-                className="text-muted-foreground hover:text-foreground transition-colors shrink-0"
-                aria-label="Close"
-              >
-                <X size={16} />
-              </button>
-            </div>
-            {periodArticles.length > 0 && (
-              <div className="flex flex-wrap items-center gap-3 px-5 py-3 border-b bg-muted/20 text-xs">
-                <span className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
-                  Sort by impact
-                </span>
-                <label className="flex items-center gap-1.5 text-muted-foreground">
-                  <span className="sr-only">Cluster</span>
-                  <select
-                    className="rounded-md border border-border bg-background px-2 py-1.5 text-xs text-foreground max-w-[200px]"
-                    value={periodModalSortCluster}
-                    onChange={(e) => setPeriodModalSortCluster(e.target.value)}
-                  >
-                    {CLUSTERS.map((c) => (
-                      <option key={c.id} value={c.id}>
-                        {c.label}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <label className="flex items-center gap-1.5 text-muted-foreground">
-                  <span className="sr-only">Direction</span>
-                  <select
-                    className="rounded-md border border-border bg-background px-2 py-1.5 text-xs text-foreground"
-                    value={periodModalSortDir}
-                    onChange={(e) =>
-                      setPeriodModalSortDir(e.target.value === "asc" ? "asc" : "desc")
-                    }
-                  >
-                    <option value="desc">High → low</option>
-                    <option value="asc">Low → high</option>
-                  </select>
-                </label>
-              </div>
-            )}
-            <div className="overflow-y-auto p-4">
-              {periodArticles.length === 0 ? (
-                <p className="text-sm text-muted-foreground text-center py-8">
-                  No articles in this period (try a wider range or different date
-                  filters).
-                </p>
-              ) : (
-                <ArticlesGrid
-                  articles={sortedPeriodArticles.map((a) => ({
-                    id: a.id ?? 0,
-                    slug: a.slug ?? null,
-                    title: a.title ?? null,
-                    url: a.url ?? null,
-                    image_url: a.image_url ?? null,
-                    source: a.source ?? null,
-                    published_at: a.published_at,
-                    created_at: a.created_at ?? a.published_at,
-                  }))}
-                />
+              {periodArticles.length > 0 && (
+                <div className="flex flex-wrap items-center gap-3 px-5 py-3 border-b bg-muted/20 text-xs">
+                  <span className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                    Sort by impact
+                  </span>
+                  <label className="flex items-center gap-1.5 text-muted-foreground">
+                    <span className="sr-only">Cluster</span>
+                    <select
+                      className="rounded-md border border-border bg-background px-2 py-1.5 text-xs text-foreground max-w-[200px]"
+                      value={periodModalSortCluster}
+                      onChange={(e) =>
+                        setPeriodModalSortCluster(e.target.value)
+                      }
+                    >
+                      {CLUSTERS.map((c) => (
+                        <option key={c.id} value={c.id}>
+                          {c.label}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="flex items-center gap-1.5 text-muted-foreground">
+                    <span className="sr-only">Direction</span>
+                    <select
+                      className="rounded-md border border-border bg-background px-2 py-1.5 text-xs text-foreground"
+                      value={periodModalSortDir}
+                      onChange={(e) =>
+                        setPeriodModalSortDir(
+                          e.target.value === "asc" ? "asc" : "desc",
+                        )
+                      }
+                    >
+                      <option value="desc">High → low</option>
+                      <option value="asc">Low → high</option>
+                    </select>
+                  </label>
+                </div>
               )}
+              <div className="overflow-y-auto p-4">
+                {periodArticles.length === 0 ? (
+                  <p className="text-sm text-muted-foreground text-center py-8">
+                    No articles in this period (try a wider range or different
+                    date filters).
+                  </p>
+                ) : (
+                  <ArticlesGrid
+                    articles={sortedPeriodArticles.map((a) => ({
+                      id: a.id ?? 0,
+                      slug: a.slug ?? null,
+                      title: a.title ?? null,
+                      url: a.url ?? null,
+                      image_url: a.image_url ?? null,
+                      source: a.source ?? null,
+                      published_at: a.published_at,
+                      created_at: a.created_at ?? a.published_at,
+                    }))}
+                  />
+                )}
+              </div>
             </div>
           </div>
-        </div>
-      )}
+        )}
     </div>
   );
 }

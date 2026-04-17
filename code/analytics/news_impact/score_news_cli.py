@@ -631,6 +631,14 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
             "already processed this run, until every day in the window has had one pass."
         ),
     )
+    parser.add_argument(
+        "--sparse-fill-probabilistic",
+        action="store_true",
+        help=(
+            "With --sparse-fill: choose target day by weighted probability "
+            "(sparser days are more likely) instead of deterministic earliest-sparsest."
+        ),
+    )
 
     parser.add_argument(
         "--tickers", nargs="+", metavar="TICKER", default=None,
@@ -904,6 +912,29 @@ def _pick_sparsest_calendar_day_excluding(
     min_c = min(candidates.values())
     tie = [d for d, c in candidates.items() if c == min_c]
     return min(tie)
+
+
+def _pick_probabilistic_calendar_day(
+    counts: dict[date, int],
+    *,
+    excluded: set[date] | None = None,
+) -> date | None:
+    """
+    Pick a day using weighted probability, favoring lower-count (sparser) days.
+
+    Weight formula: ``(max_count - day_count) + 1``.
+    This keeps every in-window day selectable while biasing toward sparse days.
+    """
+    candidates = counts
+    if excluded:
+        candidates = {d: c for d, c in counts.items() if d not in excluded}
+    if not candidates:
+        return None
+
+    max_count = max(candidates.values())
+    days = sorted(candidates.keys())
+    weights = [(max_count - candidates[d]) + 1 for d in days]
+    return random.choices(days, weights=weights, k=1)[0]
 
 
 async def _process_one_fmp_article(
@@ -1411,6 +1442,7 @@ async def _process_fmp_sparse_fill(args: argparse.Namespace) -> None:
     assert args.sparse_fill is not None
     n_days, m_new = args.sparse_fill
     loop = bool(getattr(args, "sparse_fill_loop", False))
+    probabilistic = bool(getattr(args, "sparse_fill_probabilistic", False))
 
     fetcher = FMPFetcher()
     seen_urls: set[str] = set()
@@ -1425,7 +1457,22 @@ async def _process_fmp_sparse_fill(args: argparse.Namespace) -> None:
 
     while True:
         counts = count_news_articles_per_calendar_day_eastern(n_days)
-        if loop:
+        if probabilistic:
+            target_day = _pick_probabilistic_calendar_day(
+                counts,
+                excluded=excluded if loop else None,
+            )
+            if target_day is None:
+                if loop:
+                    console.print(
+                        "\n[dim]Sparse-fill loop: no remaining days in window (all processed).[/dim]",
+                    )
+                else:
+                    console.print(
+                        "\n[yellow]Sparse-fill: no candidate days available in the requested window.[/yellow]",
+                    )
+                break
+        elif loop:
             target_day = _pick_sparsest_calendar_day_excluding(counts, excluded)
             if target_day is None:
                 console.print(
@@ -1441,14 +1488,16 @@ async def _process_fmp_sparse_fill(args: argparse.Namespace) -> None:
         if loop:
             console.print(
                 f"\n[bold]Sparse fill[/bold] round [cyan]{round_idx}[/cyan] / up to [cyan]{n_days}[/cyan] — "
-                f"next sparsest day [green]{target_day.isoformat()}[/green] "
+                f"next {'weighted-random' if probabilistic else 'sparsest'} day "
+                f"[green]{target_day.isoformat()}[/green] "
                 f"([bold]{min_count}[/bold] article(s) in DB). "
                 f"Target: [bold]{m_new}[/bold] new insert(s).\n",
             )
         else:
             console.print(
                 f"\n[bold]Sparse fill[/bold]: last [cyan]{n_days}[/cyan] ET day(s) — "
-                f"sparsest day [green]{target_day.isoformat()}[/green] "
+                f"{'weighted-random' if probabilistic else 'sparsest'} day "
+                f"[green]{target_day.isoformat()}[/green] "
                 f"([bold]{min_count}[/bold] article(s) in DB). "
                 f"Target: [bold]{m_new}[/bold] new insert(s).\n",
             )
