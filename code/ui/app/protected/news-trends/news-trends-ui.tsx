@@ -2,6 +2,7 @@
 
 import type { MouseEvent as ReactMouseEvent } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import {
   Brush,
   LineChart,
@@ -993,6 +994,51 @@ export function NewsTrendsUI({ articles, chartHeight = 400 }: { articles: Articl
   const [showClusterMean, setShowClusterMean] = useState(true);
   const [showArticleCount, setShowArticleCount] = useState(true);
   const [showUsSessionMarkers, setShowUsSessionMarkers] = useState(true);
+  const [advancedOpen, setAdvancedOpen] = useState(false);
+  const advancedMenuRef = useRef<HTMLDivElement | null>(null);
+  const advancedButtonRef = useRef<HTMLButtonElement | null>(null);
+  const [advancedMenuPos, setAdvancedMenuPos] = useState<{ top: number; left: number } | null>(null);
+
+  useEffect(() => {
+    if (!advancedOpen) return;
+    const onPointerDown = (event: MouseEvent) => {
+      const target = event.target as Node | null;
+      if (
+        !advancedMenuRef.current?.contains(target) &&
+        !advancedButtonRef.current?.contains(target)
+      ) {
+        setAdvancedOpen(false);
+      }
+    };
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setAdvancedOpen(false);
+    };
+    window.addEventListener("mousedown", onPointerDown);
+    window.addEventListener("keydown", onKeyDown);
+    return () => {
+      window.removeEventListener("mousedown", onPointerDown);
+      window.removeEventListener("keydown", onKeyDown);
+    };
+  }, [advancedOpen]);
+
+  useEffect(() => {
+    if (!advancedOpen) return;
+    const updatePosition = () => {
+      const rect = advancedButtonRef.current?.getBoundingClientRect();
+      if (!rect) return;
+      setAdvancedMenuPos({
+        top: rect.bottom + 6,
+        left: Math.max(8, rect.right - 200),
+      });
+    };
+    updatePosition();
+    window.addEventListener("resize", updatePosition);
+    window.addEventListener("scroll", updatePosition, true);
+    return () => {
+      window.removeEventListener("resize", updatePosition);
+      window.removeEventListener("scroll", updatePosition, true);
+    };
+  }, [advancedOpen]);
 
   function applyQuickRange(range: QuickRange) {
     setQuickRange(range);
@@ -1545,7 +1591,7 @@ export function NewsTrendsUI({ articles, chartHeight = 400 }: { articles: Articl
   return (
     <div className="flex flex-col gap-6">
       {/* Controls toolbar */}
-      <div className="flex items-stretch rounded-xl border border-border bg-card overflow-x-auto">
+      <div className="flex items-stretch rounded-xl border border-border bg-card overflow-x-auto overflow-y-visible">
         {/* Date range + granularity first */}
         <div className="flex items-center px-3 py-2 border-r border-border shrink-0">
           <span className="text-[10px] font-medium text-muted-foreground/60 uppercase tracking-wide">Range</span>
@@ -1629,12 +1675,23 @@ export function NewsTrendsUI({ articles, chartHeight = 400 }: { articles: Articl
 
         {/* Toggle overlays */}
         <div className="flex items-center px-3 py-2 shrink-0">
-          <details className="group relative">
-            <summary className="inline-flex list-none items-center rounded border border-border px-2.5 py-1 text-[11px] text-muted-foreground transition-colors hover:text-foreground cursor-pointer [&::-webkit-details-marker]:hidden">
+          <div className="relative">
+            <button
+              ref={advancedButtonRef}
+              type="button"
+              onClick={() => setAdvancedOpen((v) => !v)}
+              className="inline-flex items-center rounded border border-border px-2.5 py-1 text-[11px] text-muted-foreground transition-colors hover:text-foreground cursor-pointer"
+            >
               Advanced
-              <ChevronRight className="ml-1 h-3 w-3 transition-transform group-open:rotate-90" />
-            </summary>
-            <div className="absolute right-0 top-full z-20 mt-1.5 hidden min-w-[180px] rounded-md border border-border bg-background p-1.5 shadow-lg group-open:block">
+              <ChevronRight className={`ml-1 h-3 w-3 transition-transform ${advancedOpen ? "rotate-90" : ""}`} />
+            </button>
+            {advancedOpen && advancedMenuPos
+              ? createPortal(
+                  <div
+                    ref={advancedMenuRef}
+                    className="fixed z-[60] min-w-[200px] rounded-md border border-border bg-background p-1.5 shadow-lg"
+                    style={{ top: advancedMenuPos.top, left: advancedMenuPos.left }}
+                  >
               <div className="px-2.5 py-1">
                 <p className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground/60">
                   Series
@@ -1707,8 +1764,11 @@ export function NewsTrendsUI({ articles, chartHeight = 400 }: { articles: Articl
               >
                 Sessions
               </button>
-            </div>
-          </details>
+                  </div>,
+                  document.body,
+                )
+              : null}
+          </div>
         </div>
 
         {/* Article count */}
