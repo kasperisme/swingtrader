@@ -70,6 +70,7 @@ function NewKeyDialog({
   const [name, setName] = useState("");
   const [expiresAt, setExpiresAt] = useState("");
   const [screeningsWrite, setScreeningsWrite] = useState(false);
+  const [relationshipsRead, setRelationshipsRead] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -78,7 +79,9 @@ function NewKeyDialog({
     setError(null);
     setLoading(true);
     try {
-      const scopes = screeningsWrite ? ["news:read", "screenings:write"] : ["news:read"];
+      const scopes = ["news:read"];
+      if (screeningsWrite) scopes.push("screenings:write");
+      if (relationshipsRead) scopes.push("relationships:read");
       const res = await fetch("/api/user/api-keys", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -133,6 +136,18 @@ function NewKeyDialog({
             <span>
               Allow posting screening runs via API{" "}
               <span className="text-muted-foreground font-normal">(adds scope screenings:write)</span>
+            </span>
+          </label>
+          <label className="flex items-start gap-2 text-sm cursor-pointer">
+            <input
+              type="checkbox"
+              checked={relationshipsRead}
+              onChange={(e) => setRelationshipsRead(e.target.checked)}
+              className="mt-0.5 rounded border"
+            />
+            <span>
+              Allow reading ticker relationship network via API{" "}
+              <span className="text-muted-foreground font-normal">(adds scope relationships:read)</span>
             </span>
           </label>
           {error && <p className="text-sm text-red-500">{error}</p>}

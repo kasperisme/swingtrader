@@ -10,7 +10,7 @@ export const maxDuration = 60;
  * Endpoint: POST /api/mcp  (basePath `/api` → streamable HTTP at `/api/mcp`)
  * Auth: the **same** user API key as v1 REST (`Authorization: Bearer st_live_…`):
  * identical validation RPC, per-minute rate limit (429 + Retry-After), invalid-key timing, and DB-backed scopes.
- * Tool handlers enforce `news:read` / `screenings:write` the same way as the matching REST routes.
+ * Tool handlers enforce `news:read` / `screenings:write` / `relationships:read` the same way as the matching REST routes.
  *
  * Cursor example (Streamable HTTP):
  *   { "url": "https://<host>/api/mcp", "headers": { "Authorization": "Bearer st_live_…" } }

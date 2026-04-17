@@ -120,6 +120,10 @@ bash scripts/run_blog_post.sh intra-market
 
 See inline docstrings for usage.
 
+### News Trends & ticker SQL
+
+- `supabase/README.md` — how `news_trends_*` and ticker/relationship views in `supabase/migrations/` relate to base tables (diagrams, column calculations, and how to read each field).
+
 ### Relationship graph + alias docs
 
 - `news_impact/README_ticker_identity_graph.md` documents:

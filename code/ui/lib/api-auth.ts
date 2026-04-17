@@ -141,7 +141,7 @@ export async function authenticateUserApiKeyFromAuthorizationHeader(
 }
 
 /** Scopes that may be assigned when creating an API key in the dashboard. */
-export const API_KEY_SCOPE_ALLOWLIST = ["news:read", "screenings:write"] as const;
+export const API_KEY_SCOPE_ALLOWLIST = ["news:read", "screenings:write", "relationships:read"] as const;
 
 export type ApiKeyScopeAllowlist = (typeof API_KEY_SCOPE_ALLOWLIST)[number];
 

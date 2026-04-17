@@ -32,20 +32,29 @@ import {
 import { CLUSTERS } from "../vectors/dimensions";
 import { fmpGetOhlc } from "@/app/actions/fmp";
 import { ArticlesGrid } from "@/components/articles-grid";
+import {
+  benchmarkDateToLocalChartBucket,
+  articleLocalBucket,
+  buildPeriodDataFromArticlesLocal,
+  dateToLocalChartBucket,
+  fillDateGapsLocal,
+} from "./news-trends-local-aggregates";
+import {
+  benchmarkDateToUtcKey,
+  fillUtcBucketGaps,
+  formatUtcBucketForDisplay,
+  pivotTrendAggregates,
+  trendsRowMatchesLocalDateRange,
+  utcBucketFromPublishedAt,
+  utcKeyToDate,
+  utcSortKeyFromDbBucket,
+  type ClusterTrendRow,
+  type DimensionTrendRow,
+  type TrendsPeriodRow,
+} from "./news-trends-series";
+import type { ArticleImpact } from "./news-trends-types";
 
-export interface ArticleImpact {
-  published_at: string;
-  impact_json: Record<string, number>;
-  /** Mean confidence across `news_impact_heads` rows for this article; drives weighted period averages. */
-  confidence?: number | null;
-  id?: number | null;
-  title?: string | null;
-  url?: string | null;
-  source?: string | null;
-  slug?: string | null;
-  image_url?: string | null;
-  created_at?: string | null;
-}
+export type { ArticleImpact };
 
 // ── cluster palette ──────────────────────────────────────────────────────────
 const CLUSTER_COLORS: Record<string, string> = {
@@ -98,9 +107,7 @@ const BENCHMARK_OPTIONS: Array<{
   { id: "nasdaq100", label: "Nasdaq 100 (QQQ)", symbol: "QQQ" },
 ];
 
-// ── local-time bucket helpers ─────────────────────────────────────────────────
-// All bucketing uses the browser's local timezone so the X-axis matches the
-// user's wall clock, not UTC.
+// Chart buckets follow DB `date_trunc` (UTC). Tick labels use local timezone (see `formatUtcBucketForDisplay`).
 
 const pad2 = (n: number) => String(n).padStart(2, "0");
 
@@ -108,32 +115,14 @@ function localDateStr(d: Date): string {
   return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
 }
 
-function localBucket(d: Date, mode: ViewMode): string {
-  const base = localDateStr(d);
-  return mode === "hourly" ? `${base}T${pad2(d.getHours())}` : base;
-}
-
-function toBucket(iso: string, mode: ViewMode): string {
-  const d = new Date(iso);
-  if (!Number.isNaN(d.getTime())) return localBucket(d, mode);
-  // Fallback for plain date strings with no time component.
-  return mode === "hourly" ? iso.slice(0, 13) : iso.slice(0, 10);
-}
-
-function normalizeToBucket(dateLike: string, mode: ViewMode): string | null {
-  if (!dateLike) return null;
-  const parsed = new Date(dateLike.replace(" ", "T"));
-  if (Number.isNaN(parsed.getTime())) return null;
-  return localBucket(parsed, mode);
-}
-
-function formatBucket(bucket: string, mode: ViewMode): string {
+/** X-axis / tooltip: UTC bucket keys → local labels when `utcBuckets`, else legacy local keys. */
+function formatChartAxisTick(value: string, mode: ViewMode, utcBuckets: boolean): string {
+  if (utcBuckets) return formatUtcBucketForDisplay(value, mode);
   if (mode === "hourly") {
-    // "2024-01-15T14" → "01-15 14h"
-    const [datePart, hourPart] = bucket.split("T");
-    return `${datePart.slice(5)} ${hourPart}h`;
+    const [datePart, hourPart] = value.split("T");
+    if (datePart && hourPart != null) return `${datePart.slice(5)} ${hourPart}h`;
   }
-  return bucket.slice(5); // "2024-01-15" → "01-15"
+  return value.length >= 10 ? value.slice(5, 10) : value;
 }
 
 type DateParts = {
@@ -320,17 +309,21 @@ function nyTimeToUtcDate(
   return new Date(guessUtcMs);
 }
 
-/** Articles whose time bucket falls in [startBucket, endBucket] (inclusive), using the same bucketing as the chart. */
+/** Articles whose chart bucket falls in [startBucket, endBucket] (UTC when using DB aggregates, else local). */
 function articlesInBucketRange(
   rows: ArticleImpact[],
   startBucket: string,
   endBucket: string,
   mode: ViewMode,
+  utcChartBuckets: boolean,
 ): ArticleImpact[] {
   const lo = startBucket <= endBucket ? startBucket : endBucket;
   const hi = startBucket <= endBucket ? endBucket : startBucket;
   return rows.filter((a) => {
-    const b = toBucket(a.published_at, mode);
+    const b = utcChartBuckets
+      ? utcBucketFromPublishedAt(a.published_at, mode)
+      : articleLocalBucket(a.published_at, mode);
+    if (!b) return false;
     return b >= lo && b <= hi;
   });
 }
@@ -393,133 +386,9 @@ function weightedMeanPairs(
   return vals.length > 0 ? vals.reduce((a, b) => a + b, 0) / vals.length : null;
 }
 
-/** Compute per-period confidence-weighted average impact per cluster and dimension */
-function buildPeriodData(
-  articles: ArticleImpact[],
-  mode: ViewMode,
-): Array<{
-  date: string;
-  clusters: Record<string, number | null>;
-  dimensions: Record<string, number | null>;
-  count: number;
-}> {
-  const byDate = new Map<string, ArticleImpact[]>();
-  for (const a of articles) {
-    const d = toBucket(a.published_at, mode);
-    if (!byDate.has(d)) byDate.set(d, []);
-    byDate.get(d)!.push(a);
-  }
-
-  const sorted = Array.from(byDate.entries()).sort((a, b) =>
-    a[0].localeCompare(b[0]),
-  );
-
-  // Collect all dimension keys across all clusters
-  const allDimKeys = CLUSTERS.flatMap((c) => c.dimensions.map((d) => d.key));
-
-  return sorted.map(([date, rows]) => {
-    const clusters: Record<string, number | null> = {};
-    for (const cluster of CLUSTERS) {
-      const pairs: { value: number; weight: number }[] = [];
-      for (const row of rows) {
-        const w = impactConfidenceWeight(row.confidence);
-        const dimKeys = cluster.dimensions.map((d) => d.key);
-        const scores = dimKeys
-          .map((k) => row.impact_json[k])
-          .filter((v) => v != null && !isNaN(v)) as number[];
-        if (scores.length === 0) continue;
-        const value = scores.reduce((a, b) => a + b, 0) / scores.length;
-        pairs.push({ value, weight: w });
-      }
-      clusters[cluster.id] = weightedMeanPairs(pairs);
-    }
-
-    const dimensions: Record<string, number | null> = {};
-    for (const key of allDimKeys) {
-      const pairs: { value: number; weight: number }[] = [];
-      for (const row of rows) {
-        const v = row.impact_json[key];
-        if (v == null || isNaN(v)) continue;
-        pairs.push({
-          value: v,
-          weight: impactConfidenceWeight(row.confidence),
-        });
-      }
-      dimensions[key] = weightedMeanPairs(pairs);
-    }
-
-    return { date, clusters, dimensions, count: rows.length };
-  });
-}
-
-/** Fill missing date/hour buckets in the range with null values */
-function fillDateGaps(
-  data: ReturnType<typeof buildPeriodData>,
-  mode: ViewMode,
-  startBucket: string,
-  endBucket: string,
-): ReturnType<typeof buildPeriodData> {
-  if (!startBucket || !endBucket) return data;
-
-  const allDimKeys = CLUSTERS.flatMap((c) => c.dimensions.map((d) => d.key));
-  const dataMap = new Map(data.map((d) => [d.date, d]));
-  const result: ReturnType<typeof buildPeriodData> = [];
-
-  const emptyEntry = (date: string) => {
-    const clusters: Record<string, number | null> = {};
-    for (const cluster of CLUSTERS) clusters[cluster.id] = null;
-    const dimensions: Record<string, number | null> = {};
-    for (const key of allDimKeys) dimensions[key] = null;
-    return { date, clusters, dimensions, count: 0 };
-  };
-
-  const toHourlyBucket = (bucket: string, endOfDay: boolean): string | null => {
-    // Accept either "YYYY-MM-DD" or "YYYY-MM-DDTHH".
-    if (/^\d{4}-\d{2}-\d{2}T\d{2}$/.test(bucket)) return bucket;
-    if (/^\d{4}-\d{2}-\d{2}$/.test(bucket))
-      return `${bucket}T${endOfDay ? "23" : "00"}`;
-    return null;
-  };
-
-  if (mode === "daily") {
-    let current = startBucket.slice(0, 10);
-    const end = endBucket.slice(0, 10);
-    while (current <= end) {
-      result.push(dataMap.get(current) ?? emptyEntry(current));
-      const [y, m, day] = current.split("-").map(Number);
-      const d = new Date(y, m - 1, day); // local midnight
-      d.setDate(d.getDate() + 1);
-      if (Number.isNaN(d.getTime())) break;
-      current = localDateStr(d);
-    }
-  } else {
-    // hourly buckets: "2024-01-15T14" (local time)
-    const normalizedStart = toHourlyBucket(startBucket, false);
-    const normalizedEnd = toHourlyBucket(endBucket, true);
-    if (!normalizedStart || !normalizedEnd) return data;
-
-    let current: string = normalizedStart;
-    const end: string = normalizedEnd;
-
-    while (current <= end) {
-      result.push(dataMap.get(current) ?? emptyEntry(current));
-      const [datePart, hourPart] = current.split("T");
-      const [y, m, day] = datePart.split("-").map(Number);
-      const hour = Number.parseInt(hourPart, 10);
-      if (Number.isNaN(hour)) break;
-      const d = new Date(y, m - 1, day, hour); // local time
-      d.setHours(d.getHours() + 1);
-      if (Number.isNaN(d.getTime())) break;
-      current = localBucket(d, "hourly");
-    }
-  }
-
-  return result;
-}
-
 /** Apply rolling window moving average to cluster data */
 function applyClusterMA(
-  daily: ReturnType<typeof buildPeriodData>,
+  daily: TrendsPeriodRow[],
   window: number,
 ): Array<{ date: string; [key: string]: number | string | null }> {
   return daily.map((point, i) => {
@@ -527,6 +396,7 @@ function applyClusterMA(
     const slice = daily.slice(start, i + 1);
     const result: { date: string; [key: string]: number | string | null } = {
       date: point.date,
+      dateLabel: point.dateLabel,
       __articleCount: point.count,
     };
     for (const cluster of CLUSTERS) {
@@ -549,7 +419,7 @@ function applyClusterMA(
 
 /** Apply rolling window MA to dimension data for a specific cluster */
 function applyDimensionMA(
-  daily: ReturnType<typeof buildPeriodData>,
+  daily: TrendsPeriodRow[],
   window: number,
   dimKeys: string[],
 ): Array<{ date: string; [key: string]: number | string | null }> {
@@ -558,6 +428,7 @@ function applyDimensionMA(
     const slice = daily.slice(start, i + 1);
     const result: { date: string; [key: string]: number | string | null } = {
       date: point.date,
+      dateLabel: point.dateLabel,
     };
     for (const key of dimKeys) {
       const vals = slice
@@ -716,11 +587,15 @@ function CustomTooltip({
   payload,
   label,
   labelMap,
+  mode,
+  utcChartBuckets,
 }: {
   active?: boolean;
   payload?: Array<{ name: string; value: number | null; color: string }>;
   label?: string;
   labelMap: Record<string, string>;
+  mode: ViewMode;
+  utcChartBuckets: boolean;
 }) {
   if (!active || !payload?.length) return null;
 
@@ -731,9 +606,12 @@ function CustomTooltip({
     .filter((p) => typeof p.value === "number" && Number.isFinite(p.value))
     .sort((a, b) => (b.value as number) - (a.value as number));
 
+  const labelText =
+    label != null ? formatChartAxisTick(String(label), mode, utcChartBuckets) : "";
+
   return (
     <div className="bg-background border rounded-lg shadow-lg p-3 text-xs max-w-[220px]">
-      <p className="font-semibold mb-2 text-muted-foreground">{label}</p>
+      <p className="font-semibold mb-2 text-muted-foreground">{labelText}</p>
       {typeof articleCount === "number" ? (
         <p className="mb-2 text-[11px] text-muted-foreground">
           Articles:{" "}
@@ -843,14 +721,18 @@ function DimensionDrilldown({
   maWindow,
   latestDimScores,
   mode,
+  utcChartBuckets,
   chartHeight = 260,
+  aggregatesLoading = false,
 }: {
   clusterId: string;
   chartData: Array<{ date: string; [key: string]: number | string | null }>;
   maWindow: number;
   latestDimScores: Record<string, number | null>;
   mode: ViewMode;
+  utcChartBuckets: boolean;
   chartHeight?: number;
+  aggregatesLoading?: boolean;
 }) {
   const cluster = CLUSTERS.find((c) => c.id === clusterId);
   if (!cluster) return null;
@@ -904,7 +786,15 @@ function DimensionDrilldown({
         </div>
       </div>
 
-      <div className="flex gap-6">
+      {aggregatesLoading ? (
+        <div
+          className="flex flex-col items-center justify-center gap-2 rounded-lg border border-dashed border-border bg-muted/20 py-16 text-sm text-muted-foreground animate-pulse"
+          style={{ minHeight: chartHeight }}
+        >
+          <span>Loading dimension series…</span>
+        </div>
+      ) : (
+        <div className="flex gap-6">
         {/* Dimension chart */}
         <div className="flex-1 min-w-0">
           <ResponsiveContainer width="100%" height={chartHeight}>
@@ -921,7 +811,9 @@ function DimensionDrilldown({
                 dataKey="date"
                 tick={{ fontSize: 10, fill: "currentColor", opacity: 0.5 }}
                 tickLine={false}
-                tickFormatter={(v: string) => formatBucket(v, mode)}
+                tickFormatter={(v: string) =>
+                  formatChartAxisTick(v, mode, utcChartBuckets)
+                }
                 interval="preserveStartEnd"
               />
               <YAxis
@@ -941,7 +833,15 @@ function DimensionDrilldown({
                 strokeOpacity={0.3}
                 strokeWidth={1}
               />
-              <Tooltip content={<CustomTooltip labelMap={labelMap} />} />
+              <Tooltip
+                content={
+                  <CustomTooltip
+                    labelMap={labelMap}
+                    mode={mode}
+                    utcChartBuckets={utcChartBuckets}
+                  />
+                }
+              />
               {dims.map((dim, i) => (
                 <Line
                   key={dim.key}
@@ -1001,7 +901,8 @@ function DimensionDrilldown({
             );
           })}
         </div>
-      </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -1036,10 +937,30 @@ function toDateInputValue(iso: string): string {
 
 export function NewsTrendsUI({
   articles,
+  clusterDaily = [],
+  clusterHourly = [],
+  dimensionDaily = [],
+  dimensionHourly = [],
   chartHeight = 400,
+  onSwitchToHourly,
+  hourlyClusterLoading = false,
+  onEnsureDimensionAggregates,
+  dimensionAggregatesLoading = false,
 }: {
   articles: ArticleImpact[];
+  clusterDaily?: ClusterTrendRow[];
+  clusterHourly?: ClusterTrendRow[];
+  dimensionDaily?: DimensionTrendRow[];
+  dimensionHourly?: DimensionTrendRow[];
   chartHeight?: number;
+  /** When the user picks hourly granularity; parent can lazy-load hourly aggregates. */
+  onSwitchToHourly?: () => void;
+  /** True while parent is fetching `news_trends_cluster_hourly_v` after switching to hourly. */
+  hourlyClusterLoading?: boolean;
+  /** Lazy-load `news_trends_dimension_*_v` when drill-down opens or view mode changes with drill-down open. */
+  onEnsureDimensionAggregates?: (mode: ViewMode) => void;
+  /** Which granularity’s dimension aggregates are currently loading (`false` = idle). */
+  dimensionAggregatesLoading?: false | ViewMode;
 }) {
   const [viewMode, setViewMode] = useState<ViewMode>("daily");
   const [maWindow, setMaWindow] = useState(7);
@@ -1050,11 +971,29 @@ export function NewsTrendsUI({
   );
   const [drilldownId, setDrilldownId] = useState<string | null>(null);
 
-  // Date range filter
-  const allDates = useMemo(
-    () => articles.map((a) => toDateInputValue(a.published_at)).sort(),
-    [articles],
-  );
+  useEffect(() => {
+    if (!drilldownId) return;
+    onEnsureDimensionAggregates?.(viewMode);
+  }, [drilldownId, viewMode, onEnsureDimensionAggregates]);
+
+  // Date range filter (local calendar), spanning articles and aggregate buckets
+  const allDates = useMemo(() => {
+    const fromArticles = articles.map((a) => toDateInputValue(a.published_at));
+    const fromClusters = (rows: ClusterTrendRow[], mode: ViewMode) =>
+      rows
+        .map((r) => {
+          const raw = mode === "daily" ? r.bucket_day : r.bucket_hour;
+          const k = utcSortKeyFromDbBucket(raw, mode);
+          if (!k) return null;
+          return localDateStr(utcKeyToDate(k, mode));
+        })
+        .filter((x): x is string => x != null);
+    return [
+      ...fromArticles,
+      ...fromClusters(clusterDaily, "daily"),
+      ...fromClusters(clusterHourly, "hourly"),
+    ].sort();
+  }, [articles, clusterDaily, clusterHourly]);
   const minDate = allDates[0] ?? "";
   const maxDate = allDates[allDates.length - 1] ?? "";
 
@@ -1143,14 +1082,58 @@ export function NewsTrendsUI({
   function switchMode(mode: ViewMode) {
     setViewMode(mode);
     setMaWindow((prev) => (prev === 0 ? 0 : DEFAULT_MA[mode]));
+    if (mode === "hourly") {
+      onSwitchToHourly?.();
+    }
   }
 
+  const useDbAggregates =
+    clusterDaily.length > 0 ||
+    clusterHourly.length > 0 ||
+    dimensionDaily.length > 0 ||
+    dimensionHourly.length > 0;
+
   const daily = useMemo(() => {
-    const raw = buildPeriodData(filteredArticles, viewMode);
+    if (useDbAggregates) {
+      const clusterRows = viewMode === "daily" ? clusterDaily : clusterHourly;
+      const dimRows = viewMode === "daily" ? dimensionDaily : dimensionHourly;
+      const pivoted = pivotTrendAggregates(clusterRows, dimRows, viewMode);
+      const filtered =
+        !dateFrom && !dateTo
+          ? pivoted
+          : pivoted.filter((row) =>
+              trendsRowMatchesLocalDateRange(
+                row,
+                viewMode,
+                dateFrom || minDate,
+                dateTo || maxDate,
+              ),
+            );
+      if (filtered.length === 0) return [];
+      return fillUtcBucketGaps(
+        filtered,
+        viewMode,
+        filtered[0]!.date,
+        filtered[filtered.length - 1]!.date,
+      );
+    }
+    const raw = buildPeriodDataFromArticlesLocal(filteredArticles, viewMode);
     const start = dateFrom || minDate;
     const end = dateTo || maxDate;
-    return fillDateGaps(raw, viewMode, start, end);
-  }, [filteredArticles, viewMode, dateFrom, dateTo, minDate, maxDate]);
+    return fillDateGapsLocal(raw, viewMode, start, end);
+  }, [
+    useDbAggregates,
+    viewMode,
+    clusterDaily,
+    clusterHourly,
+    dimensionDaily,
+    dimensionHourly,
+    filteredArticles,
+    dateFrom,
+    dateTo,
+    minDate,
+    maxDate,
+  ]);
   const effectiveMaWindow = maWindow === 0 ? 1 : maWindow;
 
   const chartDataBase = useMemo(
@@ -1233,7 +1216,9 @@ export function NewsTrendsUI({
       { open: number; high: number; low: number; close: number }
     >();
     for (const p of benchmarkData) {
-      const bucket = normalizeToBucket(p.date, viewMode);
+      const bucket = useDbAggregates
+        ? benchmarkDateToUtcKey(String(p.date ?? ""), viewMode)
+        : benchmarkDateToLocalChartBucket(String(p.date ?? ""), viewMode);
       if (!bucket) continue;
       if (bucket < startBucket || bucket > endBucket) continue;
       bucketValues.set(bucket, {
@@ -1276,7 +1261,7 @@ export function NewsTrendsUI({
         ] as const;
       }),
     );
-  }, [benchmark, benchmarkData, daily, viewMode]);
+  }, [benchmark, benchmarkData, daily, viewMode, useDbAggregates]);
 
   const chartDataWithBenchmark = useMemo(() => {
     if (benchmark === "none" || benchmarkByBucket.size === 0) return chartData;
@@ -1321,19 +1306,35 @@ export function NewsTrendsUI({
       string,
       { year: number; month: number; day: number }
     >();
-    for (const point of chartDataWithBenchmark) {
-      const dateStr = String(point.date);
-      const [localDatePart] = dateStr.split("T");
-      if (!localDatePart) continue;
-      const localMidnight = new Date(`${localDatePart}T00:00:00`);
-      if (Number.isNaN(localMidnight.getTime())) continue;
-      const ny = getTimeZoneParts(localMidnight, "America/New_York");
-      const nyKey = `${ny.year}-${pad2(ny.month)}-${pad2(ny.day)}`;
-      if (
-        !tradingDays.has(nyKey) &&
-        isUsMarketTradingDayNyDate(ny.year, ny.month, ny.day)
-      ) {
-        tradingDays.set(nyKey, { year: ny.year, month: ny.month, day: ny.day });
+    if (useDbAggregates) {
+      for (const point of chartDataWithBenchmark) {
+        const utcKey = String(point.date);
+        const bucketStart = utcKeyToDate(utcKey, "hourly");
+        if (Number.isNaN(bucketStart.getTime())) continue;
+        const ny = getTimeZoneParts(bucketStart, "America/New_York");
+        const nyKey = `${ny.year}-${pad2(ny.month)}-${pad2(ny.day)}`;
+        if (
+          !tradingDays.has(nyKey) &&
+          isUsMarketTradingDayNyDate(ny.year, ny.month, ny.day)
+        ) {
+          tradingDays.set(nyKey, { year: ny.year, month: ny.month, day: ny.day });
+        }
+      }
+    } else {
+      for (const point of chartDataWithBenchmark) {
+        const dateStr = String(point.date);
+        const [localDatePart] = dateStr.split("T");
+        if (!localDatePart) continue;
+        const localMidnight = new Date(`${localDatePart}T00:00:00`);
+        if (Number.isNaN(localMidnight.getTime())) continue;
+        const ny = getTimeZoneParts(localMidnight, "America/New_York");
+        const nyKey = `${ny.year}-${pad2(ny.month)}-${pad2(ny.day)}`;
+        if (
+          !tradingDays.has(nyKey) &&
+          isUsMarketTradingDayNyDate(ny.year, ny.month, ny.day)
+        ) {
+          tradingDays.set(nyKey, { year: ny.year, month: ny.month, day: ny.day });
+        }
       }
     }
 
@@ -1345,21 +1346,22 @@ export function NewsTrendsUI({
     const sessions: Array<{ start: string; end: string }> = [];
 
     for (const day of tradingDays.values()) {
-      const openLocalBucket = localBucket(
-        nyTimeToUtcDate(day.year, day.month, day.day, 9, 30),
-        "hourly",
-      );
-      const closeLocalBucket = localBucket(
-        nyTimeToUtcDate(day.year, day.month, day.day, 16, 0),
-        "hourly",
-      );
-      if (dataBuckets.has(openLocalBucket)) openBuckets.add(openLocalBucket);
-      if (dataBuckets.has(closeLocalBucket)) closeBuckets.add(closeLocalBucket);
-      if (
-        dataBuckets.has(openLocalBucket) &&
-        dataBuckets.has(closeLocalBucket)
-      ) {
-        sessions.push({ start: openLocalBucket, end: closeLocalBucket });
+      const openBucket = useDbAggregates
+        ? nyTimeToUtcDate(day.year, day.month, day.day, 9, 30).toISOString().slice(0, 13)
+        : dateToLocalChartBucket(
+            nyTimeToUtcDate(day.year, day.month, day.day, 9, 30),
+            "hourly",
+          );
+      const closeBucket = useDbAggregates
+        ? nyTimeToUtcDate(day.year, day.month, day.day, 16, 0).toISOString().slice(0, 13)
+        : dateToLocalChartBucket(
+            nyTimeToUtcDate(day.year, day.month, day.day, 16, 0),
+            "hourly",
+          );
+      if (dataBuckets.has(openBucket)) openBuckets.add(openBucket);
+      if (dataBuckets.has(closeBucket)) closeBuckets.add(closeBucket);
+      if (dataBuckets.has(openBucket) && dataBuckets.has(closeBucket)) {
+        sessions.push({ start: openBucket, end: closeBucket });
       }
     }
 
@@ -1368,19 +1370,22 @@ export function NewsTrendsUI({
       closeBuckets: Array.from(closeBuckets).sort((a, b) => a.localeCompare(b)),
       sessions: sessions.sort((a, b) => a.start.localeCompare(b.start)),
     };
-  }, [chartDataWithBenchmark, showUsSessionMarkers, viewMode]);
+  }, [chartDataWithBenchmark, showUsSessionMarkers, viewMode, useDbAggregates]);
 
   const [articleModalDate, setArticleModalDate] = useState<string | null>(null);
 
   const articlesByBucket = useMemo(() => {
     const map = new Map<string, ArticleImpact[]>();
     for (const a of articles) {
-      const bucket = toBucket(a.published_at, viewMode);
+      const bucket = useDbAggregates
+        ? utcBucketFromPublishedAt(a.published_at, viewMode)
+        : articleLocalBucket(a.published_at, viewMode);
+      if (!bucket) continue;
       if (!map.has(bucket)) map.set(bucket, []);
       map.get(bucket)!.push(a);
     }
     return map;
-  }, [articles, viewMode]);
+  }, [articles, viewMode, useDbAggregates]);
 
   const modalArticles = articleModalDate
     ? (articlesByBucket.get(articleModalDate) ?? [])
@@ -1599,6 +1604,7 @@ export function NewsTrendsUI({
       startBucket,
       endBucket,
       viewMode,
+      useDbAggregates,
     )
       .slice()
       .sort(
@@ -1606,7 +1612,7 @@ export function NewsTrendsUI({
           new Date(b.published_at).getTime() -
           new Date(a.published_at).getTime(),
       );
-  }, [periodSelection, chartDataWithBenchmark, filteredArticles, viewMode]);
+  }, [periodSelection, chartDataWithBenchmark, filteredArticles, viewMode, useDbAggregates]);
 
   const sortedPeriodArticles = useMemo(() => {
     if (periodArticles.length === 0) return periodArticles;
@@ -1702,14 +1708,6 @@ export function NewsTrendsUI({
     setDrilldownId((prev) => (prev === id ? null : id));
   }
 
-  if (articles.length === 0) {
-    return (
-      <div className="text-center py-16 text-muted-foreground">
-        <p className="text-sm">No news impact data found.</p>
-      </div>
-    );
-  }
-
   const totalArticles = daily.reduce((sum, d) => sum + d.count, 0);
 
   const clusterLabelMap = useMemo(
@@ -1720,6 +1718,21 @@ export function NewsTrendsUI({
     }),
     [],
   );
+
+  const awaitingHourlyCluster =
+    hourlyClusterLoading && viewMode === "hourly";
+
+  if (
+    articles.length === 0 &&
+    daily.length === 0 &&
+    !awaitingHourlyCluster
+  ) {
+    return (
+      <div className="text-center py-16 text-muted-foreground">
+        <p className="text-sm">No news impact data found.</p>
+      </div>
+    );
+  }
 
   return (
     <div className="flex flex-col gap-6">
@@ -1972,63 +1985,72 @@ export function NewsTrendsUI({
                 brushBlockRef.current = !!t?.closest?.(".recharts-brush");
               }}
             >
-              {viewMode === "hourly" && showUsSessionMarkers ? (
-                <div className="pointer-events-none absolute left-2 top-2 z-10 rounded-md border border-border bg-background/90 px-2 py-1 text-[10px] text-muted-foreground shadow-sm">
-                  <span className="inline-flex items-center gap-1">
-                    <span className="inline-block h-2 w-2 rounded-full bg-[hsl(var(--chart-2))]" />
-                    Open 09:30 ET
-                  </span>
-                  <span className="mx-1.5 opacity-50">|</span>
-                  <span className="inline-flex items-center gap-1">
-                    <span className="inline-block h-2 w-2 rounded-full bg-[hsl(var(--chart-5))]" />
-                    Close 16:00 ET
-                  </span>
+              {awaitingHourlyCluster ? (
+                <div
+                  className="flex flex-col items-center justify-center gap-2 rounded-lg border border-dashed border-border bg-muted/20 text-sm text-muted-foreground animate-pulse"
+                  style={{ minHeight: chartHeight }}
+                >
+                  <span>Loading hourly cluster series…</span>
                 </div>
-              ) : null}
-              {explainIconIndex !== null &&
-                dataLen > 1 &&
-                !Number.isNaN(explainIconIndex) && (
-                  <div
-                    className="pointer-events-none absolute z-10"
-                    style={{
-                      top: 6,
-                      bottom: 42,
-                      left: 0,
-                      right: 0,
-                    }}
-                  >
-                    <div
-                      className="pointer-events-auto absolute top-1 flex items-center gap-0.5"
-                      style={{
-                        left: `calc(${plotLeftGutterPx}px + (100% - ${plotLeftGutterPx + plotRightGutterPx}px) * ${explainIconIndex / Math.max(1, dataLen - 1)})`,
-                        transform: "translateX(-50%)",
-                      }}
-                    >
-                      <button
-                        type="button"
-                        className="rounded-full border border-border bg-background/95 p-1.5 shadow-sm text-primary hover:bg-muted transition-colors"
-                        title="Period context — articles in this range (AI zeitgeist summary coming later)"
-                        aria-label="Open articles for selected period"
-                        onClick={() => setPeriodZeitgeistOpen(true)}
-                      >
-                        <Sparkles className="h-3.5 w-3.5" aria-hidden />
-                      </button>
-                      <button
-                        type="button"
-                        className="rounded-full border border-border bg-background/95 p-1 shadow-sm text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
-                        title="Clear selection"
-                        aria-label="Clear period selection"
-                        onClick={() => {
-                          setPeriodSelection(null);
-                          setPeriodZeitgeistOpen(false);
+              ) : (
+                <>
+                  {viewMode === "hourly" && showUsSessionMarkers ? (
+                    <div className="pointer-events-none absolute left-2 top-2 z-10 rounded-md border border-border bg-background/90 px-2 py-1 text-[10px] text-muted-foreground shadow-sm">
+                      <span className="inline-flex items-center gap-1">
+                        <span className="inline-block h-2 w-2 rounded-full bg-[hsl(var(--chart-2))]" />
+                        Open 09:30 ET
+                      </span>
+                      <span className="mx-1.5 opacity-50">|</span>
+                      <span className="inline-flex items-center gap-1">
+                        <span className="inline-block h-2 w-2 rounded-full bg-[hsl(var(--chart-5))]" />
+                        Close 16:00 ET
+                      </span>
+                    </div>
+                  ) : null}
+                  {explainIconIndex !== null &&
+                    dataLen > 1 &&
+                    !Number.isNaN(explainIconIndex) && (
+                      <div
+                        className="pointer-events-none absolute z-10"
+                        style={{
+                          top: 6,
+                          bottom: 42,
+                          left: 0,
+                          right: 0,
                         }}
                       >
-                        <X className="h-3 w-3" aria-hidden />
-                      </button>
-                    </div>
-                  </div>
-                )}
-              <ResponsiveContainer width="100%" height={chartHeight}>
+                        <div
+                          className="pointer-events-auto absolute top-1 flex items-center gap-0.5"
+                          style={{
+                            left: `calc(${plotLeftGutterPx}px + (100% - ${plotLeftGutterPx + plotRightGutterPx}px) * ${explainIconIndex / Math.max(1, dataLen - 1)})`,
+                            transform: "translateX(-50%)",
+                          }}
+                        >
+                          <button
+                            type="button"
+                            className="rounded-full border border-border bg-background/95 p-1.5 shadow-sm text-primary hover:bg-muted transition-colors"
+                            title="Period context — articles in this range (AI zeitgeist summary coming later)"
+                            aria-label="Open articles for selected period"
+                            onClick={() => setPeriodZeitgeistOpen(true)}
+                          >
+                            <Sparkles className="h-3.5 w-3.5" aria-hidden />
+                          </button>
+                          <button
+                            type="button"
+                            className="rounded-full border border-border bg-background/95 p-1 shadow-sm text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+                            title="Clear selection"
+                            aria-label="Clear period selection"
+                            onClick={() => {
+                              setPeriodSelection(null);
+                              setPeriodZeitgeistOpen(false);
+                            }}
+                          >
+                            <X className="h-3 w-3" aria-hidden />
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  <ResponsiveContainer width="100%" height={chartHeight}>
                 <ComposedChart
                   data={chartDataWithBenchmark}
                   margin={{ top: 5, right: 10, left: 0, bottom: 8 }}
@@ -2045,7 +2067,9 @@ export function NewsTrendsUI({
                     dataKey="date"
                     tick={{ fontSize: 10, fill: "currentColor", opacity: 0.5 }}
                     tickLine={false}
-                    tickFormatter={(v: string) => formatBucket(v, viewMode)}
+                    tickFormatter={(v: string) =>
+                      formatChartAxisTick(v, viewMode, useDbAggregates)
+                    }
                     interval="preserveStartEnd"
                   />
                   <YAxis
@@ -2115,7 +2139,13 @@ export function NewsTrendsUI({
                     />
                   ) : null}
                   <Tooltip
-                    content={<CustomTooltip labelMap={clusterLabelMap} />}
+                    content={
+                      <CustomTooltip
+                        labelMap={clusterLabelMap}
+                        mode={viewMode}
+                        utcChartBuckets={useDbAggregates}
+                      />
+                    }
                   />
                   {showClusterMean ? (
                     <Line
@@ -2253,11 +2283,15 @@ export function NewsTrendsUI({
                         hasValidControlledBrush ? normalizedBrushEnd : undefined
                       }
                       onChange={handleBrushChange}
-                      tickFormatter={(v: string) => formatBucket(v, viewMode)}
+                      tickFormatter={(v: string) =>
+                        formatChartAxisTick(v, viewMode, useDbAggregates)
+                      }
                     />
                   ) : null}
                 </ComposedChart>
               </ResponsiveContainer>
+                </>
+              )}
             </div>
           </div>
         </div>
@@ -2287,7 +2321,12 @@ export function NewsTrendsUI({
           maWindow={maWindow}
           latestDimScores={latestDimScores}
           mode={viewMode}
+          utcChartBuckets={useDbAggregates}
           chartHeight={Math.round(chartHeight * 0.65)}
+          aggregatesLoading={
+            dimensionAggregatesLoading !== false &&
+            dimensionAggregatesLoading === viewMode
+          }
         />
       )}
 
@@ -2303,7 +2342,8 @@ export function NewsTrendsUI({
           >
             <div className="flex items-center justify-between px-5 py-4 border-b shrink-0">
               <h2 className="font-semibold text-sm">
-                Articles · {formatBucket(articleModalDate, viewMode)}
+                Articles ·{" "}
+                {formatChartAxisTick(articleModalDate, viewMode, useDbAggregates)}
               </h2>
               <span className="text-xs text-muted-foreground mr-auto ml-3">
                 {modalArticles.length} article
@@ -2357,22 +2397,24 @@ export function NewsTrendsUI({
                     Period context
                   </h2>
                   <p className="text-xs text-muted-foreground mt-1">
-                    {formatBucket(
+                    {formatChartAxisTick(
                       String(
                         chartDataWithBenchmark[
                           Math.min(periodSelection.start, periodSelection.end)
                         ]?.date ?? "",
                       ),
                       viewMode,
+                      useDbAggregates,
                     )}
                     {" → "}
-                    {formatBucket(
+                    {formatChartAxisTick(
                       String(
                         chartDataWithBenchmark[
                           Math.max(periodSelection.start, periodSelection.end)
                         ]?.date ?? "",
                       ),
                       viewMode,
+                      useDbAggregates,
                     )}
                     {" · "}
                     {periodArticles.length} article
