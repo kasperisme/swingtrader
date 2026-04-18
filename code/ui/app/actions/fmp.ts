@@ -1,5 +1,7 @@
 "use server";
 
+import { subtractCalendarDays } from "@/lib/fmp-date-utils";
+
 export type FmpOhlcBar = {
   date: string;
   open: number;
@@ -17,6 +19,9 @@ export type FmpPriceAtDateResult = {
 
 export type FmpActionError = { ok: false; error: string };
 export type FmpOhlcSuccess = { ok: true; data: FmpOhlcBar[] };
+
+/** Inclusive `from` / `to` dates (`YYYY-MM-DD`) for historical OHLC requests. */
+export type FmpOhlcDateRange = { from: string; to: string };
 export type FmpQuoteSuccess = { ok: true; data: unknown };
 export type FmpSearchSuccess = { ok: true; data: unknown[] };
 
@@ -133,13 +138,6 @@ function normalizeSymbolInput(symbolParam: string): string {
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 const MAX_SEARCH_QUERY_LEN = 80;
 
-function subtractCalendarDays(ymd: string, days: number): string {
-  const [y, m, d] = ymd.split("-").map((x) => Number.parseInt(x, 10));
-  if (!Number.isFinite(y) || !Number.isFinite(m) || !Number.isFinite(d)) return ymd;
-  const ms = Date.UTC(y, m - 1, d) - days * 86_400_000;
-  return new Date(ms).toISOString().slice(0, 10);
-}
-
 function pickHistoricalClose(
   rows: { date: string; close: unknown }[],
   dateStr: string,
@@ -159,6 +157,7 @@ function pickHistoricalClose(
 export async function fmpGetOhlc(
   symbolParam: string,
   intervalRaw?: string,
+  dateRange?: FmpOhlcDateRange,
 ): Promise<FmpOhlcSuccess | FmpActionError> {
   if (!symbolParam?.trim()) {
     return { ok: false, error: "symbol required" };
@@ -184,15 +183,21 @@ export async function fmpGetOhlc(
     ]),
   );
 
-  const from = new Date(now);
-  const toStr = now.toISOString().split("T")[0];
-  let fromStr = "";
-  if (interval === "1hour") {
-    from.setMonth(from.getMonth() - 6);
+  let fromStr: string;
+  let toStr: string;
+  if (dateRange?.from && dateRange?.to) {
+    fromStr = dateRange.from.slice(0, 10);
+    toStr = dateRange.to.slice(0, 10);
   } else {
-    from.setFullYear(from.getFullYear() - 1);
+    const from = new Date(now);
+    toStr = now.toISOString().split("T")[0];
+    if (interval === "1hour") {
+      from.setMonth(from.getMonth() - 6);
+    } else {
+      from.setFullYear(from.getFullYear() - 1);
+    }
+    fromStr = from.toISOString().split("T")[0];
   }
-  fromStr = from.toISOString().split("T")[0];
 
   let historical: unknown[] = [];
   let fetched = false;

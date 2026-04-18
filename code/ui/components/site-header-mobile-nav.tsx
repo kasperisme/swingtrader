@@ -12,6 +12,7 @@ import { CavemanToggle } from "@/components/caveman-toggle";
 const researchLinks = [
   { href: "/protected", label: "Articles" },
   { href: "/protected/news-trends", label: "News Trends" },
+  { href: "/protected/charts", label: "Charts" },
   { href: "/protected/relationships", label: "Explore" },
 ] as const;
 

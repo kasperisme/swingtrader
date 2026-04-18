@@ -1,23 +1,32 @@
 "use client";
 
-import { useState, useMemo, useEffect, useCallback, useRef } from "react";
+import { useState, useMemo, useEffect, useCallback, useRef, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import {
   CheckCircle, XCircle, Search, ChevronDown, ChevronUp,
   ChevronLeft, ChevronRight, BarChart2, List, TrendingUp, Loader2, Newspaper, Trash2, RotateCcw, Star, MessageSquare,
-  Activity, Copy, Gauge, Plus,
+  Activity, Copy, Gauge, Plus, Bot,
 } from "lucide-react";
+import { AiAnalysisPanel } from "@/components/ai-analysis-panel";
 import { CLUSTERS } from "../vectors/dimensions";
 import { NewsTrendsUI, type ArticleImpact } from "../news-trends/news-trends-ui";
 import { getCachedQuotes, setCachedQuotes } from "@/lib/quote-cache";
-import { fmpGetOhlc, fmpGetQuote, fmpGetPriceAtDate } from "@/app/actions/fmp";
+import { fmpGetQuote, fmpGetPriceAtDate } from "@/app/actions/fmp";
+import {
+  TickerChartsPanel,
+  pivotFromMetadata,
+  type ChartPoint,
+  type PivotMarker,
+} from "@/components/ticker-charts";
 import { createClient } from "@/lib/supabase/client";
 import {
   screeningsGetNewsImpacts,
-  screeningsGetTickerRelationships,
+  screeningsGetTickerSentimentHeadRows,
   screeningsSoftDeleteRun,
   screeningsUpsertDismissNote,
+  type ScreeningTickerSentimentHeadRow,
 } from "@/app/actions/screenings";
+import { RelationshipNetworkExplorer } from "@/components/relationship-network/relationship-network-explorer";
 import {
   collectAllRowDataKeys,
   compareRowDataValues,
@@ -37,10 +46,6 @@ import {
   NOTE_STAGE_NONE,
   type ScreeningsFilters,
 } from "./screenings-filters-model";
-
-type SentimentArticleImpact = ArticleImpact & {
-  ticker_sentiment?: Record<string, number>;
-};
 
 export interface ScanRun {
   id: number;
@@ -218,6 +223,8 @@ const DEFAULT_FILTERS = DEFAULT_SCREENINGS_FILTERS;
 type SortKey = string;
 type SortDir = "asc" | "desc";
 type ViewTab = "results" | "quotes" | "charts" | "news" | "sentiment" | "relationship" | "tradeMonitoring";
+
+type ScreeningsPrimaryTabDef = { id: ViewTab; label: string; icon: ReactNode };
 
 // ─── FMP Quote types ─────────────────────────────────────────────────────────
 
@@ -465,758 +472,10 @@ function QuotesView({
   );
 }
 
-// ─── OHLC types ──────────────────────────────────────────────────────────────
 
-interface OhlcBar {
-  date: string;
-  open: number;
-  high: number;
-  low: number;
-  close: number;
-  volume: number;
-}
+// ─── Screenings relationship network (same DB neighborhood as Explore) ─────
 
-
-
-// ─── Candlestick chart using pure SVG ────────────────────────────────────────
-// (recharts doesn't support true candlestick natively; we build a lightweight SVG chart)
-
-interface Crosshair {
-  barIdx: number;
-  svgY: number;
-  pinned: boolean;
-}
-
-interface SelectionBox {
-  startX: number;
-  startY: number;
-  endX: number;
-  endY: number;
-  locked: boolean;
-}
-
-interface ChartPoint {
-  barIdx: number;
-  date: string;
-  price: number;
-  open: number;
-  high: number;
-  low: number;
-  close: number;
-}
-
-/** Single saved pivot: dot at bar + horizontal ray to the right (price pane only). */
-export type PivotMarker = { barIdx: number; date: string; price: number };
-
-function resolvePivotBarIndex(data: OhlcBar[], pivot: { barIdx: number; date: string }): number {
-  const byDate = data.findIndex(d => d.date === pivot.date);
-  if (byDate >= 0) return byDate;
-  return Math.max(0, Math.min(data.length - 1, pivot.barIdx));
-}
-
-function pivotFromMetadata(meta: Record<string, unknown> | undefined): PivotMarker | null {
-  if (!meta) return null;
-  const single = meta.pivot;
-  if (
-    single &&
-    typeof single === "object" &&
-    typeof (single as { barIdx?: unknown }).barIdx === "number" &&
-    typeof (single as { date?: unknown }).date === "string" &&
-    typeof (single as { price?: unknown }).price === "number"
-  ) {
-    return {
-      barIdx: (single as { barIdx: number }).barIdx,
-      date: (single as { date: string }).date,
-      price: (single as { price: number }).price,
-    };
-  }
-  const raw = meta.pivot_points;
-  if (Array.isArray(raw) && raw.length > 0) {
-    const first = raw[0];
-    if (
-      first &&
-      typeof first === "object" &&
-      typeof (first as { date?: unknown }).date === "string" &&
-      typeof (first as { price?: unknown }).price === "number"
-    ) {
-      const barIdx =
-        typeof (first as { barIdx?: unknown }).barIdx === "number"
-          ? (first as { barIdx: number }).barIdx
-          : 0;
-      return {
-        barIdx,
-        date: (first as { date: string }).date,
-        price: (first as { price: number }).price,
-      };
-    }
-  }
-  return null;
-}
-
-function CandlestickSvg({
-  symbol,
-  onPointChange,
-  pivotMarker,
-  onChartMetrics,
-  onChartData,
-  onAutoPivot,
-}: {
-  symbol: string;
-  onPointChange?: (point: ChartPoint | null) => void;
-  pivotMarker?: PivotMarker | null;
-  /** Latest bar close for header pivot distance when crosshair is inactive */
-  onChartMetrics?: (m: { lastClose: number } | null) => void;
-  onChartData?: (rows: OhlcBar[]) => void;
-  onAutoPivot?: (point: ChartPoint) => void;
-}) {
-  const [data, setData] = useState<OhlcBar[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [crosshair, setCrosshair] = useState<Crosshair | null>(null);
-  const [selBox, setSelBox] = useState<SelectionBox | null>(null);
-  const svgRef = useRef<SVGSVGElement>(null);
-  const lastPointKeyRef = useRef<string | null>(null);
-
-  useEffect(() => {
-    setLoading(true);
-    setError(null);
-    setData([]);
-    fmpGetOhlc(symbol)
-      .then((r) => {
-        if (!r.ok) {
-          setError("Failed to load chart data");
-          return;
-        }
-        setData(r.data);
-      })
-      .catch(() => setError("Failed to load chart data"))
-      .finally(() => setLoading(false));
-  }, [symbol]);
-
-  useEffect(() => {
-    if (!onChartMetrics) return;
-    if (data.length === 0) {
-      onChartMetrics(null);
-      return;
-    }
-    onChartMetrics({ lastClose: data[data.length - 1]!.close });
-  }, [data, onChartMetrics]);
-
-  useEffect(() => {
-    onChartData?.(data);
-  }, [data, onChartData]);
-
-  const W = 900;
-  const H_PRICE = 340;
-  const H_VOL = 80;
-  const H = H_PRICE + H_VOL + 16;
-  const PAD_L = 60;
-  const PAD_R = 12;
-  const PAD_T = 12;
-  const PAD_B = 24;
-
-  const chartW = W - PAD_L - PAD_R;
-  const chartH = H_PRICE - PAD_T - PAD_B;
-
-  const priceMin = useMemo(() => data.length ? Math.min(...data.map(d => d.low)) * 0.99 : 0, [data]);
-  const priceMax = useMemo(() => data.length ? Math.max(...data.map(d => d.high)) * 1.01 : 1, [data]);
-  const volMax = useMemo(() => data.length ? Math.max(...data.map(d => d.volume)) : 1, [data]);
-
-  const toY = useCallback((p: number) => {
-    return PAD_T + chartH - ((p - priceMin) / (priceMax - priceMin)) * chartH;
-  }, [priceMin, priceMax, chartH]);
-
-  const toVolY = useCallback((v: number) => {
-    const volH = H_VOL - 8;
-    return H_PRICE + 16 + volH - (v / volMax) * volH;
-  }, [volMax]);
-
-  const barW = Math.max(1, Math.min(12, chartW / (data.length || 1) - 1));
-  const barStep = data.length > 1 ? chartW / data.length : chartW;
-
-  function xOf(i: number) {
-    return PAD_L + i * barStep + barStep / 2;
-  }
-
-  // SMAs
-  const sma = useCallback((period: number) => {
-    return data.map((_, i) => {
-      if (i < period - 1) return null;
-      const slice = data.slice(i - period + 1, i + 1);
-      return slice.reduce((s, d) => s + d.close, 0) / period;
-    });
-  }, [data]);
-
-  const sma10 = useMemo(() => sma(10), [sma]);
-  const sma21 = useMemo(() => sma(21), [sma]);
-  const sma50 = useMemo(() => sma(50), [sma]);
-  const sma200 = useMemo(() => sma(200), [sma]);
-
-  // Y-axis ticks
-  const yTicks = useMemo(() => {
-    const range = priceMax - priceMin;
-    const step = Math.pow(10, Math.floor(Math.log10(range))) / 2;
-    const ticks: number[] = [];
-    const start = Math.ceil(priceMin / step) * step;
-    for (let t = start; t <= priceMax; t += step) {
-      ticks.push(Math.round(t * 100) / 100);
-    }
-    return ticks;
-  }, [priceMin, priceMax]);
-
-  // X-axis ticks
-  const xTickIndices = useMemo(() => {
-    if (data.length === 0) return [];
-    const step = Math.ceil(data.length / 8);
-    const idx: number[] = [];
-    for (let i = 0; i < data.length; i += step) idx.push(i);
-    return idx;
-  }, [data]);
-
-  const toPrice = useCallback((svgY: number): number => {
-    return priceMin + (1 - (svgY - PAD_T) / chartH) * (priceMax - priceMin);
-  }, [priceMin, chartH, priceMax, PAD_T]);
-
-  function svgCoordsFromEvent(e: React.MouseEvent<SVGSVGElement>) {
-    const svg = svgRef.current;
-    if (!svg || data.length === 0) return null;
-    const rect = svg.getBoundingClientRect();
-    const scaleX = W / rect.width;
-    const scaleY = H / rect.height;
-    const svgX = (e.clientX - rect.left) * scaleX;
-    const svgY = (e.clientY - rect.top) * scaleY;
-    const rawIdx = (svgX - PAD_L - barStep / 2) / barStep;
-    const barIdx = Math.max(0, Math.min(data.length - 1, Math.round(rawIdx)));
-    return { barIdx, svgX, svgY };
-  }
-
-  function handleMouseMove(e: React.MouseEvent<SVGSVGElement>) {
-    const coords = svgCoordsFromEvent(e);
-    if (!coords) return;
-    setCrosshair(prev => ({ barIdx: coords.barIdx, svgY: coords.svgY, pinned: prev?.pinned ?? false }));
-    // Drag end corner of selection box to cursor position
-    setSelBox(prev => prev && !prev.locked ? { ...prev, endX: coords.svgX, endY: coords.svgY } : prev);
-  }
-
-  function handleClick(e: React.MouseEvent<SVGSVGElement>) {
-    const coords = svgCoordsFromEvent(e);
-    if (!coords) return;
-    if (e.shiftKey) {
-      // Shift+click: start new box at cursor (or clear locked one)
-      setSelBox(prev =>
-        prev && prev.locked
-          ? null
-          : { startX: coords.svgX, startY: coords.svgY, endX: coords.svgX, endY: coords.svgY, locked: false }
-      );
-    } else if (selBox && !selBox.locked) {
-      // Plain click while drawing: lock at current cursor
-      setSelBox({ ...selBox, endX: coords.svgX, endY: coords.svgY, locked: true });
-    } else if (selBox && selBox.locked) {
-      // Click outside the locked box: clear it
-      const x1 = Math.min(selBox.startX, selBox.endX);
-      const x2 = Math.max(selBox.startX, selBox.endX);
-      const y1 = Math.min(selBox.startY, selBox.endY);
-      const y2 = Math.max(selBox.startY, selBox.endY);
-      const inside = coords.svgX >= x1 && coords.svgX <= x2 && coords.svgY >= y1 && coords.svgY <= y2;
-      if (!inside) setSelBox(null);
-    }
-  }
-
-  function handleDoubleClick(e: React.MouseEvent<SVGSVGElement>) {
-    const coords = svgCoordsFromEvent(e);
-    if (!coords) return;
-    setCrosshair(prev => ({ ...coords, pinned: !(prev?.pinned) }));
-  }
-
-  useEffect(() => {
-    if (!onPointChange) return;
-    if (!crosshair) {
-      lastPointKeyRef.current = null;
-      onPointChange(null);
-      return;
-    }
-    const bar = data[crosshair.barIdx];
-    if (!bar) {
-      onPointChange(null);
-      return;
-    }
-    const lineY = Math.max(PAD_T, Math.min(H_PRICE - PAD_B, crosshair.svgY));
-    const nextPoint: ChartPoint = {
-      barIdx: crosshair.barIdx,
-      date: bar.date,
-      price: toPrice(lineY),
-      open: bar.open,
-      high: bar.high,
-      low: bar.low,
-      close: bar.close,
-    };
-    const pointKey = `${nextPoint.barIdx}:${nextPoint.date}:${nextPoint.price.toFixed(4)}`;
-    if (lastPointKeyRef.current === pointKey) return;
-    lastPointKeyRef.current = pointKey;
-    onPointChange(nextPoint);
-  }, [crosshair, data, onPointChange, PAD_T, H_PRICE, PAD_B, toPrice]);
-
-  if (loading) {
-    return (
-      <div className="flex items-center justify-center h-64 gap-2 text-muted-foreground">
-        <Loader2 className="w-5 h-5 animate-spin" />
-        <span className="text-sm">Loading {symbol}…</span>
-      </div>
-    );
-  }
-  if (error) return <p className="text-sm text-rose-500 text-center py-8">{error}</p>;
-  if (data.length === 0) return <p className="text-sm text-muted-foreground text-center py-8">No chart data.</p>;
-
-  return (
-    <div className="relative w-full">
-      <svg
-        ref={svgRef}
-        viewBox={`0 0 ${W} ${H}`}
-        width="100%"
-        className="block cursor-crosshair select-none"
-        onMouseMove={handleMouseMove}
-        onClick={handleClick}
-        onDoubleClick={handleDoubleClick}
-        onMouseDown={e => e.preventDefault()}
-        onMouseLeave={() => setCrosshair(prev => prev?.pinned ? prev : null)}
-      >
-        {/* Grid */}
-        {yTicks.map(t => (
-          <line
-            key={t}
-            x1={PAD_L} x2={W - PAD_R}
-            y1={toY(t)} y2={toY(t)}
-            stroke="hsl(var(--border))"
-            strokeWidth={0.5}
-          />
-        ))}
-
-        {/* Y-axis labels */}
-        {yTicks.map(t => (
-          <text
-            key={`yl-${t}`}
-            x={PAD_L - 6}
-            y={toY(t) + 4}
-            textAnchor="end"
-            fontSize={10}
-            fill="hsl(var(--muted-foreground))"
-          >
-            ${t.toFixed(t >= 100 ? 0 : 2)}
-          </text>
-        ))}
-
-        {/* SMAs */}
-        {([
-          { values: sma10,  color: "#10b981", key: "10"  },
-          { values: sma21,  color: "#f97316", key: "21"  },
-          { values: sma50,  color: "#ef4444", key: "50"  },
-          { values: sma200, color: "#6366f1", key: "200" },
-        ] as const).map(({ values, color, key }) =>
-          values.map((v, i) => {
-            if (v == null || values[i - 1] == null) return null;
-            return (
-              <line
-                key={`s${key}-${i}`}
-                x1={xOf(i - 1)} y1={toY(values[i - 1]!)}
-                x2={xOf(i)} y2={toY(v)}
-                stroke={color}
-                strokeWidth={1.5}
-                opacity={0.85}
-              />
-            );
-          })
-        )}
-
-        {/* Candles */}
-        {data.map((bar, i) => {
-          const cx = xOf(i);
-          const up = bar.close >= bar.open;
-          const color = up ? "#10b981" : "#ef4444";
-          const bodyTop = toY(Math.max(bar.open, bar.close));
-          const bodyBot = toY(Math.min(bar.open, bar.close));
-          const bodyH = Math.max(bodyBot - bodyTop, 1);
-
-          return (
-            <g key={i}>
-              {/* Wick */}
-              <line
-                x1={cx} x2={cx}
-                y1={toY(bar.high)} y2={toY(bar.low)}
-                stroke={color}
-                strokeWidth={1}
-                opacity={0.7}
-              />
-              {/* Body */}
-              <rect
-                x={cx - barW / 2}
-                y={bodyTop}
-                width={barW}
-                height={bodyH}
-                fill={color}
-                opacity={0.85}
-              />
-            </g>
-          );
-        })}
-
-        {/* Pivot marker: dot at bar + horizontal line to the right edge of the price pane */}
-        {pivotMarker && (() => {
-          const pbi = resolvePivotBarIndex(data, pivotMarker);
-          const px = xOf(pbi);
-          const py = toY(pivotMarker.price);
-          const inPane = py >= PAD_T && py <= H_PRICE - PAD_B;
-          if (!inPane) return null;
-          return (
-            <g pointerEvents="none">
-              <line
-                x1={px}
-                y1={py}
-                x2={W - PAD_R}
-                y2={py}
-                stroke="#f59e0b"
-                strokeWidth={1.5}
-                strokeDasharray="5 3"
-                opacity={0.95}
-              />
-              <circle
-                cx={px}
-                cy={py}
-                r={4}
-                fill="#f59e0b"
-                stroke="hsl(var(--background))"
-                strokeWidth={1.5}
-              />
-            </g>
-          );
-        })()}
-
-        {/* X-axis labels */}
-        {xTickIndices.map(i => (
-          <text
-            key={`xl-${i}`}
-            x={xOf(i)}
-            y={H_PRICE - PAD_B + 14}
-            textAnchor="middle"
-            fontSize={10}
-            fill="hsl(var(--muted-foreground))"
-          >
-            {data[i]?.date?.slice(5)} {/* MM-DD */}
-          </text>
-        ))}
-
-        {/* Divider */}
-        <line
-          x1={PAD_L} x2={W - PAD_R}
-          y1={H_PRICE + 8} y2={H_PRICE + 8}
-          stroke="hsl(var(--border))"
-          strokeWidth={1}
-        />
-
-        {/* Volume bars */}
-        {data.map((bar, i) => {
-          const cx = xOf(i);
-          const up = bar.close >= bar.open;
-          const color = up ? "#10b981" : "#ef4444";
-          const volY = toVolY(bar.volume);
-          const volH = H_PRICE + 16 + (H_VOL - 8) - volY;
-          return (
-            <rect
-              key={`v-${i}`}
-              x={cx - barW / 2}
-              y={volY}
-              width={barW}
-              height={Math.max(volH, 1)}
-              fill={color}
-              opacity={0.35}
-            />
-          );
-        })}
-
-        {/* Legend */}
-        {[
-          { color: "#10b981", label: "SMA 10"  },
-          { color: "#f97316", label: "SMA 21"  },
-          { color: "#ef4444", label: "SMA 50"  },
-          { color: "#6366f1", label: "SMA 200" },
-        ].map(({ color, label }, i) => (
-          <g key={label}>
-            <circle cx={PAD_L + 8 + i * 58} cy={PAD_T + 6} r={4} fill={color} opacity={0.85} />
-            <text x={PAD_L + 16 + i * 58} y={PAD_T + 10} fontSize={10} fill="hsl(var(--muted-foreground))">{label}</text>
-          </g>
-        ))}
-
-        {/* Selection box */}
-        {selBox && (() => {
-          // Box corners follow cursor exactly
-          const x1 = Math.min(selBox.startX, selBox.endX);
-          const x2 = Math.max(selBox.startX, selBox.endX);
-          const y1 = Math.min(selBox.startY, selBox.endY);
-          const y2 = Math.max(selBox.startY, selBox.endY);
-
-          // Derive bar indices from x positions for stats only
-          const toIdx = (x: number) =>
-            Math.max(0, Math.min(data.length - 1, Math.round((x - PAD_L - barStep / 2) / barStep)));
-          const minIdx = toIdx(x1);
-          const maxIdx = toIdx(x2);
-          const barsInRange = data.slice(minIdx, maxIdx + 1);
-          if (barsInRange.length === 0) return null;
-
-          const startBar = data[minIdx];
-          const endBar   = data[maxIdx];
-          const priceChange = endBar.close - startBar.open;
-          const pctChange   = (priceChange / startBar.open) * 100;
-          const barCount    = maxIdx - minIdx + 1;
-          const totalVol    = barsInRange.reduce((s, b) => s + b.volume, 0);
-          const calDays     = Math.round(
-            (new Date(endBar.date).getTime() - new Date(startBar.date).getTime()) / 86400000
-          );
-
-          const up = priceChange >= 0;
-          const boxColor = up ? "rgba(16,185,129,0.12)" : "rgba(239,68,68,0.12)";
-          const borderColor = up ? "#10b981" : "#ef4444";
-
-          const fmtVol = (v: number) =>
-            v >= 1e9 ? `${(v / 1e9).toFixed(2)}B`
-            : v >= 1e6 ? `${(v / 1e6).toFixed(2)}M`
-            : v >= 1e3 ? `${(v / 1e3).toFixed(1)}K`
-            : String(v);
-
-          // Stats label — bottom-right of box, flip left if near edge
-          const labelW = 180;
-          const labelH = 56;
-          const labelX = x2 + 8 + labelW > W - PAD_R ? x2 - labelW - 8 : x2 + 8;
-          const labelY = Math.min(y2 + 8, H - labelH - 8);
-
-          return (
-            <g pointerEvents="none">
-              {/* Fill */}
-              <rect x={x1} y={y1} width={x2 - x1} height={y2 - y1} fill={boxColor} />
-              {/* Dotted border */}
-              <rect
-                x={x1} y={y1} width={x2 - x1} height={y2 - y1}
-                fill="none"
-                stroke={borderColor}
-                strokeWidth={1}
-                strokeDasharray="5 3"
-                opacity={0.8}
-              />
-
-              {/* Stats label */}
-              <rect x={labelX} y={labelY} width={labelW} height={labelH} rx={5}
-                fill={up ? "rgba(16,185,129,0.18)" : "rgba(239,68,68,0.18)"}
-                stroke={borderColor} strokeWidth={1}
-              />
-              {/* Line 1: price change + % */}
-              <text
-                x={labelX + labelW / 2} y={labelY + 18}
-                textAnchor="middle" fontSize={12} fontWeight="bold"
-                fill={borderColor}
-              >
-                {priceChange >= 0 ? "+" : ""}{priceChange.toFixed(2)} ({pctChange >= 0 ? "+" : ""}{pctChange.toFixed(2)}%)
-              </text>
-              {/* Line 2: bars + days */}
-              <text
-                x={labelX + labelW / 2} y={labelY + 34}
-                textAnchor="middle" fontSize={11}
-                fill="hsl(var(--foreground))"
-              >
-                {barCount} bar{barCount !== 1 ? "s" : ""}, {calDays}d
-              </text>
-              {/* Line 3: volume */}
-              <text
-                x={labelX + labelW / 2} y={labelY + 50}
-                textAnchor="middle" fontSize={11}
-                fill="hsl(var(--muted-foreground))"
-              >
-                Vol {fmtVol(totalVol)}
-              </text>
-            </g>
-          );
-        })()}
-
-        {/* Crosshair */}
-        {crosshair && (() => {
-          const { barIdx, svgY, pinned } = crosshair;
-          const bar = data[barIdx];
-          if (!bar) return null;
-
-          const cx = xOf(barIdx);
-          // Clamp horizontal line to price area
-          const lineY = Math.max(PAD_T, Math.min(H_PRICE - PAD_B, svgY));
-          const price = toPrice(lineY);
-          const chg = bar.close - bar.open;
-          const chgPct = (chg / bar.open) * 100;
-          const up = chg >= 0;
-
-          // Info panel: flip left if near right edge
-          const panelW = 152;
-          const panelH = 110;
-          const panelX = cx + 12 + panelW > W - PAD_R ? cx - panelW - 12 : cx + 12;
-          const panelY = Math.max(PAD_T, Math.min(H_PRICE - panelH - 8, lineY - panelH / 2));
-
-          // Date label: flip left if near right edge
-          const dateLabelW = 52;
-          const dateLabelX = Math.max(PAD_L, Math.min(W - PAD_R - dateLabelW, cx - dateLabelW / 2));
-
-          // Price label on Y-axis
-          const priceLabelY = Math.max(PAD_T + 6, Math.min(H_PRICE - PAD_B, lineY));
-
-          const priceStr = `$${price.toFixed(price >= 100 ? 2 : 2)}`;
-
-          return (
-            <g pointerEvents="none">
-              {/* Vertical dotted line — full chart height */}
-              <line
-                x1={cx} x2={cx}
-                y1={PAD_T} y2={H - PAD_B}
-                stroke="hsl(var(--muted-foreground))"
-                strokeWidth={1}
-                strokeDasharray="4 3"
-                opacity={0.7}
-              />
-              {/* Horizontal dotted line — price area only */}
-              <line
-                x1={PAD_L} x2={W - PAD_R}
-                y1={lineY} y2={lineY}
-                stroke="hsl(var(--muted-foreground))"
-                strokeWidth={1}
-                strokeDasharray="4 3"
-                opacity={0.7}
-              />
-
-              {/* Date label on X-axis */}
-              <rect
-                x={dateLabelX} y={H_PRICE - PAD_B + 2}
-                width={dateLabelW} height={16}
-                rx={3}
-                fill="hsl(var(--foreground))"
-              />
-              <text
-                x={dateLabelX + dateLabelW / 2}
-                y={H_PRICE - PAD_B + 13}
-                textAnchor="middle"
-                fontSize={10}
-                fill="hsl(var(--background))"
-                fontWeight="500"
-              >
-                {bar.date.slice(5)}
-              </text>
-
-              {/* Price label on Y-axis */}
-              <rect
-                x={0} y={priceLabelY - 7}
-                width={PAD_L - 2} height={14}
-                rx={3}
-                fill="hsl(var(--foreground))"
-              />
-              <text
-                x={PAD_L - 6}
-                y={priceLabelY + 4}
-                textAnchor="end"
-                fontSize={10}
-                fill="hsl(var(--background))"
-                fontWeight="500"
-              >
-                {priceStr}
-              </text>
-
-              {/* Info panel — shown only when pinned (double-click) */}
-              {pinned && <>
-                <rect
-                  x={panelX} y={panelY}
-                  width={panelW} height={panelH}
-                  rx={6}
-                  fill="hsl(var(--background))"
-                  stroke="hsl(var(--border))"
-                  strokeWidth={1}
-                />
-                <text x={panelX + 10} y={panelY + 16} fontSize={11} fontWeight="bold" fill="hsl(var(--foreground))">{bar.date}</text>
-                {[
-                  ["O", `$${bar.open.toFixed(2)}`, "hsl(var(--foreground))"],
-                  ["H", `$${bar.high.toFixed(2)}`, "hsl(var(--foreground))"],
-                  ["L", `$${bar.low.toFixed(2)}`, "hsl(var(--foreground))"],
-                  ["C", `$${bar.close.toFixed(2)}`, up ? "#10b981" : "#ef4444"],
-                  ["Chg", `${chg >= 0 ? "+" : ""}${chg.toFixed(2)} (${chgPct >= 0 ? "+" : ""}${chgPct.toFixed(2)}%)`, up ? "#10b981" : "#ef4444"],
-                ].map(([label, val, color], row) => (
-                  <g key={label}>
-                    <text x={panelX + 10} y={panelY + 32 + row * 16} fontSize={10} fill="hsl(var(--muted-foreground))">{label}</text>
-                    <text x={panelX + panelW - 8} y={panelY + 32 + row * 16} fontSize={10} textAnchor="end" fill={color}>{val}</text>
-                  </g>
-                ))}
-              </>}
-            </g>
-          );
-        })()}
-      </svg>
-
-      {/* Selection-box toolbar — appears when box is locked */}
-      {selBox?.locked && (() => {
-        const toIdx = (x: number) =>
-          Math.max(0, Math.min(data.length - 1, Math.round((x - PAD_L - barStep / 2) / barStep)));
-        const x1 = Math.min(selBox.startX, selBox.endX);
-        const x2 = Math.max(selBox.startX, selBox.endX);
-        const y1 = Math.min(selBox.startY, selBox.endY);
-        const y2 = Math.max(selBox.startY, selBox.endY);
-        const minIdx = toIdx(x1);
-        const maxIdx = toIdx(x2);
-
-        // Position centered on box, above top edge; flip below if too close to top
-        const cx = (x1 + x2) / 2;
-        const leftPct = (cx / W) * 100;
-        const showBelow = y1 / H < 0.12;
-        const anchorPct = ((showBelow ? y2 : y1) / H) * 100;
-
-        function autoFindPivot() {
-          if (!onAutoPivot) return;
-          let bestIdx = minIdx;
-          for (let i = minIdx + 1; i <= maxIdx; i++) {
-            if ((data[i]?.high ?? 0) > (data[bestIdx]?.high ?? 0)) bestIdx = i;
-          }
-          const bar = data[bestIdx];
-          if (!bar) return;
-          onAutoPivot({
-            barIdx: bestIdx,
-            date: bar.date,
-            price: bar.high,
-            open: bar.open,
-            high: bar.high,
-            low: bar.low,
-            close: bar.close,
-          });
-          setSelBox(null);
-        }
-
-        return (
-          <div
-            className="absolute z-10 flex items-center bg-background border border-border rounded-md shadow-lg overflow-hidden"
-            style={{
-              left: `${leftPct}%`,
-              top: `${anchorPct}%`,
-              transform: `translate(-50%, ${showBelow ? "4px" : "calc(-100% - 4px)"})`,
-              pointerEvents: "auto",
-            }}
-          >
-            <span className="px-2 text-[10px] font-medium text-muted-foreground uppercase tracking-wide border-r border-border py-1.5">
-              Selection
-            </span>
-            {onAutoPivot && (
-              <button
-                type="button"
-                onClick={autoFindPivot}
-                className="px-3 py-1.5 text-xs font-medium hover:bg-muted transition-colors whitespace-nowrap"
-              >
-                Auto find pivot
-              </button>
-            )}
-          </div>
-        );
-      })()}
-    </div>
-  );
-}
-
-// Replace OhlcChart with CandlestickSvg in ChartsView
-function ChartsViewFinal({
+function ScreeningsRelationshipNetworkPanel({
   symbols,
   selectedTicker,
   onSelect,
@@ -1228,9 +487,6 @@ function ChartsViewFinal({
   hasComment,
   onEditComment,
   getTickerMeta,
-  getPivotMarker,
-  onSetPivotMarker,
-  onClearPivotMarker,
 }: {
   symbols: string[];
   selectedTicker: string | null;
@@ -1243,9 +499,6 @@ function ChartsViewFinal({
   hasComment: (ticker: string) => boolean;
   onEditComment: (ticker: string) => void;
   getTickerMeta: (ticker: string) => { sector: string; industry: string };
-  getPivotMarker: (ticker: string) => PivotMarker | null;
-  onSetPivotMarker: (ticker: string, point: ChartPoint) => void;
-  onClearPivotMarker: (ticker: string) => void;
 }) {
   const idx = useMemo(() => {
     const i = selectedTicker ? symbols.indexOf(selectedTicker) : -1;
@@ -1254,8 +507,9 @@ function ChartsViewFinal({
 
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
-      if (e.key === "ArrowLeft") onSelect(symbols[Math.max(0, idx - 1)]);
-      if (e.key === "ArrowRight") onSelect(symbols[Math.min(symbols.length - 1, idx + 1)]);
+      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
+      if (e.key === "ArrowLeft") onSelect(symbols[Math.max(0, idx - 1)]!);
+      if (e.key === "ArrowRight") onSelect(symbols[Math.min(symbols.length - 1, idx + 1)]!);
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
@@ -1265,83 +519,17 @@ function ChartsViewFinal({
     return <p className="text-sm text-muted-foreground py-8 text-center">No stocks to show.</p>;
   }
 
-  const symbol = symbols[idx];
+  const symbol = symbols[idx]!;
   const meta = getTickerMeta(symbol);
   const status = getStatus(symbol);
   const commentExists = hasComment(symbol);
-  const pivotMarker = getPivotMarker(symbol);
-  const [activePoint, setActivePoint] = useState<ChartPoint | null>(null);
-  const activePointRef = useRef<ChartPoint | null>(null);
-  activePointRef.current = activePoint;
-  const [pivotMenu, setPivotMenu] = useState<{ x: number; y: number; pointSnapshot: ChartPoint | null } | null>(null);
-  const pivotMenuRef = useRef<HTMLDivElement>(null);
-  const [chartLastClose, setChartLastClose] = useState<number | null>(null);
-  const [chartData, setChartData] = useState<OhlcBar[]>([]);
-  const [copyState, setCopyState] = useState<"idle" | "ok" | "err">("idle");
-
-  const onChartMetrics = useCallback((m: { lastClose: number } | null) => {
-    setChartLastClose(m?.lastClose ?? null);
-  }, []);
-  const onChartData = useCallback((rows: OhlcBar[]) => {
-    setChartData(rows);
-  }, []);
-
-  useEffect(() => {
-    setChartLastClose(null);
-    setChartData([]);
-    setCopyState("idle");
-  }, [symbol]);
-
-  const pivotVsHeader = useMemo(() => {
-    if (!pivotMarker) return null;
-    const refPrice = activePoint?.price ?? chartLastClose;
-    if (refPrice == null) return null;
-    const pivot = pivotMarker.price;
-    const d = refPrice - pivot;
-    const dp = Math.abs(pivot) > 1e-9 ? (d / pivot) * 100 : 0;
-    const source = activePoint ? "Crosshair" : "Last close";
-    return { source, d, dp };
-  }, [pivotMarker, activePoint, chartLastClose]);
-
-  async function copyOhlcvToClipboard() {
-    if (chartData.length === 0) return;
-    const header = "date,open,high,low,close,volume";
-    const lines = chartData.map(
-      d => `${d.date},${d.open},${d.high},${d.low},${d.close},${d.volume}`
-    );
-    const text = [header, ...lines].join("\n");
-    try {
-      await navigator.clipboard.writeText(text);
-      setCopyState("ok");
-    } catch {
-      setCopyState("err");
-    }
-    window.setTimeout(() => setCopyState("idle"), 1800);
-  }
-
-  useEffect(() => {
-    if (!pivotMenu) return;
-    function onPointerDown(e: PointerEvent) {
-      if (pivotMenuRef.current?.contains(e.target as Node)) return;
-      setPivotMenu(null);
-    }
-    function onKey(e: KeyboardEvent) {
-      if (e.key === "Escape") setPivotMenu(null);
-    }
-    document.addEventListener("pointerdown", onPointerDown, true);
-    document.addEventListener("keydown", onKey);
-    return () => {
-      document.removeEventListener("pointerdown", onPointerDown, true);
-      document.removeEventListener("keydown", onKey);
-    };
-  }, [pivotMenu]);
 
   return (
     <div className="flex flex-col gap-4">
-      {/* Nav bar */}
-      <div className="flex items-center gap-3">
+      <div className="flex items-center gap-3 flex-wrap">
         <button
-          onClick={() => onSelect(symbols[Math.max(0, idx - 1)])}
+          type="button"
+          onClick={() => onSelect(symbols[Math.max(0, idx - 1)]!)}
           disabled={idx === 0}
           className="p-1.5 rounded-md border border-border hover:bg-muted disabled:opacity-30 transition-colors"
           title="Previous (←)"
@@ -1350,18 +538,19 @@ function ChartsViewFinal({
         </button>
 
         <span className="font-mono font-bold text-lg">{symbol}</span>
-        {(meta.sector || meta.industry) && (
+        {(meta.sector || meta.industry) ? (
           <span
             className="text-xs text-muted-foreground max-w-[260px] truncate"
             title={[meta.sector, meta.industry].filter(Boolean).join(" · ")}
           >
             {[meta.sector, meta.industry].filter(Boolean).join(" · ")}
           </span>
-        )}
+        ) : null}
         <span className="text-sm text-muted-foreground">{idx + 1} / {symbols.length}</span>
 
         {dismissed.has(symbol) ? (
           <button
+            type="button"
             onClick={() => onRestore(symbol)}
             title="Restore"
             className="flex items-center gap-1.5 text-xs px-2 py-1 rounded border border-border text-emerald-500 hover:bg-muted transition-colors"
@@ -1370,6 +559,7 @@ function ChartsViewFinal({
           </button>
         ) : (
           <button
+            type="button"
             onClick={() => onDismiss(symbol)}
             title="Dismiss"
             className="flex items-center gap-1.5 text-xs px-2 py-1 rounded border border-border text-muted-foreground hover:text-rose-500 hover:border-rose-400 transition-colors"
@@ -1380,7 +570,7 @@ function ChartsViewFinal({
 
         <select
           value={status}
-          onChange={e => onSetStatus(symbol, e.target.value as NoteStatus)}
+          onChange={(e) => onSetStatus(symbol, e.target.value as NoteStatus)}
           className="px-2 py-1 text-xs rounded border border-input bg-background focus:outline-none focus:ring-1 focus:ring-ring"
           title="Status"
         >
@@ -1391,6 +581,7 @@ function ChartsViewFinal({
         </select>
 
         <button
+          type="button"
           onClick={() => onEditComment(symbol)}
           title={commentExists ? "Edit note" : "Add note"}
           className={`flex items-center gap-1.5 text-xs px-2 py-1 rounded border border-border transition-colors ${commentExists ? "text-sky-500 hover:bg-muted" : "text-muted-foreground hover:text-sky-500 hover:border-sky-400"}`}
@@ -1398,53 +589,21 @@ function ChartsViewFinal({
           <MessageSquare className="w-3.5 h-3.5" /> {commentExists ? "Edit note" : "Add note"}
         </button>
 
-        {pivotVsHeader && pivotMarker && (
-          <div
-            className="flex flex-col items-end gap-0.5 text-right shrink-0 min-w-0"
-            title={`Pivot $${pivotMarker.price.toFixed(2)} · ${pivotVsHeader.source} vs pivot`}
-          >
-            <span className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">vs pivot</span>
-            <span
-              className={`text-xs font-semibold tabular-nums whitespace-nowrap ${pivotVsHeader.d >= 0 ? "text-emerald-600 dark:text-emerald-400" : "text-rose-500"}`}
-            >
-              {pivotVsHeader.source}: {pivotVsHeader.d >= 0 ? "+" : ""}
-              {pivotVsHeader.d.toFixed(2)} ({pivotVsHeader.d >= 0 ? "+" : ""}
-              {pivotVsHeader.dp.toFixed(2)}%)
-            </span>
-          </div>
-        )}
-
-        <button
-          type="button"
-          onClick={() => void copyOhlcvToClipboard()}
-          disabled={chartData.length === 0}
-          title="Copy date/open/high/low/close/volume as CSV"
-          className={`flex items-center gap-1.5 text-xs px-2 py-1 rounded border transition-colors ${
-            chartData.length === 0
-              ? "border-border text-muted-foreground/60 cursor-not-allowed"
-              : copyState === "ok"
-                ? "border-emerald-500/50 text-emerald-600 dark:text-emerald-400"
-                : copyState === "err"
-                  ? "border-rose-400 text-rose-500"
-                  : "border-border text-muted-foreground hover:text-foreground hover:border-foreground/40"
-          }`}
-        >
-          <Copy className="w-3.5 h-3.5" />
-          {copyState === "ok" ? "Copied" : copyState === "err" ? "Copy failed" : "Copy OHLCV"}
-        </button>
-
         <select
           value={symbol}
-          onChange={e => onSelect(e.target.value)}
+          onChange={(e) => onSelect(e.target.value)}
           className="ml-auto px-2 py-1 text-sm rounded border border-input bg-background focus:outline-none focus:ring-1 focus:ring-ring"
         >
           {symbols.map((s, i) => (
-            <option key={s} value={s}>{i + 1}. {s}</option>
+            <option key={s} value={s}>
+              {i + 1}. {s}
+            </option>
           ))}
         </select>
 
         <button
-          onClick={() => onSelect(symbols[Math.min(symbols.length - 1, idx + 1)])}
+          type="button"
+          onClick={() => onSelect(symbols[Math.min(symbols.length - 1, idx + 1)]!)}
           disabled={idx === symbols.length - 1}
           className="p-1.5 rounded-md border border-border hover:bg-muted disabled:opacity-30 transition-colors"
           title="Next (→)"
@@ -1453,491 +612,12 @@ function ChartsViewFinal({
         </button>
       </div>
 
-      {/* Chart — right-click for pivot menu */}
-      <div
-        className="relative border border-border rounded-lg p-4 bg-background"
-        title="Right-click chart for pivot options"
-        onContextMenu={e => {
-          e.preventDefault();
-          // Snapshot crosshair at open — leaving the SVG clears activePoint but menu must stay usable
-          setPivotMenu({
-            x: e.clientX,
-            y: e.clientY,
-            pointSnapshot: activePointRef.current,
-          });
-        }}
-      >
-        <CandlestickSvg
-          key={symbol}
-          symbol={symbol}
-          onPointChange={setActivePoint}
-          pivotMarker={pivotMarker}
-          onChartMetrics={onChartMetrics}
-          onChartData={onChartData}
-          onAutoPivot={(point) => onSetPivotMarker(symbol, point)}
-        />
-      </div>
-
-      {pivotMenu && (
-        <div
-          ref={pivotMenuRef}
-          role="menu"
-          className="fixed z-[100] min-w-[200px] rounded-md border border-border bg-popover py-1 text-popover-foreground shadow-md"
-          style={{
-            left: Math.min(pivotMenu.x, window.innerWidth - 210),
-            top: Math.min(pivotMenu.y, window.innerHeight - 140),
-          }}
-          onPointerDown={e => e.stopPropagation()}
-        >
-          <div className="px-2 py-1.5 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
-            Pivot
-          </div>
-          {pivotMarker && (
-            <div className="px-2 pb-1.5 text-[11px] text-muted-foreground border-b border-border truncate" title={`${pivotMarker.date} @ $${pivotMarker.price.toFixed(2)}`}>
-              Current: {pivotMarker.date} @ ${pivotMarker.price.toFixed(2)}
-            </div>
-          )}
-          {!pivotMenu.pointSnapshot && (
-            <div className="px-2 pb-1 text-[11px] text-muted-foreground border-b border-border">
-              Move crosshair on chart, then right-click to capture a pivot point.
-            </div>
-          )}
-          <button
-            type="button"
-            role="menuitem"
-            className="flex w-full items-center px-3 py-2 text-left text-sm hover:bg-muted disabled:opacity-40 disabled:pointer-events-none"
-            disabled={!pivotMenu.pointSnapshot}
-            onClick={() => {
-              if (pivotMenu.pointSnapshot) onSetPivotMarker(symbol, pivotMenu.pointSnapshot);
-              setPivotMenu(null);
-            }}
-          >
-            Set pivot at crosshair
-          </button>
-          <button
-            type="button"
-            role="menuitem"
-            className="flex w-full items-center px-3 py-2 text-left text-sm text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-40 disabled:pointer-events-none"
-            disabled={!pivotMarker}
-            onClick={() => {
-              onClearPivotMarker(symbol);
-              setPivotMenu(null);
-            }}
-          >
-            Clear pivot
-          </button>
-        </div>
-      )}
-
-      <p className="text-xs text-muted-foreground text-center">
-        Use ← → arrow keys or buttons to navigate · right-click chart for pivot · {symbols.length} stocks in current filter
-      </p>
-    </div>
-  );
-}
-
-// ─── RelationshipMapView ─────────────────────────────────────────────────────
-
-interface TickerEdge {
-  from: string;
-  to: string;
-  rel_type: string;
-  strength: number;
-  count: number;
-  note: string;
-}
-
-const REL_COLORS: Record<string, string> = {
-  competitor: "#ef4444",
-  supplier:   "#22c55e",
-  customer:   "#3b82f6",
-  partner:    "#a855f7",
-  acquirer:   "#f97316",
-  subsidiary: "#14b8a6",
-};
-
-const REL_LABELS: Record<string, string> = {
-  competitor: "Competitor",
-  supplier:   "Supplier",
-  customer:   "Customer",
-  partner:    "Partner",
-  acquirer:   "Acquirer",
-  subsidiary: "Subsidiary",
-};
-
-const NODE_R = 18;
-const GW = 900;
-const GH = 520;
-const REPULSION = 6000;
-const SPRING_K = 0.04;
-const SPRING_REST = 110;
-const CENTER_K = 0.008;
-const DAMPING = 0.86;
-const SIM_STEPS = 400;
-
-function runForceLayout(
-  nodeIds: string[],
-  edges: { from: string; to: string; strength: number }[],
-): Record<string, { x: number; y: number }> {
-  const cx = GW / 2, cy = GH / 2;
-  const r0 = Math.min(GW, GH) * 0.32;
-  const pos: Record<string, { x: number; y: number; vx: number; vy: number }> = {};
-  nodeIds.forEach((id, i) => {
-    const angle = (2 * Math.PI * i) / nodeIds.length - Math.PI / 2;
-    pos[id] = { x: cx + r0 * Math.cos(angle), y: cy + r0 * Math.sin(angle), vx: 0, vy: 0 };
-  });
-  const active = edges.filter(e => e.from in pos && e.to in pos);
-  for (let step = 0; step < SIM_STEPS; step++) {
-    const cool = 1 - step / SIM_STEPS;
-    for (let i = 0; i < nodeIds.length; i++) {
-      for (let j = i + 1; j < nodeIds.length; j++) {
-        const a = pos[nodeIds[i]!]!;
-        const b = pos[nodeIds[j]!]!;
-        const dx = a.x - b.x || 0.01;
-        const dy = a.y - b.y || 0.01;
-        const dist2 = Math.max(1, dx * dx + dy * dy);
-        const dist = Math.sqrt(dist2);
-        const f = REPULSION / dist2;
-        const fx = (dx / dist) * f;
-        const fy = (dy / dist) * f;
-        a.vx += fx; a.vy += fy;
-        b.vx -= fx; b.vy -= fy;
-      }
-    }
-    for (const e of active) {
-      const a = pos[e.from]!;
-      const b = pos[e.to]!;
-      const dx = b.x - a.x;
-      const dy = b.y - a.y;
-      const dist = Math.sqrt(dx * dx + dy * dy) || 0.01;
-      const disp = dist - SPRING_REST * (1 / (0.3 + e.strength));
-      const f = SPRING_K * disp;
-      const fx = (dx / dist) * f;
-      const fy = (dy / dist) * f;
-      a.vx += fx; a.vy += fy;
-      b.vx -= fx; b.vy -= fy;
-    }
-    for (const id of nodeIds) {
-      const n = pos[id]!;
-      n.vx += (cx - n.x) * CENTER_K;
-      n.vy += (cy - n.y) * CENTER_K;
-      n.vx *= DAMPING;
-      n.vy *= DAMPING;
-      n.x += n.vx * cool;
-      n.y += n.vy * cool;
-      n.x = Math.max(NODE_R + 6, Math.min(GW - NODE_R - 6, n.x));
-      n.y = Math.max(NODE_R + 6, Math.min(GH - NODE_R - 6, n.y));
-    }
-  }
-  return Object.fromEntries(nodeIds.map(id => [id, { x: pos[id]!.x, y: pos[id]!.y }]));
-}
-
-function RelationshipMapView({
-  symbols,
-  selectedTicker,
-  onSelect,
-  getTickerMeta,
-}: {
-  symbols: string[];
-  selectedTicker: string | null;
-  onSelect: (ticker: string) => void;
-  getTickerMeta: (ticker: string) => { sector: string; industry: string };
-}) {
-  const [allEdges, setAllEdges] = useState<TickerEdge[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [hoveredEdge, setHoveredEdge] = useState<TickerEdge | null>(null);
-  const [hoveredNode, setHoveredNode] = useState<string | null>(null);
-
-  const symbolSet = useMemo(() => new Set(symbols), [symbols]);
-
-  useEffect(() => {
-    let cancelled = false;
-    setLoading(true);
-    setError(null);
-    screeningsGetTickerRelationships()
-      .then((res) => {
-        if (!res.ok) {
-          if (!cancelled) setError("Failed to load relationship data");
-          return;
-        }
-        if (!cancelled) setAllEdges(Array.isArray(res.data) ? res.data : []);
-      })
-      .catch(() => { if (!cancelled) setError("Failed to load relationship data"); })
-      .finally(() => { if (!cancelled) setLoading(false); });
-    return () => { cancelled = true; };
-  }, []);
-
-  const visibleEdges = useMemo(
-    () => allEdges.filter(e => symbolSet.has(e.from) && symbolSet.has(e.to)),
-    [allEdges, symbolSet]
-  );
-
-  const edgesByPair = useMemo(() => {
-    const map = new Map<string, TickerEdge[]>();
-    for (const e of visibleEdges) {
-      const key = [e.from, e.to].sort().join("__");
-      if (!map.has(key)) map.set(key, []);
-      map.get(key)!.push(e);
-    }
-    return map;
-  }, [visibleEdges]);
-
-  const nodeIds = useMemo(() => [...symbols].sort(), [symbols]);
-
-  const positions = useMemo(() => {
-    if (nodeIds.length === 0) return {};
-    return runForceLayout(
-      nodeIds,
-      visibleEdges.map(e => ({ from: e.from, to: e.to, strength: e.strength }))
-    );
-  }, [nodeIds, visibleEdges]);
-
-  const idx = selectedTicker ? nodeIds.indexOf(selectedTicker) : -1;
-
-  useEffect(() => {
-    function onKey(e: KeyboardEvent) {
-      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
-      if (e.key === "ArrowLeft" && idx > 0) onSelect(nodeIds[idx - 1]!);
-      if (e.key === "ArrowRight" && idx < nodeIds.length - 1) onSelect(nodeIds[idx + 1]!);
-    }
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [idx, nodeIds, onSelect]);
-
-  const symbol = selectedTicker ?? nodeIds[0] ?? null;
-  const displayIdx = symbol ? nodeIds.indexOf(symbol) : 0;
-  const selectedMeta = symbol ? getTickerMeta(symbol) : null;
-
-  const connectedSet = useMemo(() => {
-    if (!symbol) return new Set<string>();
-    const s = new Set<string>();
-    for (const e of visibleEdges) {
-      if (e.from === symbol) s.add(e.to);
-      if (e.to === symbol) s.add(e.from);
-    }
-    return s;
-  }, [symbol, visibleEdges]);
-
-  const selectedConnections = useMemo(() => {
-    if (!symbol) return [];
-    return visibleEdges
-      .filter(e => e.from === symbol || e.to === symbol)
-      .map(e => ({ ...e, peer: e.from === symbol ? e.to : e.from }))
-      .sort((a, b) => b.strength - a.strength);
-  }, [symbol, visibleEdges]);
-
-  if (loading) {
-    return (
-      <div className="flex items-center gap-2 text-sm text-muted-foreground py-8">
-        <Loader2 className="w-4 h-4 animate-spin" />
-        Loading relationship data…
-      </div>
-    );
-  }
-  if (error) return <p className="text-sm text-rose-500 py-8">{error}</p>;
-  if (symbols.length === 0) {
-    return <p className="text-sm text-muted-foreground py-8 text-center">No tickers in current filter set.</p>;
-  }
-
-  return (
-    <div className="flex flex-col gap-3">
-      {/* Navigation header */}
-      <div className="flex items-center gap-3 flex-wrap">
-        <button
-          onClick={() => displayIdx > 0 && onSelect(nodeIds[displayIdx - 1]!)}
-          disabled={displayIdx <= 0}
-          className="p-1.5 rounded-md border border-border hover:bg-muted disabled:opacity-30 transition-colors"
-          title="Previous (←)"
-        >
-          <ChevronLeft className="w-4 h-4" />
-        </button>
-        <select
-          value={symbol ?? ""}
-          onChange={e => onSelect(e.target.value)}
-          className="px-2 py-1 text-sm font-mono font-semibold rounded border border-input bg-background focus:outline-none focus:ring-1 focus:ring-ring"
-        >
-          {nodeIds.map(s => (
-            <option key={s} value={s}>{s}</option>
-          ))}
-        </select>
-        <button
-          onClick={() => displayIdx < nodeIds.length - 1 && onSelect(nodeIds[displayIdx + 1]!)}
-          disabled={displayIdx >= nodeIds.length - 1}
-          className="p-1.5 rounded-md border border-border hover:bg-muted disabled:opacity-30 transition-colors"
-          title="Next (→)"
-        >
-          <ChevronRight className="w-4 h-4" />
-        </button>
-        {selectedMeta && (selectedMeta.sector || selectedMeta.industry) && (
-          <span className="text-xs text-muted-foreground truncate max-w-[260px]">
-            {[selectedMeta.sector, selectedMeta.industry].filter(Boolean).join(" · ")}
-          </span>
-        )}
-        <span className="text-sm text-muted-foreground ml-auto">{displayIdx + 1} / {nodeIds.length}</span>
-      </div>
-
-      {/* Hover tooltip */}
-      {hoveredEdge && (
-        <div className="text-xs text-muted-foreground px-1 min-h-[1.25rem]">
-          <span className="font-mono font-semibold text-foreground">{hoveredEdge.from}</span>
-          {" → "}
-          <span className="font-mono font-semibold text-foreground">{hoveredEdge.to}</span>
-          {" "}
-          <span className="rounded px-1.5 py-0.5 text-white text-[10px] font-medium" style={{ background: REL_COLORS[hoveredEdge.rel_type] ?? "#888" }}>
-            {REL_LABELS[hoveredEdge.rel_type] ?? hoveredEdge.rel_type}
-          </span>
-          {" "}
-          <span className="tabular-nums">{(hoveredEdge.strength * 100).toFixed(0)}% strength</span>
-          {hoveredEdge.count > 1 && <span className="text-muted-foreground/60"> · {hoveredEdge.count} mentions</span>}
-          {hoveredEdge.note && <span className="ml-2 italic text-muted-foreground/70">{hoveredEdge.note.replace(/^\[.*?\]\s*/, "")}</span>}
-        </div>
-      )}
-
-      {/* Network graph */}
-      <div className="rounded-lg border border-border bg-background overflow-hidden">
-        <svg viewBox={`0 0 ${GW} ${GH}`} className="w-full" style={{ maxHeight: 520 }}>
-          {/* Edges */}
-          {Array.from(edgesByPair.entries()).map(([pairKey, edges]) => {
-            const primary = edges.reduce((best, e) => e.strength > best.strength ? e : best, edges[0]!);
-            const p0 = positions[primary.from];
-            const p1 = positions[primary.to];
-            if (!p0 || !p1) return null;
-            const isHighlighted = primary.from === symbol || primary.to === symbol;
-            const isHovered = hoveredEdge &&
-              ((hoveredEdge.from === primary.from && hoveredEdge.to === primary.to) ||
-               (hoveredEdge.from === primary.to && hoveredEdge.to === primary.from));
-            const color = REL_COLORS[primary.rel_type] ?? "#888";
-            const opacity = symbol ? (isHighlighted ? 0.85 : 0.1) : (isHovered ? 0.9 : 0.4);
-            const sw = 1 + primary.strength * 3 * (isHighlighted ? 1.5 : 1);
-            const mx = (p0.x + p1.x) / 2;
-            const my = (p0.y + p1.y) / 2;
-            return (
-              <g key={pairKey}>
-                <line
-                  x1={p0.x} y1={p0.y} x2={p1.x} y2={p1.y}
-                  stroke={color} strokeWidth={sw} strokeOpacity={opacity}
-                  className="cursor-pointer"
-                  onMouseEnter={() => setHoveredEdge(primary)}
-                  onMouseLeave={() => setHoveredEdge(null)}
-                />
-                {(isHighlighted || isHovered) && (
-                  <text x={mx} y={my - 4} textAnchor="middle" fontSize={9}
-                    fill={color} fillOpacity={0.9}
-                    className="select-none pointer-events-none">
-                    {REL_LABELS[primary.rel_type] ?? primary.rel_type}
-                  </text>
-                )}
-              </g>
-            );
-          })}
-
-          {/* Nodes */}
-          {nodeIds.map(sym => {
-            const p = positions[sym];
-            if (!p) return null;
-            const isSelected = sym === symbol;
-            const isConnected = connectedSet.has(sym);
-            const isHov = hoveredNode === sym;
-            const dimmed = symbol && !isSelected && !isConnected;
-            return (
-              <g key={sym} transform={`translate(${p.x},${p.y})`}
-                className="cursor-pointer"
-                onClick={() => onSelect(sym)}
-                onMouseEnter={() => setHoveredNode(sym)}
-                onMouseLeave={() => setHoveredNode(null)}
-                style={{ opacity: dimmed ? 0.3 : 1 }}
-              >
-                {(isSelected || isConnected || isHov) && (
-                  <circle r={NODE_R + 4} fill="none"
-                    stroke={isSelected ? "hsl(var(--foreground))" : "hsl(var(--foreground) / 0.3)"}
-                    strokeWidth={isSelected ? 2 : 1}
-                  />
-                )}
-                <circle r={NODE_R}
-                  fill={isSelected ? "hsl(var(--foreground))" : "hsl(var(--muted))"}
-                  stroke="hsl(var(--border))" strokeWidth={1}
-                />
-                <text textAnchor="middle" dominantBaseline="middle"
-                  fontSize={sym.length > 4 ? 8 : 9} fontWeight="600" fontFamily="monospace"
-                  fill={isSelected ? "hsl(var(--background))" : "hsl(var(--foreground))"}
-                  className="select-none pointer-events-none">
-                  {sym}
-                </text>
-              </g>
-            );
-          })}
-        </svg>
-      </div>
-
-      {/* Connections detail + legend */}
-      <div className="grid gap-4 md:grid-cols-2">
-        <div className="flex flex-col gap-2">
-          <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-            {symbol} — connections ({selectedConnections.length})
-          </p>
-          {selectedConnections.length === 0 ? (
-            <p className="text-xs text-muted-foreground">No relationships found in current filter set.</p>
-          ) : (
-            <div className="rounded-lg border border-border overflow-hidden">
-              <table className="w-full text-sm">
-                <tbody className="divide-y divide-border">
-                  {selectedConnections.map((c, i) => (
-                    <tr key={`${c.peer}-${c.rel_type}-${i}`}
-                      className="hover:bg-muted/30 cursor-pointer"
-                      onClick={() => onSelect(c.peer)}
-                    >
-                      <td className="px-3 py-2 font-mono font-semibold w-20">{c.peer}</td>
-                      <td className="px-3 py-2">
-                        <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium text-white"
-                          style={{ background: REL_COLORS[c.rel_type] ?? "#888" }}>
-                          {REL_LABELS[c.rel_type] ?? c.rel_type}
-                        </span>
-                      </td>
-                      <td className="px-3 py-2 tabular-nums text-xs text-muted-foreground">
-                        {(c.strength * 100).toFixed(0)}%
-                        {c.count > 1 && <span className="ml-1 text-muted-foreground/50">×{c.count}</span>}
-                      </td>
-                      <td className="px-3 py-2 text-xs text-muted-foreground/70 italic max-w-[200px] truncate" title={c.note}>
-                        {c.note.replace(/^\[.*?\]\s*/, "")}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </div>
-
-        <div className="flex flex-col gap-2">
-          <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Legend</p>
-          <div className="flex flex-wrap gap-3">
-            {Object.entries(REL_LABELS).map(([type, label]) => (
-              <div key={type} className="flex items-center gap-1.5">
-                <div className="w-3 h-1.5 rounded-sm" style={{ background: REL_COLORS[type] ?? "#888" }} />
-                <span className="text-xs text-muted-foreground">{label}</span>
-              </div>
-            ))}
-          </div>
-          <p className="text-xs text-muted-foreground mt-1">
-            Edge thickness = relationship strength · Only edges between tickers in current filter shown
-          </p>
-          {visibleEdges.length === 0 && allEdges.length > 0 && (
-            <p className="text-xs text-amber-600 dark:text-amber-400 mt-1">
-              No relationships between tickers in this filter. Try broadening your filter.
-            </p>
-          )}
-          {allEdges.length === 0 && !loading && (
-            <p className="text-xs text-muted-foreground/60 mt-1">
-              No data yet — relationships are scored automatically as articles are ingested.
-            </p>
-          )}
-        </div>
-      </div>
-
-      <p className="text-xs text-muted-foreground text-center">
-        Use ← → arrow keys or buttons to navigate · click a node to select · {nodeIds.length} stocks in current filter
-      </p>
+      <RelationshipNetworkExplorer
+        key={symbol}
+        vectors={[]}
+        initialSeedTicker={symbol}
+        hideSeedControls
+      />
     </div>
   );
 }
@@ -1946,16 +626,19 @@ function RelationshipMapView({
 
 type SentimentSort = { key: "symbol" | "s7d" | "s30d" | "s90d"; dir: "asc" | "desc" };
 
-function computeStockSentiment(
-  articles: SentimentArticleImpact[],
+/** Sum `sentiment_score` for `ticker` from `ticker_sentiment_heads_v` rows on/after `cutoffDate` (UTC date). */
+function computeTickerSentimentWindow(
+  rows: ScreeningTickerSentimentHeadRow[],
   ticker: string,
   cutoffDate: string,
 ): number {
+  const t = ticker.toUpperCase();
   let total = 0;
-  for (const article of articles) {
-    if (article.published_at.slice(0, 10) < cutoffDate) continue;
-    const score = article.ticker_sentiment?.[ticker];
-    if (typeof score === "number" && Number.isFinite(score)) total += score;
+  for (const row of rows) {
+    if (row.ticker.toUpperCase() !== t) continue;
+    const day = row.article_ts.slice(0, 10);
+    if (day < cutoffDate) continue;
+    if (Number.isFinite(row.sentiment_score)) total += row.sentiment_score;
   }
   return total;
 }
@@ -2013,25 +696,44 @@ function SentimentView({
   onSelect: (ticker: string) => void;
   getTickerMeta: (ticker: string) => { sector: string; industry: string };
 }) {
-  const [articles, setArticles] = useState<SentimentArticleImpact[]>([]);
+  const [sentimentHeadRows, setSentimentHeadRows] = useState<ScreeningTickerSentimentHeadRow[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [sort, setSort] = useState<SentimentSort>({ key: "s7d", dir: "desc" });
 
   useEffect(() => {
+    if (symbols.length === 0) {
+      setSentimentHeadRows([]);
+      setLoading(false);
+      setError(null);
+      return;
+    }
+    let cancelled = false;
     setLoading(true);
     setError(null);
-    screeningsGetNewsImpacts()
+    screeningsGetTickerSentimentHeadRows(symbols)
       .then((res) => {
+        if (cancelled) return;
         if (!res.ok) {
-          setError("Failed to load news data");
+          setError("Failed to load ticker sentiment");
+          setSentimentHeadRows([]);
           return;
         }
-        setArticles(res.data as SentimentArticleImpact[]);
+        setSentimentHeadRows(res.data);
       })
-      .catch(() => setError("Failed to load news data"))
-      .finally(() => setLoading(false));
-  }, []);
+      .catch(() => {
+        if (!cancelled) {
+          setError("Failed to load ticker sentiment");
+          setSentimentHeadRows([]);
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [symbols]);
 
   const cutoffs = useMemo(() => {
     const now = new Date();
@@ -2051,12 +753,12 @@ function SentimentView({
           symbol,
           sector,
           industry,
-          s7d: computeStockSentiment(articles, symbol, cutoffs.c7),
-          s30d: computeStockSentiment(articles, symbol, cutoffs.c30),
-          s90d: computeStockSentiment(articles, symbol, cutoffs.c90),
+          s7d: computeTickerSentimentWindow(sentimentHeadRows, symbol, cutoffs.c7),
+          s30d: computeTickerSentimentWindow(sentimentHeadRows, symbol, cutoffs.c30),
+          s90d: computeTickerSentimentWindow(sentimentHeadRows, symbol, cutoffs.c90),
         };
       });
-  }, [symbols, articles, cutoffs, getTickerMeta]);
+  }, [symbols, sentimentHeadRows, cutoffs, getTickerMeta]);
 
   const maxAbs = useMemo(
     () => Math.max(...rows.flatMap(r => [Math.abs(r.s7d), Math.abs(r.s30d), Math.abs(r.s90d)]), 0.01),
@@ -2083,6 +785,12 @@ function SentimentView({
     );
   }
 
+  if (symbols.length === 0) {
+    return (
+      <p className="text-sm text-muted-foreground py-8 text-center">No stocks to show.</p>
+    );
+  }
+
   if (loading) {
     return (
       <div className="flex items-center gap-2 text-sm text-muted-foreground py-8">
@@ -2092,18 +800,14 @@ function SentimentView({
     );
   }
   if (error) return <p className="text-sm text-rose-500 py-4">{error}</p>;
-  if (rows.length === 0) {
-    return (
-      <p className="text-sm text-muted-foreground py-8 text-center">
-        {articles.length === 0
-          ? "No news data available."
-          : "No ticker sentiment data available for the filtered stocks."}
-      </p>
-    );
-  }
 
   return (
     <div className="overflow-x-auto rounded-lg border border-border">
+      <p className="text-[11px] text-muted-foreground px-3 pt-3 leading-snug">
+        Same source as Explore → Relationships → Sentiment:{" "}
+        <span className="font-mono text-foreground/80">swingtrader.ticker_sentiment_heads_v</span>
+        {" "}(sums <span className="font-mono">sentiment_score</span> by article time, 120-day fetch window).
+      </p>
       <table className="w-full text-sm">
         <thead className="bg-muted/40 border-b border-border">
           <tr>
@@ -2939,6 +1643,7 @@ export function ScreeningsUI({
   } | null>(null);
   const [savingWorkflowEditor, setSavingWorkflowEditor] = useState(false);
   const [deletingRunId, setDeletingRunId] = useState<number | null>(null);
+  const [aiSelectedRow, setAiSelectedRow] = useState<ScreeningRow | null>(null);
 
   // Load persisted UI preferences only after hydration to avoid SSR/client mismatch.
   useEffect(() => {
@@ -3577,6 +2282,35 @@ export function ScreeningsUI({
 
   const selectedRun = runs.find(r => r.id === selectedRunId) ?? runs[0] ?? null;
 
+  function buildAiMessage(r: ScreeningRow): string {
+    const parts: string[] = [];
+    if (r.RS_Rank != null) parts.push(`RS Rank: ${r.RS_Rank}`);
+    if (r.adr_pct != null) parts.push(`ADR: ${r.adr_pct.toFixed(1)}%`);
+    if (r.vol_ratio_today != null) parts.push(`Vol ratio: ${r.vol_ratio_today.toFixed(2)}`);
+    if (r.up_down_vol_ratio != null) parts.push(`Up/down vol ratio: ${r.up_down_vol_ratio.toFixed(2)}`);
+    if (r.within_buy_range != null) parts.push(`In buy range: ${r.within_buy_range}`);
+    if (r.extended != null) parts.push(`Extended: ${r.extended}`);
+    if (r.accumulation != null) parts.push(`Accumulation: ${r.accumulation}`);
+    if (r.rs_line_new_high != null) parts.push(`RS line new high: ${r.rs_line_new_high}`);
+    if (r.PriceOverSMA150And200) parts.push(`Price > SMA150 & SMA200: true`);
+    if (r.SMA150AboveSMA200) parts.push(`SMA150 > SMA200: true`);
+    if (r.SMA50AboveSMA150And200) parts.push(`SMA50 > SMA150 & SMA200: true`);
+    if (r.SMA200Slope) parts.push(`SMA200 slope up: true`);
+    if (r.PriceAbove25Percent52WeekLow) parts.push(`Price > 25% above 52w low: true`);
+    if (r.PriceWithin25Percent52WeekHigh) parts.push(`Price within 25% of 52w high: true`);
+    if (r.RSOver70) parts.push(`RS > 70: true`);
+    if (r.eps_growth_yoy != null) parts.push(`EPS growth YoY: ${r.eps_growth_yoy.toFixed(0)}%`);
+    if (r.rev_growth_yoy != null) parts.push(`Revenue growth YoY: ${r.rev_growth_yoy.toFixed(0)}%`);
+    if (r.eps_accelerating != null) parts.push(`EPS accelerating: ${r.eps_accelerating}`);
+    if (r.roe != null) parts.push(`ROE: ${r.roe.toFixed(1)}%`);
+    if (r.inst_pct_accumulating != null) parts.push(`Inst. accumulating: ${r.inst_pct_accumulating.toFixed(0)}%`);
+    if (r.sector) parts.push(`Sector: ${r.sector}`);
+    if (r.industry) parts.push(`Industry: ${r.industry}`);
+    if (r.sector_rank != null && r.total_sectors != null) parts.push(`Sector rank: ${r.sector_rank}/${r.total_sectors}`);
+
+    return `Analyse this stock as a potential swing trade setup:\n\nSymbol: ${r.symbol}\n${parts.join("\n")}\n\nGive a concise assessment: setup quality, entry criteria, key risks, and whether this is worth acting on now.`;
+  }
+
   function SortIcon({ col }: { col: SortKey }) {
     if (sortKey !== col) return null;
     return sortDir === "asc"
@@ -3595,12 +2329,17 @@ export function ScreeningsUI({
     );
   }
 
-  const primaryViewTabs: { id: ViewTab; label: string; icon: React.ReactNode }[] = [
+  /** Many symbols at once — same filtered list. */
+  const multiSymbolViewTabs: ScreeningsPrimaryTabDef[] = [
     { id: "results", label: "Results", icon: <List className="w-3.5 h-3.5" /> },
     { id: "quotes", label: "Quotes", icon: <TrendingUp className="w-3.5 h-3.5" /> },
+    { id: "sentiment", label: "Sentiment", icon: <Gauge className="w-3.5 h-3.5" /> },
+  ];
+
+  /** One selected ticker — row highlight or prev/next in the tab bar. */
+  const deepDiveViewTabs: ScreeningsPrimaryTabDef[] = [
     { id: "charts", label: "Charts", icon: <BarChart2 className="w-3.5 h-3.5" /> },
     { id: "news", label: "News Trend", icon: <Newspaper className="w-3.5 h-3.5" /> },
-    { id: "sentiment", label: "Sentiment", icon: <Gauge className="w-3.5 h-3.5" /> },
     { id: "relationship", label: "Relationships", icon: <Activity className="w-3.5 h-3.5" /> },
   ];
 
@@ -3724,46 +2463,94 @@ export function ScreeningsUI({
           freeStringKeys={freeStringKeys}
         />
 
-        {/* View tabs — trade monitoring last, separated by a divider */}
-        <div className="flex items-stretch gap-1 border-b border-border">
-          {primaryViewTabs.map(tab => (
-            <button
-              key={tab.id}
-              type="button"
-              onClick={() => setActiveView(tab.id)}
-              className={`flex items-center gap-1.5 px-3 py-2 text-sm font-medium transition-colors border-b-2 -mb-px ${
-                activeView === tab.id
-                  ? "border-foreground text-foreground"
-                  : "border-transparent text-muted-foreground hover:text-foreground"
-              }`}
+        {/* View tabs — list the full filter first, then per-ticker deep dives, then trade monitoring */}
+        <div className="flex flex-col gap-2 border-b border-border pb-px">
+          <div className="flex flex-wrap items-end gap-x-0 gap-y-1">
+            <div
+              className="flex flex-wrap items-end gap-1 rounded-md bg-muted/30 px-1 pt-1 pb-0"
+              role="group"
+              aria-label="List views — multiple symbols from your filter"
             >
-              {tab.icon}
-              {tab.label}
+              <span className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground px-2 pb-2 shrink-0 max-sm:hidden">
+                Multi-symbol
+              </span>
+              {multiSymbolViewTabs.map((tab) => (
+                <button
+                  key={tab.id}
+                  type="button"
+                  onClick={() => setActiveView(tab.id)}
+                  className={`flex items-center gap-1.5 px-3 py-2 text-sm font-medium transition-colors border-b-2 -mb-px rounded-t-md ${
+                    activeView === tab.id
+                      ? "border-foreground text-foreground bg-background"
+                      : "border-transparent text-muted-foreground hover:text-foreground"
+                  }`}
+                >
+                  {tab.icon}
+                  {tab.label}
+                </button>
+              ))}
+            </div>
+            <div
+              className="hidden sm:block w-px shrink-0 self-stretch min-h-[2.25rem] bg-border mx-0.5"
+              role="separator"
+              aria-orientation="vertical"
+              aria-hidden
+            />
+            <div
+              className="flex flex-wrap items-end gap-1 rounded-md bg-muted/30 px-1 pt-1 pb-0"
+              role="group"
+              aria-label="Deep dive — one ticker at a time"
+            >
+              <span className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground px-2 pb-2 shrink-0 max-sm:hidden">
+                Deep dive
+              </span>
+              {deepDiveViewTabs.map((tab) => (
+                <button
+                  key={tab.id}
+                  type="button"
+                  onClick={() => setActiveView(tab.id)}
+                  className={`flex items-center gap-1.5 px-3 py-2 text-sm font-medium transition-colors border-b-2 -mb-px rounded-t-md ${
+                    activeView === tab.id
+                      ? "border-foreground text-foreground bg-background"
+                      : "border-transparent text-muted-foreground hover:text-foreground"
+                  }`}
+                >
+                  {tab.icon}
+                  {tab.label}
+                </button>
+              ))}
+            </div>
+            <div
+              className="hidden sm:block w-px shrink-0 self-stretch min-h-[2.25rem] bg-border mx-0.5"
+              role="separator"
+              aria-orientation="vertical"
+              aria-hidden
+            />
+            <button
+              type="button"
+              disabled={tradeMonitoringDisabled}
+              title={tradeMonitoringTitle}
+              onClick={() => {
+                if (tradeMonitoringDisabled) return;
+                setActiveView("tradeMonitoring");
+              }}
+              className={`flex items-center gap-1.5 px-3 py-2 text-sm font-medium transition-colors border-b-2 -mb-px rounded-t-md ${
+                activeView === "tradeMonitoring"
+                  ? "border-foreground text-foreground bg-muted/30"
+                  : "border-transparent text-muted-foreground hover:text-foreground"
+              } ${tradeMonitoringDisabled ? "opacity-40 cursor-not-allowed hover:text-muted-foreground" : ""}`}
+            >
+              <Activity className="w-3.5 h-3.5" />
+              Trade monitoring
             </button>
-          ))}
-          <div
-            className="w-px shrink-0 self-stretch bg-border my-2 mx-1"
-            role="separator"
-            aria-orientation="vertical"
-            aria-hidden
-          />
-          <button
-            type="button"
-            disabled={tradeMonitoringDisabled}
-            title={tradeMonitoringTitle}
-            onClick={() => {
-              if (tradeMonitoringDisabled) return;
-              setActiveView("tradeMonitoring");
-            }}
-            className={`flex items-center gap-1.5 px-3 py-2 text-sm font-medium transition-colors border-b-2 -mb-px ${
-              activeView === "tradeMonitoring"
-                ? "border-foreground text-foreground"
-                : "border-transparent text-muted-foreground hover:text-foreground"
-            } ${tradeMonitoringDisabled ? "opacity-40 cursor-not-allowed hover:text-muted-foreground" : ""}`}
-          >
-            <Activity className="w-3.5 h-3.5" />
-            Trade monitoring
-          </button>
+          </div>
+          <p className="text-[11px] leading-snug text-muted-foreground px-1 pb-2 max-w-[52rem]">
+            <span className="text-foreground/90 font-medium">Multi-symbol</span> lists every symbol in your filter.
+            <span className="mx-1.5 text-muted-foreground/50" aria-hidden>
+              ·
+            </span>
+            <span className="text-foreground/90 font-medium">Deep dive</span> (Charts, News trend, Relationships) follows the ticker you select in the table or with prev/next on those views.
+          </p>
         </div>
 
         {/* View content */}
@@ -3805,11 +2592,15 @@ export function ScreeningsUI({
                       >
                         Vec
                       </th>
+                      <th className="px-3 py-2 text-center text-xs font-medium text-muted-foreground uppercase tracking-wide w-8">
+                        AI
+                      </th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-border">
                     {filtered.map((row, i) => {
                       const isSelected = row.symbol === selectedTicker;
+                      const isAiSelected = aiSelectedRow?.scan_row_id === row.scan_row_id;
                       const note = rowNotes.get(row.scan_row_id);
                       const isDismissed = note?.status === "dismissed";
                       const isHighlighted = !!note?.highlighted;
@@ -3839,6 +2630,16 @@ export function ScreeningsUI({
                             <div className="flex justify-center">
                               <Check value={vectorTickers.has(row.symbol ?? "")} />
                             </div>
+                          </td>
+                          <td className="px-2 py-1.5 text-center" onClick={e => e.stopPropagation()}>
+                            <button
+                              type="button"
+                              title={`Analyse ${row.symbol} with AI`}
+                              onClick={() => setAiSelectedRow(isAiSelected ? null : row)}
+                              className={`p-1 rounded transition-colors ${isAiSelected ? "text-primary bg-primary/10" : "text-muted-foreground hover:text-foreground hover:bg-muted"}`}
+                            >
+                              <Bot className="w-3.5 h-3.5" />
+                            </button>
                           </td>
                         </tr>
                       );
@@ -3889,7 +2690,7 @@ export function ScreeningsUI({
             onOpenWorkflowEditor={openTickerWorkflowEditor}
           />
         ) : activeView === "charts" ? (
-          <ChartsViewFinal
+          <TickerChartsPanel
             symbols={chartSymbols}
             selectedTicker={selectedTicker}
             onSelect={setSelectedTicker}
@@ -3904,6 +2705,26 @@ export function ScreeningsUI({
             getPivotMarker={getTickerPivotMarker}
             onSetPivotMarker={setTickerPivotMarker}
             onClearPivotMarker={clearTickerPivotMarker}
+            symbolPicker={
+              <select
+                value={
+                  chartSymbols[
+                    selectedTicker &&
+                    chartSymbols.includes(selectedTicker)
+                      ? chartSymbols.indexOf(selectedTicker)
+                      : 0
+                  ]
+                }
+                onChange={(e) => setSelectedTicker(e.target.value)}
+                className="px-2 py-1 text-sm rounded border border-input bg-background focus:outline-none focus:ring-1 focus:ring-ring"
+              >
+                {chartSymbols.map((s, i) => (
+                  <option key={s} value={s}>
+                    {i + 1}. {s}
+                  </option>
+                ))}
+              </select>
+            }
           />
         ) : activeView === "tradeMonitoring" ? (
           <TradeMonitoringView
@@ -3923,10 +2744,17 @@ export function ScreeningsUI({
             getTickerMeta={getTickerMeta}
           />
         ) : activeView === "relationship" ? (
-          <RelationshipMapView
+          <ScreeningsRelationshipNetworkPanel
             symbols={filteredSymbols}
             selectedTicker={selectedTicker}
             onSelect={setSelectedTicker}
+            dismissed={dismissedSymbols}
+            onDismiss={dismissTicker}
+            onRestore={restoreTicker}
+            getStatus={getTickerStatus}
+            onSetStatus={setTickerStatus}
+            hasComment={tickerHasComment}
+            onEditComment={editTickerComment}
             getTickerMeta={getTickerMeta}
           />
         ) : (
@@ -3945,6 +2773,17 @@ export function ScreeningsUI({
             getTickerMeta={getTickerMeta}
           />
         )}
+      {aiSelectedRow && (
+        <AiAnalysisPanel
+          key={aiSelectedRow.scan_row_id}
+          title={`Analyse ${aiSelectedRow.symbol}`}
+          system="You are a swing trading assistant. You analyse stock screening data and give setup assessments based on trend template criteria, relative strength, volume action, and fundamentals. Be direct and concise."
+          userMessage={buildAiMessage(aiSelectedRow)}
+          symbol={aiSelectedRow.symbol}
+          cacheKey={String(aiSelectedRow.scan_row_id)}
+          onClose={() => setAiSelectedRow(null)}
+        />
+      )}
       </div>
       {workflowEditor && (
         <div

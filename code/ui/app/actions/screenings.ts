@@ -166,6 +166,72 @@ export async function screeningsGetNewsImpacts(): Promise<
   return { ok: true, data: articles };
 }
 
+/** One row per (head, ticker) from `ticker_sentiment_heads_v` — same source as Explore → Relationships → Sentiment. */
+export type ScreeningTickerSentimentHeadRow = {
+  article_id: number;
+  ticker: string;
+  sentiment_score: number;
+  article_ts: string;
+};
+
+const TICKER_SENTIMENT_HEAD_TICKER_CHUNK = 40;
+
+/**
+ * Loads ticker sentiment rows from `swingtrader.ticker_sentiment_heads_v` for the given symbols.
+ * Matches the Explore relationship panel sentiment feed (view over TICKER_SENTIMENT heads + articles).
+ */
+export async function screeningsGetTickerSentimentHeadRows(
+  symbols: string[],
+): Promise<ScreeningActionSuccess<ScreeningTickerSentimentHeadRow[]> | ScreeningActionError> {
+  const tickers = [...new Set(symbols.map((s) => s.trim().toUpperCase()).filter(Boolean))];
+  if (tickers.length === 0) {
+    return { ok: true, data: [] };
+  }
+
+  const supabase = await createClient();
+  const since = new Date();
+  since.setUTCDate(since.getUTCDate() - 120);
+  const sinceIso = since.toISOString();
+
+  const out: ScreeningTickerSentimentHeadRow[] = [];
+
+  for (let i = 0; i < tickers.length; i += TICKER_SENTIMENT_HEAD_TICKER_CHUNK) {
+    const chunk = tickers.slice(i, i + TICKER_SENTIMENT_HEAD_TICKER_CHUNK);
+    const { data, error } = await supabase
+      .schema("swingtrader")
+      .from("ticker_sentiment_heads_v")
+      .select("article_id, ticker, sentiment_score, article_ts")
+      .in("ticker", chunk)
+      .gte("article_ts", sinceIso);
+
+    if (error) {
+      return { ok: false, error: error.message };
+    }
+
+    for (const raw of data ?? []) {
+      const row = raw as {
+        article_id?: unknown;
+        ticker?: unknown;
+        sentiment_score?: unknown;
+        article_ts?: unknown;
+      };
+      const articleId = Number(row.article_id);
+      const ticker = String(row.ticker ?? "").trim().toUpperCase();
+      const sentimentScore = Number(row.sentiment_score);
+      const articleTs = row.article_ts != null ? String(row.article_ts) : "";
+      if (!Number.isFinite(articleId) || !ticker || !Number.isFinite(sentimentScore) || !articleTs) continue;
+      out.push({
+        article_id: articleId,
+        ticker,
+        sentiment_score: sentimentScore,
+        article_ts: articleTs,
+      });
+    }
+  }
+
+  return { ok: true, data: out };
+}
+
 export async function screeningsUpsertDismissNote(input: {
   scanRowId: number;
   runId: number;

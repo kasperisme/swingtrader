@@ -1,10 +1,10 @@
 import Image from "next/image";
 import Link from "next/link";
-import { ChevronDown } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { Button } from "@/components/ui/button";
 import { LogoutButton } from "@/components/logout-button";
 import { SiteHeaderMobileNav } from "@/components/site-header-mobile-nav";
+import { SiteHeaderDesktopAuthedNav } from "@/components/site-header-desktop-authed-nav";
 import { CavemanToggle } from "@/components/caveman-toggle";
 
 function Logo() {
@@ -26,13 +26,6 @@ function Logo() {
 
 const navLinkClass =
   "text-sm font-medium text-muted-foreground transition-colors hover:text-foreground cursor-pointer";
-const navDropdownTriggerClass =
-  "inline-flex cursor-pointer list-none items-center rounded-md bg-transparent px-2.5 py-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground transition-colors hover:bg-muted hover:text-foreground [&::-webkit-details-marker]:hidden";
-const navDropdownPanelClass =
-  "absolute left-0 top-full z-30 mt-2 hidden min-w-[180px] rounded-lg border border-border bg-background/95 p-1.5 shadow-lg backdrop-blur group-open:block";
-const navDropdownItemClass =
-  "block rounded-md px-2.5 py-2 text-sm font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground";
-
 function HeaderShell({ children }: { children: React.ReactNode }) {
   return (
     <header className="sticky top-0 z-50 px-4 pt-4 pb-2">
@@ -83,32 +76,7 @@ export async function SiteHeader() {
         <SiteHeaderMobileNav isAuthed={isAuthed} userEmail={user?.email} />
 
         {/* Desktop authenticated nav */}
-        {isAuthed && (
-          <nav className="hidden min-w-0 items-center gap-2 md:flex">
-            <details className="group relative" name="desktop-main-nav">
-              <summary className={navDropdownTriggerClass}>
-                <span>Research</span>
-                <ChevronDown className="ml-1 h-3.5 w-3.5 transition-transform duration-200 group-open:rotate-180" />
-              </summary>
-              <div className={navDropdownPanelClass}>
-                <Link href="/protected" className={navDropdownItemClass}>Articles</Link>
-                <Link href="/protected/news-trends" className={navDropdownItemClass}>News Trends</Link>
-                <Link href="/protected/relationships" className={navDropdownItemClass}>Explore</Link>
-              </div>
-            </details>
-            <details className="group relative" name="desktop-main-nav">
-              <summary className={navDropdownTriggerClass}>
-                <span>Operations</span>
-                <ChevronDown className="ml-1 h-3.5 w-3.5 transition-transform duration-200 group-open:rotate-180" />
-              </summary>
-              <div className={navDropdownPanelClass}>
-                <Link href="/protected/screenings" className={navDropdownItemClass}>Screenings</Link>
-                <Link href="/protected/daily-narrative" className={navDropdownItemClass}>Daily Narrative</Link>
-                <Link href="/protected/trades" className={navDropdownItemClass}>Trades</Link>
-              </div>
-            </details>
-          </nav>
-        )}
+        {isAuthed && <SiteHeaderDesktopAuthedNav />}
       </div>
 
       {/* Right side — desktop only */}
