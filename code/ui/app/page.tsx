@@ -14,6 +14,7 @@ import {
   TrendingUp,
   Zap,
   Shield,
+  type LucideProps,
 } from "lucide-react";
 
 import { createClient } from "@/lib/supabase/server";
@@ -24,37 +25,53 @@ import {
 } from "@/components/articles-grid";
 import { EarlyAccessSignupForm } from "@/components/early-access-signup-form";
 import { isSanityConfigured, sanityFetch } from "@/lib/sanity/client";
-import { newsPublishersQuery } from "@/lib/sanity/queries";
-import type { NewsPublisher } from "@/lib/sanity/types";
+import { newsPublishersQuery, landingPageQuery } from "@/lib/sanity/queries";
+import type { NewsPublisher, LandingPage, LandingCardItem, LandingStep } from "@/lib/sanity/types";
 
-type CardItem = {
-  title: string;
-  description: string;
-  icon: React.ComponentType<{ className?: string }>;
+// ── Icon mapping ──────────────────────────────────────────────────────────────
+
+type IconComponent = React.ComponentType<LucideProps & { className?: string }>;
+
+const ICON_MAP: Record<string, IconComponent> = {
+  Newspaper,
+  Target,
+  Workflow,
+  BarChart3,
+  Compass,
+  Filter,
+  Shield,
+  TrendingUp,
+  Zap,
 };
 
-const benefitCards: CardItem[] = [
+function resolveIcon(name: string | null | undefined, fallback: IconComponent): IconComponent {
+  return (name && ICON_MAP[name]) ? ICON_MAP[name] : fallback;
+}
+
+// ── Hardcoded fallbacks ───────────────────────────────────────────────────────
+
+const DEFAULT_BENEFIT_CARDS: LandingCardItem[] = [
   {
     title: "Spend time on news that actually moves your watchlist",
     description:
       "Cut through endless headlines. See which stories and themes are gaining traction so you know what to read first—without a terminal or a research team.",
-    icon: Newspaper,
+    iconName: "Newspaper",
   },
   {
     title: "Link headlines to stocks and sectors you care about",
     description:
       `Turn \u201cwhat\u2019s everyone talking about?\u201d into \u201cwhat might affect the names in my brokerage or IRA?\u201d\u2014before the connection is obvious everywhere else.`,
-    icon: Target,
+    iconName: "Target",
   },
   {
     title: "A simpler way to do your own homework",
     description:
       "Whether you check in daily or on weekends, get a steadier rhythm: less noise, clearer next steps, and fewer rabbit holes.",
-    icon: Workflow,
+    iconName: "Workflow",
   },
 ];
 
-const howItWorksSteps = [
+const DEFAULT_HOW_IT_WORKS_STEPS: LandingStep[] = [
   {
     label: "Follow the themes heating up",
     detail:
@@ -72,49 +89,49 @@ const howItWorksSteps = [
   },
 ];
 
-const productValueItems: CardItem[] = [
+const DEFAULT_PRODUCT_VALUE_ITEMS: LandingCardItem[] = [
   {
     title: "Themes, not just tickers",
     description:
       "Watch how narratives build over time so you're not reacting to every single headline in isolation.",
-    icon: BarChart3,
+    iconName: "BarChart3",
   },
   {
     title: "Exposure, in plain terms",
     description:
       "Get a clearer picture of which companies and industries sit closest to a story—helpful context for any self-directed investor.",
-    icon: Compass,
+    iconName: "Compass",
   },
   {
     title: "Screen the way you think",
     description:
       "Focus on the factors that matter to you—growth, value, risk, sectors—and keep your process consistent without spreadsheets you maintain by hand.",
-    icon: Filter,
+    iconName: "Filter",
   },
 ];
 
-const trustItems = [
+const DEFAULT_TRUST_ITEMS: LandingCardItem[] = [
   {
     title: "Who it's for",
-    icon: Shield,
+    iconName: "Shield",
     description:
       "Retail and self-directed investors who manage their own accounts—taxable brokerage, IRA, or both—and want news tied to opportunities, not noise.",
   },
   {
     title: "How it's different",
-    icon: TrendingUp,
+    iconName: "TrendingUp",
     description:
       "Most screeners start with static filters. News Impact Screener starts with what's happening in the world and shows what it might push on in the market.",
   },
   {
     title: "Why it helps",
-    icon: Zap,
+    iconName: "Zap",
     description:
       `Less doom-scrolling, fewer \u201cwhat did I miss?\u201d moments, and a shorter path from a headline to a watchlist you actually understand.`,
   },
 ];
 
-const tickerThemes = [
+const DEFAULT_TICKER_THEMES = [
   "AI chip demand surge",
   "Rate cut expectations",
   "Energy supply pressure",
@@ -126,6 +143,8 @@ const tickerThemes = [
   "Biotech regulatory cycle",
   "Dollar strength impact",
 ];
+
+// ── Sub-components ────────────────────────────────────────────────────────────
 
 async function PublishersMarquee() {
   let publishers: NewsPublisher[] = [];
@@ -234,7 +253,54 @@ async function LandingArticlesHeaderAndList() {
   );
 }
 
-export default function Home() {
+// ── Page ──────────────────────────────────────────────────────────────────────
+
+export default async function Home() {
+  let cms: LandingPage | null = null;
+  if (isSanityConfigured) {
+    try {
+      cms = await sanityFetch<LandingPage>(landingPageQuery);
+    } catch {
+      cms = null;
+    }
+  }
+
+  const heroBadgeText = cms?.heroBadgeText ?? "For retail & self-directed investors";
+  const heroHeadlinePart1 = cms?.heroHeadlinePart1 ?? "The news moves stocks.";
+  const heroHeadlineHighlight = cms?.heroHeadlineHighlight ?? "Know which ones.";
+  const heroDescription =
+    cms?.heroDescription ??
+    "News Impact Screener connects headlines to stocks and sectors—so you see what themes are rising, what might be exposed, and where to focus next. No terminal required.";
+  const heroPrimaryCtaLabel = cms?.heroPrimaryCtaLabel ?? "Get Early Access";
+  const heroSecondaryCtaLabel = cms?.heroSecondaryCtaLabel ?? "See How It Works";
+
+  const benefitsSectionLabel = cms?.benefitsSectionLabel ?? "Why it works";
+  const benefitsHeading = cms?.benefitsHeading ?? "Built for how retail investors actually research";
+  const benefitsSubheading =
+    cms?.benefitsSubheading ??
+    "You don't need a desk full of monitors. Follow themes, see exposure, and narrow ideas in one place.";
+  const benefitCards = cms?.benefitCards?.length ? cms.benefitCards : DEFAULT_BENEFIT_CARDS;
+
+  const howItWorksSectionLabel = cms?.howItWorksSectionLabel ?? "How it works";
+  const howItWorksHeading = cms?.howItWorksHeading ?? "Three steps, no terminal";
+  const howItWorksSteps = cms?.howItWorksSteps?.length ? cms.howItWorksSteps : DEFAULT_HOW_IT_WORKS_STEPS;
+
+  const productValuesSectionLabel = cms?.productValuesSectionLabel ?? "What you get";
+  const productValuesHeading = cms?.productValuesHeading ?? "Signal, not noise";
+  const productValueItems = cms?.productValueItems?.length ? cms.productValueItems : DEFAULT_PRODUCT_VALUE_ITEMS;
+
+  const trustSectionLabel = cms?.trustSectionLabel ?? "Straight answers";
+  const trustHeading = cms?.trustHeading ?? "Common questions";
+  const trustItems = cms?.trustItems?.length ? cms.trustItems : DEFAULT_TRUST_ITEMS;
+
+  const ctaSectionLabel = cms?.ctaSectionLabel ?? "Early access";
+  const ctaHeading = cms?.ctaHeading ?? "Smarter homework for your portfolio.";
+  const ctaDescription =
+    cms?.ctaDescription ??
+    "Join the list for product updates and early access. Built for people who invest their own money and want context, not chaos.";
+  const ctaFootnote = cms?.ctaFootnote ?? "No credit card. No terminal subscription.";
+
+  const tickerThemes = cms?.tickerThemes?.length ? cms.tickerThemes : DEFAULT_TICKER_THEMES;
   const doubledTicker = [...tickerThemes, ...tickerThemes];
 
   return (
@@ -247,18 +313,16 @@ export default function Home() {
             <div>
               <div className="inline-flex items-center gap-2 rounded-full border border-amber-500/25 bg-amber-500/10 px-3 py-1.5 text-xs font-semibold text-amber-400">
                 <span className="h-1.5 w-1.5 rounded-full bg-amber-400" />
-                For retail &amp; self-directed investors
+                {heroBadgeText}
               </div>
 
               <h1 className="mt-6 text-4xl font-bold tracking-tight sm:text-5xl lg:text-[3.25rem] lg:leading-[1.1]">
-                The news moves stocks.{" "}
-                <span className="text-amber-400">Know which ones.</span>
+                {heroHeadlinePart1}{" "}
+                <span className="text-amber-400">{heroHeadlineHighlight}</span>
               </h1>
 
               <p className="mt-5 max-w-lg text-base leading-7 text-muted-foreground sm:text-lg">
-                News Impact Screener connects headlines to stocks and sectors—so you see what
-                themes are rising, what might be exposed, and where to focus next. No terminal
-                required.
+                {heroDescription}
               </p>
 
               <div className="mt-8 flex flex-wrap gap-3">
@@ -266,14 +330,14 @@ export default function Home() {
                   href="#final-cta"
                   className="inline-flex cursor-pointer items-center gap-2 rounded-xl bg-violet-600 px-6 py-3 text-sm font-semibold text-white shadow-lg shadow-violet-500/20 transition-all hover:bg-violet-500 hover:shadow-violet-500/30"
                 >
-                  Get Early Access
+                  {heroPrimaryCtaLabel}
                   <ArrowRight className="h-4 w-4" />
                 </Link>
                 <Link
                   href="#how-it-works"
                   className="inline-flex cursor-pointer items-center rounded-xl border border-border px-6 py-3 text-sm font-semibold text-foreground transition-colors hover:bg-muted"
                 >
-                  See How It Works
+                  {heroSecondaryCtaLabel}
                 </Link>
               </div>
             </div>
@@ -318,25 +382,23 @@ export default function Home() {
       <section className="border-t border-border py-16 md:py-24">
         <div className="mx-auto max-w-6xl px-4 sm:px-6 lg:px-8">
           <p className="text-xs font-semibold uppercase tracking-widest text-amber-500">
-            Why it works
+            {benefitsSectionLabel}
           </p>
           <h2 className="mt-3 text-2xl font-bold tracking-tight sm:text-3xl">
-            Built for how retail investors actually research
+            {benefitsHeading}
           </h2>
           <p className="mt-3 max-w-2xl text-sm leading-6 text-muted-foreground">
-            You don't need a desk full of monitors. Follow themes, see exposure, and narrow ideas
-            in one place.
+            {benefitsSubheading}
           </p>
 
           {/* Bento grid */}
           <div className="mt-10 grid gap-4 md:grid-cols-3">
-            {/* Card 1 — wide */}
-            {(() => {
-              const Icon0 = benefitCards[0].icon;
+            {benefitCards[0] && (() => {
+              const Icon = resolveIcon(benefitCards[0].iconName, Newspaper);
               return (
                 <article className="cursor-default p-2 md:col-span-2">
                   <div className="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-border bg-background/80">
-                    <Icon0 className="h-5 w-5 text-amber-400" />
+                    <Icon className="h-5 w-5 text-amber-400" />
                   </div>
                   <h3 className="mt-4 text-lg font-semibold tracking-tight">{benefitCards[0].title}</h3>
                   <p className="mt-2 text-sm leading-6 text-muted-foreground">
@@ -346,13 +408,12 @@ export default function Home() {
               );
             })()}
 
-            {/* Card 2 */}
-            {(() => {
-              const Icon1 = benefitCards[1].icon;
+            {benefitCards[1] && (() => {
+              const Icon = resolveIcon(benefitCards[1].iconName, Target);
               return (
                 <article className="cursor-default p-2">
                   <div className="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-border bg-background/80">
-                    <Icon1 className="h-5 w-5 text-amber-400" />
+                    <Icon className="h-5 w-5 text-amber-400" />
                   </div>
                   <h3 className="mt-4 text-base font-semibold tracking-tight">
                     {benefitCards[1].title}
@@ -364,14 +425,13 @@ export default function Home() {
               );
             })()}
 
-            {/* Card 3 — full width, horizontal layout */}
-            {(() => {
-              const Icon2 = benefitCards[2].icon;
+            {benefitCards[2] && (() => {
+              const Icon = resolveIcon(benefitCards[2].iconName, Workflow);
               return (
                 <article className="cursor-default p-2 md:col-span-3 md:flex md:items-center md:gap-8">
                   <div className="shrink-0">
                     <div className="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-border bg-background/80">
-                      <Icon2 className="h-5 w-5 text-amber-400" />
+                      <Icon className="h-5 w-5 text-amber-400" />
                     </div>
                   </div>
                   <div className="mt-4 md:mt-0">
@@ -391,12 +451,11 @@ export default function Home() {
       <section id="how-it-works" className="py-16 md:py-24">
         <div className="mx-auto max-w-6xl px-4 sm:px-6 lg:px-8">
           <p className="text-xs font-semibold uppercase tracking-widest text-amber-500">
-            How it works
+            {howItWorksSectionLabel}
           </p>
-          <h2 className="mt-3 text-2xl font-bold tracking-tight sm:text-3xl">Three steps, no terminal</h2>
+          <h2 className="mt-3 text-2xl font-bold tracking-tight sm:text-3xl">{howItWorksHeading}</h2>
 
           <div className="relative mt-10">
-            {/* Connecting line */}
             <div
               aria-hidden
               className="absolute top-5 left-0 right-0 hidden h-px bg-gradient-to-r from-transparent via-amber-500/30 to-transparent md:block"
@@ -423,21 +482,24 @@ export default function Home() {
       <section className="py-16 md:py-24">
         <div className="mx-auto max-w-6xl px-4 sm:px-6 lg:px-8">
           <p className="text-xs font-semibold uppercase tracking-widest text-amber-500">
-            What you get
+            {productValuesSectionLabel}
           </p>
           <h2 className="mt-3 text-2xl font-bold tracking-tight sm:text-3xl">
-            Signal, not noise
+            {productValuesHeading}
           </h2>
           <div className="mt-10 grid gap-4 sm:grid-cols-2 md:grid-cols-3">
-            {productValueItems.map((item) => (
-              <article key={item.title} className="cursor-default p-2">
-                <div className="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-border bg-background/80">
-                  <item.icon className="h-5 w-5 text-amber-400" />
-                </div>
-                <h3 className="mt-4 text-base font-semibold">{item.title}</h3>
-                <p className="mt-2 text-sm leading-6 text-muted-foreground">{item.description}</p>
-              </article>
-            ))}
+            {productValueItems.map((item) => {
+              const Icon = resolveIcon(item.iconName, BarChart3);
+              return (
+                <article key={item.title} className="cursor-default p-2">
+                  <div className="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-border bg-background/80">
+                    <Icon className="h-5 w-5 text-amber-400" />
+                  </div>
+                  <h3 className="mt-4 text-base font-semibold">{item.title}</h3>
+                  <p className="mt-2 text-sm leading-6 text-muted-foreground">{item.description}</p>
+                </article>
+              );
+            })}
           </div>
         </div>
       </section>
@@ -446,21 +508,24 @@ export default function Home() {
       <section className="py-16 md:py-24">
         <div className="mx-auto max-w-6xl px-4 sm:px-6 lg:px-8">
           <p className="text-xs font-semibold uppercase tracking-widest text-amber-500">
-            Straight answers
+            {trustSectionLabel}
           </p>
           <h2 className="mt-3 text-2xl font-bold tracking-tight sm:text-3xl">
-            Common questions
+            {trustHeading}
           </h2>
           <div className="mt-10 grid gap-4 sm:grid-cols-2 md:grid-cols-3">
-            {trustItems.map((item) => (
-              <article key={item.title} className="p-2">
-                <div className="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-border bg-background/80">
-                  <item.icon className="h-5 w-5 text-amber-400" />
-                </div>
-                <h3 className="mt-4 text-base font-semibold">{item.title}</h3>
-                <p className="mt-2 text-sm leading-6 text-muted-foreground">{item.description}</p>
-              </article>
-            ))}
+            {trustItems.map((item) => {
+              const Icon = resolveIcon(item.iconName, Shield);
+              return (
+                <article key={item.title} className="p-2">
+                  <div className="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-border bg-background/80">
+                    <Icon className="h-5 w-5 text-amber-400" />
+                  </div>
+                  <h3 className="mt-4 text-base font-semibold">{item.title}</h3>
+                  <p className="mt-2 text-sm leading-6 text-muted-foreground">{item.description}</p>
+                </article>
+              );
+            })}
           </div>
         </div>
       </section>
@@ -469,19 +534,18 @@ export default function Home() {
       <section id="final-cta" className="border-t border-border py-20 md:py-28">
         <div className="mx-auto max-w-2xl px-4 text-center">
           <p className="text-xs font-semibold uppercase tracking-widest text-amber-500">
-            Early access
+            {ctaSectionLabel}
           </p>
           <h2 className="mt-3 text-3xl font-bold tracking-tight sm:text-4xl">
-            Smarter homework for your portfolio.
+            {ctaHeading}
           </h2>
           <p className="mt-4 text-base leading-7 text-muted-foreground">
-            Join the list for product updates and early access. Built for people who invest their
-            own money and want context, not chaos.
+            {ctaDescription}
           </p>
 
           <EarlyAccessSignupForm />
           <p className="mt-4 text-xs text-muted-foreground">
-            No credit card. No terminal subscription.
+            {ctaFootnote}
           </p>
         </div>
       </section>

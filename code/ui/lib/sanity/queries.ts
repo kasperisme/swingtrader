@@ -78,6 +78,35 @@ export const changelogEntriesQuery = `
   }
 `;
 
+export const landingPageQuery = `
+  *[_type == "landingPage"][0] {
+    heroBadgeText,
+    heroHeadlinePart1,
+    heroHeadlineHighlight,
+    heroDescription,
+    heroPrimaryCtaLabel,
+    heroSecondaryCtaLabel,
+    benefitsSectionLabel,
+    benefitsHeading,
+    benefitsSubheading,
+    benefitCards[] { title, description, iconName },
+    howItWorksSectionLabel,
+    howItWorksHeading,
+    howItWorksSteps[] { label, detail },
+    productValuesSectionLabel,
+    productValuesHeading,
+    productValueItems[] { title, description, iconName },
+    trustSectionLabel,
+    trustHeading,
+    trustItems[] { title, description, iconName },
+    ctaSectionLabel,
+    ctaHeading,
+    ctaDescription,
+    ctaFootnote,
+    tickerThemes
+  }
+`;
+
 export const blogPostBySlugQuery = `
   *[_type == "post" && slug.current == $slug][0] {
     _id,

@@ -53,6 +53,44 @@ export type BlogPostPreview = {
   readingTimeMinutes: number | null;
 };
 
+export type LandingCardItem = {
+  title: string;
+  description: string;
+  iconName: string | null;
+};
+
+export type LandingStep = {
+  label: string;
+  detail: string;
+};
+
+export type LandingPage = {
+  heroBadgeText: string | null;
+  heroHeadlinePart1: string | null;
+  heroHeadlineHighlight: string | null;
+  heroDescription: string | null;
+  heroPrimaryCtaLabel: string | null;
+  heroSecondaryCtaLabel: string | null;
+  benefitsSectionLabel: string | null;
+  benefitsHeading: string | null;
+  benefitsSubheading: string | null;
+  benefitCards: LandingCardItem[] | null;
+  howItWorksSectionLabel: string | null;
+  howItWorksHeading: string | null;
+  howItWorksSteps: LandingStep[] | null;
+  productValuesSectionLabel: string | null;
+  productValuesHeading: string | null;
+  productValueItems: LandingCardItem[] | null;
+  trustSectionLabel: string | null;
+  trustHeading: string | null;
+  trustItems: LandingCardItem[] | null;
+  ctaSectionLabel: string | null;
+  ctaHeading: string | null;
+  ctaDescription: string | null;
+  ctaFootnote: string | null;
+  tickerThemes: string[] | null;
+};
+
 export type BlogPost = BlogPostPreview & {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   body: any[];
