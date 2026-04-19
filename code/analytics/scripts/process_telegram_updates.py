@@ -112,7 +112,8 @@ def _finish_request(
     }).eq("id", req_id).execute()
 
 
-async def _process_single(row: dict) -> None:
+async def _process_single(row: dict) -> bool:
+    """Process one update request. Returns True on success, False on failure."""
     req_id = str(row["id"])
     user_id = str(row["user_id"])
     chat_id = str(row["chat_id"])
@@ -143,6 +144,7 @@ async def _process_single(row: dict) -> None:
                 telegram_message_id=message_id,
             )
             logger.info("[tg-update] completed request id=%s user=%s", req_id, user_id)
+            return True
         else:
             _finish_request(
                 req_id,
@@ -151,9 +153,11 @@ async def _process_single(row: dict) -> None:
                 error_text=send_error or "Failed to send Telegram message",
             )
             logger.error("[tg-update] send failed id=%s user=%s err=%s", req_id, user_id, send_error)
+            return False
     except Exception as exc:
         _finish_request(req_id, status="failed", error_text=str(exc))
         logger.exception("[tg-update] request failed id=%s user=%s", req_id, user_id)
+        return False
 
 
 def _build_search_response(query: str, *, lookback_hours: int) -> str:
@@ -193,14 +197,21 @@ def _build_search_response(query: str, *, lookback_hours: int) -> str:
     return "\n".join(lines).strip()
 
 
-async def _run_loop(batch_size: int, poll_interval_sec: int, once: bool) -> None:
+async def _run_loop(batch_size: int, poll_interval_sec: int, once: bool) -> dict:
+    """Process pending requests. Returns metadata with request counts."""
+    processed = 0
+    failed = 0
     while True:
         claimed = _claim_pending_requests(batch_size)
         if claimed:
             for row in claimed:
-                await _process_single(row)
+                ok = await _process_single(row)
+                if ok:
+                    processed += 1
+                else:
+                    failed += 1
         elif once:
-            return
+            return {"requests_processed": processed, "requests_failed": failed}
         else:
             time.sleep(poll_interval_sec)
 
@@ -217,4 +228,11 @@ if __name__ == "__main__":
     parser.add_argument("--once", action="store_true", help="Process one fetch cycle then exit")
     args = parser.parse_args()
 
-    asyncio.run(_run_loop(args.batch_size, args.poll_interval_sec, args.once))
+    try:
+        from src.health import JobHeartbeat, update_job_metadata
+        with JobHeartbeat("telegram_updates", expected_interval=1 / 60):
+            _meta = asyncio.run(_run_loop(args.batch_size, args.poll_interval_sec, args.once))
+        if _meta:
+            update_job_metadata("telegram_updates", _meta)
+    except ImportError:
+        asyncio.run(_run_loop(args.batch_size, args.poll_interval_sec, args.once))

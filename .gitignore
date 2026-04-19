@@ -170,3 +170,5 @@ data/*.duckdb
 
 news_impact/cache/*
 .claude/worktrees/
+
+content/

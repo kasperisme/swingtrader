@@ -157,6 +157,8 @@ _FMP_NEWS_MAX_LIMIT = 250
 _FMP_SPARSE_FILL_RANDOM_PAGE_MAX = 120
 # If every random page is empty, the day likely has no FMP rows — stop retrying.
 _FMP_SPARSE_FILL_RANDOM_TRIES = 250
+# Random high pages often 400/empty on FMP; sparse-fill passes expect_sparse_misses=True
+# so FMPFetcher logs those misses at DEBUG (see news_impact.fmp_fetcher).
 
 
 def _load_identity_alias_maps() -> tuple[dict[str, str], dict[str, str]]:
@@ -309,10 +311,14 @@ async def _fmp_fetch_articles(
     limit: int | None = None,
     from_date: str | None = None,
     to_date: str | None = None,
+    expect_sparse_misses: bool = False,
 ) -> list[dict]:
     """
     Fetch FMP articles according to ``args.fmp_news_feed`` (stock | general | both).
     When ``page``/``limit``/dates are None, uses ``args.page``, ``args.limit``, ``args.from_date``, ``args.to_date``.
+
+    ``expect_sparse_misses``: when True (sparse-fill random paging), FMP client/empty
+    misses are logged at DEBUG in ``FMPFetcher`` instead of WARNING — expected noise.
     """
     feed = getattr(args, "fmp_news_feed", "stock") or "stock"
     pg = args.page if page is None else page
@@ -323,24 +329,42 @@ async def _fmp_fetch_articles(
 
     if feed == "general":
         rows = await fetcher.fetch_general_news(
-            limit=lim, page=pg, from_date=fd, to_date=td,
+            limit=lim,
+            page=pg,
+            from_date=fd,
+            to_date=td,
+            expect_sparse_misses=expect_sparse_misses,
         )
         for r in rows:
             r["__stream"] = "fmp_general"
         return rows
     if feed == "stock":
         rows = await fetcher.fetch_stock_news(
-            tickers=tickers, limit=lim, page=pg, from_date=fd, to_date=td,
+            tickers=tickers,
+            limit=lim,
+            page=pg,
+            from_date=fd,
+            to_date=td,
+            expect_sparse_misses=expect_sparse_misses,
         )
         for r in rows:
             r["__stream"] = "fmp_stock"
         return rows
     # both
     stock_task = fetcher.fetch_stock_news(
-        tickers=tickers, limit=lim, page=pg, from_date=fd, to_date=td,
+        tickers=tickers,
+        limit=lim,
+        page=pg,
+        from_date=fd,
+        to_date=td,
+        expect_sparse_misses=expect_sparse_misses,
     )
     general_task = fetcher.fetch_general_news(
-        limit=lim, page=pg, from_date=fd, to_date=td,
+        limit=lim,
+        page=pg,
+        from_date=fd,
+        to_date=td,
+        expect_sparse_misses=expect_sparse_misses,
     )
     stock_arts, gen_arts = await asyncio.gather(stock_task, general_task)
     for r in stock_arts:
@@ -1371,6 +1395,7 @@ async def _run_sparse_fill_for_day(
             limit=page_limit,
             from_date=day_iso,
             to_date=day_iso,
+            expect_sparse_misses=True,
         )
         if articles:
             console.print(
@@ -1420,6 +1445,7 @@ async def _run_sparse_fill_for_day(
             limit=page_limit,
             from_date=day_iso,
             to_date=day_iso,
+            expect_sparse_misses=True,
         )
         if not articles:
             console.print(

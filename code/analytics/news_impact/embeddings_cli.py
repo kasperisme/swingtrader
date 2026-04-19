@@ -49,15 +49,19 @@ def main(argv: list[str] | None = None) -> None:
     logging.basicConfig(level=logging.DEBUG if args.verbose else logging.INFO)
 
     try:
-        from src.health import JobHeartbeat
+        from src.health import JobHeartbeat, update_job_metadata
         _heartbeat = JobHeartbeat
+        _update_meta = update_job_metadata
     except ImportError:
         from contextlib import nullcontext as _heartbeat  # type: ignore[assignment]
+        _update_meta = None  # type: ignore[assignment]
 
     if args.enqueue_missing:
         with _heartbeat("embeddings_enqueue", expected_interval=24.0):
             n = enqueue_missing_embedding_jobs(limit=args.limit)
             print(f"enqueued_missing={n}")
+        if _update_meta:
+            _update_meta("embeddings_enqueue", {"enqueued": n})
         return
 
     if args.process_pending:
@@ -71,11 +75,15 @@ def main(argv: list[str] | None = None) -> None:
                 timeout=float(args.timeout),
             )
             print(f"completed={ok} failed={bad}")
+        if _update_meta:
+            _update_meta(job_name, {"completed": ok, "failed": bad})
         return
 
     with _heartbeat("embeddings_cleanup", expected_interval=168.0):  # weekly
         deleted_emb, deleted_jobs = cleanup_embedding_orphans()
         print(f"deleted_embeddings={deleted_emb} deleted_jobs={deleted_jobs}")
+    if _update_meta:
+        _update_meta("embeddings_cleanup", {"deleted_embeddings": deleted_emb, "deleted_jobs": deleted_jobs})
 
 
 if __name__ == "__main__":

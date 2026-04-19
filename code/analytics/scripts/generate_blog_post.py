@@ -951,7 +951,7 @@ def parse_blog_post_args(argv: list[str] | None = None) -> argparse.Namespace:
     return args
 
 
-async def main(args: argparse.Namespace) -> None:
+async def main(args: argparse.Namespace) -> dict:
     lookback = args.lookback_hours or int(
         os.environ.get("NEWS_LOOKBACK_HOURS", LOOKBACK_HOURS[args.mode])
     )
@@ -966,6 +966,8 @@ async def main(args: argparse.Namespace) -> None:
         now_et.strftime("%Y-%m-%d %H:%M"),
     )
 
+    meta: dict = {"mode": args.mode, "lookback_hours": lookback}
+
     # 1. Pull data from Supabase
     articles = _fetch_recent_articles(args.mode, lookback, args.max_articles)
     if not articles:
@@ -978,6 +980,9 @@ async def main(args: argparse.Namespace) -> None:
     all_tickers = list({t for ts in tickers_map.values() for t in ts})
     top_tickers = _top_tickers(tickers_map, articles, n=8)
     company_meta = _fetch_company_metadata(top_tickers)
+
+    meta["articles_fetched"] = len(articles)
+    meta["tickers_unique"] = len(all_tickers)
 
     log.info("Articles: %d | Unique tickers: %d", len(articles), len(all_tickers))
 
@@ -1015,6 +1020,10 @@ async def main(args: argparse.Namespace) -> None:
             dry_run=args.dry_run,
         )
         log.info("Sanity document ID: %s", doc_id)
+        meta["body_chars"] = len(body_markdown)
+        meta["caveman_chars"] = len(caveman_markdown)
+        meta["sanity_doc_id"] = doc_id
+        meta["blog_url"] = blog_url
     else:
         log.info("Skipping Sanity blog post (--skip-sanity). Blog URL: %s", blog_url)
 
@@ -1046,8 +1055,11 @@ async def main(args: argparse.Namespace) -> None:
                 raise PartialJobFailure("X thread was not posted (xdk unavailable or missing credentials)")
             except ImportError:
                 pass
+        meta["x_tweets_generated"] = len(tweets)
+        meta["x_root_tweet_id"] = root_id if not args.dry_run else None
 
     log.info("Done.")
+    return meta
 
 
 if __name__ == "__main__":
@@ -1056,8 +1068,9 @@ if __name__ == "__main__":
         sys.exit(0 if _check_x_auth() else 1)
     _job_name = f"blog_post_{_args.mode.replace('-', '_')}"
     try:
-        from src.health import JobHeartbeat
+        from src.health import JobHeartbeat, update_job_metadata
         with JobHeartbeat(_job_name, expected_interval=24.0):
-            asyncio.run(main(_args))
+            _meta = asyncio.run(main(_args))
+        update_job_metadata(_job_name, _meta)
     except ImportError:
         asyncio.run(main(_args))

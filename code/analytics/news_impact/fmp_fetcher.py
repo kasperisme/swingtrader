@@ -3,7 +3,8 @@ Async FMP data fetcher for company embedding system.
 
 Fetches all raw data needed to compute dimension vectors for a single ticker.
 Uses httpx.AsyncClient with a 0.25s inter-request delay to respect FMP rate limits.
-Never raises on partial data failure — missing endpoints return None with a warning.
+Never raises on partial data failure — missing endpoints return None with a warning
+(or debug logs when ``expect_sparse_misses`` is used for stochastic sparse-fill probes).
 """
 
 import asyncio
@@ -79,6 +80,8 @@ class FMPFetcher:
         endpoint: str,
         params: dict,
         base_url: str | None = None,
+        *,
+        expect_sparse_misses: bool = False,
     ) -> list | dict | None:
         """
         Single async GET with global rate limiting and 429 retry/backoff.
@@ -87,6 +90,10 @@ class FMPFetcher:
         FMPFetcher calls share one _DELAY-second gap between sends.
         On 429 the request is retried up to _MAX_RETRIES times with
         increasing back-off delays.
+
+        When ``expect_sparse_misses`` is True (sparse-fill random page probes),
+        empty responses and client errors (4xx) are logged at DEBUG instead of
+        WARNING because misses are expected.
         """
         url = f"{base_url or self.base_url}/{endpoint.lstrip('/')}"
         params = {**params, "apikey": self.api_key}
@@ -99,7 +106,15 @@ class FMPFetcher:
                 try:
                     r = await client.get(url, params=params, timeout=30.0)
                 except Exception as exc:
-                    logger.warning("[FMPFetcher] %s failed for %s: %s", endpoint, sym, exc)
+                    if expect_sparse_misses:
+                        logger.debug(
+                            "[FMPFetcher] %s request failed for %s (sparse-fill; expected miss): %s",
+                            endpoint,
+                            sym,
+                            exc,
+                        )
+                    else:
+                        logger.warning("[FMPFetcher] %s failed for %s: %s", endpoint, sym, exc)
                     return None
 
             # --- handle response outside the lock ---
@@ -116,18 +131,45 @@ class FMPFetcher:
                 return None
 
             if r.status_code in (404, 204):
-                logger.warning("[FMPFetcher] %s → %s %s (no data)", endpoint, r.status_code, sym)
+                if expect_sparse_misses:
+                    logger.debug(
+                        "[FMPFetcher] %s → %s %s (no data; sparse-fill probe)",
+                        endpoint,
+                        r.status_code,
+                        sym,
+                    )
+                else:
+                    logger.warning("[FMPFetcher] %s → %s %s (no data)", endpoint, r.status_code, sym)
                 return None
 
             try:
                 r.raise_for_status()
             except Exception as exc:
+                if expect_sparse_misses and isinstance(exc, httpx.HTTPStatusError):
+                    sc = exc.response.status_code
+                    if 400 <= sc < 500:
+                        logger.debug(
+                            "[FMPFetcher] %s client %s for %s (sparse-fill; expected when "
+                            "page is past FMP window): %s",
+                            endpoint,
+                            sc,
+                            sym,
+                            exc,
+                        )
+                        return None
                 logger.warning("[FMPFetcher] %s failed for %s: %s", endpoint, sym, exc)
                 return None
 
             data = r.json()
             if not data:
-                logger.warning("[FMPFetcher] %s returned empty body for %s", endpoint, sym)
+                if expect_sparse_misses:
+                    logger.debug(
+                        "[FMPFetcher] %s empty JSON/list for %s (sparse-fill; expected miss)",
+                        endpoint,
+                        sym,
+                    )
+                else:
+                    logger.warning("[FMPFetcher] %s returned empty body for %s", endpoint, sym)
                 return None
             return data
 
@@ -191,6 +233,8 @@ class FMPFetcher:
         page: int = 0,
         from_date: str | None = None,
         to_date: str | None = None,
+        *,
+        expect_sparse_misses: bool = False,
     ) -> list[dict]:
         """
         Fetch stock news from FMP stable APIs.
@@ -213,6 +257,9 @@ class FMPFetcher:
         page      : page index.
         from_date : start date ``YYYY-MM-DD`` (optional).
         to_date   : end date ``YYYY-MM-DD`` (optional).
+        expect_sparse_misses
+            If True (sparse-fill random paging), empty/4xx responses are logged at DEBUG
+            instead of WARNING because misses are expected.
 
         Returns
         -------
@@ -233,10 +280,18 @@ class FMPFetcher:
                 endpoint = _FMP_NEWS_STOCK_BY_SYMBOL
             else:
                 endpoint = _FMP_NEWS_STOCK_LATEST
-            data = await self._get(client, endpoint, params)
+            data = await self._get(
+                client, endpoint, params, expect_sparse_misses=expect_sparse_misses
+            )
 
         if not isinstance(data, list):
-            logger.warning("[FMPFetcher] fetch_stock_news returned unexpected type: %s", type(data))
+            if expect_sparse_misses:
+                logger.debug(
+                    "[FMPFetcher] fetch_stock_news unexpected type %s (sparse-fill; expected miss)",
+                    type(data),
+                )
+            else:
+                logger.warning("[FMPFetcher] fetch_stock_news returned unexpected type: %s", type(data))
             return []
         return data
 
@@ -246,6 +301,8 @@ class FMPFetcher:
         page: int = 0,
         from_date: str | None = None,
         to_date: str | None = None,
+        *,
+        expect_sparse_misses: bool = False,
     ) -> list[dict]:
         """
         Fetch latest **general** (non–ticker-scoped) news from FMP.
@@ -255,6 +312,8 @@ class FMPFetcher:
             GET /stable/news/general-latest?page=0&limit=20&from=YYYY-MM-DD&to=YYYY-MM-DD
 
         Response items match the stock news shape (``symbol`` may be ``null``).
+
+        ``expect_sparse_misses``: same as for :meth:`fetch_stock_news`.
         """
         params: dict[str, str | int] = {"page": page, "limit": limit}
         if from_date:
@@ -263,10 +322,23 @@ class FMPFetcher:
             params["to"] = to_date
 
         async with httpx.AsyncClient() as client:
-            data = await self._get(client, _FMP_NEWS_GENERAL_LATEST, params)
+            data = await self._get(
+                client,
+                _FMP_NEWS_GENERAL_LATEST,
+                params,
+                expect_sparse_misses=expect_sparse_misses,
+            )
 
         if not isinstance(data, list):
-            logger.warning("[FMPFetcher] fetch_general_news returned unexpected type: %s", type(data))
+            if expect_sparse_misses:
+                logger.debug(
+                    "[FMPFetcher] fetch_general_news unexpected type %s (sparse-fill; expected miss)",
+                    type(data),
+                )
+            else:
+                logger.warning(
+                    "[FMPFetcher] fetch_general_news returned unexpected type: %s", type(data)
+                )
             return []
         return data
 

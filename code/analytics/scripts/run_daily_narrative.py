@@ -409,15 +409,16 @@ async def _main(
     network_lookback_days: int,
     deliver: bool,
     dry_run: bool = False,
-) -> None:
+) -> dict:
     today = datetime.now(_EASTERN).date().isoformat()
+    meta: dict = {"narrative_date": today, "lookback_hours": lookback_hours}
 
     if dry_run:
         if not user_id:
             logger.error("--dry-run requires --user-id")
             sys.exit(1)
         _print_dry_run(user_id, lookback_hours, network_lookback_days)
-        return
+        return meta
 
     if user_id:
         narrative = await generate_for_user(
@@ -427,11 +428,17 @@ async def _main(
         )
         logger.info("[run_daily_narrative] done for user=%s", user_id)
         print(json.dumps(narrative, indent=2, default=str))
+        meta["users_processed"] = 1
+        meta["users_failed"] = 0
         if deliver:
             _deliver_if_needed(user_id, narrative, today)
     else:
         processed, failed = await generate_all(network_lookback_days=network_lookback_days)
         logger.info("[run_daily_narrative] done for %d users (%d failed)", len(processed), len(failed))
+        meta["users_processed"] = len(processed)
+        meta["users_failed"] = len(failed)
+        telegrams_sent = 0
+        telegrams_failed = 0
         if deliver:
             client = get_supabase_client()
             for uid in processed:
@@ -456,8 +463,12 @@ async def _main(
                         "market_pulse_sources": row.get("market_pulse_sources") or [],
                     }
                     _deliver_if_needed(uid, narrative, today)
+                    telegrams_sent += 1
                 except Exception as exc:
                     logger.error("[delivery] failed for user=%s: %s", uid, exc)
+                    telegrams_failed += 1
+        meta["telegrams_sent"] = telegrams_sent
+        meta["telegrams_failed"] = telegrams_failed
         if failed and processed:
             raise PartialJobFailure(
                 f"{len(failed)}/{len(processed) + len(failed)} users failed: {failed}"
@@ -466,6 +477,7 @@ async def _main(
             raise RuntimeError(
                 f"All {len(failed)} user(s) failed: {failed}"
             )
+    return meta
 
 
 if __name__ == "__main__":
@@ -504,9 +516,9 @@ if __name__ == "__main__":
         )
     else:
         try:
-            from src.health import JobHeartbeat
+            from src.health import JobHeartbeat, update_job_metadata
             with JobHeartbeat("daily_narrative", expected_interval=24.0):
-                asyncio.run(
+                _meta = asyncio.run(
                     _main(
                         args.user_id,
                         args.lookback_hours,
@@ -514,6 +526,7 @@ if __name__ == "__main__":
                         args.deliver,
                     )
                 )
+            update_job_metadata("daily_narrative", _meta)
         except ImportError:
             asyncio.run(
                 _main(
