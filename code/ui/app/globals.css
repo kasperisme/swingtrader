@@ -2,6 +2,7 @@
 @tailwind components;
 @tailwind utilities;
 
+
 @layer base {
   :root {
     /* Light mode */
@@ -83,4 +84,32 @@
   .animate-news-roll {
     animation: news-roll 40s linear infinite;
   }
+}
+
+body.screenings-fullscreen {
+  overflow: hidden !important;
+}
+
+body.screenings-fullscreen.hide-site-header footer,
+body.screenings-fullscreen.hide-site-header .site-footer {
+  display: none !important;
+}
+
+body.screenings-fullscreen main {
+  min-height: 0 !important;
+}
+
+body.screenings-fullscreen.hide-site-header header {
+  display: none !important;
+}
+
+body.screenings-fullscreen.hide-site-header .screenings-viewport {
+  height: 100dvh !important;
+  margin-top: 0 !important;
+  margin-bottom: 0 !important;
+}
+
+body.screenings-fullscreen.hide-site-header main > div {
+  padding-top: 0 !important;
+  padding-bottom: 0 !important;
 }

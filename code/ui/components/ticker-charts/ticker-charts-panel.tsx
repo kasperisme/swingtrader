@@ -40,7 +40,7 @@ export type TickerChartsPanelProps = {
   onSetStatus: (ticker: string, status: TickerChartNoteStatus) => void;
   hasComment: (ticker: string) => boolean;
   onEditComment: (ticker: string) => void;
-  getTickerMeta: (ticker: string) => { sector: string; industry: string };
+  getTickerMeta: (ticker: string) => { sector: string; industry: string; subSector?: string };
   getPivotMarker: (ticker: string) => PivotMarker | null;
   onSetPivotMarker: (ticker: string, point: ChartPoint) => void;
   onClearPivotMarker: (ticker: string) => void;
@@ -297,6 +297,7 @@ export function TickerChartsPanel({
           </div>
         )}
 
+        {screeningToolbar && (
         <button
           type="button"
           onClick={() => void copyOhlcvToClipboard()}
@@ -319,6 +320,7 @@ export function TickerChartsPanel({
               ? "Copy failed"
               : "Copy OHLCV"}
         </button>
+        )}
 
         {showTrailingStepNav ? (
           <div className="ml-auto flex items-center gap-2">

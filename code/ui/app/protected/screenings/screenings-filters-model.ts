@@ -19,6 +19,7 @@ export type ScreeningStatusFilter =
 
 export interface ScreeningsFilters {
   status: ScreeningStatusFilter;
+  symbolContains: string;
   hasRowNote: HasRowNoteFilter;
   noteHighlighted: NoteHighlightedFilter;
   noteComment: NoteCommentFilter;
@@ -44,6 +45,7 @@ export interface ScreeningsFilters {
 
 export const DEFAULT_SCREENINGS_FILTERS: ScreeningsFilters = {
   status: "active",
+  symbolContains: "",
   hasRowNote: "any",
   noteHighlighted: "any",
   noteComment: "any",
@@ -68,6 +70,7 @@ export const DEFAULT_SCREENINGS_FILTERS: ScreeningsFilters = {
 export function countScreeningsFilterRules(f: ScreeningsFilters): number {
   let n = 0;
   if (f.status !== "active") n++;
+  if (f.symbolContains?.trim()) n++;
   if (f.hasRowNote !== "any") n++;
   if (f.noteHighlighted !== "any") n++;
   if (f.noteComment !== "any") n++;

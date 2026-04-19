@@ -237,14 +237,16 @@ export default function ScreeningsPage({
   searchParams: Promise<{ run?: string }>;
 }) {
   return (
-    <div className="flex-1 w-full flex flex-col gap-6">
-      <div>
-        <p className="text-xs font-semibold uppercase tracking-widest text-amber-500">
-          Scanner
-        </p>
-        <h1 className="mt-1 text-2xl font-bold tracking-tight">Screenings</h1>
-      </div>
-
+    <div
+      className="screenings-viewport flex-1 min-h-0 flex flex-col"
+      style={{
+        width: "100vw",
+        marginLeft: "calc(-50vw + 50%)",
+        height: "calc(100dvh - 5rem)",
+        marginTop: "-2rem",
+        marginBottom: "-2rem",
+      }}
+    >
       <Suspense
         fallback={
           <div className="text-sm text-muted-foreground animate-pulse">

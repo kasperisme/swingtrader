@@ -14,6 +14,7 @@ import { MAX_CATEGORICAL_STRING_OPTIONS } from "./screenings-row-data";
 type SetFilters = (f: ScreeningsFilters | ((prev: ScreeningsFilters) => ScreeningsFilters)) => void;
 
 type FieldKind =
+  | { kind: "wf_symbol" }
   | { kind: "wf_status" }
   | { kind: "wf_has_row_note" }
   | { kind: "wf_highlighted" }
@@ -39,6 +40,7 @@ function catalogEntries(
   freeStringKeys: string[],
 ): CatalogEntry[] {
   const out: CatalogEntry[] = [];
+  out.push({ group: "Symbol", id: "wf.symbol", label: "symbol", sub: "text", field: { kind: "wf_symbol" } });
   const wf = "Workflow notes";
   out.push({ group: wf, id: "wf.status", label: "status", sub: "varchar", field: { kind: "wf_status" } });
   out.push({
@@ -88,6 +90,11 @@ type OpDef = { id: string; label: string; sym?: string };
 
 function opsForField(f: FieldKind): OpDef[] {
   switch (f.kind) {
+    case "wf_symbol":
+      return [
+        { id: "contains", label: "Contains", sym: "~~" },
+        { id: "eq", label: "Equals", sym: "=" },
+      ];
     case "wf_status":
       return [{ id: "eq", label: "Equals", sym: "=" }];
     case "wf_has_row_note":
@@ -153,6 +160,14 @@ function buildPills(filters: ScreeningsFilters, setFilters: SetFilters) {
   const pills: Pill[] = [];
   const patch = (fn: (p: ScreeningsFilters) => ScreeningsFilters) => setFilters(fn);
 
+  if (filters.symbolContains?.trim()) {
+    const v = filters.symbolContains.trim();
+    pills.push({
+      id: "sym",
+      text: `symbol ~ ${v}`,
+      remove: () => patch((p) => ({ ...p, symbolContains: "" })),
+    });
+  }
   if (filters.status !== "active") {
     pills.push({
       id: "st",
@@ -397,16 +412,62 @@ function buildPills(filters: ScreeningsFilters, setFilters: SetFilters) {
   return pills;
 }
 
+// Pills-only bar — shown inside the collapsible filters panel
 export function ScreeningsFilterBar({
   filters,
   setFilters,
-  noteStageOptions,
-  noteTagOptions,
-  boolKeys,
-  numKeys,
-  categoricalStringCols,
-  freeStringKeys,
 }: {
+  filters: ScreeningsFilters;
+  setFilters: SetFilters;
+}) {
+  const pills = useMemo(() => buildPills(filters, setFilters), [filters, setFilters]);
+  const activeCount = countScreeningsFilterRules(filters);
+
+  if (pills.length === 0) return null;
+
+  return (
+    <div
+      className="flex flex-wrap items-center gap-2 rounded-lg border border-border bg-muted/25 dark:bg-muted/15 px-2 py-2 min-h-[2.75rem] transition-colors"
+      role="status"
+      aria-label="Active filters"
+    >
+      <Search className="w-4 h-4 text-muted-foreground shrink-0" aria-hidden />
+      <div className="flex flex-wrap items-center gap-1.5 flex-1 min-w-0">
+        {pills.map((pill) => (
+          <span
+            key={pill.id}
+            className="inline-flex items-center gap-0.5 max-w-full rounded-full border border-border bg-background px-2 py-0.5 text-xs text-foreground shadow-sm"
+            title={pill.title}
+          >
+            <span className="truncate max-w-[min(20rem,85vw)]">{pill.text}</span>
+            <button
+              type="button"
+              onClick={() => pill.remove()}
+              className="shrink-0 rounded-full p-0.5 text-muted-foreground hover:bg-muted hover:text-foreground focus:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              aria-label={`Remove filter ${pill.text}`}
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
+          </span>
+        ))}
+      </div>
+      {activeCount > 0 && (
+        <button
+          type="button"
+          onClick={() => setFilters(() => ({ ...DEFAULT_SCREENINGS_FILTERS }))}
+          className="shrink-0 text-[11px] text-muted-foreground hover:text-foreground underline underline-offset-2"
+        >
+          Clear all
+        </button>
+      )}
+    </div>
+  );
+}
+
+type AddFilterWidgetProps = {
+  open: boolean;
+  onOpen: () => void;
+  onClose: () => void;
   filters: ScreeningsFilters;
   setFilters: SetFilters;
   noteStageOptions: string[];
@@ -415,8 +476,24 @@ export function ScreeningsFilterBar({
   numKeys: string[];
   categoricalStringCols: { key: string; options: string[] }[];
   freeStringKeys: string[];
-}) {
-  const [open, setOpen] = useState(false);
+};
+
+// Compact trigger button (open=false) or full-width inline wizard (open=true).
+// Place inside the tabs flex row with ml-auto; parent must conditionally hide
+// sibling tabs when open so the wizard fills the entire row.
+export function AddFilterWidget({
+  open,
+  onOpen,
+  onClose,
+  filters,
+  setFilters,
+  noteStageOptions,
+  noteTagOptions,
+  boolKeys,
+  numKeys,
+  categoricalStringCols,
+  freeStringKeys,
+}: AddFilterWidgetProps) {
   const [step, setStep] = useState<WizardStep>("fields");
   const [fieldQuery, setFieldQuery] = useState("");
   const [selectedEntry, setSelectedEntry] = useState<CatalogEntry | null>(null);
@@ -455,13 +532,13 @@ export function ScreeningsFilterBar({
     if (!open) return;
     function onDoc(e: MouseEvent) {
       if (rootRef.current && !rootRef.current.contains(e.target as Node)) {
-        setOpen(false);
+        onClose();
         resetWizard();
       }
     }
     document.addEventListener("mousedown", onDoc);
     return () => document.removeEventListener("mousedown", onDoc);
-  }, [open]);
+  }, [open, onClose]);
 
   const resetWizard = useCallback(() => {
     setStep("fields");
@@ -473,12 +550,9 @@ export function ScreeningsFilterBar({
   }, []);
 
   const closeMenu = useCallback(() => {
-    setOpen(false);
+    onClose();
     resetWizard();
-  }, [resetWizard]);
-
-  const pills = useMemo(() => buildPills(filters, setFilters), [filters, setFilters]);
-  const activeCount = countScreeningsFilterRules(filters);
+  }, [onClose, resetWizard]);
 
   const applyFilter = useCallback(
     (apply: (p: ScreeningsFilters) => ScreeningsFilters) => {
@@ -519,6 +593,12 @@ export function ScreeningsFilterBar({
     const f = selectedEntry.field;
     const op = selectedOp.id;
 
+    if (f.kind === "wf_symbol") {
+      const v = valueDraft.trim().toUpperCase();
+      if (!v) return;
+      applyFilter((p) => ({ ...p, symbolContains: v }));
+      return;
+    }
     if (f.kind === "wf_status") {
       const v = (valueDraft.trim() || filters.status) as ScreeningStatusFilter;
       if (!["active", "dismissed", "watchlist", "pipeline", "all"].includes(v)) return;
@@ -671,308 +751,290 @@ export function ScreeningsFilterBar({
     }
   }
 
-  const statusOptions: ScreeningStatusFilter[] = [
-    "active",
-    "dismissed",
-    "watchlist",
-    "pipeline",
-    "all",
-  ];
+  const statusOptions: ScreeningStatusFilter[] = ["active", "dismissed", "watchlist", "pipeline", "all"];
+  const activeCount = countScreeningsFilterRules(filters);
 
-  return (
-    <div ref={rootRef} className="flex flex-col gap-2 w-full min-w-0">
-      <div
-        className="flex flex-wrap items-center gap-2 rounded-lg border border-border bg-muted/25 dark:bg-muted/15 px-2 py-2 min-h-[2.75rem] transition-colors focus-within:ring-1 focus-within:ring-ring"
-        role="search"
+  // Compact trigger button
+  if (!open) {
+    return (
+      <button
+        type="button"
+        onClick={onOpen}
+        className="ml-auto inline-flex items-center gap-1.5 px-3 py-2 text-sm font-medium transition-colors border-b-2 -mb-px rounded-t-md border-transparent text-muted-foreground hover:text-foreground hover:bg-muted/30"
       >
-        <Search className="w-4 h-4 text-muted-foreground shrink-0" aria-hidden />
-        <div className="flex flex-wrap items-center gap-1.5 flex-1 min-w-0">
-          {pills.map((pill) => (
-            <span
-              key={pill.id}
-              className="inline-flex items-center gap-0.5 max-w-full rounded-full border border-border bg-background px-2 py-0.5 text-xs text-foreground shadow-sm"
-              title={pill.title}
-            >
-              <span className="truncate max-w-[min(20rem,85vw)]">{pill.text}</span>
-              <button
-                type="button"
-                onClick={() => pill.remove()}
-                className="shrink-0 rounded-full p-0.5 text-muted-foreground hover:bg-muted hover:text-foreground focus:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                aria-label={`Remove filter ${pill.text}`}
-              >
-                <X className="w-3.5 h-3.5" />
-              </button>
-            </span>
-          ))}
+        <Plus className="w-3.5 h-3.5" />
+        {activeCount > 0 ? `Filters (${activeCount})` : "Add filter"}
+      </button>
+    );
+  }
+
+  // Expanded inline wizard — fills the entire tabs row
+  return (
+    <div ref={rootRef} className="flex-1 min-w-0 flex flex-col pb-px">
+      {/* Inline header row — same height as tab buttons */}
+      <div className="flex items-center gap-1.5 px-1 py-1 min-w-0">
+        {step !== "fields" && (
           <button
             type="button"
             onClick={() => {
-              setOpen((o) => !o);
-              if (!open) resetWizard();
+              if (selectedEntry && opsForField(selectedEntry.field).length > 1 && step === "value") {
+                setStep("ops");
+                setSelectedOp(null);
+              } else {
+                setStep("fields");
+                setSelectedEntry(null);
+                setSelectedOp(null);
+              }
             }}
-            className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs text-muted-foreground hover:text-foreground hover:bg-muted/80 focus:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            className="shrink-0 rounded-md p-1 hover:bg-muted focus:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            aria-label="Back"
           >
-            <Plus className="w-3.5 h-3.5" />
-            Add filter
-            {activeCount > 0 && (
-              <span className="tabular-nums text-[10px] opacity-70">({activeCount})</span>
-            )}
-          </button>
-        </div>
-        {activeCount > 0 && (
-          <button
-            type="button"
-            onClick={() => setFilters(() => ({ ...DEFAULT_SCREENINGS_FILTERS }))}
-            className="shrink-0 text-[11px] text-muted-foreground hover:text-foreground underline underline-offset-2"
-          >
-            Clear all
+            <ChevronLeft className="w-4 h-4" />
           </button>
         )}
+
+        {step === "fields" ? (
+          <div className="flex-1 min-w-0 flex items-center gap-1.5 flex-wrap rounded-md border border-input bg-background pl-2.5 pr-2 py-1 focus-within:ring-1 focus-within:ring-ring">
+            <Search className="w-3.5 h-3.5 text-muted-foreground pointer-events-none shrink-0" />
+            {buildPills(filters, setFilters).map((pill) => (
+              <span
+                key={pill.id}
+                title={pill.title}
+                className="inline-flex items-center gap-0.5 rounded-full border border-border bg-muted px-2 py-0.5 text-xs text-foreground shrink-0"
+              >
+                <span className="truncate max-w-[8rem]">{pill.text}</span>
+                <button
+                  type="button"
+                  onClick={() => pill.remove()}
+                  className="shrink-0 rounded-full p-0.5 text-muted-foreground hover:text-foreground"
+                  aria-label={`Remove filter ${pill.text}`}
+                >
+                  <X className="w-3 h-3" />
+                </button>
+              </span>
+            ))}
+            <input
+              autoFocus
+              placeholder="Add filter…"
+              value={fieldQuery}
+              onChange={(e) => setFieldQuery(e.target.value)}
+              className="flex-1 min-w-[8rem] bg-transparent text-sm focus:outline-none"
+            />
+          </div>
+        ) : (
+          <span className="flex-1 text-sm font-medium truncate min-w-0">
+            {selectedEntry?.label}
+            {selectedOp && (
+              <span className="text-muted-foreground font-normal"> · {selectedOp.label}</span>
+            )}
+          </span>
+        )}
+
+        <button
+          type="button"
+          onClick={closeMenu}
+          className="shrink-0 rounded-md p-1 text-muted-foreground hover:text-foreground hover:bg-muted focus:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          aria-label="Close filter"
+        >
+          <X className="w-4 h-4" />
+        </button>
       </div>
 
-      <p className="text-[11px] text-muted-foreground px-0.5">
-        Filter by workflow note columns or discovered row fields — same rules as table filters.{" "}
-        <span className="opacity-80">Add filters one at a time.</span>
-      </p>
-
-      {open && (
-        <div className="relative z-50">
-          <div className="absolute left-0 top-0 w-full max-w-md rounded-lg border border-border bg-popover text-popover-foreground shadow-lg ring-1 ring-black/5 dark:ring-white/10">
-            {step === "fields" && (
-              <div className="flex flex-col max-h-80">
-                <div className="p-2 border-b border-border">
-                  <label className="sr-only" htmlFor="filter-field-search">
-                    Search fields
-                  </label>
-                  <div className="relative">
-                    <Search className="absolute left-2 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
-                    <input
-                      id="filter-field-search"
-                      autoFocus
-                      placeholder="Filter by status, sector, RS_Rank…"
-                      value={fieldQuery}
-                      onChange={(e) => setFieldQuery(e.target.value)}
-                      className="w-full rounded-md border border-input bg-background pl-8 pr-2 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-ring"
-                    />
-                  </div>
-                </div>
-                <div className="overflow-y-auto p-1">
-                  {filteredCatalog.length === 0 ? (
-                    <p className="px-2 py-4 text-sm text-muted-foreground text-center">No matching fields</p>
-                  ) : (
-                    [...grouped.entries()].map(([group, entries]) => (
-                      <div key={group} className="mb-2 last:mb-0">
-                        <p className="px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-                          {group}
-                        </p>
-                        <ul className="space-y-0.5">
-                          {entries.map((e) => (
-                            <li key={e.id}>
-                              <button
-                                type="button"
-                                onClick={() => onPickField(e)}
-                                className="w-full flex items-baseline justify-between gap-2 rounded-md px-2 py-1.5 text-left text-sm hover:bg-muted/80 focus:outline-none focus-visible:bg-muted"
-                              >
-                                <span className="font-medium">{e.label}</span>
-                                {e.sub && (
-                                  <span className="text-[11px] text-muted-foreground shrink-0">{e.sub}</span>
-                                )}
-                              </button>
-                            </li>
-                          ))}
-                        </ul>
-                      </div>
-                    ))
-                  )}
-                </div>
-              </div>
-            )}
-
-            {step === "ops" && selectedEntry && (
-              <div className="flex flex-col max-h-80">
-                <div className="flex items-center gap-1 p-2 border-b border-border">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setStep("fields");
-                      setSelectedOp(null);
-                    }}
-                    className="rounded-md p-1 hover:bg-muted focus:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                    aria-label="Back"
-                  >
-                    <ChevronLeft className="w-4 h-4" />
-                  </button>
-                  <span className="text-sm font-medium truncate">{selectedEntry.label}</span>
-                  <span className="text-xs text-muted-foreground truncate">{selectedEntry.sub}</span>
-                </div>
-                <div className="p-1">
-                  <p className="px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-                    Comparison
-                  </p>
-                  <ul className="space-y-0.5">
-                    {opsForField(selectedEntry.field).map((op) => (
-                      <li key={op.id}>
-                        <button
-                          type="button"
-                          onClick={() => onPickOp(op)}
-                          className="w-full flex items-center justify-between rounded-md px-2 py-1.5 text-left text-sm hover:bg-muted/80 focus:outline-none focus-visible:bg-muted"
-                        >
-                          <span>{op.label}</span>
-                          {op.sym && (
-                            <span className="text-[11px] font-mono text-muted-foreground bg-muted/50 px-1 rounded">
-                              {op.sym}
-                            </span>
-                          )}
-                        </button>
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              </div>
-            )}
-
-            {step === "value" && selectedEntry && selectedOp && (
-              <div className="flex flex-col max-h-96">
-                <div className="flex items-center gap-1 p-2 border-b border-border">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      if (selectedEntry && opsForField(selectedEntry.field).length > 1) {
-                        setStep("ops");
-                        setSelectedOp(null);
-                      } else {
-                        setStep("fields");
-                        setSelectedEntry(null);
-                        setSelectedOp(null);
-                      }
-                    }}
-                    className="rounded-md p-1 hover:bg-muted focus:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                    aria-label="Back"
-                  >
-                    <ChevronLeft className="w-4 h-4" />
-                  </button>
-                  <span className="text-sm font-medium truncate">
-                    {selectedEntry.label}{" "}
-                    <span className="text-muted-foreground font-normal">{selectedOp.label}</span>
-                  </span>
-                </div>
-                <div className="p-3 flex flex-col gap-3">
-                  {selectedEntry.field.kind === "wf_status" && (
-                    <select
-                      className="w-full rounded-md border border-input bg-background px-2 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-ring"
-                      value={valueDraft || filters.status}
-                      onChange={(e) => setValueDraft(e.target.value)}
-                    >
-                      {statusOptions.map((s) => (
-                        <option key={s} value={s}>
-                          {s}
-                        </option>
-                      ))}
-                    </select>
-                  )}
-                  {selectedEntry.field.kind === "wf_stage" && selectedOp.id === "eq" && (
-                    <select
-                      className="w-full rounded-md border border-input bg-background px-2 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-ring"
-                      value={valueDraft}
-                      onChange={(e) => setValueDraft(e.target.value)}
-                    >
-                      <option value="">Choose stage…</option>
-                      {noteStageOptions.map((s) => (
-                        <option key={s} value={s}>
-                          {s}
-                        </option>
-                      ))}
-                    </select>
-                  )}
-                  {selectedEntry.field.kind === "wf_priority" && (
-                    <input
-                      type="number"
-                      className="w-full rounded-md border border-input bg-background px-2 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-ring"
-                      placeholder="Value"
-                      value={valueDraft}
-                      onChange={(e) => setValueDraft(e.target.value)}
-                    />
-                  )}
-                  {selectedEntry.field.kind === "wf_tags" && (
-                    <>
-                      {noteTagOptions.length === 0 ? (
-                        <p className="text-sm text-muted-foreground">No tags in this run yet.</p>
-                      ) : (
-                        <select
-                          className="w-full rounded-md border border-input bg-background px-2 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-ring"
-                          value={valueDraft}
-                          onChange={(e) => setValueDraft(e.target.value)}
-                        >
-                          <option value="">Choose tag…</option>
-                          {noteTagOptions.map((t) => (
-                            <option key={t} value={t}>
-                              {t}
-                            </option>
-                          ))}
-                        </select>
-                      )}
-                    </>
-                  )}
-                  {(selectedEntry.field.kind === "row_num" ||
-                    (selectedEntry.field.kind === "row_str_cat" && selectedOp.id === "eq") ||
-                    selectedEntry.field.kind === "row_str_free") && (
-                    <input
-                      type={selectedEntry.field.kind === "row_num" ? "number" : "text"}
-                      className="w-full rounded-md border border-input bg-background px-2 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-ring"
-                      placeholder="Value"
-                      value={valueDraft}
-                      onChange={(e) => setValueDraft(e.target.value)}
-                    />
-                  )}
-                  {selectedEntry.field.kind === "row_str_cat" && selectedOp.id === "in" && (
-                    <div className="max-h-48 overflow-y-auto space-y-1 border border-border rounded-md p-2">
-                      {selectedEntry.field.options.map((opt) => (
-                        <label key={opt} className="flex items-center gap-2 text-sm cursor-pointer">
-                          <input
-                            type="checkbox"
-                            checked={catDraft.has(opt)}
-                            onChange={(e) => {
-                              const n = new Set(catDraft);
-                              if (e.target.checked) n.add(opt);
-                              else n.delete(opt);
-                              setCatDraft(n);
-                            }}
-                            className="rounded"
-                          />
-                          <span className="truncate">{opt}</span>
-                        </label>
-                      ))}
+      {/* Dropdown panel */}
+      <div className="relative z-50">
+        <div className="absolute left-0 top-0 w-full max-w-md rounded-lg border border-border bg-popover text-popover-foreground shadow-lg ring-1 ring-black/5 dark:ring-white/10">
+          {step === "fields" && (
+            <div className="flex flex-col max-h-80">
+              <div className="overflow-y-auto p-1">
+                {filteredCatalog.length === 0 ? (
+                  <p className="px-2 py-4 text-sm text-muted-foreground text-center">No matching fields</p>
+                ) : (
+                  [...grouped.entries()].map(([group, entries]) => (
+                    <div key={group} className="mb-2 last:mb-0">
+                      <p className="px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                        {group}
+                      </p>
+                      <ul className="space-y-0.5">
+                        {entries.map((e) => (
+                          <li key={e.id}>
+                            <button
+                              type="button"
+                              onClick={() => onPickField(e)}
+                              className="w-full flex items-baseline justify-between gap-2 rounded-md px-2 py-1.5 text-left text-sm hover:bg-muted/80 focus:outline-none focus-visible:bg-muted"
+                            >
+                              <span className="font-medium">{e.label}</span>
+                              {e.sub && (
+                                <span className="text-[11px] text-muted-foreground shrink-0">{e.sub}</span>
+                              )}
+                            </button>
+                          </li>
+                        ))}
+                      </ul>
                     </div>
-                  )}
-                  {(selectedEntry.field.kind === "wf_has_row_note" ||
-                    selectedEntry.field.kind === "wf_highlighted" ||
-                    selectedEntry.field.kind === "wf_comment" ||
-                    selectedEntry.field.kind === "row_bool") && (
-                    <p className="text-xs text-muted-foreground">Apply this constraint with the button below.</p>
-                  )}
+                  ))
+                )}
+              </div>
+            </div>
+          )}
 
-                  <div className="flex justify-end gap-2 pt-1">
-                    <button
-                      type="button"
-                      onClick={closeMenu}
-                      className="rounded-md px-3 py-1.5 text-sm text-muted-foreground hover:bg-muted"
-                    >
-                      Cancel
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => commitValue()}
-                      className="rounded-md bg-foreground px-3 py-1.5 text-sm font-medium text-background hover:opacity-90 focus:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                    >
-                      Apply
-                    </button>
+          {step === "ops" && selectedEntry && (
+            <div className="flex flex-col max-h-80">
+              <div className="p-1">
+                <p className="px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                  Comparison
+                </p>
+                <ul className="space-y-0.5">
+                  {opsForField(selectedEntry.field).map((op) => (
+                    <li key={op.id}>
+                      <button
+                        type="button"
+                        onClick={() => onPickOp(op)}
+                        className="w-full flex items-center justify-between rounded-md px-2 py-1.5 text-left text-sm hover:bg-muted/80 focus:outline-none focus-visible:bg-muted"
+                      >
+                        <span>{op.label}</span>
+                        {op.sym && (
+                          <span className="text-[11px] font-mono text-muted-foreground bg-muted/50 px-1 rounded">
+                            {op.sym}
+                          </span>
+                        )}
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            </div>
+          )}
+
+          {step === "value" && selectedEntry && selectedOp && (
+            <div className="flex flex-col max-h-96">
+              <div className="p-3 flex flex-col gap-3">
+                {selectedEntry.field.kind === "wf_symbol" && (
+                  <input
+                    autoFocus
+                    type="text"
+                    className="w-full rounded-md border border-input bg-background px-2 py-2 text-sm uppercase focus:outline-none focus:ring-1 focus:ring-ring"
+                    placeholder="e.g. AAPL"
+                    value={valueDraft}
+                    onChange={(e) => setValueDraft(e.target.value.toUpperCase())}
+                  />
+                )}
+                {selectedEntry.field.kind === "wf_status" && (
+                  <select
+                    className="w-full rounded-md border border-input bg-background px-2 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-ring"
+                    value={valueDraft || filters.status}
+                    onChange={(e) => setValueDraft(e.target.value)}
+                  >
+                    {statusOptions.map((s) => (
+                      <option key={s} value={s}>
+                        {s}
+                      </option>
+                    ))}
+                  </select>
+                )}
+                {selectedEntry.field.kind === "wf_stage" && selectedOp.id === "eq" && (
+                  <select
+                    className="w-full rounded-md border border-input bg-background px-2 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-ring"
+                    value={valueDraft}
+                    onChange={(e) => setValueDraft(e.target.value)}
+                  >
+                    <option value="">Choose stage…</option>
+                    {noteStageOptions.map((s) => (
+                      <option key={s} value={s}>
+                        {s}
+                      </option>
+                    ))}
+                  </select>
+                )}
+                {selectedEntry.field.kind === "wf_priority" && (
+                  <input
+                    autoFocus
+                    type="number"
+                    className="w-full rounded-md border border-input bg-background px-2 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-ring"
+                    placeholder="Value"
+                    value={valueDraft}
+                    onChange={(e) => setValueDraft(e.target.value)}
+                  />
+                )}
+                {selectedEntry.field.kind === "wf_tags" && (
+                  <>
+                    {noteTagOptions.length === 0 ? (
+                      <p className="text-sm text-muted-foreground">No tags in this run yet.</p>
+                    ) : (
+                      <select
+                        className="w-full rounded-md border border-input bg-background px-2 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-ring"
+                        value={valueDraft}
+                        onChange={(e) => setValueDraft(e.target.value)}
+                      >
+                        <option value="">Choose tag…</option>
+                        {noteTagOptions.map((t) => (
+                          <option key={t} value={t}>
+                            {t}
+                          </option>
+                        ))}
+                      </select>
+                    )}
+                  </>
+                )}
+                {(selectedEntry.field.kind === "row_num" ||
+                  (selectedEntry.field.kind === "row_str_cat" && selectedOp.id === "eq") ||
+                  selectedEntry.field.kind === "row_str_free") && (
+                  <input
+                    autoFocus
+                    type={selectedEntry.field.kind === "row_num" ? "number" : "text"}
+                    className="w-full rounded-md border border-input bg-background px-2 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-ring"
+                    placeholder="Value"
+                    value={valueDraft}
+                    onChange={(e) => setValueDraft(e.target.value)}
+                  />
+                )}
+                {selectedEntry.field.kind === "row_str_cat" && selectedOp.id === "in" && (
+                  <div className="max-h-48 overflow-y-auto space-y-1 border border-border rounded-md p-2">
+                    {selectedEntry.field.options.map((opt) => (
+                      <label key={opt} className="flex items-center gap-2 text-sm cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={catDraft.has(opt)}
+                          onChange={(e) => {
+                            const n = new Set(catDraft);
+                            if (e.target.checked) n.add(opt);
+                            else n.delete(opt);
+                            setCatDraft(n);
+                          }}
+                          className="rounded"
+                        />
+                        <span className="truncate">{opt}</span>
+                      </label>
+                    ))}
                   </div>
+                )}
+                {(selectedEntry.field.kind === "wf_has_row_note" ||
+                  selectedEntry.field.kind === "wf_highlighted" ||
+                  selectedEntry.field.kind === "wf_comment" ||
+                  selectedEntry.field.kind === "row_bool") && (
+                  <p className="text-xs text-muted-foreground">Apply this constraint with the button below.</p>
+                )}
+
+                <div className="flex justify-end gap-2 pt-1">
+                  <button
+                    type="button"
+                    onClick={closeMenu}
+                    className="rounded-md px-3 py-1.5 text-sm text-muted-foreground hover:bg-muted"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => commitValue()}
+                    className="rounded-md bg-foreground px-3 py-1.5 text-sm font-medium text-background hover:opacity-90 focus:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  >
+                    Apply
+                  </button>
                 </div>
               </div>
-            )}
-          </div>
+            </div>
+          )}
         </div>
-      )}
+      </div>
     </div>
   );
 }

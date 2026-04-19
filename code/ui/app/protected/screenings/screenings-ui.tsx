@@ -4,14 +4,13 @@ import { useState, useMemo, useEffect, useCallback, useRef, type ReactNode } fro
 import { useRouter } from "next/navigation";
 import {
   CheckCircle, XCircle, Search, ChevronDown, ChevronUp,
-  ChevronLeft, ChevronRight, BarChart2, List, TrendingUp, Loader2, Newspaper, Trash2, RotateCcw, Star, MessageSquare,
+  BarChart2, List, TrendingUp, Loader2, Newspaper, Trash2, RotateCcw, Star, MessageSquare,
   Activity, Copy, Gauge, Plus, Bot, FolderPlus,
 } from "lucide-react";
 import { AiAnalysisPanel } from "@/components/ai-analysis-panel";
 import { CLUSTERS } from "../vectors/dimensions";
 import { NewsTrendsUI, type ArticleImpact } from "../news-trends/news-trends-ui";
-import { getCachedQuotes, setCachedQuotes } from "@/lib/quote-cache";
-import { fmpGetQuote, fmpGetPriceAtDate } from "@/app/actions/fmp";
+import { fmpGetPriceAtDate } from "@/app/actions/fmp";
 import { relationshipsResolveTicker } from "@/app/actions/relationships";
 import {
   TickerChartsPanel,
@@ -43,12 +42,17 @@ import {
   stringifyRowDataValueForFilter,
   uniqueStringValuesForKey,
 } from "./screenings-row-data";
-import { ScreeningsFilterBar } from "./screenings-filter-bar";
+import { AddFilterWidget } from "./screenings-filter-bar";
 import {
   DEFAULT_SCREENINGS_FILTERS,
   NOTE_STAGE_NONE,
   type ScreeningsFilters,
+  countScreeningsFilterRules,
 } from "./screenings-filters-model";
+import { TickerSidebar } from "./ticker-sidebar";
+import { TickerContextMenu, type NoteStatus as ContextMenuNoteStatus } from "./ticker-context-menu";
+import type { OhlcBar } from "@/components/ticker-charts/types";
+import { useQuotes, type FmpQuote } from "@/lib/use-quotes";
 
 export interface ScanRun {
   id: number;
@@ -227,29 +231,13 @@ type SortKey = string;
 type SortDir = "asc" | "desc";
 type ViewTab = "results" | "quotes" | "charts" | "news" | "sentiment" | "relationship" | "tradeMonitoring";
 
-type ScreeningsPrimaryTabDef = { id: ViewTab; label: string; icon: ReactNode };
+const DEEP_DIVE_VIEWS: ViewTab[] = ["charts", "news", "relationship"];
 
-// ─── FMP Quote types ─────────────────────────────────────────────────────────
-
-interface FmpQuote {
-  symbol: string;
-  name: string;
-  price: number;
-  changePercentage: number;
-  change: number;
-  volume: number;
-  dayLow: number;
-  dayHigh: number;
-  yearHigh: number;
-  yearLow: number;
-  marketCap: number;
-  priceAvg50: number;
-  priceAvg200: number;
-  exchange: string;
-  open: number;
-  previousClose: number;
-  timestamp: number;
+function isDeepDiveView(v: ViewTab): boolean {
+  return DEEP_DIVE_VIEWS.includes(v);
 }
+
+type ScreeningsPrimaryTabDef = { id: ViewTab; label: string; icon: ReactNode };
 
 // ─── QuotesView ──────────────────────────────────────────────────────────────
 
@@ -258,18 +246,26 @@ type QuoteSortKey = "symbol" | "price" | "changePercentage" | "volume" | "market
 
 function QuotesView({
   symbols,
+  quotes,
+  loading,
   selectedTicker,
   onSelect,
   onOpenWorkflowEditor,
+  dismissedSymbols,
+  highlightedSymbols,
+  getStatus,
 }: {
   symbols: string[];
+  quotes: Record<string, FmpQuote | null>;
+  loading: boolean;
   selectedTicker: string | null;
   onSelect: (ticker: string) => void;
   onOpenWorkflowEditor: (ticker: string) => void;
+  dismissedSymbols: Set<string>;
+  highlightedSymbols: Set<string>;
+  getStatus: (ticker: string) => string;
 }) {
-  const [quotes, setQuotes] = useState<Record<string, FmpQuote | null>>({});
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [error] = useState<string | null>(null);
   const QUOTE_SORT_KEYS: QuoteSortKey[] = ["symbol","price","changePercentage","volume","marketCap","dayLow","dayHigh","yearLow","yearHigh","priceAvg50","priceAvg200"];
   const [sortKey, setSortKeyRaw] = useState<QuoteSortKey>(() => {
     try {
@@ -294,64 +290,6 @@ function QuotesView({
     setSortDirRaw(d);
     try { localStorage.setItem("quotes-sort-dir", d); } catch { /* ignore */ }
   }
-
-  useEffect(() => {
-    if (symbols.length === 0) return;
-    let cancelled = false;
-
-    async function fetchAll() {
-      // 1. Populate from IndexedDB immediately
-      const cached = await getCachedQuotes<FmpQuote>(symbols);
-      if (cancelled) return;
-      if (Object.keys(cached).length > 0) setQuotes(cached);
-
-      // 2. Fetch only symbols missing from cache (or stale)
-      const missing = symbols.filter(s => !(s in cached));
-      if (missing.length === 0) return;
-
-      setLoading(true);
-      setError(null);
-
-      const chunks: string[][] = [];
-      for (let i = 0; i < missing.length; i += 10) {
-        chunks.push(missing.slice(i, i + 10));
-      }
-
-      const fresh: Record<string, FmpQuote | null> = {};
-      for (const chunk of chunks) {
-        await Promise.all(
-          chunk.map(async (sym) => {
-            try {
-              const res = await fmpGetQuote(sym);
-              if (!res.ok) { fresh[sym] = null; return; }
-              const data = res.data;
-              fresh[sym] = Array.isArray(data) ? (data[0] ?? null) : null;
-            } catch {
-              fresh[sym] = null;
-            }
-          })
-        );
-      }
-
-      if (cancelled) return;
-
-      // 3. Merge and update state
-      setQuotes(prev => ({ ...prev, ...fresh }));
-
-      // 4. Persist successful fetches to IndexedDB
-      const toCache: Record<string, FmpQuote> = {};
-      for (const [sym, q] of Object.entries(fresh)) {
-        if (q != null) toCache[sym] = q;
-      }
-      if (Object.keys(toCache).length > 0) setCachedQuotes(toCache);
-    }
-
-    fetchAll()
-      .catch(() => setError("Failed to load quotes"))
-      .finally(() => { if (!cancelled) setLoading(false); });
-
-    return () => { cancelled = true; };
-  }, [symbols.join(",")]);
 
   if (symbols.length === 0) {
     return <p className="text-sm text-muted-foreground py-8 text-center">No stocks to show.</p>;
@@ -416,7 +354,7 @@ function QuotesView({
         </div>
       )}
       {error && <p className="text-sm text-rose-500">{error}</p>}
-      <div className="overflow-x-auto rounded-lg border border-border">
+      <div className="overflow-x-auto border border-border">
         <table className="w-full text-sm">
           <thead className="bg-muted/40 border-b border-border">
             <tr>
@@ -443,12 +381,24 @@ function QuotesView({
               const isLoading = loading && q === undefined;
               const chgColor = q ? (q.changePercentage >= 0 ? "text-emerald-600 dark:text-emerald-400" : "text-rose-500") : "";
               const isSelected = sym === selectedTicker;
+              const isDismissed = dismissedSymbols.has(sym);
+              const isHighlighted = highlightedSymbols.has(sym);
+              const status = getStatus(sym);
+              const statusStripe: Record<string, string> = {
+                dismissed: "border-l-rose-400",
+                watchlist: "border-l-amber-400",
+                pipeline: "border-l-sky-400",
+                active: "border-l-emerald-400",
+              };
+              const stripe = isDismissed || isHighlighted || isSelected
+                ? statusStripe[status] ?? "border-l-transparent"
+                : "";
               return (
                 <tr
                   key={sym}
                   onClick={() => onSelect(sym)}
                   onDoubleClick={() => onOpenWorkflowEditor(sym)}
-                  className={`cursor-pointer transition-colors ${isSelected ? "bg-foreground/10 ring-1 ring-inset ring-foreground/20" : "hover:bg-muted/30"}`}
+                  className={`cursor-pointer transition-colors border-l-[3px] ${stripe || "border-l-transparent"} ${isDismissed ? "opacity-40" : ""} ${isHighlighted ? "bg-amber-500/10" : ""} ${isSelected ? "bg-foreground/10 ring-1 ring-inset ring-foreground/20" : "hover:bg-muted/30"}`}
                 >
                   <td className="px-3 py-2 font-mono font-semibold whitespace-nowrap">{sym}</td>
                   <td className="px-3 py-2 text-xs text-muted-foreground max-w-[160px] truncate whitespace-nowrap" title={q?.name}>{isLoading ? "…" : (q?.name ?? "—")}</td>
@@ -481,7 +431,6 @@ function QuotesView({
 function ScreeningsRelationshipNetworkPanel({
   symbols,
   selectedTicker,
-  onSelect,
   dismissed,
   onDismiss,
   onRestore,
@@ -501,22 +450,12 @@ function ScreeningsRelationshipNetworkPanel({
   onSetStatus: (ticker: string, status: NoteStatus) => void;
   hasComment: (ticker: string) => boolean;
   onEditComment: (ticker: string) => void;
-  getTickerMeta: (ticker: string) => { sector: string; industry: string };
+  getTickerMeta: (ticker: string) => { sector: string; industry: string; subSector: string };
 }) {
   const idx = useMemo(() => {
     const i = selectedTicker ? symbols.indexOf(selectedTicker) : -1;
     return i >= 0 ? i : 0;
   }, [symbols, selectedTicker]);
-
-  useEffect(() => {
-    function onKey(e: KeyboardEvent) {
-      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
-      if (e.key === "ArrowLeft") onSelect(symbols[Math.max(0, idx - 1)]!);
-      if (e.key === "ArrowRight") onSelect(symbols[Math.min(symbols.length - 1, idx + 1)]!);
-    }
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [idx, symbols, onSelect]);
 
   if (symbols.length === 0) {
     return <p className="text-sm text-muted-foreground py-8 text-center">No stocks to show.</p>;
@@ -529,92 +468,6 @@ function ScreeningsRelationshipNetworkPanel({
 
   return (
     <div className="flex flex-col gap-4">
-      <div className="flex items-center gap-3 flex-wrap">
-        <button
-          type="button"
-          onClick={() => onSelect(symbols[Math.max(0, idx - 1)]!)}
-          disabled={idx === 0}
-          className="p-1.5 rounded-md border border-border hover:bg-muted disabled:opacity-30 transition-colors"
-          title="Previous (←)"
-        >
-          <ChevronLeft className="w-4 h-4" />
-        </button>
-
-        <span className="font-mono font-bold text-lg">{symbol}</span>
-        {(meta.sector || meta.industry) ? (
-          <span
-            className="text-xs text-muted-foreground max-w-[260px] truncate"
-            title={[meta.sector, meta.industry].filter(Boolean).join(" · ")}
-          >
-            {[meta.sector, meta.industry].filter(Boolean).join(" · ")}
-          </span>
-        ) : null}
-        <span className="text-sm text-muted-foreground">{idx + 1} / {symbols.length}</span>
-
-        {dismissed.has(symbol) ? (
-          <button
-            type="button"
-            onClick={() => onRestore(symbol)}
-            title="Restore"
-            className="flex items-center gap-1.5 text-xs px-2 py-1 rounded border border-border text-emerald-500 hover:bg-muted transition-colors"
-          >
-            <RotateCcw className="w-3.5 h-3.5" /> Restore
-          </button>
-        ) : (
-          <button
-            type="button"
-            onClick={() => onDismiss(symbol)}
-            title="Dismiss"
-            className="flex items-center gap-1.5 text-xs px-2 py-1 rounded border border-border text-muted-foreground hover:text-rose-500 hover:border-rose-400 transition-colors"
-          >
-            <Trash2 className="w-3.5 h-3.5" /> Dismiss
-          </button>
-        )}
-
-        <select
-          value={status}
-          onChange={(e) => onSetStatus(symbol, e.target.value as NoteStatus)}
-          className="px-2 py-1 text-xs rounded border border-input bg-background focus:outline-none focus:ring-1 focus:ring-ring"
-          title="Status"
-        >
-          <option value="active">Active</option>
-          <option value="dismissed">Dismissed</option>
-          <option value="watchlist">Watchlist</option>
-          <option value="pipeline">Pipeline</option>
-        </select>
-
-        <button
-          type="button"
-          onClick={() => onEditComment(symbol)}
-          title={commentExists ? "Edit note" : "Add note"}
-          className={`flex items-center gap-1.5 text-xs px-2 py-1 rounded border border-border transition-colors ${commentExists ? "text-sky-500 hover:bg-muted" : "text-muted-foreground hover:text-sky-500 hover:border-sky-400"}`}
-        >
-          <MessageSquare className="w-3.5 h-3.5" /> {commentExists ? "Edit note" : "Add note"}
-        </button>
-
-        <select
-          value={symbol}
-          onChange={(e) => onSelect(e.target.value)}
-          className="ml-auto px-2 py-1 text-sm rounded border border-input bg-background focus:outline-none focus:ring-1 focus:ring-ring"
-        >
-          {symbols.map((s, i) => (
-            <option key={s} value={s}>
-              {i + 1}. {s}
-            </option>
-          ))}
-        </select>
-
-        <button
-          type="button"
-          onClick={() => onSelect(symbols[Math.min(symbols.length - 1, idx + 1)]!)}
-          disabled={idx === symbols.length - 1}
-          className="p-1.5 rounded-md border border-border hover:bg-muted disabled:opacity-30 transition-colors"
-          title="Next (→)"
-        >
-          <ChevronRight className="w-4 h-4" />
-        </button>
-      </div>
-
       <RelationshipNetworkExplorer
         key={symbol}
         vectors={[]}
@@ -693,11 +546,17 @@ function SentimentView({
   selectedTicker,
   onSelect,
   getTickerMeta,
+  dismissedSymbols,
+  highlightedSymbols,
+  getStatus,
 }: {
   symbols: string[];
   selectedTicker: string | null;
   onSelect: (ticker: string) => void;
-  getTickerMeta: (ticker: string) => { sector: string; industry: string };
+  getTickerMeta: (ticker: string) => { sector: string; industry: string; subSector: string };
+  dismissedSymbols: Set<string>;
+  highlightedSymbols: Set<string>;
+  getStatus: (ticker: string) => string;
 }) {
   const [sentimentHeadRows, setSentimentHeadRows] = useState<ScreeningTickerSentimentHeadRow[]>([]);
   const [loading, setLoading] = useState(false);
@@ -805,12 +664,7 @@ function SentimentView({
   if (error) return <p className="text-sm text-rose-500 py-4">{error}</p>;
 
   return (
-    <div className="overflow-x-auto rounded-lg border border-border">
-      <p className="text-[11px] text-muted-foreground px-3 pt-3 leading-snug">
-        Same source as Explore → Relationships → Sentiment:{" "}
-        <span className="font-mono text-foreground/80">swingtrader.ticker_sentiment_heads_v</span>
-        {" "}(sums <span className="font-mono">sentiment_score</span> by article time, 120-day fetch window).
-      </p>
+    <div className="overflow-x-auto border border-border">
       <table className="w-full text-sm">
         <thead className="bg-muted/40 border-b border-border">
           <tr>
@@ -822,11 +676,25 @@ function SentimentView({
           </tr>
         </thead>
         <tbody className="divide-y divide-border">
-          {sorted.map(row => (
+          {sorted.map(row => {
+            const isSelected = selectedTicker === row.symbol;
+            const isDismissed = dismissedSymbols.has(row.symbol);
+            const isHighlighted = highlightedSymbols.has(row.symbol);
+            const status = getStatus(row.symbol);
+            const statusStripe: Record<string, string> = {
+              dismissed: "border-l-rose-400",
+              watchlist: "border-l-amber-400",
+              pipeline: "border-l-sky-400",
+              active: "border-l-emerald-400",
+            };
+            const stripe = isDismissed || isHighlighted || isSelected
+              ? statusStripe[status] ?? "border-l-transparent"
+              : "";
+            return (
             <tr
               key={row.symbol}
               onClick={() => onSelect(row.symbol)}
-              className={`cursor-pointer transition-colors hover:bg-muted/30 ${selectedTicker === row.symbol ? "bg-foreground/10 ring-1 ring-inset ring-foreground/20" : ""}`}
+              className={`cursor-pointer transition-colors border-l-[3px] ${stripe || "border-l-transparent"} ${isDismissed ? "opacity-40" : ""} ${isHighlighted ? "bg-amber-500/10" : ""} ${isSelected ? "bg-foreground/10 ring-1 ring-inset ring-foreground/20" : "hover:bg-muted/30"}`}
             >
               <td className="px-3 py-2 font-mono font-semibold whitespace-nowrap">{row.symbol}</td>
               <td className="px-3 py-2 text-xs text-muted-foreground whitespace-nowrap max-w-[140px] truncate" title={row.sector || undefined}>{row.sector || "—"}</td>
@@ -834,7 +702,8 @@ function SentimentView({
               <td className="px-3 py-2"><SentimentScoreCell value={row.s30d} maxAbs={maxAbs} /></td>
               <td className="px-3 py-2"><SentimentScoreCell value={row.s90d} maxAbs={maxAbs} /></td>
             </tr>
-          ))}
+            );
+          })}
         </tbody>
       </table>
     </div>
@@ -860,7 +729,6 @@ function StockNewsTrendView({
   symbols,
   companyVectorDimensions,
   selectedTicker,
-  onSelect,
   dismissed,
   onDismiss,
   onRestore,
@@ -881,7 +749,7 @@ function StockNewsTrendView({
   onSetStatus: (ticker: string, status: NoteStatus) => void;
   hasComment: (ticker: string) => boolean;
   onEditComment: (ticker: string) => void;
-  getTickerMeta: (ticker: string) => { sector: string; industry: string };
+  getTickerMeta: (ticker: string) => { sector: string; industry: string; subSector: string };
 }) {
   const [articles, setArticles] = useState<ArticleImpact[]>([]);
   const [loading, setLoading] = useState(false);
@@ -914,15 +782,6 @@ function StockNewsTrendView({
     const i = selectedTicker ? eligible.indexOf(selectedTicker) : -1;
     return i >= 0 ? i : 0;
   }, [eligible, selectedTicker]);
-
-  useEffect(() => {
-    function onKey(e: KeyboardEvent) {
-      if (e.key === "ArrowLeft") onSelect(eligible[Math.max(0, idx - 1)]);
-      if (e.key === "ArrowRight") onSelect(eligible[Math.min(eligible.length - 1, idx + 1)]);
-    }
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [idx, eligible, onSelect]);
 
   useEffect(() => {
     setLoading(true);
@@ -970,90 +829,6 @@ function StockNewsTrendView({
 
   return (
     <div className="flex flex-col gap-4">
-      {/* Nav bar */}
-      <div className="flex items-center gap-3">
-        <button
-          onClick={() => onSelect(eligible[Math.max(0, idx - 1)])}
-          disabled={idx === 0}
-          className="p-1.5 rounded-md border border-border hover:bg-muted disabled:opacity-30 transition-colors"
-          title="Previous (←)"
-        >
-          <ChevronLeft className="w-4 h-4" />
-        </button>
-
-        <span className="font-mono font-bold text-lg">{symbol}</span>
-        {(meta.sector || meta.industry) && (
-          <span
-            className="text-xs text-muted-foreground max-w-[260px] truncate"
-            title={[meta.sector, meta.industry].filter(Boolean).join(" · ")}
-          >
-            {[meta.sector, meta.industry].filter(Boolean).join(" · ")}
-          </span>
-        )}
-        <span className="text-sm text-muted-foreground">{idx + 1} / {eligible.length}</span>
-
-        {symbol && (dismissed.has(symbol) ? (
-          <button
-            onClick={() => onRestore(symbol)}
-            title="Restore"
-            className="flex items-center gap-1.5 text-xs px-2 py-1 rounded border border-border text-emerald-500 hover:bg-muted transition-colors"
-          >
-            <RotateCcw className="w-3.5 h-3.5" /> Restore
-          </button>
-        ) : (
-          <button
-            onClick={() => onDismiss(symbol)}
-            title="Dismiss"
-            className="flex items-center gap-1.5 text-xs px-2 py-1 rounded border border-border text-muted-foreground hover:text-rose-500 hover:border-rose-400 transition-colors"
-          >
-            <Trash2 className="w-3.5 h-3.5" /> Dismiss
-          </button>
-        ))}
-
-        {symbol && (
-          <select
-            value={status}
-            onChange={e => onSetStatus(symbol, e.target.value as NoteStatus)}
-            className="px-2 py-1 text-xs rounded border border-input bg-background focus:outline-none focus:ring-1 focus:ring-ring"
-            title="Status"
-          >
-            <option value="active">Active</option>
-            <option value="dismissed">Dismissed</option>
-            <option value="watchlist">Watchlist</option>
-            <option value="pipeline">Pipeline</option>
-          </select>
-        )}
-
-        {symbol && (
-          <button
-            onClick={() => onEditComment(symbol)}
-            title={commentExists ? "Edit note" : "Add note"}
-            className={`flex items-center gap-1.5 text-xs px-2 py-1 rounded border border-border transition-colors ${commentExists ? "text-sky-500 hover:bg-muted" : "text-muted-foreground hover:text-sky-500 hover:border-sky-400"}`}
-          >
-            <MessageSquare className="w-3.5 h-3.5" /> {commentExists ? "Edit note" : "Add note"}
-          </button>
-        )}
-
-        <select
-          value={symbol ?? ""}
-          onChange={e => onSelect(e.target.value)}
-          className="ml-auto px-2 py-1 text-sm rounded border border-input bg-background focus:outline-none focus:ring-1 focus:ring-ring"
-        >
-          {eligible.map((s, i) => (
-            <option key={s} value={s}>{i + 1}. {s}</option>
-          ))}
-        </select>
-
-        <button
-          onClick={() => onSelect(eligible[Math.min(eligible.length - 1, idx + 1)])}
-          disabled={idx === eligible.length - 1}
-          className="p-1.5 rounded-md border border-border hover:bg-muted disabled:opacity-30 transition-colors"
-          title="Next (→)"
-        >
-          <ChevronRight className="w-4 h-4" />
-        </button>
-      </div>
-
       {/* News trend chart — reuses the full NewsTrendsUI with weighted articles */}
       <div ref={containerRef} className="w-full">
         {symbol && weightedArticles.length > 0 && (
@@ -1291,6 +1066,8 @@ function LogTradeForm({
 
 function TradeMonitoringView({
   entries,
+  quotes,
+  loadingQuotes,
   selectedTicker,
   onSelect,
   onGoToCharts,
@@ -1299,6 +1076,8 @@ function TradeMonitoringView({
   filteredSymbolSet,
 }: {
   entries: { row: ScreeningRow; pivot: PivotMarker }[];
+  quotes: Record<string, FmpQuote | null>;
+  loadingQuotes: boolean;
   selectedTicker: string | null;
   onSelect: (ticker: string) => void;
   onGoToCharts: () => void;
@@ -1307,8 +1086,6 @@ function TradeMonitoringView({
   /** Symbols currently included in the Results table after filters (pivot names may extend beyond this). */
   filteredSymbolSet: Set<string>;
 }) {
-  const [quotes, setQuotes] = useState<Record<string, FmpQuote | null>>({});
-  const [loadingQuotes, setLoadingQuotes] = useState(false);
   const [logTradeTicker, setLogTradeTicker] = useState<string | null>(null);
   type TradeSortKey = "symbol" | "sector" | "RS_Rank" | "Passed" | "pivotDate" | "pivotPrice" | "latest" | "vsPivotPct" | "workflow" | "results";
   const TRADE_SORT_KEYS: TradeSortKey[] = ["symbol", "sector", "RS_Rank", "Passed", "pivotDate", "pivotPrice", "latest", "vsPivotPct", "workflow", "results"];
@@ -1344,59 +1121,6 @@ function TradeMonitoringView({
     setSortKey(k);
     setSortDir(k === "symbol" || k === "sector" || k === "pivotDate" || k === "workflow" ? "asc" : "desc");
   }
-
-  const symbols = useMemo(
-    () => entries.map(e => e.row.symbol).filter((s): s is string => !!s),
-    [entries]
-  );
-
-  useEffect(() => {
-    if (symbols.length === 0) return;
-    let cancelled = false;
-
-    async function fetchQuotes() {
-      const cached = await getCachedQuotes<FmpQuote>(symbols);
-      if (cancelled) return;
-      if (Object.keys(cached).length > 0) setQuotes(prev => ({ ...prev, ...cached }));
-
-      const missing = symbols.filter(s => !(s in cached));
-      if (missing.length === 0) return;
-
-      setLoadingQuotes(true);
-      const fresh: Record<string, FmpQuote | null> = {};
-      await Promise.all(
-        missing.map(async sym => {
-          try {
-            const res = await fmpGetQuote(sym);
-            if (!res.ok) {
-              fresh[sym] = null;
-              return;
-            }
-            const data = res.data;
-            fresh[sym] = Array.isArray(data) ? (data[0] ?? null) : null;
-          } catch {
-            fresh[sym] = null;
-          }
-        })
-      );
-
-      if (cancelled) return;
-      setQuotes(prev => ({ ...prev, ...fresh }));
-      const toCache: Record<string, FmpQuote> = {};
-      for (const [sym, q] of Object.entries(fresh)) {
-        if (q != null) toCache[sym] = q;
-      }
-      if (Object.keys(toCache).length > 0) setCachedQuotes(toCache);
-    }
-
-    fetchQuotes().finally(() => {
-      if (!cancelled) setLoadingQuotes(false);
-    });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [symbols.join(",")]);
 
   const sorted = useMemo(() => {
     const out = [...entries];
@@ -1467,7 +1191,7 @@ function TradeMonitoringView({
           Loading latest prices…
         </div>
       )}
-      <div className="overflow-x-auto rounded-lg border border-border">
+      <div className="overflow-x-auto border border-border">
         <table className="w-full text-sm">
           <thead className="bg-muted/40 border-b border-border">
             <tr>
@@ -1637,6 +1361,26 @@ export function ScreeningsUI({
     });
   }
   const [activeView, setActiveView] = useState<ViewTab>("results");
+  const [collapsed, setCollapsed] = useState(false);
+
+  useEffect(() => {
+    document.body.classList.add("screenings-fullscreen");
+    return () => {
+      document.body.classList.remove("screenings-fullscreen");
+      document.body.classList.remove("hide-site-header");
+    };
+  }, []);
+
+  useEffect(() => {
+    document.body.classList.toggle("hide-site-header", collapsed);
+  }, [collapsed]);
+  const [addFilterOpen, setAddFilterOpen] = useState(false);
+  const [contextMenu, setContextMenu] = useState<{ ticker: string; x: number; y: number } | null>(null);
+  const ohlcvDataRef = useRef<OhlcBar[]>([]);
+  const handleContextMenu = useCallback((ticker: string, e: React.MouseEvent) => {
+    e.preventDefault();
+    setContextMenu({ ticker, x: e.clientX, y: e.clientY });
+  }, []);
   const [selectedTicker, setSelectedTicker] = useState<string | null>(null);
   const [workflowEditor, setWorkflowEditor] = useState<{
     scanRowId: number;
@@ -1783,6 +1527,15 @@ export function ScreeningsUI({
     return symbols;
   }, [rows, rowNotes]);
 
+  const highlightedSymbols = useMemo(() => {
+    const symbols = new Set<string>();
+    for (const row of rows) {
+      const note = rowNotes.get(row.scan_row_id);
+      if (note?.highlighted && row.symbol) symbols.add(row.symbol);
+    }
+    return symbols;
+  }, [rows, rowNotes]);
+
   const dismissedCount = useMemo(() => {
     let count = 0;
     for (const note of rowNotes.values()) {
@@ -1920,11 +1673,12 @@ export function ScreeningsUI({
     return !!rowNotes.get(row.scan_row_id)?.comment;
   }
 
-  function getTickerMeta(ticker: string): { sector: string; industry: string } {
+  function getTickerMeta(ticker: string): { sector: string; industry: string; subSector: string } {
     const row = rowBySymbol.get(ticker);
     return {
       sector: row?.sector ?? "",
       industry: row?.industry ?? row?.subSector ?? "",
+      subSector: row?.subSector ?? "",
     };
   }
 
@@ -1952,6 +1706,12 @@ export function ScreeningsUI({
     const row = rowBySymbol.get(ticker);
     if (!row) return null;
     return pivotFromMetadata(rowNotes.get(row.scan_row_id)?.metadata_json);
+  }
+
+  function getTickerComment(ticker: string): string | null {
+    const row = rowBySymbol.get(ticker);
+    if (!row) return null;
+    return rowNotes.get(row.scan_row_id)?.comment ?? null;
   }
 
   async function setTickerPivotMarker(ticker: string, point: ChartPoint) {
@@ -2147,6 +1907,11 @@ export function ScreeningsUI({
 
   const filtered = useMemo(() => {
     let result = rows.filter((r) => {
+      if (filters.symbolContains?.trim()) {
+        const q = filters.symbolContains.trim().toUpperCase();
+        if (!r.symbol?.toUpperCase().includes(q)) return false;
+      }
+
       const note = rowNotes.get(r.scan_row_id);
       const hasSavedNote = note !== undefined;
       if (filters.hasRowNote === "yes" && !hasSavedNote) return false;
@@ -2322,6 +2087,8 @@ export function ScreeningsUI({
 
   const filteredSymbols = useMemo(() => filtered.map(r => r.symbol).filter(Boolean) as string[], [filtered]);
 
+  const { quotes, loading: quotesLoading } = useQuotes(filteredSymbols);
+
   /** Chart carousel includes filtered symbols first, then any pivot-marked tickers not in the current filter so pivots always stay on-chart. */
   const chartSymbols = useMemo(() => {
     const seen = new Set<string>();
@@ -2421,107 +2188,107 @@ export function ScreeningsUI({
   }
 
   return (
-    <div className="flex flex-col gap-4 min-h-0 w-full">
-      {/* Scan runs — horizontal selector (scrolls when many runs) */}
-      <div className="flex flex-col gap-2 shrink-0">
-        <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between sm:gap-3">
-          <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide shrink-0">
-            Scan runs
-          </p>
-          <form
-            className="flex flex-wrap items-center gap-2 min-w-0"
-            onSubmit={(e) => {
-              e.preventDefault();
-              void handleCreateScreening();
-            }}
-          >
-            <input
-              type="text"
-              value={newScreeningName}
-              onChange={(e) => setNewScreeningName(e.target.value)}
-              placeholder="New screening name…"
-              maxLength={120}
-              disabled={creatingRun}
-              className="min-w-[10rem] flex-1 sm:flex-initial sm:w-56 rounded-md border border-input bg-background px-2.5 py-1.5 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-60"
-              aria-label="New screening name"
-            />
-            <button
-              type="submit"
-              disabled={creatingRun || !newScreeningName.trim()}
-              className="inline-flex items-center gap-1.5 shrink-0 rounded-md border border-border bg-background px-2.5 py-1.5 text-xs font-medium text-foreground transition-colors hover:bg-muted disabled:pointer-events-none disabled:opacity-40"
+    <div className="flex flex-col h-full min-h-0 w-full">
+      {/* Collapsible: scan runs + search + filters */}
+      <div className={`shrink-0 transition-all duration-200 overflow-hidden ${collapsed ? "max-h-0 opacity-0" : "max-h-[2000px] opacity-100"}`}>
+        {/* Scan runs */}
+        <div className="flex flex-col gap-2 mb-4">
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between sm:gap-3">
+            <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide shrink-0">
+              Scan runs
+            </p>
+            <form
+              className="flex flex-wrap items-center gap-2 min-w-0"
+              onSubmit={(e) => {
+                e.preventDefault();
+                void handleCreateScreening();
+              }}
             >
-              {creatingRun ? (
-                <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden />
-              ) : (
-                <FolderPlus className="h-3.5 w-3.5" aria-hidden />
-              )}
-              Create screening
-            </button>
-          </form>
-        </div>
-        {runs.length === 0 ? (
-          <p className="text-sm text-muted-foreground">
-            No screenings yet. Name one above and click Create — then add tickers from Charts or the Add to screening control.
-          </p>
-        ) : (
-          <div className="flex gap-2 overflow-x-auto pb-1 -mx-1 px-1 [scrollbar-width:thin]">
-            {runs.map(run => {
-              const active = run.id === (selectedRun?.id ?? null);
-              const busy = deletingRunId === run.id;
-              return (
-                <div
-                  key={run.id}
-                  className={`relative shrink-0 group min-w-[9.5rem] max-w-[220px] rounded-lg border flex flex-col ${
-                    active
-                      ? "border-foreground bg-foreground text-background"
-                      : "border-border bg-background text-muted-foreground"
-                  }`}
-                >
-                  <button
-                    type="button"
-                    onClick={() => selectRun(run.id)}
-                    disabled={busy}
-                    className={`text-left px-3 pt-2 pb-1.5 pr-8 text-sm transition-colors rounded-t-lg ${
-                      active
-                        ? "font-medium"
-                        : "hover:bg-muted hover:text-foreground hover:border-foreground/30"
-                    } ${busy ? "opacity-60" : ""}`}
-                  >
-                    <div className="font-medium leading-tight">{run.scan_date}</div>
-                    <div className="text-xs opacity-80 truncate mt-0.5" title={run.source}>{run.source}</div>
-                  </button>
-                  <button
-                    type="button"
-                    title="Remove from list"
-                    aria-label={`Remove screening ${run.scan_date}`}
-                    disabled={busy}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      void softDeleteRun(run.id);
-                    }}
-                    className={`absolute right-1 top-1 p-1 rounded-md transition-colors ${
-                      active
-                        ? "text-background/70 hover:text-background hover:bg-background/15"
-                        : "text-muted-foreground hover:text-destructive hover:bg-destructive/10"
-                    } ${busy ? "pointer-events-none opacity-50" : ""}`}
-                  >
-                    {busy ? (
-                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                    ) : (
-                      <Trash2 className="w-3.5 h-3.5" />
-                    )}
-                  </button>
-                </div>
-              );
-            })}
+              <input
+                type="text"
+                value={newScreeningName}
+                onChange={(e) => setNewScreeningName(e.target.value)}
+                placeholder="New screening name…"
+                maxLength={120}
+                disabled={creatingRun}
+                className="min-w-[10rem] flex-1 sm:flex-initial sm:w-56 rounded-md border border-input bg-background px-2.5 py-1.5 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-60"
+                aria-label="New screening name"
+              />
+              <button
+                type="submit"
+                disabled={creatingRun || !newScreeningName.trim()}
+                className="inline-flex items-center gap-1.5 shrink-0 rounded-md border border-border bg-background px-2.5 py-1.5 text-xs font-medium text-foreground transition-colors hover:bg-muted disabled:pointer-events-none disabled:opacity-40"
+              >
+                {creatingRun ? (
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden />
+                ) : (
+                  <FolderPlus className="h-3.5 w-3.5" aria-hidden />
+                )}
+                Create screening
+              </button>
+            </form>
           </div>
-        )}
-      </div>
+          {runs.length === 0 ? (
+            <p className="text-sm text-muted-foreground">
+              No screenings yet. Name one above and click Create — then add tickers from Charts or the Add to screening control.
+            </p>
+          ) : (
+            <div className="flex gap-2 overflow-x-auto pb-1 -mx-1 px-1 [scrollbar-width:thin]">
+              {runs.map(run => {
+                const active = run.id === (selectedRun?.id ?? null);
+                const busy = deletingRunId === run.id;
+                return (
+                  <div
+                    key={run.id}
+                    className={`relative shrink-0 group min-w-[9.5rem] max-w-[220px] rounded-lg border flex flex-col ${
+                      active
+                        ? "border-foreground bg-foreground text-background"
+                        : "border-border bg-background text-muted-foreground"
+                    }`}
+                  >
+                    <button
+                      type="button"
+                      onClick={() => selectRun(run.id)}
+                      disabled={busy}
+                      className={`text-left px-3 pt-2 pb-1.5 pr-8 text-sm transition-colors rounded-t-lg ${
+                        active
+                          ? "font-medium"
+                          : "hover:bg-muted hover:text-foreground hover:border-foreground/30"
+                      } ${busy ? "opacity-60" : ""}`}
+                    >
+                      <div className="font-medium leading-tight">{run.scan_date}</div>
+                      <div className="text-xs opacity-80 truncate mt-0.5" title={run.source}>{run.source}</div>
+                    </button>
+                    <button
+                      type="button"
+                      title="Remove from list"
+                      aria-label={`Remove screening ${run.scan_date}`}
+                      disabled={busy}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        void softDeleteRun(run.id);
+                      }}
+                      className={`absolute right-1 top-1 p-1 rounded-md transition-colors ${
+                        active
+                          ? "text-background/70 hover:text-background hover:bg-background/15"
+                          : "text-muted-foreground hover:text-destructive hover:bg-destructive/10"
+                      } ${busy ? "pointer-events-none opacity-50" : ""}`}
+                    >
+                      {busy ? (
+                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                      ) : (
+                        <Trash2 className="w-3.5 h-3.5" />
+                      )}
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
 
-      {/* Main panel */}
-      <div className="flex-1 min-w-0 flex flex-col gap-4">
         {/* Search + count */}
-        <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-start sm:gap-3">
+        <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-start sm:gap-3 mb-2">
           <div className="flex flex-col gap-1.5 min-w-0 shrink-0 w-full max-w-[min(100%,20rem)] sm:w-56">
             <div className="relative w-full">
               <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none" />
@@ -2591,111 +2358,191 @@ export function ScreeningsUI({
           </span>
         </div>
 
-        <ScreeningsFilterBar
-          filters={filters}
-          setFilters={setFilters}
-          noteStageOptions={noteStageOptions}
-          noteTagOptions={noteTagOptions}
-          boolKeys={boolFilterKeys}
-          numKeys={numFilterKeys}
-          categoricalStringCols={categoricalStringCols}
-          freeStringKeys={freeStringKeys}
-        />
+      </div>
 
-        {/* View tabs — list the full filter first, then per-ticker deep dives, then trade monitoring */}
-        <div className="flex flex-col gap-2 border-b border-border pb-px">
-          <div className="flex flex-wrap items-end gap-x-0 gap-y-1">
-            <div
-              className="flex flex-wrap items-end gap-1 rounded-md bg-muted/30 px-1 pt-1 pb-0"
-              role="group"
-              aria-label="List views — multiple symbols from your filter"
-            >
-              <span className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground px-2 pb-2 shrink-0 max-sm:hidden">
-                Multi-symbol
-              </span>
-              {multiSymbolViewTabs.map((tab) => (
-                <button
-                  key={tab.id}
-                  type="button"
-                  onClick={() => setActiveView(tab.id)}
-                  className={`flex items-center gap-1.5 px-3 py-2 text-sm font-medium transition-colors border-b-2 -mb-px rounded-t-md ${
-                    activeView === tab.id
-                      ? "border-foreground text-foreground bg-background"
-                      : "border-transparent text-muted-foreground hover:text-foreground"
-                  }`}
-                >
-                  {tab.icon}
-                  {tab.label}
-                </button>
-              ))}
-            </div>
-            <div
-              className="hidden sm:block w-px shrink-0 self-stretch min-h-[2.25rem] bg-border mx-0.5"
-              role="separator"
-              aria-orientation="vertical"
-              aria-hidden
-            />
-            <div
-              className="flex flex-wrap items-end gap-1 rounded-md bg-muted/30 px-1 pt-1 pb-0"
-              role="group"
-              aria-label="Deep dive — one ticker at a time"
-            >
-              <span className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground px-2 pb-2 shrink-0 max-sm:hidden">
-                Deep dive
-              </span>
-              {deepDiveViewTabs.map((tab) => (
-                <button
-                  key={tab.id}
-                  type="button"
-                  onClick={() => setActiveView(tab.id)}
-                  className={`flex items-center gap-1.5 px-3 py-2 text-sm font-medium transition-colors border-b-2 -mb-px rounded-t-md ${
-                    activeView === tab.id
-                      ? "border-foreground text-foreground bg-background"
-                      : "border-transparent text-muted-foreground hover:text-foreground"
-                  }`}
-                >
-                  {tab.icon}
-                  {tab.label}
-                </button>
-              ))}
-            </div>
-            <div
-              className="hidden sm:block w-px shrink-0 self-stretch min-h-[2.25rem] bg-border mx-0.5"
-              role="separator"
-              aria-orientation="vertical"
-              aria-hidden
-            />
-            <button
-              type="button"
-              disabled={tradeMonitoringDisabled}
-              title={tradeMonitoringTitle}
-              onClick={() => {
-                if (tradeMonitoringDisabled) return;
-                setActiveView("tradeMonitoring");
-              }}
-              className={`flex items-center gap-1.5 px-3 py-2 text-sm font-medium transition-colors border-b-2 -mb-px rounded-t-md ${
-                activeView === "tradeMonitoring"
-                  ? "border-foreground text-foreground bg-muted/30"
-                  : "border-transparent text-muted-foreground hover:text-foreground"
-              } ${tradeMonitoringDisabled ? "opacity-40 cursor-not-allowed hover:text-muted-foreground" : ""}`}
-            >
-              <Activity className="w-3.5 h-3.5" />
-              Trade monitoring
-            </button>
-          </div>
-          <p className="text-[11px] leading-snug text-muted-foreground px-1 pb-2 max-w-[52rem]">
-            <span className="text-foreground/90 font-medium">Multi-symbol</span> lists every symbol in your filter.
-            <span className="mx-1.5 text-muted-foreground/50" aria-hidden>
-              ·
-            </span>
-            <span className="text-foreground/90 font-medium">Deep dive</span> (Charts, News trend, Relationships) follows the ticker you select in the table or with prev/next on those views.
-          </p>
+      {/* View tabs */}
+      <div className="flex flex-col gap-2 border-b border-border pb-px shrink-0">
+        <div className="flex flex-wrap items-end gap-x-0 gap-y-1">
+          {!addFilterOpen && (
+            <>
+              <button
+                type="button"
+                onClick={() => setCollapsed(c => !c)}
+                className="mr-1 p-1.5 rounded-md border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+                title={collapsed ? "Show filters" : "Hide filters"}
+              >
+                {collapsed ? <ChevronDown className="w-3.5 h-3.5" /> : <ChevronUp className="w-3.5 h-3.5" />}
+              </button>
+              <div
+                className="flex flex-wrap items-end gap-1 rounded-md bg-muted/30 px-1 pt-1 pb-0"
+                role="group"
+                aria-label="List views — multiple symbols from your filter"
+              >
+                <span className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground px-2 pb-2 shrink-0 max-sm:hidden">
+                  Multi-symbol
+                </span>
+                {multiSymbolViewTabs.map((tab) => (
+                  <button
+                    key={tab.id}
+                    type="button"
+                    onClick={() => setActiveView(tab.id)}
+                    className={`flex items-center gap-1.5 px-3 py-2 text-sm font-medium transition-colors border-b-2 -mb-px rounded-t-md ${
+                      activeView === tab.id
+                        ? "border-foreground text-foreground bg-background"
+                        : "border-transparent text-muted-foreground hover:text-foreground"
+                    }`}
+                  >
+                    {tab.icon}
+                    {tab.label}
+                  </button>
+                ))}
+              </div>
+              <div
+                className="hidden sm:block w-px shrink-0 self-stretch min-h-[2.25rem] bg-border mx-0.5"
+                role="separator"
+                aria-orientation="vertical"
+                aria-hidden
+              />
+              <div
+                className="flex flex-wrap items-end gap-1 rounded-md bg-muted/30 px-1 pt-1 pb-0"
+                role="group"
+                aria-label="Deep dive — one ticker at a time"
+              >
+                <span className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground px-2 pb-2 shrink-0 max-sm:hidden">
+                  Deep dive
+                </span>
+                {deepDiveViewTabs.map((tab) => (
+                  <button
+                    key={tab.id}
+                    type="button"
+                    onClick={() => setActiveView(tab.id)}
+                    className={`flex items-center gap-1.5 px-3 py-2 text-sm font-medium transition-colors border-b-2 -mb-px rounded-t-md ${
+                      activeView === tab.id
+                        ? "border-foreground text-foreground bg-background"
+                        : "border-transparent text-muted-foreground hover:text-foreground"
+                    }`}
+                  >
+                    {tab.icon}
+                    {tab.label}
+                  </button>
+                ))}
+              </div>
+              <div
+                className="hidden sm:block w-px shrink-0 self-stretch min-h-[2.25rem] bg-border mx-0.5"
+                role="separator"
+                aria-orientation="vertical"
+                aria-hidden
+              />
+              <button
+                type="button"
+                disabled={tradeMonitoringDisabled}
+                title={tradeMonitoringTitle}
+                onClick={() => {
+                  if (tradeMonitoringDisabled) return;
+                  setActiveView("tradeMonitoring");
+                }}
+                className={`flex items-center gap-1.5 px-3 py-2 text-sm font-medium transition-colors border-b-2 -mb-px rounded-t-md ${
+                  activeView === "tradeMonitoring"
+                    ? "border-foreground text-foreground bg-muted/30"
+                    : "border-transparent text-muted-foreground hover:text-foreground"
+                } ${tradeMonitoringDisabled ? "opacity-40 cursor-not-allowed hover:text-muted-foreground" : ""}`}
+              >
+                <Activity className="w-3.5 h-3.5" />
+                Trade monitoring
+              </button>
+            </>
+          )}
+          <AddFilterWidget
+            open={addFilterOpen}
+            onOpen={() => setAddFilterOpen(true)}
+            onClose={() => setAddFilterOpen(false)}
+            filters={filters}
+            setFilters={setFilters}
+            noteStageOptions={noteStageOptions}
+            noteTagOptions={noteTagOptions}
+            boolKeys={boolFilterKeys}
+            numKeys={numFilterKeys}
+            categoricalStringCols={categoricalStringCols}
+            freeStringKeys={freeStringKeys}
+          />
         </div>
+      </div>
 
-        {/* View content */}
+      {/* View content — scrollable area */}
+      <div className={`flex-1 min-h-0 ${isDeepDiveView(activeView) && filteredSymbols.length > 0 ? "overflow-hidden" : "overflow-y-auto"}`}>
         {rows.length === 0 ? (
           <div className="text-sm text-muted-foreground py-8 text-center">
             {selectedRun ? "No results for this run." : "Select a scan run to view results."}
+          </div>
+        ) : isDeepDiveView(activeView) && filteredSymbols.length > 0 ? (
+          <div className="flex h-full min-h-0 gap-0">
+            <div className="hidden sm:flex sm:flex-col w-56 shrink-0 xl:w-64 border-r border-border h-full">
+              <TickerSidebar
+                symbols={filteredSymbols}
+                quotes={quotes}
+                selectedTicker={selectedTicker}
+                onSelect={setSelectedTicker}
+                getTickerMeta={getTickerMeta}
+                getStatus={getTickerStatus}
+                getSymbolNote={getTickerComment}
+                dismissedSymbols={dismissedSymbols}
+                highlightedSymbols={highlightedSymbols}
+                onContextMenu={handleContextMenu}
+              />
+            </div>
+            <div className="flex-1 min-w-0 min-h-0 flex flex-col gap-4 overflow-y-auto">
+              {activeView === "charts" ? (
+                <TickerChartsPanel
+                  symbols={chartSymbols}
+                  selectedTicker={selectedTicker}
+                  onSelect={setSelectedTicker}
+                  dismissed={dismissedSymbols}
+                  onDismiss={dismissTicker}
+                  onRestore={restoreTicker}
+                  getStatus={getTickerStatus}
+                  onSetStatus={setTickerStatus}
+                  hasComment={tickerHasComment}
+                  onEditComment={editTickerComment}
+                  getTickerMeta={getTickerMeta}
+                  getPivotMarker={getTickerPivotMarker}
+                  onSetPivotMarker={setTickerPivotMarker}
+                  onClearPivotMarker={clearTickerPivotMarker}
+                  showChevronSymbolNav={false}
+                  screeningToolbar={false}
+                  showSymbolHeadline={false}
+                  onChartData={(rows: OhlcBar[]) => { ohlcvDataRef.current = rows; }}
+                />
+              ) : activeView === "relationship" ? (
+                <ScreeningsRelationshipNetworkPanel
+                  symbols={filteredSymbols}
+                  selectedTicker={selectedTicker}
+                  onSelect={setSelectedTicker}
+                  dismissed={dismissedSymbols}
+                  onDismiss={dismissTicker}
+                  onRestore={restoreTicker}
+                  getStatus={getTickerStatus}
+                  onSetStatus={setTickerStatus}
+                  hasComment={tickerHasComment}
+                  onEditComment={editTickerComment}
+                  getTickerMeta={getTickerMeta}
+                />
+              ) : (
+                <StockNewsTrendView
+                  symbols={filteredSymbols}
+                  companyVectorDimensions={companyVectorDimensions}
+                  selectedTicker={selectedTicker}
+                  onSelect={setSelectedTicker}
+                  dismissed={dismissedSymbols}
+                  onDismiss={dismissTicker}
+                  onRestore={restoreTicker}
+                  getStatus={getTickerStatus}
+                  onSetStatus={setTickerStatus}
+                  hasComment={tickerHasComment}
+                  onEditComment={editTickerComment}
+                  getTickerMeta={getTickerMeta}
+                />
+              )}
+            </div>
           </div>
         ) : activeView === "results" ? (
           <>
@@ -2704,7 +2551,7 @@ export function ScreeningsUI({
                 No stocks match the current filters.
               </div>
             ) : (
-              <div className="overflow-x-auto rounded-lg border border-border">
+              <div className="overflow-x-auto border border-border">
                 <table className="w-full text-sm">
                   <thead className="bg-muted/40 border-b border-border">
                     <tr>
@@ -2743,12 +2590,23 @@ export function ScreeningsUI({
                       const note = rowNotes.get(row.scan_row_id);
                       const isDismissed = note?.status === "dismissed";
                       const isHighlighted = !!note?.highlighted;
+                      const status = note?.status ?? "active";
+                      const statusStripe: Record<string, string> = {
+                        dismissed: "border-l-rose-400",
+                        watchlist: "border-l-amber-400",
+                        pipeline: "border-l-sky-400",
+                        active: "border-l-emerald-400",
+                      };
+                      const stripe = isDismissed || isHighlighted || isSelected
+                        ? statusStripe[status] ?? "border-l-transparent"
+                        : "";
                       return (
                         <tr
                           key={row.scan_row_id ?? row.symbol ?? i}
                           onClick={() => row.symbol && setSelectedTicker(row.symbol)}
                           onDoubleClick={() => row.symbol && void openTickerWorkflowEditor(row.symbol)}
-                          className={`group cursor-pointer transition-colors ${isDismissed ? "opacity-40" : ""} ${isHighlighted ? "bg-amber-500/10" : ""} ${isSelected ? "bg-foreground/10 ring-1 ring-inset ring-foreground/20" : "hover:bg-muted/30"}`}
+                          onContextMenu={(e) => row.symbol && handleContextMenu(row.symbol, e)}
+                          className={`group cursor-pointer transition-colors border-l-[3px] ${stripe || "border-l-transparent"} ${isDismissed ? "opacity-40" : ""} ${isHighlighted ? "bg-amber-500/10" : ""} ${isSelected ? "bg-foreground/10 ring-1 ring-inset ring-foreground/20" : "hover:bg-muted/30"}`}
                         >
                           <td className="px-3 py-2 font-mono font-semibold whitespace-nowrap">
                             {row.symbol ?? "—"}
@@ -2824,50 +2682,20 @@ export function ScreeningsUI({
         ) : activeView === "quotes" ? (
           <QuotesView
             symbols={filteredSymbols}
+            quotes={quotes}
+            loading={quotesLoading}
             selectedTicker={selectedTicker}
             onSelect={setSelectedTicker}
             onOpenWorkflowEditor={openTickerWorkflowEditor}
-          />
-        ) : activeView === "charts" ? (
-          <TickerChartsPanel
-            symbols={chartSymbols}
-            selectedTicker={selectedTicker}
-            onSelect={setSelectedTicker}
-            dismissed={dismissedSymbols}
-            onDismiss={dismissTicker}
-            onRestore={restoreTicker}
+            dismissedSymbols={dismissedSymbols}
+            highlightedSymbols={highlightedSymbols}
             getStatus={getTickerStatus}
-            onSetStatus={setTickerStatus}
-            hasComment={tickerHasComment}
-            onEditComment={editTickerComment}
-            getTickerMeta={getTickerMeta}
-            getPivotMarker={getTickerPivotMarker}
-            onSetPivotMarker={setTickerPivotMarker}
-            onClearPivotMarker={clearTickerPivotMarker}
-            symbolPicker={
-              <select
-                value={
-                  chartSymbols[
-                    selectedTicker &&
-                    chartSymbols.includes(selectedTicker)
-                      ? chartSymbols.indexOf(selectedTicker)
-                      : 0
-                  ]
-                }
-                onChange={(e) => setSelectedTicker(e.target.value)}
-                className="px-2 py-1 text-sm rounded border border-input bg-background focus:outline-none focus:ring-1 focus:ring-ring"
-              >
-                {chartSymbols.map((s, i) => (
-                  <option key={s} value={s}>
-                    {i + 1}. {s}
-                  </option>
-                ))}
-              </select>
-            }
           />
         ) : activeView === "tradeMonitoring" ? (
           <TradeMonitoringView
             entries={tradeMonitoringRows}
+            quotes={quotes}
+            loadingQuotes={quotesLoading}
             selectedTicker={selectedTicker}
             onSelect={setSelectedTicker}
             onGoToCharts={() => setActiveView("charts")}
@@ -2881,20 +2709,9 @@ export function ScreeningsUI({
             selectedTicker={selectedTicker}
             onSelect={setSelectedTicker}
             getTickerMeta={getTickerMeta}
-          />
-        ) : activeView === "relationship" ? (
-          <ScreeningsRelationshipNetworkPanel
-            symbols={filteredSymbols}
-            selectedTicker={selectedTicker}
-            onSelect={setSelectedTicker}
-            dismissed={dismissedSymbols}
-            onDismiss={dismissTicker}
-            onRestore={restoreTicker}
+            dismissedSymbols={dismissedSymbols}
+            highlightedSymbols={highlightedSymbols}
             getStatus={getTickerStatus}
-            onSetStatus={setTickerStatus}
-            hasComment={tickerHasComment}
-            onEditComment={editTickerComment}
-            getTickerMeta={getTickerMeta}
           />
         ) : (
           <StockNewsTrendView
@@ -2912,6 +2729,7 @@ export function ScreeningsUI({
             getTickerMeta={getTickerMeta}
           />
         )}
+      </div>
       {aiSelectedRow && (
         <AiAnalysisPanel
           key={aiSelectedRow.scan_row_id}
@@ -2923,7 +2741,6 @@ export function ScreeningsUI({
           onClose={() => setAiSelectedRow(null)}
         />
       )}
-      </div>
       {workflowEditor && (
         <div
           className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4"
@@ -2981,6 +2798,33 @@ export function ScreeningsUI({
           </div>
         </div>
       )}
+
+      {contextMenu && (() => {
+        const cm = contextMenu;
+        const note = [...rowNotes.values()].find(n => n.ticker === cm.ticker);
+        return (
+          <TickerContextMenu
+            ticker={cm.ticker}
+            x={cm.x}
+            y={cm.y}
+            onClose={() => setContextMenu(null)}
+            isDismissed={dismissedSymbols.has(cm.ticker)}
+            onDismiss={() => dismissTicker(cm.ticker)}
+            onRestore={() => restoreTicker(cm.ticker)}
+            status={(note?.status ?? "active") as ContextMenuNoteStatus}
+            onSetStatus={(s) => setTickerStatus(cm.ticker, s)}
+            hasComment={tickerHasComment(cm.ticker)}
+            onEditComment={() => editTickerComment(cm.ticker)}
+            onCopyOhlcv={activeView === "charts" && ohlcvDataRef.current.length > 0 ? () => {
+              const header = "date,open,high,low,close,volume";
+              const lines = ohlcvDataRef.current.map(
+                d => `${d.date},${d.open},${d.high},${d.low},${d.close},${d.volume}`
+              );
+              void navigator.clipboard.writeText([header, ...lines].join("\n"));
+            } : null}
+          />
+        );
+      })()}
     </div>
   );
 }
