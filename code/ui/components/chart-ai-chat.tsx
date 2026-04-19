@@ -12,6 +12,7 @@ type Message = { role: "user" | "assistant"; content: string };
 interface ChartAiChatProps {
   symbol: string;
   ohlcData: OhlcBar[];
+  annotations?: ChartAnnotation[];
   onAnnotations: (annotations: ChartAnnotation[]) => void;
 }
 
@@ -40,7 +41,7 @@ function AnnotationPills({ annotations }: { annotations: ChartAnnotation[] }) {
   );
 }
 
-export function ChartAiChat({ symbol, ohlcData, onAnnotations }: ChartAiChatProps) {
+export function ChartAiChat({ symbol, ohlcData, annotations = [], onAnnotations }: ChartAiChatProps) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
@@ -74,7 +75,7 @@ export function ChartAiChat({ symbol, ohlcData, onAnnotations }: ChartAiChatProp
         method: "POST",
         headers: { "Content-Type": "application/json" },
         signal: controller.signal,
-        body: JSON.stringify({ symbol, ohlcData, messages: history }),
+        body: JSON.stringify({ symbol, ohlcData, annotations, messages: history }),
       });
 
       if (!res.ok) {

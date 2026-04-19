@@ -15,9 +15,13 @@ import {
   Trash2,
   MessageSquare,
   Copy,
+  Minus,
+  SquareDashed,
+  TrendingUp,
+  MousePointer2,
 } from "lucide-react";
 import { CandlestickSvg } from "./candlestick-svg";
-import type { ChartAnnotation, ChartPoint, OhlcBar, PivotMarker } from "./types";
+import type { AnnotationRole, ChartAnnotation, ChartPoint, OhlcBar, PivotMarker } from "./types";
 
 export type TickerChartNoteStatus =
   | "active"
@@ -48,10 +52,14 @@ export type TickerChartsPanelProps = {
   showChevronSymbolNav?: boolean;
   /** When false, hides the large symbol, sector line, and “i / n” counter (e.g. charts page). */
   showSymbolHeadline?: boolean;
-  /** AI-generated annotations to overlay on the chart. */
+  /** Annotations to overlay on the chart (AI + user). */
   annotations?: ChartAnnotation[];
   /** Called whenever OHLC data loads or updates for the selected ticker. */
   onChartData?: (rows: OhlcBar[]) => void;
+  /** Called when the user draws a new annotation. */
+  onAnnotationAdd?: (ann: ChartAnnotation) => void;
+  /** Called when the user deletes an annotation by clicking it. */
+  onAnnotationDelete?: (id: string) => void;
 };
 
 export function TickerChartsPanel({
@@ -75,6 +83,8 @@ export function TickerChartsPanel({
   showSymbolHeadline = true,
   annotations = [],
   onChartData: onChartDataProp,
+  onAnnotationAdd,
+  onAnnotationDelete,
 }: TickerChartsPanelProps) {
   const idx = useMemo(() => {
     const i = selectedTicker ? symbols.indexOf(selectedTicker) : -1;
@@ -117,6 +127,8 @@ export function TickerChartsPanel({
   const [chartLastClose, setChartLastClose] = useState<number | null>(null);
   const [chartData, setChartData] = useState<OhlcBar[]>([]);
   const [copyState, setCopyState] = useState<"idle" | "ok" | "err">("idle");
+  const [drawingMode, setDrawingMode] = useState<"none" | "horizontal" | "zone" | "trend_line">("none");
+  const [drawingRole, setDrawingRole] = useState<AnnotationRole>("info");
 
   const onChartMetrics = useCallback((m: { lastClose: number } | null) => {
     setChartLastClose(m?.lastClose ?? null);
@@ -328,9 +340,55 @@ export function TickerChartsPanel({
         ) : null}
       </div>
 
+      {/* Drawing toolbar */}
+      {onAnnotationAdd && (
+        <div className="flex items-center gap-2 flex-wrap">
+          <span className="text-[11px] text-muted-foreground">Draw:</span>
+          {([
+            { mode: "none", icon: <MousePointer2 className="w-3.5 h-3.5" />, label: "Select" },
+            { mode: "horizontal", icon: <Minus className="w-3.5 h-3.5" />, label: "Horizontal" },
+            { mode: "zone", icon: <SquareDashed className="w-3.5 h-3.5" />, label: "Zone" },
+            { mode: "trend_line", icon: <TrendingUp className="w-3.5 h-3.5" />, label: "Trend Line" },
+          ] as const).map(({ mode, icon, label }) => (
+            <button
+              key={mode}
+              type="button"
+              title={label}
+              onClick={() => setDrawingMode(mode)}
+              className={`flex items-center gap-1 text-[11px] px-2 py-1 rounded border transition-colors ${
+                drawingMode === mode
+                  ? "border-foreground bg-muted text-foreground"
+                  : "border-border text-muted-foreground hover:text-foreground hover:border-foreground/40"
+              }`}
+            >
+              {icon}
+              {label}
+            </button>
+          ))}
+          <select
+            value={drawingRole}
+            onChange={(e) => setDrawingRole(e.target.value as AnnotationRole)}
+            className="px-2 py-1 text-[11px] rounded border border-input bg-background focus:outline-none focus:ring-1 focus:ring-ring"
+            title="Annotation role"
+          >
+            <option value="info">Info</option>
+            <option value="support">Support</option>
+            <option value="resistance">Resistance</option>
+            <option value="entry">Entry</option>
+            <option value="stop">Stop</option>
+            <option value="target">Target</option>
+          </select>
+          {drawingMode !== "none" && (
+            <span className="text-[10px] text-muted-foreground italic">
+              {drawingMode === "horizontal" ? "Click chart to place line" : "Click two points on chart"}
+            </span>
+          )}
+        </div>
+      )}
+
       <div
         className="relative border border-border rounded-lg p-4 bg-background"
-        title="Right-click chart for pivot options"
+        title="Drag left/right to pan time · Drag up/down to pan price · Double-click to reset price pan · Right-click for pivot options"
         onContextMenu={(e) => {
           e.preventDefault();
           setPivotMenu({
@@ -349,6 +407,10 @@ export function TickerChartsPanel({
           onChartData={onChartData}
           onAutoPivot={(point) => onSetPivotMarker(symbol, point)}
           annotations={annotations}
+          drawingMode={drawingMode}
+          drawingRole={drawingRole}
+          onAnnotationAdd={onAnnotationAdd}
+          onAnnotationDelete={onAnnotationDelete}
         />
       </div>
 

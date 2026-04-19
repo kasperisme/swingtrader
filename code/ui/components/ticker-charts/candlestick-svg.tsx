@@ -120,6 +120,10 @@ export function CandlestickSvg({
   onChartData,
   onAutoPivot,
   annotations = [],
+  drawingMode = "none",
+  drawingRole = "info",
+  onAnnotationAdd,
+  onAnnotationDelete,
 }: {
   symbol: string;
   onPointChange?: (point: ChartPoint | null) => void;
@@ -128,6 +132,10 @@ export function CandlestickSvg({
   onChartData?: (rows: OhlcBar[]) => void;
   onAutoPivot?: (point: ChartPoint) => void;
   annotations?: ChartAnnotation[];
+  drawingMode?: "none" | "horizontal" | "zone" | "trend_line";
+  drawingRole?: import("./types").AnnotationRole;
+  onAnnotationAdd?: (ann: ChartAnnotation) => void;
+  onAnnotationDelete?: (id: string) => void;
 }) {
   const [data, setData] = useState<OhlcBar[]>([]);
   const [loading, setLoading] = useState(false);
@@ -138,12 +146,13 @@ export function CandlestickSvg({
   const [viewportBars, setViewportBars] = useState(CHART_DEFAULT_VIEWPORT_BARS);
   const [isPanning, setIsPanning] = useState(false);
   const [loadingOlder, setLoadingOlder] = useState(false);
+  const [priceOffset, setPriceOffset] = useState(0);
   const svgRef = useRef<SVGSVGElement>(null);
   const dataRef = useRef<OhlcBar[]>([]);
   const symbolRef = useRef(symbol);
   const viewStartRef = useRef(0);
   const sliceStartRef = useRef(0);
-  const visibleLenRef = useRef(0);
+  const visibleLenRef = useRef(CHART_DEFAULT_VIEWPORT_BARS);
   const viewportBarsRef = useRef(CHART_DEFAULT_VIEWPORT_BARS);
   const loadingOlderRef = useRef(false);
   const pastExhaustedRef = useRef(false);
@@ -157,6 +166,7 @@ export function CandlestickSvg({
         startClientX: number;
         startClientY: number;
         startViewStart: number;
+        startPriceOffset: number;
       }
     | {
         mode: "panning";
@@ -164,11 +174,23 @@ export function CandlestickSvg({
         originClientX: number;
         originViewStart: number;
       }
+    | {
+        mode: "price_panning";
+        pointerId: number;
+        originClientY: number;
+        startPriceOffset: number;
+      }
   >({ mode: "idle" });
   const suppressClickAfterPan = useRef(false);
+  const [drawingFirstPoint, setDrawingFirstPoint] = useState<{ price: number; date: string } | null>(null);
+
+  useEffect(() => {
+    setDrawingFirstPoint(null);
+  }, [drawingMode]);
 
   useEffect(() => {
     symbolRef.current = symbol;
+    setPriceOffset(0);
   }, [symbol]);
 
   useEffect(() => {
@@ -218,21 +240,16 @@ export function CandlestickSvg({
     console.log("[Chart] annotations prop changed:", annotations, "data bars:", data.length);
   }, [annotations, data.length]);
 
-  const visibleLen = useMemo(
-    () => (data.length === 0 ? 0 : Math.min(viewportBars, data.length)),
-    [data.length, viewportBars],
-  );
-
+  // Allow viewStart to extend one bar past the last bar (future panning).
+  // Constraint: at least 1 data bar must remain in viewport → viewStart ≤ data.length - 1.
   const sliceStart = useMemo(() => {
-    if (data.length === 0 || visibleLen === 0) return 0;
-    const maxS = Math.max(0, data.length - visibleLen);
-    return Math.min(Math.max(0, viewStart), maxS);
-  }, [data.length, visibleLen, viewStart]);
+    if (data.length === 0) return 0;
+    return Math.min(Math.max(0, viewStart), data.length - 1);
+  }, [data.length, viewStart]);
 
   const displaySlice = useMemo(
-    () =>
-      data.length === 0 ? [] : data.slice(sliceStart, sliceStart + visibleLen),
-    [data, sliceStart, visibleLen],
+    () => data.slice(sliceStart, sliceStart + viewportBars),
+    [data, sliceStart, viewportBars],
   );
 
   const W = 900;
@@ -247,7 +264,7 @@ export function CandlestickSvg({
   const chartW = W - PAD_L - PAD_R;
   const chartH = H_PRICE - PAD_T - PAD_B;
 
-  const { priceMin, priceMax, volMax } = useMemo(() => {
+  const { priceMin: priceMinData, priceMax: priceMaxData, volMax } = useMemo(() => {
     if (displaySlice.length === 0) {
       return { priceMin: 0, priceMax: 1, volMax: 1 };
     }
@@ -267,15 +284,22 @@ export function CandlestickSvg({
     };
   }, [displaySlice]);
 
+  // Apply vertical pan offset. Clamped to ±0.99 so at least one data bar stays visible.
+  const priceDataRange = priceMaxData - priceMinData;
+  const clampedPriceOffset = Math.min(0.99, Math.max(-0.99, priceOffset));
+  const priceShift = clampedPriceOffset * priceDataRange;
+  const priceMin = priceMinData - priceShift;
+  const priceMax = priceMaxData - priceShift;
+
   const n = displaySlice.length;
-  const barStep = n > 1 ? chartW / n : chartW;
-  const barW = Math.max(1, Math.min(12, chartW / Math.max(n, 1) - 1));
-  const canPanTimescale =
-    data.length > visibleLen && visibleLen > 0 && n > 0;
+  // barStep always spans the full viewport width so future/empty slots are proportional.
+  const barStep = viewportBars > 1 ? chartW / viewportBars : chartW;
+  const barW = Math.max(1, Math.min(12, chartW / Math.max(viewportBars, 1) - 1));
+  const canPanTimescale = data.length > 0;
 
   viewStartRef.current = viewStart;
   sliceStartRef.current = sliceStart;
-  visibleLenRef.current = visibleLen;
+  visibleLenRef.current = viewportBars;
 
   const toY = useCallback((p: number) => {
     return PAD_T + chartH - ((p - priceMin) / (priceMax - priceMin)) * chartH;
@@ -457,7 +481,7 @@ export function CandlestickSvg({
       );
       if (clampedV === curV) return;
 
-      const maxS = Math.max(0, dataLen - Math.min(clampedV, dataLen));
+      const maxS = Math.max(0, dataLen - 1);
       let nextStart = Math.round(
         anchorIdx - f * Math.max(Math.min(clampedV, dataLen) - 1, 0),
       );
@@ -489,7 +513,7 @@ export function CandlestickSvg({
             setViewportBars(dl);
           }
           const V = Math.min(effectiveViewport, dl);
-          const maxS2 = Math.max(0, dl - V);
+          const maxS2 = Math.max(0, dl - 1);
           let ns = Math.round(idx - z.fraction * Math.max(V - 1, 0));
           ns = Math.min(Math.max(0, ns), maxS2);
           setViewStart(ns);
@@ -531,6 +555,7 @@ export function CandlestickSvg({
     if (e.button !== 0) return;
     if (e.shiftKey) return;
     if (selBox && !selBox.locked) return;
+    if (drawingMode !== "none") return;
     if (!canPanTimescale) return;
     panRef.current = {
       mode: "candidate",
@@ -538,6 +563,7 @@ export function CandlestickSvg({
       startClientX: e.clientX,
       startClientY: e.clientY,
       startViewStart: sliceStart,
+      startPriceOffset: priceOffset,
     };
   }
 
@@ -546,20 +572,22 @@ export function CandlestickSvg({
     if (p.mode === "candidate" && (e.buttons & 1) === 1) {
       const dx = e.clientX - p.startClientX;
       const dy = e.clientY - p.startClientY;
-      if (
-        Math.abs(dx) > 6 &&
-        Math.abs(dx) > Math.abs(dy) * 0.65
-      ) {
-        try {
-          e.currentTarget.setPointerCapture(e.pointerId);
-        } catch {
-          /* already captured */
-        }
+      if (Math.abs(dx) > 6 && Math.abs(dx) > Math.abs(dy) * 0.65) {
+        try { e.currentTarget.setPointerCapture(e.pointerId); } catch { /* already captured */ }
         panRef.current = {
           mode: "panning",
           pointerId: e.pointerId,
           originClientX: p.startClientX,
           originViewStart: p.startViewStart,
+        };
+        setIsPanning(true);
+      } else if (Math.abs(dy) > 6 && Math.abs(dy) > Math.abs(dx) * 0.65) {
+        try { e.currentTarget.setPointerCapture(e.pointerId); } catch { /* already captured */ }
+        panRef.current = {
+          mode: "price_panning",
+          pointerId: e.pointerId,
+          originClientY: p.startClientY,
+          startPriceOffset: p.startPriceOffset,
         };
         setIsPanning(true);
       }
@@ -572,19 +600,27 @@ export function CandlestickSvg({
       const pan = panRef.current;
       const dxSvg = (e.clientX - pan.originClientX) * scaleX;
       const deltaBars = Math.round(dxSvg / barStep);
-      const maxS = Math.max(0, data.length - visibleLen);
+      // Right bound: keep at least one bar in viewport (last bar = data.length - 1).
+      const maxS = Math.max(0, data.length - 1);
       const rawNext = pan.originViewStart - deltaBars;
       const next = Math.min(Math.max(0, rawNext), maxS);
       setViewStart(next);
-      if (
-        rawNext < 0 &&
-        sliceStart === 0 &&
-        canPanTimescale &&
-        !loadingOlderRef.current &&
-        !pastExhaustedRef.current
-      ) {
+      if (rawNext < 0 && sliceStart === 0 && !loadingOlderRef.current && !pastExhaustedRef.current) {
         void fetchOlderChunk();
       }
+      return;
+    }
+
+    if (panRef.current.mode === "price_panning" && (e.buttons & 1) === 1) {
+      const svg = svgRef.current;
+      const rect = svg?.getBoundingClientRect();
+      if (!rect || rect.height === 0) return;
+      const pan = panRef.current;
+      const scaleY = H / rect.height;
+      const dyScreen = e.clientY - pan.originClientY;
+      // Dragging up (negative dy) shifts view upward → see higher prices → positive offset.
+      const delta = -(dyScreen * scaleY) / chartH;
+      setPriceOffset(Math.min(0.99, Math.max(-0.99, pan.startPriceOffset + delta)));
       return;
     }
 
@@ -605,12 +641,8 @@ export function CandlestickSvg({
 
   function handlePointerUp(e: ReactPointerEvent<SVGSVGElement>) {
     const p = panRef.current;
-    if (p.mode === "panning" && p.pointerId === e.pointerId) {
-      try {
-        e.currentTarget.releasePointerCapture(e.pointerId);
-      } catch {
-        /* not captured */
-      }
+    if ((p.mode === "panning" || p.mode === "price_panning") && p.pointerId === e.pointerId) {
+      try { e.currentTarget.releasePointerCapture(e.pointerId); } catch { /* not captured */ }
       setIsPanning(false);
       suppressClickAfterPan.current = true;
     }
@@ -624,6 +656,32 @@ export function CandlestickSvg({
     }
     const coords = svgCoordsFromEvent(e);
     if (!coords) return;
+
+    if (drawingMode !== "none" && onAnnotationAdd) {
+      const price = toPrice(Math.max(PAD_T, Math.min(H_PRICE - PAD_B, coords.svgY)));
+      const bar = data[coords.barIdx];
+      if (!bar) return;
+
+      if (drawingMode === "horizontal") {
+        onAnnotationAdd({ id: crypto.randomUUID(), type: "horizontal", price, role: drawingRole, origin: "user" });
+      } else if (drawingMode === "zone") {
+        if (!drawingFirstPoint) {
+          setDrawingFirstPoint({ price, date: bar.date });
+        } else {
+          onAnnotationAdd({ id: crypto.randomUUID(), type: "zone", priceTop: Math.max(price, drawingFirstPoint.price), priceBottom: Math.min(price, drawingFirstPoint.price), role: drawingRole, origin: "user" });
+          setDrawingFirstPoint(null);
+        }
+      } else if (drawingMode === "trend_line") {
+        if (!drawingFirstPoint) {
+          setDrawingFirstPoint({ price, date: bar.date });
+        } else {
+          onAnnotationAdd({ id: crypto.randomUUID(), type: "trend_line", fromDate: drawingFirstPoint.date, fromPrice: drawingFirstPoint.price, toDate: bar.date, toPrice: price, role: drawingRole, origin: "user" });
+          setDrawingFirstPoint(null);
+        }
+      }
+      return;
+    }
+
     if (e.shiftKey) {
       // Shift+click: start new box at cursor (or clear locked one)
       setSelBox(prev =>
@@ -648,6 +706,11 @@ export function CandlestickSvg({
   function handleDoubleClick(e: MouseEvent<SVGSVGElement>) {
     const coords = svgCoordsFromEvent(e);
     if (!coords) return;
+    // Double-click resets vertical price pan if active, otherwise pins crosshair.
+    if (priceOffset !== 0) {
+      setPriceOffset(0);
+      return;
+    }
     setCrosshair(prev => ({ ...coords, pinned: !(prev?.pinned) }));
   }
 
@@ -703,11 +766,13 @@ export function CandlestickSvg({
         viewBox={`0 0 ${W} ${H}`}
         width="100%"
         className={`block select-none ${
-          isPanning
-            ? "cursor-grabbing"
-            : canPanTimescale
-              ? "cursor-grab"
-              : "cursor-crosshair"
+          drawingMode !== "none"
+            ? drawingFirstPoint ? "cursor-cell" : "cursor-crosshair"
+            : isPanning
+              ? "cursor-grabbing"
+              : canPanTimescale
+                ? "cursor-grab"
+                : "cursor-default"
         }`}
         onPointerDown={handlePointerDown}
         onPointerMove={handlePointerMove}
@@ -747,6 +812,19 @@ export function CandlestickSvg({
             ${t.toFixed(t >= 100 ? 0 : 2)}
           </text>
         ))}
+
+        {/* Future area — tinted region to the right of the last data bar */}
+        {n < viewportBars && n > 0 && (() => {
+          const futureX = xOf(n - 1) + barStep / 2;
+          return (
+            <rect
+              x={futureX} y={PAD_T}
+              width={W - PAD_R - futureX} height={H_PRICE - PAD_T - PAD_B}
+              fill="hsl(var(--muted))" opacity={0.18}
+              pointerEvents="none"
+            />
+          );
+        })()}
 
         {/* SMAs — prefix sums + memoized paths (see smaPathDefs) */}
         {smaPathDefs.map(({ key, color, d }) =>
@@ -795,21 +873,23 @@ export function CandlestickSvg({
           );
         })}
 
-        {/* AI Annotations */}
+        {/* Annotations (AI + user) */}
         {annotations.map((ann) => {
           const color = ANNOTATION_COLORS[ann.role];
           const LABEL_FONT = 10;
+          const canDelete = !!onAnnotationDelete;
 
           if (ann.type === "horizontal") {
             const y = toY(ann.price);
-            console.log("[Chart] horizontal ann price:", ann.price, "toY:", y, "range:", PAD_T, H_PRICE - PAD_B);
             if (y < PAD_T || y > H_PRICE - PAD_B) return null;
             return (
-              <g key={ann.id} pointerEvents="none">
+              <g key={ann.id} style={{ cursor: canDelete ? "pointer" : "default" }} onClick={canDelete ? (ev) => { ev.stopPropagation(); onAnnotationDelete(ann.id); } : undefined}>
+                {/* Wide invisible hit area */}
+                <line x1={PAD_L} x2={W - PAD_R} y1={y} y2={y} stroke="transparent" strokeWidth={10} />
                 <line
                   x1={PAD_L} x2={W - PAD_R}
                   y1={y} y2={y}
-                  stroke={color} strokeWidth={1.5} strokeDasharray="6 3" opacity={0.85}
+                  stroke={color} strokeWidth={1.5} strokeDasharray={ann.origin === "user" ? "none" : "6 3"} opacity={0.85}
                 />
                 {ann.label && (
                   <text x={PAD_L + 4} y={y - 3} fontSize={LABEL_FONT} fill={color} opacity={0.9}>
@@ -824,10 +904,10 @@ export function CandlestickSvg({
             const yTop = toY(Math.max(ann.priceTop, ann.priceBottom));
             const yBot = toY(Math.min(ann.priceTop, ann.priceBottom));
             return (
-              <g key={ann.id} pointerEvents="none">
+              <g key={ann.id} style={{ cursor: canDelete ? "pointer" : "default" }} onClick={canDelete ? (ev) => { ev.stopPropagation(); onAnnotationDelete(ann.id); } : undefined}>
                 <rect
                   x={PAD_L} y={yTop}
-                  width={W - PAD_L - PAD_R} height={Math.max(1, yBot - yTop)}
+                  width={W - PAD_L - PAD_R} height={Math.max(8, yBot - yTop)}
                   fill={color} opacity={0.12}
                 />
                 <line x1={PAD_L} x2={W - PAD_R} y1={yTop} y2={yTop} stroke={color} strokeWidth={1} opacity={0.5} />
@@ -847,14 +927,15 @@ export function CandlestickSvg({
             if (fromGlobal < 0 || toGlobal < 0) return null;
             const fromLocal = fromGlobal - sliceStart;
             const toLocal   = toGlobal   - sliceStart;
-            // Extend visually to full viewport if endpoints are outside current view
             const clamp = (v: number) => Math.max(-1, Math.min(n, v));
             const x1 = xOf(clamp(fromLocal));
             const x2 = xOf(clamp(toLocal));
             const y1 = toY(ann.fromPrice);
             const y2 = toY(ann.toPrice);
             return (
-              <g key={ann.id} pointerEvents="none">
+              <g key={ann.id} style={{ cursor: canDelete ? "pointer" : "default" }} onClick={canDelete ? (ev) => { ev.stopPropagation(); onAnnotationDelete(ann.id); } : undefined}>
+                {/* Wide invisible hit area */}
+                <line x1={x1} y1={y1} x2={x2} y2={y2} stroke="transparent" strokeWidth={10} />
                 <line x1={x1} y1={y1} x2={x2} y2={y2} stroke={color} strokeWidth={1.5} opacity={0.85} />
                 {ann.label && (
                   <text x={(x1 + x2) / 2} y={Math.min(y1, y2) - 3} fontSize={LABEL_FONT} fill={color} opacity={0.9} textAnchor="middle">

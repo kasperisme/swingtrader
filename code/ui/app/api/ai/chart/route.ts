@@ -116,13 +116,24 @@ export async function POST(req: Request) {
   const rawText = await req.text();
   if (!rawText) return new Response("Empty body", { status: 400 });
 
-  let body: { symbol: string; ohlcData: OhlcBar[]; messages: { role: string; content: string }[] };
+  let body: { symbol: string; ohlcData: OhlcBar[]; annotations?: ChartAnnotation[]; messages: { role: string; content: string }[] };
   try { body = JSON.parse(rawText); }
   catch { return new Response("Invalid JSON", { status: 400 }); }
 
-  const { symbol, ohlcData, messages: history } = body;
+  const { symbol, ohlcData, annotations: existingAnnotations = [], messages: history } = body;
 
-  const dataContext = `OHLC data for ${symbol} (last 60 sessions):\n\`\`\`\n${ohlcSummary(ohlcData)}\n\`\`\``;
+  const annotationContext = existingAnnotations.length > 0
+    ? `\n\nExisting annotations on the chart (${existingAnnotations.length} total — these are visible to the user):\n` +
+      existingAnnotations.map((a) => {
+        const origin = a.origin ?? "ai";
+        if (a.type === "horizontal") return `- [${origin}] horizontal ${a.role} at $${a.price}${a.label ? ` "${a.label}"` : ""}`;
+        if (a.type === "zone") return `- [${origin}] zone ${a.role} $${a.priceBottom}–$${a.priceTop}${a.label ? ` "${a.label}"` : ""}`;
+        if (a.type === "trend_line") return `- [${origin}] trend_line ${a.role} from ${a.fromDate} $${a.fromPrice} to ${a.toDate} $${a.toPrice}${a.label ? ` "${a.label}"` : ""}`;
+        return "";
+      }).join("\n")
+    : "";
+
+  const dataContext = `OHLC data for ${symbol} (last 60 sessions):\n\`\`\`\n${ohlcSummary(ohlcData)}\n\`\`\`${annotationContext}`;
 
   const messages: OllamaMessage[] = [
     { role: "system", content: SYSTEM_PROMPT(symbol) },

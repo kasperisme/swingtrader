@@ -38,6 +38,7 @@ export type ChartAnnotation =
       price: number;
       role: AnnotationRole;
       label?: string;
+      origin?: "ai" | "user";
     }
   | {
       id: string;
@@ -48,6 +49,7 @@ export type ChartAnnotation =
       toPrice: number;
       role: AnnotationRole;
       label?: string;
+      origin?: "ai" | "user";
     }
   | {
       id: string;
@@ -56,6 +58,7 @@ export type ChartAnnotation =
       priceBottom: number;
       role: AnnotationRole;
       label?: string;
+      origin?: "ai" | "user";
     };
 
 export const ANNOTATION_COLORS: Record<AnnotationRole, string> = {

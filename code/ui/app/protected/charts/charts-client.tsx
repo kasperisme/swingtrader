@@ -111,6 +111,21 @@ export function ChartsPageClient({
     });
   }, []);
 
+  const handleAiAnnotations = useCallback((aiAnnotations: ChartAnnotation[]) => {
+    setAnnotations((prev) => [
+      ...prev.filter((a) => a.origin === "user"),
+      ...aiAnnotations.map((a) => ({ ...a, origin: "ai" as const })),
+    ]);
+  }, []);
+
+  const handleAnnotationAdd = useCallback((ann: ChartAnnotation) => {
+    setAnnotations((prev) => [...prev, ann]);
+  }, []);
+
+  const handleAnnotationDelete = useCallback((id: string) => {
+    setAnnotations((prev) => prev.filter((a) => a.id !== id));
+  }, []);
+
   const noop = useCallback(() => {}, []);
   const getStatus = useCallback((_ticker: string): TickerChartNoteStatus => "active", []);
   const onSetStatus = useCallback((_t: string, _s: TickerChartNoteStatus) => {}, []);
@@ -174,13 +189,16 @@ export function ChartsPageClient({
           showSymbolHeadline={false}
           annotations={annotations}
           onChartData={setChartData}
+          onAnnotationAdd={handleAnnotationAdd}
+          onAnnotationDelete={handleAnnotationDelete}
         />
         {selectedTicker && (
           <ChartAiChat
             key={selectedTicker}
             symbol={selectedTicker}
             ohlcData={chartData}
-            onAnnotations={setAnnotations}
+            annotations={annotations}
+            onAnnotations={handleAiAnnotations}
           />
         )}
       </div>
