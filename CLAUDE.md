@@ -68,6 +68,7 @@ The caveman/businessman toggle is global (localStorage-backed via `lib/caveman-m
 |-------|---------|
 | `caveman` | Writing `cavemanBody` for any blog post or doc page |
 | `ui-ux-pro-max` | Designing or reviewing UI components, layouts, styles |
+| `taste-skill` | Building any UI — enforces premium design standards, kills generic AI patterns |
 
 ## Sanity Studio
 

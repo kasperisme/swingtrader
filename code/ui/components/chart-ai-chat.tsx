@@ -7,6 +7,8 @@ import type { ChartAnnotation } from "@/components/ticker-charts/types";
 import type { OhlcBar } from "@/components/ticker-charts/types";
 import { ANNOTATION_COLORS } from "@/components/ticker-charts/types";
 import type { ChartAiChatMessage } from "@/app/actions/chart-workspace";
+import type { PersonaId } from "@/lib/chart-ai/personas";
+import { PERSONA_LABELS } from "@/lib/chart-ai/personas";
 
 const ROLE_LABELS: Record<string, string> = {
   support: "Support",
@@ -16,6 +18,39 @@ const ROLE_LABELS: Record<string, string> = {
   target: "Target",
   info: "Info",
 };
+
+const PERSONA_COLORS: Record<PersonaId, string> = {
+  technical: "#3b82f6",
+  sentiment: "#f59e0b",
+  risk: "#ef4444",
+  fundamentals: "#10b981",
+};
+
+function PersonaBadges({ personas }: { personas: PersonaId[] }) {
+  if (!personas.length) return null;
+  return (
+    <div className="flex flex-wrap gap-1 mt-1">
+      {personas.map((p) => (
+        <span
+          key={p}
+          className="inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded-full border font-medium"
+          style={{ borderColor: PERSONA_COLORS[p], color: PERSONA_COLORS[p] }}
+        >
+          <span className="w-1.5 h-1.5 rounded-full" style={{ background: PERSONA_COLORS[p] }} />
+          {PERSONA_LABELS[p]}
+        </span>
+      ))}
+    </div>
+  );
+}
+
+function parsePersonas(content: string): { personas: PersonaId[]; text: string } {
+  const match = content.match(/^<!-- personas:([a-z|]+) -->\n?/);
+  if (!match) return { personas: [], text: content };
+  const personas = match[1].split("|") as PersonaId[];
+  const text = content.slice(match[0].length);
+  return { personas, text };
+}
 
 function AnnotationPills({ annotations }: { annotations: ChartAnnotation[] }) {
   if (!annotations.length) return null;
@@ -183,7 +218,7 @@ export function ChartAiChat({
       <div className="flex items-center justify-between px-4 py-2 border-b border-border">
         <div className="flex items-center gap-2 text-xs font-medium text-muted-foreground">
           <Bot className="w-3.5 h-3.5" />
-          Chart AI · {symbol}
+          Chart AI · {symbol} · Multi-Persona
         </div>
         {(messages.length > 0 || streamingAnnotations.length > 0) && (
           <button
@@ -213,8 +248,11 @@ export function ChartAiChat({
                     prose-p:my-1 prose-ul:my-1 prose-li:my-0 prose-strong:text-foreground
                     prose-headings:text-foreground prose-headings:text-xs"
                   >
-                    <ReactMarkdown>{m.content || (loading && i === messages.length - 1 ? "…" : "")}</ReactMarkdown>
+                    <ReactMarkdown>{parsePersonas(m.content || (loading && i === messages.length - 1 ? "…" : "")).text}</ReactMarkdown>
                   </div>
+                  {parsePersonas(m.content).personas.length > 0 && (
+                    <PersonaBadges personas={parsePersonas(m.content).personas} />
+                  )}
                   {m.chartAnnotations && m.chartAnnotations.length > 0 ? (
                     <AnnotationPills annotations={m.chartAnnotations} />
                   ) : null}
@@ -230,7 +268,7 @@ export function ChartAiChat({
           {loading && messages[messages.length - 1]?.role === "user" && (
             <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
               <Loader2 className="w-3 h-3 animate-spin" />
-              Analysing chart…
+              Running personas…
             </div>
           )}
           <div ref={bottomRef} />

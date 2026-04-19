@@ -1,14 +1,18 @@
 import { createClient } from "@/lib/supabase/server";
 import type { ChartAnnotation, AnnotationRole } from "@/components/ticker-charts/types";
 import type { OhlcBar } from "@/components/ticker-charts/types";
+import { OLLAMA_HOST, DEFAULT_MODEL } from "@/lib/ollama";
+import { PERSONA_PROMPTS, ORCHESTRATOR_PROMPT, PERSONA_LABELS, type PersonaId } from "@/lib/chart-ai/personas";
+import {
+  fetchSentimentContext,
+  fetchRiskContext,
+  fetchFundamentalsContext,
+  formatSentimentContext,
+  formatRiskContext,
+  formatFundamentalsContext,
+} from "@/lib/chart-ai/persona-context";
 
-const OLLAMA_HOST = "https://ollama.com";
-const DEFAULT_MODEL = process.env.OLLAMA_DEFAULT_MODEL ?? "gpt-oss:120b";
-
-type OllamaMessage = {
-  role: "system" | "user" | "assistant";
-  content: string;
-};
+type OllamaMessage = { role: "system" | "user" | "assistant"; content: string };
 
 type RawAnnotation = {
   type?: string;
@@ -102,13 +106,56 @@ const DRAW_CHART_TOOL = {
   },
 };
 
-const SYSTEM_PROMPT = (symbol: string) =>
-  `You are an expert swing trading chart analyst for ${symbol}. ` +
-  `Always call the draw_on_chart tool to respond — include your annotations array and analysis text. ` +
-  `Only use prices that appear in the OHLC data provided. ` +
-  `Use dates from the OHLC data for trend lines.`;
+async function callPersona(
+  personaId: PersonaId,
+  symbol: string,
+  ohlcData: OhlcBar[],
+  personaContext: string,
+  existingAnnotations: ChartAnnotation[],
+): Promise<{ analysis: string; error?: string; ms: number }> {
+  const t0 = performance.now();
+  const systemPrompt = PERSONA_PROMPTS[personaId](symbol);
+  const dataBlock = `OHLC data for ${symbol} (last 60 sessions):\n\`\`\`\n${ohlcSummary(ohlcData)}\n\`\`\``;
+
+  const annotationContext = existingAnnotations.length > 0
+    ? `\n\nExisting annotations on the chart (${existingAnnotations.length} total):\n` +
+      existingAnnotations.map((a) => {
+        if (a.type === "horizontal") return `- horizontal ${a.role} at $${a.price}${a.label ? ` "${a.label}"` : ""}`;
+        if (a.type === "zone") return `- zone ${a.role} $${a.priceBottom}–$${a.priceTop}${a.label ? ` "${a.label}"` : ""}`;
+        if (a.type === "trend_line") return `- trend_line ${a.role} from ${a.fromDate} $${a.fromPrice} to ${a.toDate} $${a.toPrice}${a.label ? ` "${a.label}"` : ""}`;
+        return "";
+      }).join("\n")
+    : "";
+
+  const messages: OllamaMessage[] = [
+    { role: "system", content: systemPrompt },
+    { role: "user", content: `${dataBlock}${annotationContext}\n\n${personaContext}` },
+  ];
+
+  try {
+    const res = await fetch(`${OLLAMA_HOST}/api/chat`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${process.env.OLLAMA_API_KEY ?? ""}`,
+      },
+      body: JSON.stringify({ model: DEFAULT_MODEL, messages, stream: false }),
+    });
+
+    if (!res.ok) {
+      const t = await res.text().catch(() => res.statusText);
+      return { analysis: "", error: `${PERSONA_LABELS[personaId]} persona failed: ${res.status} ${t}`, ms: performance.now() - t0 };
+    }
+
+    const result = await res.json() as { message?: { content?: string } };
+    return { analysis: result.message?.content?.trim() ?? "", ms: performance.now() - t0 };
+  } catch (err) {
+    return { analysis: "", error: `${PERSONA_LABELS[personaId]} persona error: ${err instanceof Error ? err.message : String(err)}`, ms: performance.now() - t0 };
+  }
+}
 
 export async function POST(req: Request) {
+  const tTotal = performance.now();
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return new Response("Unauthorized", { status: 401 });
@@ -122,32 +169,85 @@ export async function POST(req: Request) {
 
   const { symbol, ohlcData, annotations: existingAnnotations = [], messages: history } = body;
 
-  const annotationContext = existingAnnotations.length > 0
-    ? `\n\nExisting annotations on the chart (${existingAnnotations.length} total — these are visible to the user):\n` +
-      existingAnnotations.map((a) => {
-        const origin = a.origin ?? "ai";
-        if (a.type === "horizontal") return `- [${origin}] horizontal ${a.role} at $${a.price}${a.label ? ` "${a.label}"` : ""}`;
-        if (a.type === "zone") return `- [${origin}] zone ${a.role} $${a.priceBottom}–$${a.priceTop}${a.label ? ` "${a.label}"` : ""}`;
-        if (a.type === "trend_line") return `- [${origin}] trend_line ${a.role} from ${a.fromDate} $${a.fromPrice} to ${a.toDate} $${a.toPrice}${a.label ? ` "${a.label}"` : ""}`;
-        return "";
-      }).join("\n")
-    : "";
+  // Fetch persona-specific context in parallel
+  const tData = performance.now();
+  const [sentimentCtx, riskCtx, fundamentalsCtx] = await Promise.all([
+    fetchSentimentContext(symbol).catch(() => null),
+    fetchRiskContext(symbol).catch(() => null),
+    fetchFundamentalsContext(symbol).catch(() => null),
+  ]);
+  console.log(`[chart-ai] data-fetch: ${Math.round(performance.now() - tData)}ms`);
 
-  const dataContext = `OHLC data for ${symbol} (last 60 sessions):\n\`\`\`\n${ohlcSummary(ohlcData)}\n\`\`\`${annotationContext}`;
+  // Build persona context strings (graceful degradation if data is missing)
+  const sentimentContextStr = sentimentCtx ? formatSentimentContext(sentimentCtx) : "No sentiment data available.";
+  const riskContextStr = riskCtx ? formatRiskContext(riskCtx) : "No risk data available.";
+  const fundamentalsContextStr = fundamentalsCtx ? formatFundamentalsContext(fundamentalsCtx) : "No fundamental data available.";
 
-  const messages: OllamaMessage[] = [
-    { role: "system", content: SYSTEM_PROMPT(symbol) },
-    { role: "user", content: dataContext },
-    ...history.map(m => ({ role: m.role as OllamaMessage["role"], content: m.content })),
+  // Run all 4 persona analyses in parallel
+  const tPersonas = performance.now();
+  const [techResult, sentimentResult, riskResult, fundamentalsResult] = await Promise.all([
+    callPersona("technical", symbol, ohlcData, "Provide your technical analysis based on the price and volume data above.", existingAnnotations),
+    callPersona("sentiment", symbol, ohlcData, sentimentContextStr, existingAnnotations),
+    callPersona("risk", symbol, ohlcData, riskContextStr, existingAnnotations),
+    callPersona("fundamentals", symbol, ohlcData, fundamentalsContextStr, existingAnnotations),
+  ]);
+  console.log(`[chart-ai] personas: ${Math.round(performance.now() - tPersonas)}ms (tech=${Math.round(techResult.ms)}ms sentiment=${Math.round(sentimentResult.ms)}ms risk=${Math.round(riskResult.ms)}ms fundamentals=${Math.round(fundamentalsResult.ms)}ms)`);
+
+  // Assemble specialist reports for orchestrator
+  const specialistReports: string[] = [];
+  const personas: { id: PersonaId; label: string; analysis: string }[] = [];
+
+  const allResults = [
+    { id: "technical" as PersonaId, ...techResult },
+    { id: "sentiment" as PersonaId, ...sentimentResult },
+    { id: "risk" as PersonaId, ...riskResult },
+    { id: "fundamentals" as PersonaId, ...fundamentalsResult },
   ];
 
+  for (const r of allResults) {
+    const label = PERSONA_LABELS[r.id];
+    if (r.error) {
+      specialistReports.push(`### ${label} Analysis\n[Error: ${r.error}]`);
+      personas.push({ id: r.id, label, analysis: `[Error: ${r.error}]` });
+    } else if (r.analysis) {
+      specialistReports.push(`### ${label} Analysis\n${r.analysis}`);
+      personas.push({ id: r.id, label, analysis: r.analysis });
+    } else {
+      specialistReports.push(`### ${label} Analysis\n[No data available]`);
+      personas.push({ id: r.id, label, analysis: "[No data available]" });
+    }
+  }
+
+  // Build orchestrator prompt
+  const orchestratorInput = [
+    `OHLC data for ${symbol} (last 60 sessions):\n\`\`\`\n${ohlcSummary(ohlcData)}\n\`\`\``,
+    existingAnnotations.length > 0
+      ? `\nExisting chart annotations (${existingAnnotations.length}):\n` +
+        existingAnnotations.map((a) => {
+          if (a.type === "horizontal") return `- horizontal ${a.role} at $${a.price}${a.label ? ` "${a.label}"` : ""}`;
+          if (a.type === "zone") return `- zone ${a.role} $${a.priceBottom}–$${a.priceTop}${a.label ? ` "${a.label}"` : ""}`;
+          if (a.type === "trend_line") return `- trend_line ${a.role} from ${a.fromDate} $${a.fromPrice} to ${a.toDate} $${a.toPrice}${a.label ? ` "${a.label}"` : ""}`;
+          return "";
+        }).join("\n")
+      : "",
+    `\n## Specialist Reports\n\n${specialistReports.join("\n\n")}`,
+  ].join("\n");
+
+  const orchestratorMessages: OllamaMessage[] = [
+    { role: "system", content: ORCHESTRATOR_PROMPT(symbol) },
+    ...history.map(m => ({ role: m.role as OllamaMessage["role"], content: m.content })),
+    { role: "user", content: orchestratorInput },
+  ];
+
+  // Call orchestrator with draw_on_chart tool
+  const tOrchestrator = performance.now();
   const upstream = await fetch(`${OLLAMA_HOST}/api/chat`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
       Authorization: `Bearer ${process.env.OLLAMA_API_KEY ?? ""}`,
     },
-    body: JSON.stringify({ model: DEFAULT_MODEL, messages, tools: [DRAW_CHART_TOOL], stream: false }),
+    body: JSON.stringify({ model: DEFAULT_MODEL, messages: orchestratorMessages, tools: [DRAW_CHART_TOOL], stream: false }),
   });
 
   if (!upstream.ok) {
@@ -158,6 +258,7 @@ export async function POST(req: Request) {
   let result: { message?: { content?: string; tool_calls?: { function: { name: string; arguments: unknown } }[] } };
   try { result = await upstream.json() as typeof result; }
   catch { return new Response("Invalid response from model", { status: 502 }); }
+  console.log(`[chart-ai] orchestrator: ${Math.round(performance.now() - tOrchestrator)}ms`);
 
   const message = result.message ?? {};
   const toolCalls = message.tool_calls ?? [];
@@ -174,11 +275,16 @@ export async function POST(req: Request) {
     }
   }
 
+  // Prepend persona labels to analysis for client-side rendering
+  const personaLine = personas.map((p) => `${p.label}`).join("|");
+  const enrichedAnalysis = `<!-- personas:${personaLine} -->\n${analysisText}`;
+
   const encoder = new TextEncoder();
+  console.log(`[chart-ai] total: ${Math.round(performance.now() - tTotal)}ms (data | personas | orchestrator)`);
   const stream = new ReadableStream({
     start(controller) {
       controller.enqueue(encoder.encode(`A:${JSON.stringify(annotations)}\n`));
-      controller.enqueue(encoder.encode(analysisText));
+      controller.enqueue(encoder.encode(enrichedAnalysis));
       controller.close();
     },
   });
