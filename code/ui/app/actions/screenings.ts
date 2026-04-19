@@ -315,3 +315,117 @@ export async function screeningsSoftDeleteRun(
   }
   return { ok: true, data: true };
 }
+
+export type ScreeningRunSummary = {
+  id: number;
+  scan_date: string;
+  source: string | null;
+};
+
+export async function screeningsListRuns(): Promise<
+  ScreeningActionSuccess<ScreeningRunSummary[]> | ScreeningActionError
+> {
+  const supabase = await createClient();
+  const { data: { user }, error: authError } = await supabase.auth.getUser();
+  if (authError || !user) return { ok: false, error: "Unauthorized" };
+
+  const { data, error } = await supabase
+    .schema("swingtrader")
+    .from("user_scan_runs")
+    .select("id, scan_date, source")
+    .eq("user_id", user.id)
+    .eq("status", "active")
+    .order("scan_date", { ascending: false })
+    .limit(50);
+
+  if (error) return { ok: false, error: error.message };
+  return {
+    ok: true,
+    data: (data ?? []).map((r) => ({
+      id: Number(r.id),
+      scan_date: String(r.scan_date ?? ""),
+      source: r.source != null ? String(r.source) : null,
+    })),
+  };
+}
+
+export async function screeningsCreateRun(
+  name: string,
+): Promise<ScreeningActionSuccess<ScreeningRunSummary> | ScreeningActionError> {
+  const trimmed = name.trim();
+  if (!trimmed) return { ok: false, error: "Name required" };
+
+  const supabase = await createClient();
+  const { data: { user }, error: authError } = await supabase.auth.getUser();
+  if (authError || !user) return { ok: false, error: "Unauthorized" };
+
+  const scanDate = new Date().toISOString().slice(0, 10);
+
+  const { data, error } = await supabase
+    .schema("swingtrader")
+    .from("user_scan_runs")
+    .insert({
+      scan_date: scanDate,
+      source: trimmed,
+      status: "active",
+      market_json: null,
+      result_json: null,
+      user_id: user.id,
+    })
+    .select("id, scan_date, source")
+    .single();
+
+  if (error) return { ok: false, error: error.message };
+  return {
+    ok: true,
+    data: {
+      id: Number((data as { id: number }).id),
+      scan_date: scanDate,
+      source: trimmed,
+    },
+  };
+}
+
+export async function screeningsAddTicker(
+  runId: number,
+  ticker: string,
+): Promise<ScreeningActionSuccess<{ id: number }> | ScreeningActionError> {
+  if (!Number.isFinite(runId) || runId < 1) return { ok: false, error: "Invalid run" };
+  const sym = ticker?.trim().toUpperCase();
+  if (!sym) return { ok: false, error: "Ticker required" };
+
+  const supabase = await createClient();
+  const { data: { user }, error: authError } = await supabase.auth.getUser();
+  if (authError || !user) return { ok: false, error: "Unauthorized" };
+
+  const { data: run, error: runErr } = await supabase
+    .schema("swingtrader")
+    .from("user_scan_runs")
+    .select("id, scan_date, status")
+    .eq("id", runId)
+    .eq("user_id", user.id)
+    .maybeSingle();
+
+  if (runErr) return { ok: false, error: runErr.message };
+  if (!run) return { ok: false, error: "Screening not found" };
+  if (run.status === "deleted") return { ok: false, error: "Screening has been deleted" };
+
+  const scanDate = String(run.scan_date ?? new Date().toISOString().slice(0, 10)).slice(0, 10);
+
+  const { data: inserted, error: insErr } = await supabase
+    .schema("swingtrader")
+    .from("user_scan_rows")
+    .insert({
+      run_id: runId,
+      scan_date: scanDate,
+      dataset: "charts_page",
+      symbol: sym,
+      row_data: {},
+      user_id: user.id,
+    })
+    .select("id")
+    .single();
+
+  if (insErr) return { ok: false, error: insErr.message };
+  return { ok: true, data: { id: Number((inserted as { id: number }).id) } };
+}

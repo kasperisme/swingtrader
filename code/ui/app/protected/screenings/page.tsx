@@ -99,8 +99,8 @@ function parseRow(
 async function fetchRows(runId: number): Promise<ScreeningRow[]> {
   const supabase = await createClient();
 
-  // Fetch both datasets: trend_template (ibd_screener) and passed_stocks (run_screener)
-  const [ttRes, psRes] = await Promise.all([
+  // trend_template + passed_stocks from screeners; charts_page = manual adds (Charts / Screenings UI)
+  const [ttRes, psRes, cpRes] = await Promise.all([
     supabase
       .schema("swingtrader")
       .from("user_scan_rows")
@@ -113,11 +113,28 @@ async function fetchRows(runId: number): Promise<ScreeningRow[]> {
       .select("id, run_id, symbol, row_data")
       .eq("run_id", runId)
       .eq("dataset", "passed_stocks"),
+    supabase
+      .schema("swingtrader")
+      .from("user_scan_rows")
+      .select("id, run_id, symbol, row_data")
+      .eq("run_id", runId)
+      .eq("dataset", "charts_page"),
   ]);
 
-  // Prefer passed_stocks (richer data) if present, else fall back to trend_template
-  const source =
+  const base =
     psRes.data && psRes.data.length > 0 ? psRes.data : (ttRes.data ?? []);
+  const baseSymbols = new Set(
+    base.map((r) => normalizeTicker(r.symbol)).filter(Boolean),
+  );
+  const seenManual = new Set<string>();
+  const manual: NonNullable<typeof cpRes.data> = [];
+  for (const r of cpRes.data ?? []) {
+    const s = normalizeTicker(r.symbol);
+    if (!s || baseSymbols.has(s) || seenManual.has(s)) continue;
+    seenManual.add(s);
+    manual.push(r);
+  }
+  const source = [...base, ...manual];
 
   return source.map((r) => {
     const raw = r.row_data;

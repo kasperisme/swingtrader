@@ -11,6 +11,7 @@ import {
 } from "react";
 import { Loader2 } from "lucide-react";
 import { fmpGetOhlc } from "@/app/actions/fmp";
+import { readChartViewCache, putChartViewCache } from "@/lib/chart-view-cache";
 import { subtractCalendarDays } from "@/lib/fmp-date-utils";
 import type { ChartPoint, OhlcBar, PivotMarker, ChartAnnotation } from "./types";
 import { resolvePivotBarIndex, ANNOTATION_COLORS } from "./types";
@@ -36,7 +37,7 @@ const CHART_MAX_VIEWPORT_BARS = 2500;
 /** Zoom-in limit (bars). */
 const CHART_MIN_VIEWPORT_BARS = 12;
 /** Wheel zoom: multiply viewport width per step (out = widen). */
-const CHART_ZOOM_WHEEL_FACTOR = 1.09;
+const CHART_ZOOM_WHEEL_FACTOR = 1.04;
 /** When panning past the oldest loaded bar, fetch up to this many calendar days further back (FMP daily). */
 const CHART_FETCH_PAST_DAYS = 400;
 /** Stop requesting older history beyond this many years before today. */
@@ -201,27 +202,66 @@ export function CandlestickSvg({
     viewportBarsRef.current = viewportBars;
   }, [viewportBars]);
 
+  const cacheWriteTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   useEffect(() => {
     setLoading(true);
     setError(null);
     setData([]);
+    setViewStart(0);
+    setViewportBars(CHART_DEFAULT_VIEWPORT_BARS);
+    setPriceOffset(0);
     pastExhaustedRef.current = false;
-    fmpGetOhlc(symbol)
-      .then((r) => {
-        if (!r.ok) {
+    const sym = symbol;
+
+    void (async () => {
+      try {
+        // Read cached view and OHLC data in parallel.
+        const [ohlcResult, cached] = await Promise.all([
+          fmpGetOhlc(sym),
+          readChartViewCache(),
+        ]);
+        if (sym !== symbolRef.current) return; // navigated away
+
+        if (!ohlcResult.ok) {
           setError("Failed to load chart data");
           return;
         }
-        const rows = r.data;
+        const rows = ohlcResult.data;
         setData(rows);
         const n = rows.length;
-        const len = Math.min(CHART_DEFAULT_VIEWPORT_BARS, n);
-        setViewportBars(len);
-        setViewStart(len >= n ? 0 : n - len);
-      })
-      .catch(() => setError("Failed to load chart data"))
-      .finally(() => setLoading(false));
+        const defaultLen = Math.min(CHART_DEFAULT_VIEWPORT_BARS, n);
+
+        if (cached) {
+          setViewportBars(cached.viewportBars);
+          setPriceOffset(cached.priceOffset);
+          // Scroll position is not cached globally — always show most recent bars.
+          const restoredLen = Math.min(cached.viewportBars, n);
+          setViewStart(restoredLen >= n ? 0 : n - restoredLen);
+        } else {
+          setViewportBars(defaultLen);
+          setViewStart(defaultLen >= n ? 0 : n - defaultLen);
+        }
+      } catch {
+        if (sym === symbolRef.current) setError("Failed to load chart data");
+      } finally {
+        if (sym === symbolRef.current) setLoading(false);
+      }
+    })();
   }, [symbol]);
+
+  // Debounced cache write — fires 600 ms after the view settles.
+  // Uses refs inside the timeout so values are always current when it fires.
+  useEffect(() => {
+    if (cacheWriteTimerRef.current) clearTimeout(cacheWriteTimerRef.current);
+    cacheWriteTimerRef.current = setTimeout(() => {
+      const vb = viewportBarsRef.current;
+      putChartViewCache({ viewportBars: vb, priceOffset });
+    }, 600);
+    return () => {
+      if (cacheWriteTimerRef.current) clearTimeout(cacheWriteTimerRef.current);
+    };
+  }, [symbol, viewStart, viewportBars, priceOffset]);
 
   useEffect(() => {
     if (!onChartMetrics) return;

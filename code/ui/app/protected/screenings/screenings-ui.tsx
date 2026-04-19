@@ -5,13 +5,14 @@ import { useRouter } from "next/navigation";
 import {
   CheckCircle, XCircle, Search, ChevronDown, ChevronUp,
   ChevronLeft, ChevronRight, BarChart2, List, TrendingUp, Loader2, Newspaper, Trash2, RotateCcw, Star, MessageSquare,
-  Activity, Copy, Gauge, Plus, Bot,
+  Activity, Copy, Gauge, Plus, Bot, FolderPlus,
 } from "lucide-react";
 import { AiAnalysisPanel } from "@/components/ai-analysis-panel";
 import { CLUSTERS } from "../vectors/dimensions";
 import { NewsTrendsUI, type ArticleImpact } from "../news-trends/news-trends-ui";
 import { getCachedQuotes, setCachedQuotes } from "@/lib/quote-cache";
 import { fmpGetQuote, fmpGetPriceAtDate } from "@/app/actions/fmp";
+import { relationshipsResolveTicker } from "@/app/actions/relationships";
 import {
   TickerChartsPanel,
   pivotFromMetadata,
@@ -22,6 +23,8 @@ import { createClient } from "@/lib/supabase/client";
 import {
   screeningsGetNewsImpacts,
   screeningsGetTickerSentimentHeadRows,
+  screeningsAddTicker,
+  screeningsCreateRun,
   screeningsSoftDeleteRun,
   screeningsUpsertDismissNote,
   type ScreeningTickerSentimentHeadRow,
@@ -1643,6 +1646,9 @@ export function ScreeningsUI({
   } | null>(null);
   const [savingWorkflowEditor, setSavingWorkflowEditor] = useState(false);
   const [deletingRunId, setDeletingRunId] = useState<number | null>(null);
+  const [newScreeningName, setNewScreeningName] = useState("");
+  const [creatingRun, setCreatingRun] = useState(false);
+  const [addTickerBusy, setAddTickerBusy] = useState(false);
   const [aiSelectedRow, setAiSelectedRow] = useState<ScreeningRow | null>(null);
 
   // Load persisted UI preferences only after hydration to avoid SSR/client mismatch.
@@ -2052,6 +2058,52 @@ export function ScreeningsUI({
     router.push(`/protected/screenings?run=${id}`);
   }
 
+  async function handleCreateScreening() {
+    const name = newScreeningName.trim();
+    if (!name || creatingRun) return;
+    setCreatingRun(true);
+    try {
+      const res = await screeningsCreateRun(name);
+      if (!res.ok) {
+        window.alert(res.error);
+        return;
+      }
+      setNewScreeningName("");
+      router.push(`/protected/screenings?run=${res.data.id}`);
+      router.refresh();
+    } finally {
+      setCreatingRun(false);
+    }
+  }
+
+  async function handleAddTickerFromSearch() {
+    if (selectedRunId == null || addTickerBusy) return;
+    const raw = search.trim();
+    if (!raw) return;
+    setAddTickerBusy(true);
+    try {
+      const resolved = await relationshipsResolveTicker(raw);
+      if (!resolved.ok) {
+        window.alert(resolved.error);
+        return;
+      }
+      const sym = resolved.data.canonicalTicker;
+      if (rows.some((r) => r.symbol === sym)) {
+        window.alert(`${sym} is already in this screening.`);
+        return;
+      }
+      const res = await screeningsAddTicker(selectedRunId, sym);
+      if (!res.ok) {
+        window.alert(res.error);
+        return;
+      }
+      setSearch("");
+      router.refresh();
+    } finally {
+      setAddTickerBusy(false);
+    }
+  }
+
   async function softDeleteRun(runId: number) {
     if (
       !window.confirm(
@@ -2255,6 +2307,19 @@ export function ScreeningsUI({
     return result;
   }, [rows, rowNotes, filters, search, sortKey, sortDir]);
 
+  /** No visible rows for this search; query looks like a ticker and is not already in the screening. */
+  const searchAddTickerOffer = useMemo(() => {
+    if (selectedRunId == null) return false;
+    const q = search.trim();
+    if (!q) return false;
+    if (filtered.length > 0) return false;
+    if (q.length > 16) return false;
+    if (!/^[A-Za-z][A-Za-z0-9.\-]*$/.test(q)) return false;
+    const upper = q.toUpperCase();
+    if (rows.some((r) => r.symbol === upper)) return false;
+    return true;
+  }, [selectedRunId, search, filtered.length, rows]);
+
   const filteredSymbols = useMemo(() => filtered.map(r => r.symbol).filter(Boolean) as string[], [filtered]);
 
   /** Chart carousel includes filtered symbols first, then any pivot-marked tickers not in the current filter so pivots always stay on-chart. */
@@ -2359,9 +2424,45 @@ export function ScreeningsUI({
     <div className="flex flex-col gap-4 min-h-0 w-full">
       {/* Scan runs — horizontal selector (scrolls when many runs) */}
       <div className="flex flex-col gap-2 shrink-0">
-        <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Scan runs</p>
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between sm:gap-3">
+          <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide shrink-0">
+            Scan runs
+          </p>
+          <form
+            className="flex flex-wrap items-center gap-2 min-w-0"
+            onSubmit={(e) => {
+              e.preventDefault();
+              void handleCreateScreening();
+            }}
+          >
+            <input
+              type="text"
+              value={newScreeningName}
+              onChange={(e) => setNewScreeningName(e.target.value)}
+              placeholder="New screening name…"
+              maxLength={120}
+              disabled={creatingRun}
+              className="min-w-[10rem] flex-1 sm:flex-initial sm:w-56 rounded-md border border-input bg-background px-2.5 py-1.5 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-60"
+              aria-label="New screening name"
+            />
+            <button
+              type="submit"
+              disabled={creatingRun || !newScreeningName.trim()}
+              className="inline-flex items-center gap-1.5 shrink-0 rounded-md border border-border bg-background px-2.5 py-1.5 text-xs font-medium text-foreground transition-colors hover:bg-muted disabled:pointer-events-none disabled:opacity-40"
+            >
+              {creatingRun ? (
+                <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden />
+              ) : (
+                <FolderPlus className="h-3.5 w-3.5" aria-hidden />
+              )}
+              Create screening
+            </button>
+          </form>
+        </div>
         {runs.length === 0 ? (
-          <p className="text-sm text-muted-foreground">No runs yet.</p>
+          <p className="text-sm text-muted-foreground">
+            No screenings yet. Name one above and click Create — then add tickers from Charts or the Add to screening control.
+          </p>
         ) : (
           <div className="flex gap-2 overflow-x-auto pb-1 -mx-1 px-1 [scrollbar-width:thin]">
             {runs.map(run => {
@@ -2420,16 +2521,54 @@ export function ScreeningsUI({
       {/* Main panel */}
       <div className="flex-1 min-w-0 flex flex-col gap-4">
         {/* Search + count */}
-        <div className="flex items-center gap-3">
-          <div className="relative">
-            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-            <input
-              type="text"
-              placeholder="Search symbol or any row field…"
-              value={search}
-              onChange={e => setSearch(e.target.value)}
-              className="pl-8 pr-3 py-1.5 text-sm rounded-md border border-input bg-background focus:outline-none focus:ring-1 focus:ring-ring w-52"
-            />
+        <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-start sm:gap-3">
+          <div className="flex flex-col gap-1.5 min-w-0 shrink-0 w-full max-w-[min(100%,20rem)] sm:w-56">
+            <div className="relative w-full">
+              <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none" />
+              <input
+                type="text"
+                placeholder={
+                  selectedRunId != null
+                    ? "Search rows, or type a symbol to add…"
+                    : "Search symbol or any row field…"
+                }
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key !== "Enter") return;
+                  if (!searchAddTickerOffer || addTickerBusy) return;
+                  e.preventDefault();
+                  void handleAddTickerFromSearch();
+                }}
+                disabled={addTickerBusy}
+                className="w-full pl-8 pr-3 py-1.5 text-sm rounded-md border border-input bg-background focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-60"
+                aria-describedby={searchAddTickerOffer ? "screenings-search-add-hint" : undefined}
+              />
+            </div>
+            {searchAddTickerOffer ? (
+              <div
+                id="screenings-search-add-hint"
+                className="flex flex-col gap-1.5 rounded-md border border-border bg-muted/30 px-2.5 py-2 text-xs"
+              >
+                <p className="text-muted-foreground leading-snug">
+                  No matches in this screening for{" "}
+                  <span className="font-mono font-medium text-foreground">{search.trim().toUpperCase()}</span>.
+                </p>
+                <button
+                  type="button"
+                  disabled={addTickerBusy}
+                  onClick={() => void handleAddTickerFromSearch()}
+                  className="inline-flex w-fit items-center gap-1.5 rounded-md border border-border bg-background px-2 py-1 font-medium text-foreground transition-colors hover:bg-muted disabled:pointer-events-none disabled:opacity-40"
+                >
+                  {addTickerBusy ? (
+                    <Loader2 className="h-3.5 w-3.5 animate-spin shrink-0" aria-hidden />
+                  ) : (
+                    <Plus className="h-3.5 w-3.5 shrink-0" aria-hidden />
+                  )}
+                  Add to this screening
+                </button>
+              </div>
+            ) : null}
           </div>
           {dismissedCount > 0 && (
             <button

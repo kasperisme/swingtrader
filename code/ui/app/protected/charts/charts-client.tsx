@@ -1,7 +1,8 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Loader2 } from "lucide-react";
+import { chartWorkspaceLoad, chartWorkspaceSave, type ChartAiChatMessage } from "@/app/actions/chart-workspace";
 import { relationshipsResolveTicker } from "@/app/actions/relationships";
 import { TickerSearchCombobox } from "@/components/ticker-search-combobox";
 import {
@@ -13,6 +14,7 @@ import {
   type TickerChartNoteStatus,
 } from "@/components/ticker-charts";
 import { ChartAiChat } from "@/components/chart-ai-chat";
+import { AddToScreening } from "@/components/add-to-screening";
 
 const DEFAULT_TICKERS = ["SPY", "QQQ", "IWM"] as const;
 
@@ -48,11 +50,53 @@ export function ChartsPageClient({
   const [pivots, setPivots] = useState<Record<string, PivotMarker | null>>({});
   const [chartData, setChartData] = useState<OhlcBar[]>([]);
   const [annotations, setAnnotations] = useState<ChartAnnotation[]>([]);
+  const [aiChatMessages, setAiChatMessages] = useState<ChartAiChatMessage[]>([]);
+  const [workspaceReady, setWorkspaceReady] = useState(false);
+  const saveSeq = useRef(0);
 
   useEffect(() => {
-    setAnnotations([]);
     setChartData([]);
   }, [selectedTicker]);
+
+  useEffect(() => {
+    setWorkspaceReady(false);
+    if (!selectedTicker) {
+      setAnnotations([]);
+      setAiChatMessages([]);
+      return;
+    }
+    setAnnotations([]);
+    setAiChatMessages([]);
+    let cancelled = false;
+    void chartWorkspaceLoad(selectedTicker).then((res) => {
+      if (cancelled) return;
+      if (res.ok) {
+        setAnnotations(res.data.annotations);
+        setAiChatMessages(res.data.aiChatMessages);
+      } else {
+        console.error("chartWorkspaceLoad:", res.error);
+      }
+      if (!cancelled) setWorkspaceReady(true);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedTicker]);
+
+  useEffect(() => {
+    if (!selectedTicker || !workspaceReady) return;
+    const seq = ++saveSeq.current;
+    const t = setTimeout(() => {
+      if (seq !== saveSeq.current) return;
+      void chartWorkspaceSave(selectedTicker, {
+        annotations,
+        aiChatMessages,
+      });
+    }, 750);
+    return () => {
+      clearTimeout(t);
+    };
+  }, [annotations, aiChatMessages, selectedTicker, workspaceReady]);
 
   const dismissed = useMemo(() => new Set<string>(), []);
 
@@ -191,6 +235,7 @@ export function ChartsPageClient({
           onChartData={setChartData}
           onAnnotationAdd={handleAnnotationAdd}
           onAnnotationDelete={handleAnnotationDelete}
+          symbolPicker={selectedTicker ? <AddToScreening ticker={selectedTicker} /> : undefined}
         />
         {selectedTicker && (
           <ChartAiChat
@@ -199,6 +244,8 @@ export function ChartsPageClient({
             ohlcData={chartData}
             annotations={annotations}
             onAnnotations={handleAiAnnotations}
+            messages={aiChatMessages}
+            setMessages={setAiChatMessages}
           />
         )}
       </div>
