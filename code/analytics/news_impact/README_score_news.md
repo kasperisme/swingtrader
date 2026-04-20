@@ -60,6 +60,13 @@ python -m news_impact.score_news_cli --fmp-news --sparse-fill 30 10
 python -m news_impact.score_news_cli --fmp-news --sparse-fill 30 10 --sparse-fill-loop
 ```
 
+# Fetch recent X (Twitter) posts mentioning stock cashtags
+python -m news_impact.score_news_cli --x-news --tickers AAPL MSFT NVDA
+python -m news_impact.score_news_cli --x-news --tickers TSLA --x-limit 50
+# Fetch X posts from specific accounts mentioning stock cashtags
+python -m news_impact.score_news_cli --x-news --tickers AAPL --x-accounts finansworld seekingalpha
+python -m news_impact.score_news_cli --x-news --tickers TSLA --x-accounts tsla elonmusk --x-limit 100
+
 ## Options
 
 ### Article source (mutually exclusive, one required)
@@ -187,6 +194,7 @@ python -m news_impact.score_news_cli --fmp-news --to 2025-11-30
 | `--url URL`                  | —       | Fetch article from URL (source mode).                                   |
 | `--use-cache`                | off     | Prefer on-disk company vector cache.                                    |
 | `--verbose` / `-v`           | off     | Debug logging.                                                          |
+| `--x-accounts ACCOUNT ...`   | —       | Specific X accounts to fetch posts from (without @ symbol, requires --x-news and --tickers). |
 
 ## Output
 

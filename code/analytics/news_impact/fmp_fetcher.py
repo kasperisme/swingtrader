@@ -12,6 +12,7 @@ import logging
 import os
 from dataclasses import dataclass, field
 from datetime import datetime
+from typing import Optional, Union, List, Dict
 
 import httpx
 
@@ -33,7 +34,7 @@ _FMP_NEWS_GENERAL_LATEST = "news/general-latest"
 
 # Module-level lock — ensures at most one FMP request is dispatched every _DELAY seconds
 # regardless of how many tickers are being fetched concurrently.
-_rate_lock: asyncio.Lock | None = None
+_rate_lock: Optional[asyncio.Lock] = None
 
 
 def _get_rate_lock() -> asyncio.Lock:
@@ -79,10 +80,10 @@ class FMPFetcher:
         client: httpx.AsyncClient,
         endpoint: str,
         params: dict,
-        base_url: str | None = None,
+        base_url: Optional[str] = None,
         *,
         expect_sparse_misses: bool = False,
-    ) -> list | dict | None:
+    ) -> Union[list, dict, None]:
         """
         Single async GET with global rate limiting and 429 retry/backoff.
 
@@ -228,11 +229,11 @@ class FMPFetcher:
 
     async def fetch_stock_news(
         self,
-        tickers: list[str] | None = None,
+        tickers: Optional[List[str]] = None,
         limit: int = 20,
         page: int = 0,
-        from_date: str | None = None,
-        to_date: str | None = None,
+        from_date: Optional[str] = None,
+        to_date: Optional[str] = None,
         *,
         expect_sparse_misses: bool = False,
     ) -> list[dict]:
@@ -299,8 +300,8 @@ class FMPFetcher:
         self,
         limit: int = 20,
         page: int = 0,
-        from_date: str | None = None,
-        to_date: str | None = None,
+        from_date: Optional[str] = None,
+        to_date: Optional[str] = None,
         *,
         expect_sparse_misses: bool = False,
     ) -> list[dict]:

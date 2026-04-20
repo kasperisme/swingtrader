@@ -4,15 +4,18 @@ Ops:
 [ ] Send daily operational reports
 
 Dev:
+Prio 1:
+[x] Implement stripe
+[ ] Implement pricing gates throughout the application and API
+
+Prio 2:
 [ ] Make sure IBD screener script runs through API
 [ ] Set up company vector updating
 [ ] Implement anlytical agent in screening sites as well (copy from chart)
-[ ] Setup X ingestion
+[ ] Setup X ingestion (show trump x posts in the graph)
 [ ] Get embedding searching to work with the ollama model
-[ ] Implement stripe
 [ ] Seperate newsimpactscreener FMP integration with personal API key
 [ ] Ensure robustness of telegram bots
-[ ] Implement pricing gates throughout the application and API
 [ ] Ensure that backfilling backfills on stream and not total
 
 Marketing:

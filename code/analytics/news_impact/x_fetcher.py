@@ -3,6 +3,7 @@ X (Twitter) fetcher for stock-related posts.
 
 Uses the official X Python SDK (xdk) with app-only Bearer Token authentication.
 Searches recent posts by cashtag (e.g. $AAPL) for a list of tickers.
+Can optionally restrict search to specific X accounts.
 
 Environment variable required:
   X_BEARER_TOKEN  — app-only bearer token from the X developer portal
@@ -20,8 +21,6 @@ logger = logging.getLogger(__name__)
 # Minimum engagement threshold — posts below this are likely noise
 _MIN_LIKES = 5
 
-# tweet_fields to request from the API
-_TWEET_FIELDS = "created_at,author_id,public_metrics"
 
 # X post URL template
 _POST_URL = "https://x.com/i/web/status/{post_id}"
@@ -51,115 +50,166 @@ class XFetcher:
     """
 
     def __init__(self) -> None:
-        self.bearer_token = os.environ.get("X_BEARER_TOKEN", "")
-        if not self.bearer_token:
+        import urllib.parse
+
+        raw_token = os.environ.get("X_BEARER_TOKEN", "")
+        if not raw_token:
             raise RuntimeError("X_BEARER_TOKEN must be set in .env to use --x-news")
+        # URL-decode the token if it's encoded (as it often is in .env files)
+        self.bearer_token = urllib.parse.unquote(raw_token)
 
-    def _build_query(self, tickers: list[str]) -> str:
+    def _build_query(
+        self, tickers: Optional[list[str]] = None, accounts: Optional[list[str]] = None
+    ) -> str:
         """
-        Build an X search query for the given tickers.
+        Build an X search query for the given tickers and/or accounts.
 
-        Searches cashtags ($AAPL OR $MSFT …) excluding retweets and replies
-        to focus on original content.
+        At least one of ``tickers`` or ``accounts`` must be provided.
+        Excludes retweets and replies to focus on original content.
         """
-        cashtags = " OR ".join(f"${t}" for t in tickers[:10])  # X query max ~512 chars
-        return f"({cashtags}) -is:retweet -is:reply lang:en"
+        parts: list[str] = []
+
+        if tickers:
+            parts.append("(" + " OR ".join(f"${t}" for t in tickers[:10]) + ")")
+
+        if accounts:
+            clean_accounts = [acc.lstrip("@") for acc in accounts]
+            account_query = " OR ".join(f"from:{acc}" for acc in clean_accounts[:10])
+            if len(clean_accounts) > 1:
+                parts.append("(" + account_query + ")")
+            else:
+                parts.append(account_query)
+
+        if not parts:
+            raise ValueError("At least one of tickers or accounts is required")
+
+        return " ".join(parts)
 
     def fetch_stock_posts(
         self,
-        tickers: list[str],
+        tickers: Optional[list[str]] = None,
         max_results: int = 50,
+        accounts: Optional[list[str]] = None,
     ) -> list[dict]:
         """
-        Search recent X posts mentioning the given stock tickers.
+        Search all X posts (full archive) mentioning the given stock tickers and/or accounts.
 
         Parameters
         ----------
-        tickers     : list of ticker symbols (e.g. ["AAPL", "MSFT"])
+        tickers     : list of ticker symbols (e.g. ["AAPL", "MSFT"]), or None if only filtering by account
         max_results : max posts to return across all tickers (up to 100 per API page)
+        accounts    : list of X account names (e.g. ["realDonaldTrump", "elonmusk"])
+
+        At least one of ``tickers`` or ``accounts`` must be provided.
 
         Returns
         -------
         List of dicts with keys: symbol, title, text, url, published_at,
         publisher, public_metrics.  Empty list on failure or missing token.
         """
-        from xdk import Client  # imported here so the module loads without xdk installed
+        from xdk import (
+            Client,
+        )  # imported here so the module loads without xdk installed
 
-        if not tickers:
+        if not tickers and not accounts:
             return []
 
         client = Client(bearer_token=self.bearer_token)
-        query = self._build_query(tickers)
-        # API max per page is 100; clamp to that
-        per_page = min(max_results, 100)
+        query = self._build_query(tickers=tickers, accounts=accounts)
+        # search_recent: min 10, max 100
+        per_page = max(10, min(max_results, 100))
 
         results: list[dict] = []
         try:
             for page in client.posts.search_recent(
                 query=query,
                 max_results=per_page,
-                tweet_fields=_TWEET_FIELDS,
+                tweet_fields=["created_at", "author_id"],
+                expansions=["author_id"],
+                user_fields=["username"],
             ):
                 if not page.data:
                     break
-                for post in page.data:
-                    metrics = getattr(post, "public_metrics", None) or {}
-                    likes = metrics.get("like_count", 0) if isinstance(metrics, dict) else getattr(metrics, "like_count", 0)
-                    if likes < _MIN_LIKES:
-                        continue
 
-                    text = (post.text or "").strip()
+                # Build id→username lookup from expanded users
+                users_by_id: dict[str, str] = {}
+                includes = getattr(page, "includes", None)
+                if includes:
+                    raw_users = (
+                        includes.get("users", []) if isinstance(includes, dict)
+                        else getattr(includes, "users", None) or []
+                    )
+                    for user in raw_users:
+                        uid = str(user.get("id") if isinstance(user, dict) else user.id)
+                        uname = (user.get("username") if isinstance(user, dict) else user.username) or ""
+                        users_by_id[uid] = uname
+
+                for post in page.data:
+                    # SDK may return dicts or objects depending on version
+                    if isinstance(post, dict):
+                        text = (post.get("text") or "").strip()
+                        post_id = str(post.get("id") or "")
+                        created_at = post.get("created_at")
+                        author_id = str(post.get("author_id") or "")
+                    else:
+                        text = (post.text or "").strip()
+                        post_id = str(post.id)
+                        created_at = getattr(post, "created_at", None)
+                        author_id = str(getattr(post, "author_id", "") or "")
+
                     if not text:
                         continue
 
-                    # Detect which ticker(s) this post mentions
                     symbol = _detect_symbol(text, tickers)
-                    post_id = str(post.id)
                     url = _POST_URL.format(post_id=post_id)
-                    published_at = _normalize_x_created_at(
-                        getattr(post, "created_at", None)
-                    )
+                    published_at = _normalize_x_created_at(created_at)
+                    username = users_by_id.get(author_id, author_id or "x_user")
 
-                    # Use first 120 chars as title proxy
                     title = text[:120].replace("\n", " ")
                     if len(text) > 120:
                         title += "…"
 
-                    if isinstance(metrics, dict):
-                        metrics_dict = metrics
-                    else:
-                        metrics_dict = {
-                            "like_count": getattr(metrics, "like_count", 0),
-                            "retweet_count": getattr(metrics, "retweet_count", 0),
-                            "reply_count": getattr(metrics, "reply_count", 0),
-                            "quote_count": getattr(metrics, "quote_count", 0),
+                    results.append(
+                        {
+                            "symbol": symbol,
+                            "title": title,
+                            "text": text,
+                            "url": url,
+                            "published_at": published_at,
+                            "publisher": f"@{username}",
+                            "post_id": post_id,
                         }
+                    )
 
-                    results.append({
-                        "symbol": symbol,
-                        "title": title,
-                        "text": text,
-                        "url": url,
-                        "published_at": published_at,
-                        "publisher": f"@{getattr(post, 'author_id', 'x_user')}",
-                        "public_metrics": metrics_dict,
-                        "post_id": post_id,
-                    })
-
-                if len(results) >= max_results:
-                    break
+                break
 
         except Exception as exc:
-            logger.warning("[XFetcher] search_recent failed: %s", exc)
-            return []
+            exc_msg = str(exc)
+            if "402" in exc_msg:
+                print(
+                    f"[XFetcher] search_recent failed: 402 Payment Required — "
+                    f"X API credits exhausted. Returning {len(results)} post(s) already fetched."
+                )
+            elif "429" in exc_msg:
+                print(
+                    f"[XFetcher] search_recent rate-limited (429). "
+                    f"Returning {len(results)} post(s) already fetched."
+                )
+            else:
+                print(
+                    f"[XFetcher] search_recent failed: {exc!r}. "
+                    f"Returning {len(results)} post(s) already fetched."
+                )
 
         return results[:max_results]
 
 
-def _detect_symbol(text: str, tickers: list[str]) -> str:
-    """Return the first ticker from ``tickers`` mentioned as a cashtag in ``text``."""
+def _detect_symbol(text: str, tickers: Optional[list[str]] = None) -> str:
+    """Return the first ticker from ``tickers`` mentioned as a cashtag in ``text``, or empty string."""
+    if not tickers:
+        return ""
     text_upper = text.upper()
     for ticker in tickers:
         if f"${ticker}" in text_upper:
             return ticker
-    return tickers[0] if tickers else ""
+    return tickers[0]

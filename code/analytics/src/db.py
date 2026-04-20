@@ -94,12 +94,18 @@ def count_news_articles_per_calendar_day_utc(n_days: int) -> dict[date, int]:
 _EASTERN = ZoneInfo("America/New_York")
 
 
-def count_news_articles_per_calendar_day_eastern(n_days: int) -> dict[date, int]:
+def count_news_articles_per_calendar_day_eastern(
+    n_days: int,
+    article_stream: str | None = None,
+) -> dict[date, int]:
     """
     Count stored news rows per US Eastern calendar day for the last ``n_days`` (inclusive of today ET).
 
     Each row is bucketed by the US Eastern date of ``COALESCE(published_at, created_at)``.
     Days with no rows are included with count ``0``.
+
+    If ``article_stream`` is given, only rows with that stream label are counted
+    (e.g. ``"fmp_stock"`` or ``"fmp_general"``).  Pass ``None`` (default) to count all rows.
 
     Use this instead of the UTC variant when the consumer uses Eastern-time date parameters
     (e.g. the FMP stock-news API).
@@ -110,6 +116,11 @@ def count_news_articles_per_calendar_day_eastern(n_days: int) -> dict[date, int]
     start = today - timedelta(days=n_days - 1)
     out: dict[date, int] = {start + timedelta(days=i): 0 for i in range(n_days)}
     schema = get_schema()
+    stream_filter = ""
+    params: list = [start, today]
+    if article_stream:
+        stream_filter = " AND article_stream = %s"
+        params.append(article_stream)
     sql = f"""
         SELECT
             ((COALESCE(published_at, created_at) AT TIME ZONE 'America/New_York')::date) AS d,
@@ -117,12 +128,13 @@ def count_news_articles_per_calendar_day_eastern(n_days: int) -> dict[date, int]
         FROM {schema}.news_articles
         WHERE ((COALESCE(published_at, created_at) AT TIME ZONE 'America/New_York')::date)
               BETWEEN %s AND %s
+              {stream_filter}
         GROUP BY 1
     """
     conn = get_pg_connection()
     try:
         cur = conn.cursor()
-        cur.execute(sql, (start, today))
+        cur.execute(sql, params)
         for row in cur.fetchall() or []:
             d, c = row[0], int(row[1])
             if d in out:
@@ -410,6 +422,22 @@ def ensure_schema(client: Optional[Client] = None) -> None:
         cur.execute(
             f"CREATE INDEX IF NOT EXISTS idx_job_runs_started ON {schema}.job_runs(started_at DESC)"
         )
+
+        cur.execute(f"""
+            CREATE TABLE IF NOT EXISTS {schema}.news_source_dry_days (
+                source_stream  VARCHAR NOT NULL,
+                day            DATE    NOT NULL,
+                marked_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                pages_checked  INTEGER NOT NULL DEFAULT 0,
+                articles_found INTEGER NOT NULL DEFAULT 0,
+                note           TEXT,
+                PRIMARY KEY (source_stream, day)
+            )
+        """)
+        cur.execute(f"""
+            CREATE INDEX IF NOT EXISTS idx_news_source_dry_days_day
+            ON {schema}.news_source_dry_days (day DESC)
+        """)
 
         conn.commit()
     finally:
@@ -828,3 +856,105 @@ def load_company_vectors(
         except (json.JSONDecodeError, TypeError, ValueError):
             continue
     return results
+
+
+# ---------------------------------------------------------------------------
+# News source dry-day tracking
+# ---------------------------------------------------------------------------
+
+def mark_source_day_dry(
+    source_stream: str,
+    day: date,
+    *,
+    pages_checked: int = 0,
+    articles_found: int = 0,
+    note: str | None = None,
+) -> None:
+    """
+    Mark a (source_stream, day) as dry — all pages exhausted, no new content.
+
+    Upserts so re-marking a day updates ``marked_at`` and counters.
+    """
+    client = get_supabase_client()
+    schema = get_schema()
+    row = {
+        "source_stream": source_stream,
+        "day": day.isoformat(),
+        "marked_at": datetime.now(timezone.utc).isoformat(),
+        "pages_checked": pages_checked,
+        "articles_found": articles_found,
+        "note": note,
+    }
+    (
+        client.schema(schema).table("news_source_dry_days")
+        .upsert(row, on_conflict="source_stream,day")
+        .execute()
+    )
+
+
+def is_source_day_dry(source_stream: str, day: date) -> bool:
+    """Return True if (source_stream, day) was previously marked dry."""
+    client = get_supabase_client()
+    schema = get_schema()
+    res = (
+        client.schema(schema).table("news_source_dry_days")
+        .select("source_stream")
+        .eq("source_stream", source_stream)
+        .eq("day", day.isoformat())
+        .limit(1)
+        .execute()
+    )
+    return bool(res.data)
+
+
+def get_dry_days(
+    source_stream: str,
+    n_days: int,
+) -> set[date]:
+    """
+    Return the set of calendar days (ET) in the last ``n_days`` marked dry
+    for the given ``source_stream``.
+    """
+    if n_days < 1:
+        return set()
+    today = datetime.now(_EASTERN).date()
+    start = today - timedelta(days=n_days - 1)
+    client = get_supabase_client()
+    schema = get_schema()
+    res = (
+        client.schema(schema).table("news_source_dry_days")
+        .select("day")
+        .eq("source_stream", source_stream)
+        .gte("day", start.isoformat())
+        .lte("day", today.isoformat())
+        .execute()
+    )
+    dry: set[date] = set()
+    for row in (res.data or []):
+        val = row.get("day")
+        if val is not None:
+            d = date.fromisoformat(str(val)) if isinstance(val, str) else val
+            dry.add(d)
+    return dry
+
+
+def clear_dry_days(
+    source_stream: str | None = None,
+    *,
+    before: date | None = None,
+) -> int:
+    """
+    Remove dry-day records. Returns count of deleted rows.
+
+    - ``source_stream=None``: clear all streams.
+    - ``before``: only clear days before this date.
+    """
+    client = get_supabase_client()
+    schema = get_schema()
+    q = client.schema(schema).table("news_source_dry_days").delete()
+    if source_stream:
+        q = q.eq("source_stream", source_stream)
+    if before is not None:
+        q = q.lt("day", before.isoformat())
+    res = q.execute()
+    return len(res.data or [])

@@ -18,7 +18,7 @@ import logging
 import os
 import sys
 import time
-from typing import Any, Optional
+from typing import Any, Optional, Union
 
 import httpx
 
@@ -50,7 +50,7 @@ def _emit_full_response(r: httpx.Response) -> None:
     print("[do_agent] ----- end full response -----", file=sys.stderr)
 
 
-def _slice_outer_json_object(s: str) -> str | None:
+def _slice_outer_json_object(s: str) -> Optional[str]:
     """First balanced {...} in s (string-aware); None if unclosed."""
     start = s.find("{")
     if start < 0:
@@ -84,7 +84,7 @@ def _slice_outer_json_object(s: str) -> str | None:
     return None
 
 
-def _parseable_json_object_slice(s: str) -> str | None:
+def _parseable_json_object_slice(s: str) -> Optional[str]:
     """Return first balanced JSON object substring if ``json.loads`` succeeds."""
     blob = _slice_outer_json_object(s.strip())
     if blob is None:

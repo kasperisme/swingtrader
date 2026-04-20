@@ -36,10 +36,21 @@ Usage:
     # Fetch recent X (Twitter) posts mentioning stock cashtags
     python -m news_impact.score_news_cli --x-news --tickers AAPL MSFT NVDA
     python -m news_impact.score_news_cli --x-news --tickers TSLA --x-limit 50
+    python -m news_impact.score_news_cli --x-news --x-accounts realDonaldTrump elonmusk
+    python -m news_impact.score_news_cli --x-news --tickers DJT --x-accounts realDonaldTrump
 
     # Embed + score companies
     python -m news_impact.score_news_cli --text "..." --tickers AAPL MSFT NVDA JPM XOM
     python -m news_impact.score_news_cli --url "..." --tickers AAPL MSFT --use-cache
+
+Dry-day tracking:
+    Days where all API pages were exhausted with zero new inserts are recorded
+    in news_source_dry_days (keyed by source_stream + day). Subsequent batch
+    runs skip dry days by default (--dry-skip, on for --fmp-news / --x-news /
+    --sparse-fill). Use --no-dry-skip to re-process. Use --clear-dry to reset.
+
+    python -m news_impact.score_news_cli --clear-dry
+    python -m news_impact.score_news_cli --clear-dry --clear-dry-stream fmp_stock
 """
 
 from __future__ import annotations
@@ -87,10 +98,14 @@ from news_impact.news_ingester import (
 from news_impact.embeddings import enqueue_article_embedding_job
 from src.db import (
     _as_json,
+    clear_dry_days,
     count_news_articles_per_calendar_day_eastern,
+    get_dry_days,
     get_schema,
     get_supabase_client,
+    is_source_day_dry,
     load_article_tickers,
+    mark_source_day_dry,
     patch_news_article_image_if_missing,
     save_article_tickers,
 )
@@ -301,6 +316,41 @@ def _manual_stream_from_args(args: argparse.Namespace) -> str:
     if args.text:
         return "manual_text"
     return "unknown"
+
+
+def _source_stream_for_args(args: argparse.Namespace) -> str:
+    """Return the article_stream label for the current batch mode."""
+    if args.x_news:
+        return "x_post"
+    feed = getattr(args, "fmp_news_feed", "stock") or "stock"
+    if feed == "general":
+        return "fmp_general"
+    if feed == "both":
+        return "fmp_both"
+    return "fmp_stock"
+
+
+def _mark_dry_if_exhausted(
+    source_stream: str,
+    target_day: date,
+    pages_checked: int,
+    articles_found: int,
+) -> None:
+    """Mark a (source_stream, day) as dry when all pages were exhausted with no new inserts."""
+    try:
+        mark_source_day_dry(
+            source_stream,
+            target_day,
+            pages_checked=pages_checked,
+            articles_found=articles_found,
+            note="all pages exhausted, 0 new inserts",
+        )
+        console.print(
+            f"  [dim]Marked {target_day.isoformat()} as dry for {source_stream} "
+            f"({pages_checked} pages checked, {articles_found} articles found)[/dim]",
+        )
+    except Exception as exc:
+        logger.warning("[score_news] failed to mark dry day %s/%s: %s", source_stream, target_day, exc)
 
 
 async def _fmp_fetch_articles(
@@ -626,6 +676,10 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="Max X posts to fetch with --x-news (default: 50, max: 100)",
     )
     parser.add_argument(
+        "--x-accounts", nargs="+", metavar="ACCOUNT", default=None,
+        help="Specific X accounts to fetch posts from (without @ symbol)",
+    )
+    parser.add_argument(
         "--from", dest="from_date", metavar="DATE",
         help="Start date filter for --fmp-news / FMP feeds (YYYY-MM-DD, e.g. 2025-09-09)",
     )
@@ -712,6 +766,35 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="Override OLLAMA_IMPACT_MODEL for this run (only used when backend is ollama)",
     )
     parser.add_argument("--verbose", "-v", action="store_true", help="Debug logging")
+    parser.add_argument(
+        "--clear-dry",
+        dest="clear_dry",
+        action="store_true",
+        help=(
+            "Remove stored dry-day records so they can be re-checked. "
+            "Optional: pass --clear-dry-stream to limit to one stream. "
+            "Runs the clearing and exits."
+        ),
+    )
+    parser.add_argument(
+        "--clear-dry-stream",
+        dest="clear_dry_stream",
+        metavar="STREAM",
+        default=None,
+        help="With --clear-dry: only clear dry-day records for this source_stream (e.g. fmp_stock)",
+    )
+    parser.add_argument(
+        "--dry-skip",
+        dest="dry_skip",
+        action="store_true",
+        help="Skip days previously marked dry for the active source stream (default: enabled for batch modes)",
+    )
+    parser.add_argument(
+        "--no-dry-skip",
+        dest="dry_skip",
+        action="store_false",
+        help="Disable dry-day skipping — process all days even if previously marked dry",
+    )
     return parser.parse_args(argv)
 
 
@@ -761,8 +844,8 @@ async def _main(args: argparse.Namespace) -> None:
 
     # X (Twitter) posts batch mode — separate flow
     if args.x_news:
-        if not args.tickers:
-            console.print("[red]--x-news requires --tickers TICKER [TICKER …][/red]")
+        if not args.tickers and not args.x_accounts:
+            console.print("[red]--x-news requires --tickers and/or --x-accounts[/red]")
             sys.exit(1)
         await _process_x_news(args)
         return
@@ -1302,14 +1385,20 @@ async def _process_one_x_post(
 
 
 async def _process_x_news(args: argparse.Namespace) -> None:
-    """Fetch recent X posts for the given tickers and run each through the pipeline."""
-    tickers = [t.upper() for t in args.tickers]
+    """Fetch recent X posts for the given tickers/accounts and run each through the pipeline."""
+    tickers = [t.upper() for t in args.tickers] if args.tickers else []
+    x_accounts = getattr(args, "x_accounts", None)
     x_limit = min(getattr(args, "x_limit", 50), 100)
+    source_stream = "x_post"
+    dry_skip = getattr(args, "dry_skip", True)
 
-    console.print(
-        f"\nFetching up to [bold]{x_limit}[/bold] X posts "
-        f"for [cyan]{', '.join(tickers)}[/cyan]…\n"
-    )
+    desc_parts = []
+    if tickers:
+        desc_parts.append(f"tickers [cyan]{', '.join(tickers)}[/cyan]")
+    if x_accounts:
+        desc_parts.append(f"accounts [cyan]{', '.join(x_accounts)}[/cyan]")
+    desc = " for ".join(desc_parts)
+    console.print(f"\nFetching up to [bold]{x_limit}[/bold] X posts {desc}…\n")
 
     try:
         fetcher = XFetcher()
@@ -1317,10 +1406,10 @@ async def _process_x_news(args: argparse.Namespace) -> None:
         console.print(f"[red]{exc}[/red]")
         return
 
-    posts = fetcher.fetch_stock_posts(tickers=tickers, max_results=x_limit)
+    posts = fetcher.fetch_stock_posts(tickers=tickers or None, max_results=x_limit, accounts=x_accounts)
 
     if not posts:
-        console.print("[yellow]No X posts returned (check X_BEARER_TOKEN and tickers).[/yellow]")
+        console.print("[yellow]No X posts returned (check X_BEARER_TOKEN, tickers, and accounts).[/yellow]")
         return
 
     console.print(f"Fetched [bold]{len(posts)}[/bold] X posts\n")
@@ -1333,21 +1422,79 @@ async def _process_x_news(args: argparse.Namespace) -> None:
         logger.warning("[score_news] failed to load identity alias maps: %s", exc)
         ticker_alias_map, company_alias_map = {}, {}
 
+    new_inserts = 0
+    total_processed = 0
     for i, post in enumerate(posts, 1):
-        await _process_one_x_post(
+        is_new = await _process_one_x_post(
             args, post, seen_ids, seen_hashes,
             ticker_alias_map, company_alias_map,
             index=i, batch_total=len(posts),
         )
+        total_processed += 1
+        if is_new:
+            new_inserts += 1
+
+    if not args.no_persist and total_processed > 0 and new_inserts == 0:
+        today = date.today()
+        try:
+            mark_source_day_dry(
+                source_stream, today,
+                pages_checked=0,
+                articles_found=total_processed,
+                note="all X posts already in DB (0 new inserts)",
+            )
+            console.print(
+                f"[dim]Marked {today.isoformat()} as dry for {source_stream}[/dim]",
+            )
+        except Exception as exc:
+            logger.warning("[score_news] failed to mark X dry: %s", exc)
+
 
 
 async def _process_fmp_news(args: argparse.Namespace) -> None:
     """Fetch articles from FMP and run each through the full pipeline."""
+    source_stream = _source_stream_for_args(args)
+    dry_skip = getattr(args, "dry_skip", True)
+
+    if dry_skip and args.from_date and args.to_date:
+        try:
+            from_d = date.fromisoformat(args.from_date)
+            to_d = date.fromisoformat(args.to_date)
+            span = (to_d - from_d).days + 1
+            if span > 0:
+                dry_days = get_dry_days(source_stream, span)
+                matching = {d for d in dry_days if from_d <= d <= to_d}
+                if matching:
+                    console.print(
+                        f"[dim]Skipping {len(matching)} dry day(s) for {source_stream}: "
+                        + ", ".join(d.isoformat() for d in sorted(matching))
+                        + "[/dim]\n",
+                    )
+        except Exception as exc:
+            logger.warning("[score_news] failed to check dry days for FMP range: %s", exc)
+
     fetcher = FMPFetcher()
     articles = await _fmp_fetch_articles(fetcher, args)
 
     if not articles:
         console.print("[red]No articles returned from FMP.[/red]")
+        if args.from_date and args.to_date and not args.no_persist:
+            try:
+                from_d = date.fromisoformat(args.from_date)
+                to_d = date.fromisoformat(args.to_date)
+                target = from_d if from_d == to_d else None
+                if target:
+                    mark_source_day_dry(
+                        source_stream, target,
+                        pages_checked=args.page + 1,
+                        articles_found=0,
+                        note="FMP returned 0 articles for date range",
+                    )
+                    console.print(
+                        f"[dim]Marked {target.isoformat()} as dry for {source_stream}[/dim]",
+                    )
+            except Exception as exc:
+                logger.warning("[score_news] failed to mark dry: %s", exc)
         return
 
     feed = getattr(args, "fmp_news_feed", "stock")
@@ -1361,12 +1508,34 @@ async def _process_fmp_news(args: argparse.Namespace) -> None:
         logger.warning("[score_news] failed to load identity alias maps: %s", exc)
         ticker_alias_map, company_alias_map = {}, {}
 
+    new_inserts = 0
+    total_processed = 0
     for i, article in enumerate(articles, 1):
-        await _process_one_fmp_article(
+        is_new = await _process_one_fmp_article(
             args, article, seen_urls, seen_hashes,
             ticker_alias_map, company_alias_map,
             index=i, batch_total=len(articles),
         )
+        total_processed += 1
+        if is_new:
+            new_inserts += 1
+
+    if not args.no_persist and total_processed > 0 and new_inserts == 0 and args.from_date and args.to_date:
+        try:
+            from_d = date.fromisoformat(args.from_date)
+            to_d = date.fromisoformat(args.to_date)
+            if from_d == to_d:
+                mark_source_day_dry(
+                    source_stream, from_d,
+                    pages_checked=args.page + 1,
+                    articles_found=total_processed,
+                    note="all articles already in DB (0 new inserts)",
+                )
+                console.print(
+                    f"[dim]Marked {from_d.isoformat()} as dry for {source_stream}[/dim]",
+                )
+        except Exception as exc:
+            logger.warning("[score_news] failed to mark dry: %s", exc)
 
 
 async def _run_sparse_fill_for_day(
@@ -1378,16 +1547,27 @@ async def _run_sparse_fill_for_day(
     seen_hashes: set[str],
     ticker_alias_map: dict[str, str],
     company_alias_map: dict[str, str],
+    *,
+    source_stream: str = "fmp_stock",
+    dry_skip: bool = True,
 ) -> int:
     """Fetch/score FMP news for ``target_day`` until ``m_new`` new rows or FMP exhausted. Returns insert count."""
+    if dry_skip and is_source_day_dry(source_stream, target_day):
+        console.print(
+            f"  [dim]Skipping {target_day.isoformat()} — previously marked dry for {source_stream}[/dim]",
+        )
+        return 0
+
     day_iso = target_day.isoformat()
     page_limit = min(_FMP_NEWS_MAX_LIMIT, max(1, args.limit))
     added = 0
     articles: list[dict] = []
     page = 0
+    pages_checked = 0
 
     for attempt in range(1, _FMP_SPARSE_FILL_RANDOM_TRIES + 1):
         page = random.randint(0, _FMP_SPARSE_FILL_RANDOM_PAGE_MAX)
+        pages_checked += 1
         articles = await _fmp_fetch_articles(
             fetcher,
             args,
@@ -1411,6 +1591,7 @@ async def _run_sparse_fill_for_day(
             f"[yellow]No articles returned from FMP for {day_iso} after "
             f"{_FMP_SPARSE_FILL_RANDOM_TRIES} random pages — giving up.[/yellow]",
         )
+        _mark_dry_if_exhausted(source_stream, target_day, pages_checked, 0)
         return 0
 
     while added < m_new:
@@ -1438,6 +1619,7 @@ async def _run_sparse_fill_for_day(
             )
             break
         page += 1
+        pages_checked += 1
         articles = await _fmp_fetch_articles(
             fetcher,
             args,
@@ -1458,6 +1640,7 @@ async def _run_sparse_fill_for_day(
             f"\n[yellow]This day stopped at {added}/{m_new} new articles "
             f"(FMP exhausted).[/yellow]",
         )
+        _mark_dry_if_exhausted(source_stream, target_day, pages_checked, added)
     else:
         console.print(f"\n[green]Day complete: {added} new article(s) inserted.[/green]")
     return added
@@ -1469,6 +1652,7 @@ async def _process_fmp_sparse_fill(args: argparse.Namespace) -> None:
     n_days, m_new = args.sparse_fill
     loop = bool(getattr(args, "sparse_fill_loop", False))
     probabilistic = bool(getattr(args, "sparse_fill_probabilistic", False))
+    dry_skip = getattr(args, "dry_skip", True)
 
     fetcher = FMPFetcher()
     seen_urls: set[str] = set()
@@ -1481,17 +1665,47 @@ async def _process_fmp_sparse_fill(args: argparse.Namespace) -> None:
     excluded: set[date] = set()
     round_idx = 0
 
+    feed = getattr(args, "fmp_news_feed", "stock") or "stock"
+    source_stream = _source_stream_for_args(args)
+    stream_filter: str | None
+    if feed == "stock":
+        stream_filter = "fmp_stock"
+    elif feed == "general":
+        stream_filter = "fmp_general"
+    else:
+        stream_filter = None
+
+    dry_days: set[date] = set()
+    if dry_skip:
+        try:
+            dry_days = get_dry_days(source_stream, n_days)
+            if dry_days:
+                console.print(
+                    f"[dim]Skipping {len(dry_days)} dry day(s) for {source_stream}: "
+                    + ", ".join(d.isoformat() for d in sorted(dry_days))
+                    + "[/dim]\n",
+                )
+        except Exception as exc:
+            logger.warning("[score_news] failed to load dry days: %s", exc)
+
     while True:
-        counts = count_news_articles_per_calendar_day_eastern(n_days)
+        counts = count_news_articles_per_calendar_day_eastern(n_days, article_stream=stream_filter)
+        candidate_days = {d: c for d, c in counts.items() if d not in dry_days} if dry_skip else counts
+        if not candidate_days:
+            console.print(
+                "\n[yellow]All days in window are marked dry or excluded — nothing to process.[/yellow]",
+            )
+            break
+
         if probabilistic:
             target_day = _pick_probabilistic_calendar_day(
-                counts,
+                candidate_days,
                 excluded=excluded if loop else None,
             )
             if target_day is None:
                 if loop:
                     console.print(
-                        "\n[dim]Sparse-fill loop: no remaining days in window (all processed).[/dim]",
+                        "\n[dim]Sparse-fill loop: no remaining days in window (all processed/dry).[/dim]",
                     )
                 else:
                     console.print(
@@ -1499,49 +1713,53 @@ async def _process_fmp_sparse_fill(args: argparse.Namespace) -> None:
                     )
                 break
         elif loop:
-            target_day = _pick_sparsest_calendar_day_excluding(counts, excluded)
+            target_day = _pick_sparsest_calendar_day_excluding(candidate_days, excluded)
             if target_day is None:
                 console.print(
-                    "\n[dim]Sparse-fill loop: no remaining days in window (all processed).[/dim]",
+                    "\n[dim]Sparse-fill loop: no remaining days in window (all processed/dry).[/dim]",
                 )
                 break
         else:
-            target_day = _pick_sparsest_calendar_day(counts)
+            target_day = _pick_sparsest_calendar_day(candidate_days)
 
-        min_count = counts[target_day]
+        min_count = counts.get(target_day, 0)
         round_idx += 1
+        stream_label = f" ({stream_filter})" if stream_filter else ""
 
         if loop:
             console.print(
                 f"\n[bold]Sparse fill[/bold] round [cyan]{round_idx}[/cyan] / up to [cyan]{n_days}[/cyan] — "
                 f"next {'weighted-random' if probabilistic else 'sparsest'} day "
                 f"[green]{target_day.isoformat()}[/green] "
-                f"([bold]{min_count}[/bold] article(s) in DB). "
+                f"([bold]{min_count}[/bold] {stream_filter or 'total'} article(s) in DB). "
                 f"Target: [bold]{m_new}[/bold] new insert(s).\n",
             )
         else:
             console.print(
-                f"\n[bold]Sparse fill[/bold]: last [cyan]{n_days}[/cyan] ET day(s) — "
+                f"\n[bold]Sparse fill[/bold]: last [cyan]{n_days}[/cyan] ET day(s){stream_label} — "
                 f"{'weighted-random' if probabilistic else 'sparsest'} day "
                 f"[green]{target_day.isoformat()}[/green] "
-                f"([bold]{min_count}[/bold] article(s) in DB). "
+                f"([bold]{min_count}[/bold] {stream_filter or 'total'} article(s) in DB). "
                 f"Target: [bold]{m_new}[/bold] new insert(s).\n",
             )
 
         for d in sorted(counts.keys()):
+            dry_marker = " [yellow](dry)[/yellow]" if d in dry_days else ""
             bar = "█" if d == target_day else "░"
             ex = " (done)" if d in excluded else ""
-            console.print(f"  {bar} {d.isoformat()}  {counts[d]:>4} articles{ex}")
+            console.print(f"  {bar} {d.isoformat()}  {counts[d]:>4} articles{ex}{dry_marker}")
 
         await _run_sparse_fill_for_day(
             args, fetcher, target_day, m_new, seen_urls, seen_hashes,
             ticker_alias_map, company_alias_map,
+            source_stream=source_stream, dry_skip=dry_skip,
         )
 
         if not loop:
             break
 
         excluded.add(target_day)
+        dry_days.add(target_day)
         if len(excluded) >= n_days:
             console.print(
                 f"\n[dim]Sparse-fill loop finished: processed [cyan]{len(excluded)}[/cyan] day(s).[/dim]",
@@ -1565,8 +1783,14 @@ def _health_job_name_from_namespace(args: argparse.Namespace) -> str | None:
 def main(argv: list[str] | None = None) -> None:
     import sys as _sys
     argv_list = list(argv if argv is not None else _sys.argv[1:])
-    # Parse before JobHeartbeat so bad flags never mark the job running / success.
     args = _parse_args(argv_list)
+
+    if args.clear_dry:
+        count = clear_dry_days(source_stream=args.clear_dry_stream or None)
+        scope = f"stream '{args.clear_dry_stream}'" if args.clear_dry_stream else "all streams"
+        console.print(f"Cleared [bold]{count}[/bold] dry-day record(s) for {scope}.")
+        return
+
     job_name = _health_job_name_from_namespace(args)
     if job_name:
         try:

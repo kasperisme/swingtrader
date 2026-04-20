@@ -11,7 +11,7 @@ import logging
 import os
 import re
 from dataclasses import dataclass
-from typing import Optional
+from typing import Optional, Union
 
 from news_impact.dimensions import CLUSTERS, DIMENSION_MAP
 from news_impact.ollama_client import chat as _ollama_chat, OllamaError
@@ -95,7 +95,7 @@ logger = logging.getLogger(__name__)
 
 # Concurrency: Ollama defaults to 1 (single GPU); cloud backends allow higher defaults.
 _CONCURRENCY = 1
-_sem: asyncio.Semaphore | None = None  # created lazily inside the running loop
+_sem: Optional[asyncio.Semaphore] = None  # created lazily inside the running loop
 _sync_concurrency_from_backend()
 
 
@@ -154,7 +154,7 @@ _FENCE_RE   = re.compile(r"^```(?:json)?\s*|\s*```$", re.MULTILINE)
 _PLUS_RE    = re.compile(r'(?<!["\w])\+(\d)')   # strip leading + from JSON numbers
 
 
-def _slice_outer_json_object(s: str) -> str | None:
+def _slice_outer_json_object(s: str) -> Optional[str]:
     """
     Find the first top-level JSON object in ``s`` using brace depth, ignoring
     braces inside quoted strings. Returns None if there is no balanced object.
