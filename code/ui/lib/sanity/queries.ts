@@ -103,7 +103,7 @@ export const landingPageQuery = `
     pricingHeading,
     pricingSubheading,
     pricingFounderNote,
-    pricingPlans[] { name, price, billingNote, description, features, ctaLabel, badge, isHighlighted, spotLimit, isCurrentPhase },
+    pricingPlans[] { name, price, billingNote, annualLabel, phase2Price, phase2AnnualLabel, phase3Price, phase3AnnualLabel, description, features, ctaLabel, badge, isHighlighted, spotLimit, isCurrentPhase },
     offerSectionLabel,
     offerHeading,
     offerSubheading,

@@ -259,6 +259,11 @@ export const landingPageType = defineType({
             defineField({name: 'name', title: 'Plan Name', type: 'string', validation: (R) => R.required()}),
             defineField({name: 'price', title: 'Price', type: 'string', description: 'e.g. "$19" or "Free"'}),
             defineField({name: 'billingNote', title: 'Billing Note', type: 'string', description: 'e.g. "per month" or "forever free"'}),
+            defineField({name: 'annualLabel', title: 'Annual Label', type: 'string', description: 'e.g. "$89/yr · lock in forever"'}),
+            defineField({name: 'phase2Price', title: 'Phase 2 Price', type: 'string', description: 'e.g. "$29" — future phase monthly price for savings calc'}),
+            defineField({name: 'phase2AnnualLabel', title: 'Phase 2 Annual Label', type: 'string', description: 'e.g. "$249/yr"'}),
+            defineField({name: 'phase3Price', title: 'Phase 3 Price', type: 'string', description: 'e.g. "$39" — final phase monthly price for savings calc'}),
+            defineField({name: 'phase3AnnualLabel', title: 'Phase 3 Annual Label', type: 'string', description: 'e.g. "$299/yr"'}),
             defineField({name: 'description', title: 'Description', type: 'text', rows: 2}),
             defineField({
               name: 'features',
@@ -277,7 +282,7 @@ export const landingPageType = defineType({
           },
         }),
       ],
-      validation: (R) => R.max(4),
+      validation: (R) => R.max(5),
     }),
 
     // ── OFFER ─────────────────────────────────────────────────────────

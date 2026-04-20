@@ -148,6 +148,7 @@ def get_pg_connection():
     import psycopg2
     import psycopg2.extras
 
+    # Priority 1: explicit full URL (direct or pooler)
     direct = os.environ.get("SUPABASE_DB_DIRECT_URL")
     if direct:
         conn = psycopg2.connect(direct)
@@ -157,9 +158,16 @@ def get_pg_connection():
         ref = project_url.replace("https://", "").split(".")[0]
         if not ref or not pwd:
             raise RuntimeError(
-                "Set SUPABASE_DB_DIRECT_URL or both SUPABASE_DB_URL and SUPABASE_DB_PWD in .env"
+                "Set SUPABASE_DB_DIRECT_URL or both SUPABASE_URL and SUPABASE_DB_PWD in .env"
             )
-        url = f"postgresql://postgres:{pwd}@db.{ref}.supabase.co:5432/postgres"
+        # Priority 2: Session Pooler (Supabase deprecated db.<ref>.supabase.co)
+        # Get the pooler host from: Supabase Dashboard → Project Settings → Database → Session pooler
+        pooler_host = os.environ.get("SUPABASE_DB_POOLER_HOST")
+        if pooler_host:
+            url = f"postgresql://postgres.{ref}:{pwd}@{pooler_host}:5432/postgres"
+        else:
+            # Legacy direct host — may fail DNS on newer Supabase projects
+            url = f"postgresql://postgres:{pwd}@db.{ref}.supabase.co:5432/postgres"
         conn = psycopg2.connect(url)
 
     psycopg2.extras.register_default_jsonb(conn, globally=False, loads=json.loads)

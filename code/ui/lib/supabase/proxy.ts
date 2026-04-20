@@ -60,7 +60,9 @@ export async function updateSession(request: NextRequest) {
     pathname === "/privacy" ||
     pathname.startsWith("/api/v1") ||  // public API — uses its own Bearer auth
     pathname === "/api/telegram-webhook" ||  // Telegram webhook — authenticated by secret header
-    pathname === "/api/early-access";  // public waitlist signup — no auth required
+    pathname === "/api/early-access" ||  // public waitlist signup — no auth required
+    pathname.startsWith("/api/stripe/checkout") ||  // creates checkout session (has own auth check)
+    pathname === "/pricing";  // public pricing page
 
   if (!user && !isPublicPath) {
     // For API routes return 401 instead of redirecting to the login page

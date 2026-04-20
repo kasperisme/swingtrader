@@ -26,7 +26,7 @@ export function EarlyAccessSignupForm() {
         return;
       }
       setStatus("success");
-      setMessage("You're on the list. We'll be in touch.");
+      setMessage("Your spot is secured. We'll be in touch when you're up.");
       setEmail("");
       router.refresh();
     } catch {

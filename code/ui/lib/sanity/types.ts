@@ -68,6 +68,11 @@ export type LandingPricingPlan = {
   name: string;
   price: string | null;
   billingNote: string | null;
+  annualLabel: string | null;
+  phase2Price: string | null;
+  phase2AnnualLabel: string | null;
+  phase3Price: string | null;
+  phase3AnnualLabel: string | null;
   description: string | null;
   features: string[] | null;
   ctaLabel: string | null;

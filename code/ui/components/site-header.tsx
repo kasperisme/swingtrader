@@ -46,6 +46,7 @@ export function SiteHeaderFallback() {
       </div>
       <div className="flex shrink-0 items-center gap-2">
         {/* Desktop-only inline links */}
+        <Link href="/pricing" className={`${navLinkClass} hidden md:inline`}>Pricing</Link>
         <Link href="/docs" className={`${navLinkClass} hidden md:inline`}>Docs</Link>
         <Link href="/blog" className={`${navLinkClass} hidden md:inline`}>Blog</Link>
         <Link href="/changelog" className={`${navLinkClass} hidden md:inline`}>Changelog</Link>
@@ -82,6 +83,7 @@ export async function SiteHeader() {
       {/* Right side — desktop only */}
       {isAuthed ? (
         <div className="hidden shrink-0 items-center gap-3 md:flex">
+          <Link href="/pricing" className={navLinkClass}>Pricing</Link>
           <Link href="/docs" className={navLinkClass}>Docs</Link>
           <Link href="/blog" className={navLinkClass}>Blog</Link>
           <Link href="/changelog" className={navLinkClass}>Changelog</Link>
@@ -96,6 +98,7 @@ export async function SiteHeader() {
         </div>
       ) : (
         <div className="hidden shrink-0 items-center gap-2 md:flex">
+          <Link href="/pricing" className={navLinkClass}>Pricing</Link>
           <Link href="/docs" className={navLinkClass}>Docs</Link>
           <Link href="/blog" className={navLinkClass}>Blog</Link>
           <Link href="/changelog" className={navLinkClass}>Changelog</Link>

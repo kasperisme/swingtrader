@@ -13,6 +13,7 @@ Dev:
 [ ] Seperate newsimpactscreener FMP integration with personal API key
 [ ] Ensure robustness of telegram bots
 [ ] Implement pricing gates throughout the application and API
+[ ] Ensure that backfilling backfills on stream and not total
 
 Marketing:
 [ ] Set up pricing and early sign up offer

@@ -25,6 +25,7 @@ import {
   type ArticleGridItem,
 } from "@/components/articles-grid";
 import { EarlyAccessSignupForm } from "@/components/early-access-signup-form";
+import { PricingTierSwitcher } from "@/components/pricing-tier-switcher";
 import { isSanityConfigured, sanityFetch } from "@/lib/sanity/client";
 import { newsPublishersQuery, landingPageQuery } from "@/lib/sanity/queries";
 import type { NewsPublisher, LandingPage, LandingCardItem, LandingStep, LandingPricingPlan } from "@/lib/sanity/types";
@@ -147,9 +148,14 @@ const DEFAULT_TICKER_THEMES = [
 
 const DEFAULT_PRICING_PLANS: LandingPricingPlan[] = [
   {
-    name: "Free",
+    name: "Observer",
     price: "$0",
     billingNote: "forever free",
+    annualLabel: null,
+    phase2Price: null,
+    phase2AnnualLabel: null,
+    phase3Price: null,
+    phase3AnnualLabel: null,
     description: "Get a feel for the screener. No card, no commitment.",
     features: ["Daily top 5 news-impacted stocks", "Basic impact score", "1-day delay on results"],
     ctaLabel: "Start for free",
@@ -159,9 +165,14 @@ const DEFAULT_PRICING_PLANS: LandingPricingPlan[] = [
     isCurrentPhase: false,
   },
   {
-    name: "Founder",
+    name: "Investor",
     price: "$9",
     billingNote: "/ month",
+    annualLabel: "$99/yr · lock in forever",
+    phase2Price: "$29",
+    phase2AnnualLabel: "$299/yr",
+    phase3Price: "$39",
+    phase3AnnualLabel: "$399/yr",
     description: "Real-time screening, locked at this price for life.",
     features: ["Real-time news impact screener", "Full impact score breakdown", "Sector & theme filters", "Watchlist alerts", "7-day history"],
     ctaLabel: "Lock in $9/mo",
@@ -171,28 +182,21 @@ const DEFAULT_PRICING_PLANS: LandingPricingPlan[] = [
     isCurrentPhase: true,
   },
   {
-    name: "Phase 2",
+    name: "Trader",
     price: "$19",
     billingNote: "/ month",
-    description: "Same features. Price goes up when Phase 1 fills.",
-    features: ["Everything in Founder", "Extended 30-day history", "AI-generated stock summaries"],
-    ctaLabel: "Join Phase 2",
-    badge: null,
+    annualLabel: "$199/yr · lock in forever",
+    phase2Price: "$49",
+    phase2AnnualLabel: "$499/yr",
+    phase3Price: "$69",
+    phase3AnnualLabel: "$699/yr",
+    description: "Everything in Investor, plus advanced tools. Locked forever.",
+    features: ["Everything in Investor", "Extended 30-day history", "AI stock summaries", "Portfolio impact view", "Priority support"],
+    ctaLabel: "Lock in $19/mo",
+    badge: "Early Access",
     isHighlighted: false,
-    spotLimit: 200,
-    isCurrentPhase: false,
-  },
-  {
-    name: "Standard",
-    price: "$49",
-    billingNote: "/ month",
-    description: "Full access at standard pricing.",
-    features: ["Everything in Phase 2", "Portfolio impact view", "Priority support", "Early access to new features"],
-    ctaLabel: "Get Standard",
-    badge: null,
-    isHighlighted: false,
-    spotLimit: null,
-    isCurrentPhase: false,
+    spotLimit: 100,
+    isCurrentPhase: true,
   },
 ];
 
@@ -371,9 +375,10 @@ export default async function Home() {
   const pricingFounderNote = cms?.pricingFounderNote ?? "Your price is locked for life. Cancel any time — but once you cancel, the founder rate is gone.";
   const pricingPlans = cms?.pricingPlans?.length ? cms.pricingPlans : DEFAULT_PRICING_PLANS;
   const signupCount = await getSignupCount();
-  const currentPlan = pricingPlans.find((p) => p.isCurrentPhase) ?? pricingPlans[1];
-  const freePlan = pricingPlans.find((p) => p.price === "$0" || p.spotLimit === null && !p.isCurrentPhase && pricingPlans.indexOf(p) === 0);
+  const currentPlans = pricingPlans.filter((p) => p.isCurrentPhase);
+  const freePlan = pricingPlans.find((p) => p.price === "$0");
   const futurePlans = pricingPlans.filter((p) => !p.isCurrentPhase && p !== freePlan);
+  const finalPhasePlan = futurePlans[futurePlans.length - 1];
 
   const offerSectionLabel = cms?.offerSectionLabel ?? null;
   const offerHeading = cms?.offerHeading ?? null;
@@ -634,132 +639,18 @@ export default async function Home() {
             </p>
           )}
 
-          {/* Current phase — featured card */}
-          {currentPlan && (() => {
-            const spotsLeft = currentPlan.spotLimit ? Math.max(0, currentPlan.spotLimit - signupCount) : null;
-            const fillPct = currentPlan.spotLimit ? Math.min(100, (signupCount / currentPlan.spotLimit) * 100) : 0;
-            return (
-              <div className="relative mt-10 overflow-hidden rounded-2xl border border-violet-500/40 bg-violet-500/5 p-6 shadow-xl shadow-violet-500/10 md:p-8">
-                <div aria-hidden className="pointer-events-none absolute -right-20 -top-20 h-64 w-64 rounded-full bg-violet-500/10 blur-3xl" />
+          {/* Current phase — pill-switched tier card */}
+          <PricingTierSwitcher
+            freePlan={freePlan}
+            currentPlans={currentPlans}
+            finalPhasePlan={finalPhasePlan}
+            spotsLeft={currentPlans[0]?.spotLimit ? Math.max(0, currentPlans[0].spotLimit - signupCount) : null}
+            spotLimit={currentPlans[0]?.spotLimit ?? null}
+            signupCount={signupCount}
+            fillPct={currentPlans[0]?.spotLimit ? Math.min(100, (signupCount / currentPlans[0].spotLimit) * 100) : 0}
+            founderNote={pricingFounderNote}
+          />
 
-                <div className="relative">
-                  <div className="flex flex-wrap items-center gap-2">
-                    {currentPlan.badge && (
-                      <span className="inline-flex items-center rounded-full bg-violet-600 px-2.5 py-0.5 text-xs font-semibold text-white">
-                        {currentPlan.badge}
-                      </span>
-                    )}
-                    <span className="text-sm font-semibold text-muted-foreground">{currentPlan.name}</span>
-                  </div>
-
-                  <div className="mt-3 flex items-end gap-2">
-                    <span className="text-5xl font-bold tracking-tight">{currentPlan.price}</span>
-                    {currentPlan.billingNote && (
-                      <span className="mb-1.5 text-base text-muted-foreground">{currentPlan.billingNote}</span>
-                    )}
-                  </div>
-
-                  {currentPlan.description && (
-                    <p className="mt-2 text-sm text-muted-foreground">{currentPlan.description}</p>
-                  )}
-
-                  {/* Spots counter */}
-                  {spotsLeft !== null && (
-                    <div className="mt-6">
-                      <div className="mb-2 flex items-center justify-between text-xs">
-                        <span className="font-semibold text-violet-300">
-                          {spotsLeft === 0 ? "Phase full" : `${spotsLeft} founder spot${spotsLeft === 1 ? "" : "s"} remaining`}
-                        </span>
-                        <span className="text-muted-foreground">{signupCount} / {currentPlan.spotLimit} taken</span>
-                      </div>
-                      <div className="h-1.5 w-full overflow-hidden rounded-full bg-violet-500/15">
-                        <div
-                          className="h-full rounded-full bg-violet-500 transition-all"
-                          style={{width: `${fillPct}%`}}
-                        />
-                      </div>
-                    </div>
-                  )}
-
-                  {currentPlan.features && currentPlan.features.length > 0 && (
-                    <ul className="mt-6 grid gap-2 sm:grid-cols-2">
-                      {currentPlan.features.map((f) => (
-                        <li key={f} className="flex items-center gap-2.5 text-sm">
-                          <Check className="h-4 w-4 shrink-0 text-violet-400" />
-                          <span>{f}</span>
-                        </li>
-                      ))}
-                    </ul>
-                  )}
-
-                  <div className="mt-8 flex flex-col gap-3 sm:flex-row sm:items-center">
-                    <Link
-                      href="#final-cta"
-                      className="inline-flex items-center justify-center gap-2 rounded-xl bg-violet-600 px-7 py-3 text-sm font-semibold text-white shadow-lg shadow-violet-500/20 transition-all hover:bg-violet-500"
-                    >
-                      {currentPlan.ctaLabel ?? "Lock in this rate"}
-                      <ArrowRight className="h-4 w-4" />
-                    </Link>
-                    {pricingFounderNote && (
-                      <p className="text-xs leading-5 text-muted-foreground sm:max-w-[280px]">
-                        {pricingFounderNote}
-                      </p>
-                    )}
-                  </div>
-                </div>
-              </div>
-            );
-          })()}
-
-          {/* Phase roadmap */}
-          {futurePlans.length > 0 && (
-            <div className="mt-4">
-              <p className="mb-3 text-xs font-semibold uppercase tracking-widest text-muted-foreground/60">
-                What happens next
-              </p>
-              <div className="grid gap-3 sm:grid-cols-2">
-                {futurePlans.map((plan, i) => (
-                  <div
-                    key={plan.name}
-                    className="flex items-start gap-4 rounded-xl border border-border bg-background/40 px-4 py-3.5 opacity-60"
-                  >
-                    <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-border text-xs font-bold text-muted-foreground">
-                      {i + 2}
-                    </div>
-                    <div className="min-w-0">
-                      <div className="flex flex-wrap items-baseline gap-2">
-                        <span className="text-base font-bold">{plan.price}</span>
-                        {plan.billingNote && <span className="text-xs text-muted-foreground">{plan.billingNote}</span>}
-                      </div>
-                      <p className="mt-0.5 text-xs text-muted-foreground">
-                        {plan.spotLimit
-                          ? `Unlocks after first ${signupCount > 0 ? currentPlan?.spotLimit ?? 100 : 100} spots fill`
-                          : "Standard pricing"}
-                      </p>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {/* Free tier */}
-          {freePlan && (
-            <div className="mt-6 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-border bg-background/40 px-5 py-4">
-              <div>
-                <p className="text-sm font-semibold">{freePlan.name} — {freePlan.price}</p>
-                {freePlan.description && (
-                  <p className="mt-0.5 text-xs text-muted-foreground">{freePlan.description}</p>
-                )}
-              </div>
-              <Link
-                href="#final-cta"
-                className="inline-flex items-center rounded-lg border border-border px-4 py-2 text-xs font-semibold transition-colors hover:bg-muted"
-              >
-                {freePlan.ctaLabel ?? "Start free"}
-              </Link>
-            </div>
-          )}
         </div>
       </section>
 
