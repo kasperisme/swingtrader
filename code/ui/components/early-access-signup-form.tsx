@@ -1,8 +1,10 @@
 "use client";
 
 import { useState } from "react";
+import { useRouter } from "next/navigation";
 
 export function EarlyAccessSignupForm() {
+  const router = useRouter();
   const [email, setEmail] = useState("");
   const [status, setStatus] = useState<"idle" | "loading" | "success" | "error">("idle");
   const [message, setMessage] = useState<string | null>(null);
@@ -26,6 +28,7 @@ export function EarlyAccessSignupForm() {
       setStatus("success");
       setMessage("You're on the list. We'll be in touch.");
       setEmail("");
+      router.refresh();
     } catch {
       setStatus("error");
       setMessage("Network error. Please try again.");
