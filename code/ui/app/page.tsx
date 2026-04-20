@@ -2,7 +2,7 @@ import Link from "next/link";
 import Image from "next/image";
 import { Suspense } from "react";
 import { unstable_noStore as noStore } from "next/cache";
-import { createClient as createSupabaseClient } from "@supabase/supabase-js";
+import { createServiceClient } from "@/lib/supabase/service";
 import {
   ArrowRight,
   BarChart3,
@@ -255,14 +255,12 @@ async function LandingArticlesHeaderAndList() {
   noStore();
   let landingArticles: ArticleGridItem[] = [];
   try {
-    const secretKey = process.env.SUPABASE_SECRET_KEY;
-    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-    const supabase =
-      secretKey && supabaseUrl
-        ? createSupabaseClient(supabaseUrl, secretKey, {
-            auth: { persistSession: false, autoRefreshToken: false },
-          })
-        : await createClient();
+    let supabase;
+    try {
+      supabase = createServiceClient();
+    } catch {
+      supabase = await createClient();
+    }
     const { data } = await supabase
       .schema("swingtrader")
       .from("news_articles")
@@ -306,18 +304,13 @@ async function LandingArticlesHeaderAndList() {
 }
 
 async function getSignupCount(): Promise<number> {
-  noStore();
   try {
-    const secretKey = process.env.SUPABASE_SECRET_KEY;
-    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-    if (!secretKey || !supabaseUrl) return 0;
-    const supabase = createSupabaseClient(supabaseUrl, secretKey, {
-      auth: { persistSession: false, autoRefreshToken: false },
-    });
-    const { count } = await supabase
+    const supabase = createServiceClient();
+    const { count, error } = await supabase
       .schema("swingtrader")
       .from("early_access_signups")
       .select("id", { count: "exact", head: true });
+    if (error) throw error;
     return count ?? 0;
   } catch {
     return 0;
@@ -327,6 +320,7 @@ async function getSignupCount(): Promise<number> {
 // ── Page ──────────────────────────────────────────────────────────────────────
 
 export default async function Home() {
+  noStore(); // pricing section shows live signup count — never serve stale
   let cms: LandingPage | null = null;
   if (isSanityConfigured) {
     try {

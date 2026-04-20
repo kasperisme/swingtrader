@@ -11,6 +11,10 @@ Dev:
 [ ] Get embedding searching to work with the ollama model
 [ ] Implement stripe
 [ ] Seperate newsimpactscreener FMP integration with personal API key
+[ ] Ensure robustness of telegram bots
+[ ] Implement pricing gates throughout the application and API
 
 Marketing:
 [ ] Set up pricing and early sign up offer
+[ ] Setup instagram and tiktok bots to post about site
+[ ] Setup competition flow with real price money
