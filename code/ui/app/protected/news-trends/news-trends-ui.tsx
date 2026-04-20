@@ -942,6 +942,7 @@ export function NewsTrendsUI({
   dimensionDaily = [],
   dimensionHourly = [],
   chartHeight = 400,
+  showMainChartFrame = true,
   onSwitchToHourly,
   hourlyClusterLoading = false,
   onEnsureDimensionAggregates,
@@ -953,6 +954,8 @@ export function NewsTrendsUI({
   dimensionDaily?: DimensionTrendRow[];
   dimensionHourly?: DimensionTrendRow[];
   chartHeight?: number;
+  /** When false, removes the bordered card around the main trend chart. */
+  showMainChartFrame?: boolean;
   /** When the user picks hourly granularity; parent can lazy-load hourly aggregates. */
   onSwitchToHourly?: () => void;
   /** True while parent is fetching `news_trends_cluster_hourly_v` after switching to hourly. */
@@ -1951,7 +1954,7 @@ export function NewsTrendsUI({
       <div className="flex gap-4">
         {/* Main cluster chart */}
         <div className="flex-1 min-w-0">
-          <div className="border rounded-xl p-4">
+          <div className={showMainChartFrame ? "border rounded-xl p-4" : ""}>
             <div className="flex items-start justify-between mb-3">
               <div>
                 <p className="text-sm font-medium text-foreground/90">

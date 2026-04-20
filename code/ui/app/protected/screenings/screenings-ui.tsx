@@ -832,7 +832,12 @@ function StockNewsTrendView({
       {/* News trend chart — reuses the full NewsTrendsUI with weighted articles */}
       <div ref={containerRef} className="w-full">
         {symbol && weightedArticles.length > 0 && (
-          <NewsTrendsUI key={symbol} articles={weightedArticles} chartHeight={chartHeight} />
+          <NewsTrendsUI
+            key={symbol}
+            articles={weightedArticles}
+            chartHeight={chartHeight}
+            showMainChartFrame={false}
+          />
         )}
       </div>
       {symbol && weightedArticles.length === 0 && articles.length > 0 && (
@@ -2510,6 +2515,7 @@ export function ScreeningsUI({
                   showChevronSymbolNav={false}
                   screeningToolbar={false}
                   showSymbolHeadline={false}
+                  showChartFrame={false}
                   onChartData={(rows: OhlcBar[]) => { ohlcvDataRef.current = rows; }}
                 />
               ) : activeView === "relationship" ? (

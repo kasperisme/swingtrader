@@ -64,6 +64,19 @@ export type LandingStep = {
   detail: string;
 };
 
+export type LandingPricingPlan = {
+  name: string;
+  price: string | null;
+  billingNote: string | null;
+  description: string | null;
+  features: string[] | null;
+  ctaLabel: string | null;
+  badge: string | null;
+  isHighlighted: boolean | null;
+  spotLimit: number | null;
+  isCurrentPhase: boolean | null;
+};
+
 export type LandingPage = {
   heroBadgeText: string | null;
   heroHeadlinePart1: string | null;
@@ -84,6 +97,23 @@ export type LandingPage = {
   trustSectionLabel: string | null;
   trustHeading: string | null;
   trustItems: LandingCardItem[] | null;
+  pricingSectionLabel: string | null;
+  pricingHeading: string | null;
+  pricingSubheading: string | null;
+  pricingFounderNote: string | null;
+  pricingPlans: LandingPricingPlan[] | null;
+  offerSectionLabel: string | null;
+  offerHeading: string | null;
+  offerSubheading: string | null;
+  offerBadge: string | null;
+  offerOriginalPrice: string | null;
+  offerDiscountedPrice: string | null;
+  offerSavingsText: string | null;
+  offerDescription: string | null;
+  offerFeatures: string[] | null;
+  offerCtaLabel: string | null;
+  offerUrgencyText: string | null;
+  offerExpiryText: string | null;
   ctaSectionLabel: string | null;
   ctaHeading: string | null;
   ctaDescription: string | null;

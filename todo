@@ -1,0 +1,16 @@
+Ops:
+
+[ ] Make sure openclaw does use whats app to communicate with subagents
+[ ] Send daily operational reports
+
+Dev:
+[ ] Make sure IBD screener script runs through API
+[ ] Set up company vector updating
+[ ] Implement anlytical agent in screening sites as well (copy from chart)
+[ ] Setup X ingestion
+[ ] Get embedding searching to work with the ollama model
+[ ] Implement stripe
+[ ] Seperate newsimpactscreener FMP integration with personal API key
+
+Marketing:
+[ ] Set up pricing and early sign up offer

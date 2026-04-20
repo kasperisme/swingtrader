@@ -60,6 +60,8 @@ export type TickerChartsPanelProps = {
   onAnnotationAdd?: (ann: ChartAnnotation) => void;
   /** Called when the user deletes an annotation by clicking it. */
   onAnnotationDelete?: (id: string) => void;
+  /** When false, removes bordered chart frame (used in screenings deep-dive). */
+  showChartFrame?: boolean;
 };
 
 export function TickerChartsPanel({
@@ -85,6 +87,7 @@ export function TickerChartsPanel({
   onChartData: onChartDataProp,
   onAnnotationAdd,
   onAnnotationDelete,
+  showChartFrame = true,
 }: TickerChartsPanelProps) {
   const idx = useMemo(() => {
     const i = selectedTicker ? symbols.indexOf(selectedTicker) : -1;
@@ -389,7 +392,11 @@ export function TickerChartsPanel({
       )}
 
       <div
-        className="relative border border-border rounded-lg p-4 bg-background"
+        className={
+          showChartFrame
+            ? "relative border border-border rounded-lg p-4 bg-background"
+            : "relative"
+        }
         title="Drag left/right to pan time · Drag up/down to pan price · Double-click to reset price pan · Right-click for pivot options"
         onContextMenu={(e) => {
           e.preventDefault();
