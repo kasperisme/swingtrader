@@ -2063,6 +2063,7 @@ def _rescore_fetch_unscored_ids(client) -> list[int]:
             .table("news_impact_heads")
             .select("article_id, count()")
             .eq("scores_json", "{}")
+            .order("article_id", desc=True)
             .range(offset, offset + _RESCORE_PAGE_SIZE - 1)
             .execute()
             .data or []
@@ -2072,7 +2073,7 @@ def _rescore_fetch_unscored_ids(client) -> list[int]:
             break
         offset += _RESCORE_PAGE_SIZE
 
-    unscored.sort()
+    unscored.sort(reverse=True)
     console.print(
         f"[dim]Found [bold]{len(unscored)}[/bold] articles with all {_RESCORE_HEAD_COUNT} heads empty[/dim]"
     )
