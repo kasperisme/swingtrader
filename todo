@@ -6,14 +6,14 @@ Ops:
 Dev:
 Prio 1:
 [ ] Implement pricing gates throughout the application and API
+[x] Make the network graph fill out the space better
 [x] Implement stripe
 [x] Setup X ingestion (show trump x posts in the graph)
 [x] Ensure that backfilling backfills on stream and not total
 [x] Ensure that dry days on streams are tracked
+[x] Move articles to own subpage and have protected root be ops center for users
 
 Prio 2:
-[ ] Move articles to own subpage and have protected root be ops center for users
-[ ] Make the network graph fill out the space better
 [ ] Make the pricing button on the landing page not redirect to stripe, but to signup page
 [ ] Make sure IBD screener script runs through API
 [ ] Set up company vector updating

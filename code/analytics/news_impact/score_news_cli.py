@@ -115,24 +115,27 @@ def _heads_from_db(article_id: int) -> list[HeadOutput]:
     """Reconstruct HeadOutput list from stored news_impact_heads rows."""
     client = get_supabase_client()
     res = (
-        client.schema(get_schema()).table("news_impact_heads")
+        client.schema(get_schema())
+        .table("news_impact_heads")
         .select("cluster,scores_json,reasoning_json,confidence,model,latency_ms")
         .eq("article_id", article_id)
         .execute()
     )
     heads = []
-    for row in (res.data or []):
-        scores    = _as_json(row.get("scores_json"),    default={})
+    for row in res.data or []:
+        scores = _as_json(row.get("scores_json"), default={})
         reasoning = _as_json(row.get("reasoning_json"), default={})
-        heads.append(HeadOutput(
-            cluster=row["cluster"],
-            scores=scores,
-            reasoning=reasoning,
-            confidence=float(row.get("confidence") or 0),
-            model=row.get("model") or "",
-            latency_ms=int(row.get("latency_ms") or 0),
-            raw_response="",
-        ))
+        heads.append(
+            HeadOutput(
+                cluster=row["cluster"],
+                scores=scores,
+                reasoning=reasoning,
+                confidence=float(row.get("confidence") or 0),
+                model=row.get("model") or "",
+                latency_ms=int(row.get("latency_ms") or 0),
+                raw_response="",
+            )
+        )
     return heads
 
 
@@ -158,7 +161,8 @@ def _fetch_published_at(article_id: int) -> Optional[str]:
         logger.debug("[score_news] published_at fetch failed: %s", exc)
     return None
 
-logger  = logging.getLogger(__name__)
+
+logger = logging.getLogger(__name__)
 console = Console()
 
 _CACHE_DIR = pathlib.Path(__file__).parent / "cache"
@@ -171,7 +175,7 @@ _FMP_NEWS_MAX_LIMIT = 250
 # forward with no fixed page ceiling until a short/empty response or m_new is reached.
 _FMP_SPARSE_FILL_RANDOM_PAGE_MAX = 120
 # If every random page is empty, the day likely has no FMP rows — stop retrying.
-_FMP_SPARSE_FILL_RANDOM_TRIES = 250
+_FMP_SPARSE_FILL_RANDOM_TRIES = 60
 # Random high pages often 400/empty on FMP; sparse-fill passes expect_sparse_misses=True
 # so FMPFetcher logs those misses at DEBUG (see news_impact.fmp_fetcher).
 
@@ -190,7 +194,7 @@ def _load_identity_alias_maps() -> tuple[dict[str, str], dict[str, str]]:
     )
     ticker_alias: dict[str, str] = {}
     company_alias: dict[str, str] = {}
-    for row in (res.data or []):
+    for row in res.data or []:
         kind = str(row.get("alias_kind") or "").strip().lower()
         alias_norm = str(row.get("alias_value_norm") or "").strip().lower()
         canonical = str(row.get("canonical_ticker") or "").strip().upper()
@@ -269,7 +273,9 @@ def _normalize_relationship_and_sentiment_heads(
             merged_scores: dict[str, float] = {}
             merged_reasoning: dict[str, str] = {}
             for token, raw_score in (head.scores or {}).items():
-                ticker = _canonicalize_ticker_token(str(token), ticker_alias, company_alias)
+                ticker = _canonicalize_ticker_token(
+                    str(token), ticker_alias, company_alias
+                )
                 if not ticker:
                     continue
                 try:
@@ -350,7 +356,12 @@ def _mark_dry_if_exhausted(
             f"({pages_checked} pages checked, {articles_found} articles found)[/dim]",
         )
     except Exception as exc:
-        logger.warning("[score_news] failed to mark dry day %s/%s: %s", source_stream, target_day, exc)
+        logger.warning(
+            "[score_news] failed to mark dry day %s/%s: %s",
+            source_stream,
+            target_day,
+            exc,
+        )
 
 
 async def _fmp_fetch_articles(
@@ -423,15 +434,16 @@ async def _fmp_fetch_articles(
         r["__stream"] = "fmp_general"
     return _merge_fmp_articles_by_url(stock_arts, gen_arts)
 
+
 # ── HTML / CSS stripping (stdlib only) ───────────────────────────────────────
 
 # Remove <style>…</style> and <script>…</script> blocks including their content
-_STYLE_RE    = re.compile(r"<style[^>]*>.*?</style>",  re.DOTALL | re.IGNORECASE)
-_SCRIPT_RE   = re.compile(r"<script[^>]*>.*?</script>", re.DOTALL | re.IGNORECASE)
-_TAG_RE      = re.compile(r"<[^>]+>")
-_SPACE_RE    = re.compile(r"\s{2,}")
+_STYLE_RE = re.compile(r"<style[^>]*>.*?</style>", re.DOTALL | re.IGNORECASE)
+_SCRIPT_RE = re.compile(r"<script[^>]*>.*?</script>", re.DOTALL | re.IGNORECASE)
+_TAG_RE = re.compile(r"<[^>]+>")
+_SPACE_RE = re.compile(r"\s{2,}")
 # Raw CSS that survives tag stripping (stored in DB bodies or fetched pages)
-_CSS_AT_RE   = re.compile(r"@[\w-]+[^{;]*\{(?:[^{}]|\{[^}]*\})*\}", re.DOTALL)
+_CSS_AT_RE = re.compile(r"@[\w-]+[^{;]*\{(?:[^{}]|\{[^}]*\})*\}", re.DOTALL)
 _CSS_RULE_RE = re.compile(
     r"(?<!\w)[.#:_\[][\w\-\[\]().#:,\s>~+*=\"'@^\$|]{0,300}?\{[^{}]{0,5000}?\}",
     re.DOTALL,
@@ -499,9 +511,12 @@ def _normalize_fmp_published_at(raw_value: Optional[str]) -> Optional[str]:
 
 # ── Article source loaders ───────────────────────────────────────────────────
 
+
 async def _load_from_url(url: str) -> str:
     async with httpx.AsyncClient(follow_redirects=True, timeout=30.0) as client:
-        r = await client.get(url, headers={"User-Agent": "Mozilla/5.0 news-impact-bot/1.0"})
+        r = await client.get(
+            url, headers={"User-Agent": "Mozilla/5.0 news-impact-bot/1.0"}
+        )
         r.raise_for_status()
     content_type = r.headers.get("content-type", "")
     if "html" in content_type:
@@ -522,23 +537,29 @@ def _load_from_file(path: str) -> str:
 
 # ── Company vector loading ────────────────────────────────────────────────────
 
+
 def _load_cached_vectors(tickers: list[str]) -> list[CompanyVector]:
     """Load the most recent cached vector per ticker from news_impact/cache/."""
     vectors: list[CompanyVector] = []
     for ticker in tickers:
         candidates = sorted(_CACHE_DIR.glob(f"{ticker}_*.json"), reverse=True)
         if not candidates:
-            console.print(f"[yellow]Warning: no cached vector for {ticker} — skipping[/yellow]")
+            console.print(
+                f"[yellow]Warning: no cached vector for {ticker} — skipping[/yellow]"
+            )
             continue
         try:
             data = json.loads(candidates[0].read_text())
             vectors.append(CompanyVector.from_json(data))
         except Exception as exc:
-            console.print(f"[yellow]Warning: failed to load cache for {ticker}: {exc}[/yellow]")
+            console.print(
+                f"[yellow]Warning: failed to load cache for {ticker}: {exc}[/yellow]"
+            )
     return vectors
 
 
 # ── Rich display ──────────────────────────────────────────────────────────────
+
 
 def _bar(value: float, width: int = 10) -> str:
     filled = round(max(0.0, min(1.0, value)) * width)
@@ -558,7 +579,9 @@ def _print_results(
     sep = "━" * 52
     console.print(f"\n[bold]{sep}[/bold]")
 
-    display_title = title or (article_text[:80].replace("\n", " ") + ("…" if len(article_text) > 80 else ""))
+    display_title = title or (
+        article_text[:80].replace("\n", " ") + ("…" if len(article_text) > 80 else "")
+    )
     console.print(f"[bold cyan]Article:[/bold cyan] {display_title}")
     if article_id >= 0:
         console.print(f"[dim]article_id={article_id}[/dim]")
@@ -570,10 +593,12 @@ def _print_results(
     # Cluster confidence bars
     console.print(f"\n[bold]Cluster confidence:[/bold]")
     for h in sorted(heads, key=lambda h: h.confidence, reverse=True):
-        bar   = _bar(h.confidence)
+        bar = _bar(h.confidence)
         label = h.cluster[:20]
-        err   = f"  [red](err)[/red]" if h.error else ""
-        console.print(f"  [cyan]{label:<22}[/cyan] [green]{bar}[/green]  {h.confidence:.2f}{err}")
+        err = f"  [red](err)[/red]" if h.error else ""
+        console.print(
+            f"  [cyan]{label:<22}[/cyan] [green]{bar}[/green]  {h.confidence:.2f}{err}"
+        )
 
     # Top signals from the impact vector
     top = top_dimensions(impact, n=5)
@@ -581,31 +606,41 @@ def _print_results(
         console.print(f"\n[bold]Top signals:[/bold]")
         for dim, score in top:
             colour = "green" if score > 0 else "red"
-            sign   = "+" if score > 0 else ""
+            sign = "+" if score > 0 else ""
             console.print(f"  [{colour}]{dim:<36}  {sign}{score:.2f}[/{colour}]")
     else:
-        console.print("\n[dim]No signals — article may not relate to any cluster.[/dim]")
+        console.print(
+            "\n[dim]No signals — article may not relate to any cluster.[/dim]"
+        )
 
     # Per-ticker sentiment
     sent_head = next((h for h in heads if h.cluster == "TICKER_SENTIMENT"), None)
     if sent_head and sent_head.scores:
         console.print(f"\n[bold]Ticker sentiment:[/bold]")
-        for ticker, score in sorted(sent_head.scores.items(), key=lambda x: x[1], reverse=True):
+        for ticker, score in sorted(
+            sent_head.scores.items(), key=lambda x: x[1], reverse=True
+        ):
             colour = "green" if score > 0 else ("red" if score < 0 else "dim")
-            sign   = "+" if score > 0 else ""
+            sign = "+" if score > 0 else ""
             reason = sent_head.reasoning.get(ticker, "")
-            console.print(f"  [{colour}]{ticker:<6}  {sign}{score:.2f}[/{colour}]  [dim]{reason}[/dim]")
+            console.print(
+                f"  [{colour}]{ticker:<6}  {sign}{score:.2f}[/{colour}]  [dim]{reason}[/dim]"
+            )
 
     # Ticker relationships
     rel_head = next((h for h in heads if h.cluster == "TICKER_RELATIONSHIPS"), None)
     if rel_head and rel_head.scores:
         console.print(f"\n[bold]Ticker relationships:[/bold]")
-        for key, strength in sorted(rel_head.scores.items(), key=lambda x: x[1], reverse=True):
+        for key, strength in sorted(
+            rel_head.scores.items(), key=lambda x: x[1], reverse=True
+        ):
             parts = key.split("__")
             if len(parts) == 3:
                 frm, to, rel_type = parts
                 note = rel_head.reasoning.get(key, "")
-                console.print(f"  [cyan]{frm}[/cyan] → [cyan]{to}[/cyan]  [{rel_type}]  strength={strength:.2f}")
+                console.print(
+                    f"  [cyan]{frm}[/cyan] → [cyan]{to}[/cyan]  [{rel_type}]  strength={strength:.2f}"
+                )
                 if note:
                     console.print(f"    [dim]{note}[/dim]")
 
@@ -614,7 +649,9 @@ def _print_results(
         tailwinds = [s for s in company_scores if s.score > 0]
         headwinds = list(reversed([s for s in company_scores if s.score < 0]))
 
-        console.print(f"\n[bold green]TAILWINDS[/bold green]{'':12}[bold red]HEADWINDS[/bold red]")
+        console.print(
+            f"\n[bold green]TAILWINDS[/bold green]{'':12}[bold red]HEADWINDS[/bold red]"
+        )
         for i in range(max(len(tailwinds), len(headwinds))):
             tw_str = hw_str = ""
             if i < len(tailwinds):
@@ -630,6 +667,7 @@ def _print_results(
 
 # ── Argument parsing ──────────────────────────────────────────────────────────
 
+
 def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         prog="python -m news_impact.score_news_cli",
@@ -639,9 +677,9 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         ),
     )
     source = parser.add_mutually_exclusive_group(required=True)
-    source.add_argument("--url",      metavar="URL",  help="Fetch article from URL")
-    source.add_argument("--text",     metavar="TEXT", help="Article text inline")
-    source.add_argument("--file",     metavar="PATH", help="Read article from file")
+    source.add_argument("--url", metavar="URL", help="Fetch article from URL")
+    source.add_argument("--text", metavar="TEXT", help="Article text inline")
+    source.add_argument("--file", metavar="PATH", help="Read article from file")
     source.add_argument(
         "--fmp-news",
         action="store_true",
@@ -650,8 +688,11 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
             "general-latest, or both merged (URL-deduped)"
         ),
     )
-    source.add_argument("--x-news", action="store_true",
-                        help="Fetch recent X posts mentioning stock cashtags (requires --tickers)")
+    source.add_argument(
+        "--x-news",
+        action="store_true",
+        help="Fetch recent X posts mentioning stock cashtags (requires --tickers)",
+    )
 
     parser.add_argument(
         "--fmp-news-feed",
@@ -664,27 +705,40 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         ),
     )
     parser.add_argument(
-        "--limit", type=int, default=20,
+        "--limit",
+        type=int,
+        default=20,
         help="Max articles per FMP request with --fmp-news (default: 20, max: 250)",
     )
     parser.add_argument(
-        "--page", type=int, default=0,
+        "--page",
+        type=int,
+        default=0,
         help="Page offset for --fmp-news pagination (default: 0, max: 100)",
     )
     parser.add_argument(
-        "--x-limit", type=int, default=50,
+        "--x-limit",
+        type=int,
+        default=50,
         help="Max X posts to fetch with --x-news (default: 50, max: 100)",
     )
     parser.add_argument(
-        "--x-accounts", nargs="+", metavar="ACCOUNT", default=None,
+        "--x-accounts",
+        nargs="+",
+        metavar="ACCOUNT",
+        default=None,
         help="Specific X accounts to fetch posts from (without @ symbol)",
     )
     parser.add_argument(
-        "--from", dest="from_date", metavar="DATE",
+        "--from",
+        dest="from_date",
+        metavar="DATE",
         help="Start date filter for --fmp-news / FMP feeds (YYYY-MM-DD, e.g. 2025-09-09)",
     )
     parser.add_argument(
-        "--to", dest="to_date", metavar="DATE",
+        "--to",
+        dest="to_date",
+        metavar="DATE",
         help="End date filter for --fmp-news / FMP feeds (YYYY-MM-DD, e.g. 2025-12-10)",
     )
     parser.add_argument(
@@ -719,18 +773,23 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
 
     parser.add_argument(
-        "--tickers", nargs="+", metavar="TICKER", default=None,
+        "--tickers",
+        nargs="+",
+        metavar="TICKER",
+        default=None,
         help="Optional: include explicit symbols (logged/persisted); scoring requires --score-companies",
     )
     parser.add_argument(
-        "--score-companies", action="store_true",
+        "--score-companies",
+        action="store_true",
         help="Build/load company vectors and score tailwinds/headwinds (off by default)",
     )
     parser.add_argument(
-        "--use-cache", action="store_true",
+        "--use-cache",
+        action="store_true",
         help="Load company vectors from disk cache (requires prior build_vectors_cli run)",
     )
-    parser.add_argument("--title",  metavar="TITLE",  default=None, help="Article title")
+    parser.add_argument("--title", metavar="TITLE", default=None, help="Article title")
     parser.add_argument(
         "--published-at",
         metavar="ISO",
@@ -739,15 +798,19 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument("--source", metavar="SOURCE", default=None, help="Source label")
     parser.add_argument(
-        "--top-n", type=int, default=6,
+        "--top-n",
+        type=int,
+        default=6,
         help="Max companies per side in tailwinds/headwinds (default: 6)",
     )
     parser.add_argument(
-        "--no-persist", action="store_true",
+        "--no-persist",
+        action="store_true",
         help="Score without writing to Supabase",
     )
     parser.add_argument(
-        "--refresh", action="store_true",
+        "--refresh",
+        action="store_true",
         help="Re-score even if article is already in DB, overwriting stored heads and vector",
     )
     parser.add_argument(
@@ -800,6 +863,7 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
 # ── Main ─────────────────────────────────────────────────────────────────────
 
+
 async def _main(args: argparse.Namespace) -> None:
     if args.news_impact_backend is not None:
         set_news_impact_backend(args.news_impact_backend)
@@ -824,14 +888,20 @@ async def _main(args: argparse.Namespace) -> None:
             console.print("[red]--sparse-fill requires --fmp-news[/red]")
             sys.exit(1)
         if args.no_persist:
-            console.print("[red]--sparse-fill requires persistence (omit --no-persist)[/red]")
+            console.print(
+                "[red]--sparse-fill requires persistence (omit --no-persist)[/red]"
+            )
             sys.exit(1)
         n_days, m_new = args.sparse_fill
         if n_days < 1 or m_new < 1:
-            console.print("[red]--sparse-fill requires N_DAYS >= 1 and M_NEW >= 1[/red]")
+            console.print(
+                "[red]--sparse-fill requires N_DAYS >= 1 and M_NEW >= 1[/red]"
+            )
             sys.exit(1)
     if args.sparse_fill_loop and args.sparse_fill is None:
-        console.print("[red]--sparse-fill-loop requires --sparse-fill N_DAYS M_NEW[/red]")
+        console.print(
+            "[red]--sparse-fill-loop requires --sparse-fill N_DAYS M_NEW[/red]"
+        )
         sys.exit(1)
 
     # FMP news batch mode — separate flow
@@ -870,7 +940,7 @@ async def _main(args: argparse.Namespace) -> None:
     # 2. Score article + extract tickers in parallel
     article_id: int = -1
     impact: dict[str, float] = {}
-    heads: list[HeadOutput]  = []
+    heads: list[HeadOutput] = []
     extracted_tickers: list[str] = []
 
     if args.no_persist:
@@ -879,12 +949,16 @@ async def _main(args: argparse.Namespace) -> None:
             score_article(article_text),
             extract_tickers(article_text),
         )
-        _normalize_relationship_and_sentiment_heads(heads, ticker_alias_map, company_alias_map)
+        _normalize_relationship_and_sentiment_heads(
+            heads, ticker_alias_map, company_alias_map
+        )
         extracted_tickers = [
-            t for t in (
+            t
+            for t in (
                 _canonicalize_ticker_token(t, ticker_alias_map, company_alias_map)
                 for t in extracted_tickers
-            ) if t
+            )
+            if t
         ]
         extracted_tickers = list(dict.fromkeys(extracted_tickers))
         impact = aggregate_heads(heads)
@@ -896,9 +970,13 @@ async def _main(args: argparse.Namespace) -> None:
 
         if existing is not None and not args.refresh:
             article_id, impact = existing
-            console.print(f"[dim]Article already in DB (id={article_id}) — using cached impact vector.[/dim]")
+            console.print(
+                f"[dim]Article already in DB (id={article_id}) — using cached impact vector.[/dim]"
+            )
             # Load previously extracted tickers from DB (avoid extra LLM call)
-            extracted_tickers = load_article_tickers(client, article_id, source="extracted")
+            extracted_tickers = load_article_tickers(
+                client, article_id, source="extracted"
+            )
             # Reconstruct heads from DB for display
             heads = _heads_from_db(article_id)
         else:
@@ -908,12 +986,16 @@ async def _main(args: argparse.Namespace) -> None:
                 score_article(article_text),
                 extract_tickers(article_text),
             )
-            _normalize_relationship_and_sentiment_heads(heads, ticker_alias_map, company_alias_map)
+            _normalize_relationship_and_sentiment_heads(
+                heads, ticker_alias_map, company_alias_map
+            )
             extracted_tickers = [
-                t for t in (
+                t
+                for t in (
                     _canonicalize_ticker_token(t, ticker_alias_map, company_alias_map)
                     for t in extracted_tickers
-                ) if t
+                )
+                if t
             ]
             extracted_tickers = list(dict.fromkeys(extracted_tickers))
             impact = aggregate_heads(heads)
@@ -930,12 +1012,16 @@ async def _main(args: argparse.Namespace) -> None:
                 try:
                     enqueue_article_embedding_job(article_id)
                 except Exception as exc:
-                    logger.warning("[score_news] failed to enqueue embedding job for article %s: %s", article_id, exc)
+                    logger.warning(
+                        "[score_news] failed to enqueue embedding job for article %s: %s",
+                        article_id,
+                        exc,
+                    )
 
     # 2b. Persist detected tickers to DB
     if not args.no_persist and article_id >= 0 and (extracted_tickers or args.tickers):
         explicit_tickers_upper = []
-        for t in (args.tickers or []):
+        for t in args.tickers or []:
             ct = _canonicalize_ticker_token(t, ticker_alias_map, company_alias_map)
             if ct:
                 explicit_tickers_upper.append(ct)
@@ -943,9 +1029,13 @@ async def _main(args: argparse.Namespace) -> None:
         try:
             client = get_supabase_client()
             if extracted_tickers:
-                save_article_tickers(client, article_id, extracted_tickers, source="extracted")
+                save_article_tickers(
+                    client, article_id, extracted_tickers, source="extracted"
+                )
             if explicit_tickers_upper:
-                save_article_tickers(client, article_id, explicit_tickers_upper, source="explicit")
+                save_article_tickers(
+                    client, article_id, explicit_tickers_upper, source="explicit"
+                )
         except Exception as exc:
             logger.warning("[score_news] failed to persist tickers: %s", exc)
 
@@ -953,16 +1043,22 @@ async def _main(args: argparse.Namespace) -> None:
         try:
             enqueue_article_embedding_job(article_id)
         except Exception as exc:
-            logger.warning("[score_news] failed to enqueue embedding job for article %s: %s", article_id, exc)
+            logger.warning(
+                "[score_news] failed to enqueue embedding job for article %s: %s",
+                article_id,
+                exc,
+            )
 
     # 3. Merge explicit --tickers with extracted ones
     explicit_tickers = []
-    for t in (args.tickers or []):
+    for t in args.tickers or []:
         ct = _canonicalize_ticker_token(t, ticker_alias_map, company_alias_map)
         if ct:
             explicit_tickers.append(ct)
     explicit_tickers = list(dict.fromkeys(explicit_tickers))
-    all_tickers = list(dict.fromkeys(explicit_tickers + extracted_tickers))  # dedupe, preserve order
+    all_tickers = list(
+        dict.fromkeys(explicit_tickers + extracted_tickers)
+    )  # dedupe, preserve order
 
     if extracted_tickers:
         auto_label = ", ".join(extracted_tickers)
@@ -976,14 +1072,18 @@ async def _main(args: argparse.Namespace) -> None:
             console.print("[dim]Loading company vectors from cache…[/dim]")
             company_vectors = _load_cached_vectors(all_tickers)
             if not company_vectors:
-                console.print("[yellow]No cached vectors found — skipping company scoring.[/yellow]")
+                console.print(
+                    "[yellow]No cached vectors found — skipping company scoring.[/yellow]"
+                )
         else:
             console.print("[dim]Fetching company vectors from FMP…[/dim]")
             company_vectors = await build_vectors(all_tickers, use_cache=True)
         if company_vectors:
             company_scores = score_companies(impact, company_vectors, top_n=args.top_n)
     elif all_tickers:
-        console.print("[dim]Skipping company vector build/scoring (use --score-companies to enable).[/dim]")
+        console.print(
+            "[dim]Skipping company vector build/scoring (use --score-companies to enable).[/dim]"
+        )
 
     # 4. Display
     published_display = args.published_at
@@ -1066,13 +1166,17 @@ async def _process_one_fmp_article(
     source = url
     publisher = article.get("publisher") or article.get("site") or None
     sym_raw = article.get("symbol")
-    symbol = sym_raw.strip().upper() if isinstance(sym_raw, str) and sym_raw.strip() else ""
+    symbol = (
+        sym_raw.strip().upper() if isinstance(sym_raw, str) and sym_raw.strip() else ""
+    )
     published_at = _normalize_fmp_published_at(article.get("publishedDate") or None)
     image_url = (article.get("image") or "").strip() or None
     article_stream = str(article.get("__stream") or "fmp_stock")
 
     if not summary and not url:
-        console.print(f"[dim][{index}/{batch_total}] {title[:60]} — skipped (no text or url)[/dim]")
+        console.print(
+            f"[dim][{index}/{batch_total}] {title[:60]} — skipped (no text or url)[/dim]"
+        )
         return False
 
     console.print(f"[bold cyan][{index}/{batch_total}][/bold cyan] {title[:70]}")
@@ -1087,9 +1191,13 @@ async def _process_one_fmp_article(
                 body = full
                 console.print(f"  [dim]fetched full article ({len(body)} chars)[/dim]")
             else:
-                console.print(f"  [dim]url returned no usable content — using summary[/dim]")
+                console.print(
+                    f"  [dim]url returned no usable content — using summary[/dim]"
+                )
         except Exception as exc:
-            console.print(f"  [dim]url fetch failed ({exc.__class__.__name__}) — using summary[/dim]")
+            console.print(
+                f"  [dim]url fetch failed ({exc.__class__.__name__}) — using summary[/dim]"
+            )
 
     if not body:
         console.print(f"  [dim]skipped (no content)[/dim]")
@@ -1113,7 +1221,9 @@ async def _process_one_fmp_article(
         return False
 
     client = None if args.no_persist else get_supabase_client()
-    existing = None if client is None else _check_existing(client, article_hash, url=url)
+    existing = (
+        None if client is None else _check_existing(client, article_hash, url=url)
+    )
     from_cache = existing is not None and not args.refresh
 
     article_id = -1
@@ -1135,17 +1245,25 @@ async def _process_one_fmp_article(
             score_article(body),
             extract_tickers(body),
         )
-        _normalize_relationship_and_sentiment_heads(heads, ticker_alias_map, company_alias_map)
+        _normalize_relationship_and_sentiment_heads(
+            heads, ticker_alias_map, company_alias_map
+        )
         extracted_tickers = [
-            t for t in (
+            t
+            for t in (
                 _canonicalize_ticker_token(t, ticker_alias_map, company_alias_map)
                 for t in extracted_tickers
-            ) if t
+            )
+            if t
         ]
         extracted_tickers = list(dict.fromkeys(extracted_tickers))
         impact = aggregate_heads(heads)
 
-    symbol_canonical = _canonicalize_ticker_token(symbol, ticker_alias_map, company_alias_map) if symbol else ""
+    symbol_canonical = (
+        _canonicalize_ticker_token(symbol, ticker_alias_map, company_alias_map)
+        if symbol
+        else ""
+    )
     if symbol_canonical and symbol_canonical not in extracted_tickers:
         extracted_tickers = [symbol_canonical] + extracted_tickers
 
@@ -1187,12 +1305,16 @@ async def _process_one_fmp_article(
         try:
             enqueue_article_embedding_job(article_id)
         except Exception as exc:
-            logger.warning("[score_news] failed to enqueue embedding job for article %s: %s", article_id, exc)
+            logger.warning(
+                "[score_news] failed to enqueue embedding job for article %s: %s",
+                article_id,
+                exc,
+            )
 
     if client is not None and article_id >= 0 and extracted_tickers:
         save_article_tickers(client, article_id, extracted_tickers, source="extracted")
         explicit = []
-        for t in (args.tickers or []):
+        for t in args.tickers or []:
             ct = _canonicalize_ticker_token(t, ticker_alias_map, company_alias_map)
             if ct:
                 explicit.append(ct)
@@ -1208,10 +1330,14 @@ async def _process_one_fmp_article(
     top_str = "  ".join(f"{d} {s:+.2f}" for d, s in top) if top else "no signals"
     mentioned = ", ".join(extracted_tickers[:5]) if extracted_tickers else "—"
     pub = published_at or "—"
-    console.print(f"  [dim]id={article_id}  published={pub}  mentioned={mentioned}[/dim]")
+    console.print(
+        f"  [dim]id={article_id}  published={pub}  mentioned={mentioned}[/dim]"
+    )
     console.print(f"  [dim]top signals: {top_str}[/dim]")
 
-    all_tickers = list(dict.fromkeys(extracted_tickers + [t.upper() for t in (args.tickers or [])]))
+    all_tickers = list(
+        dict.fromkeys(extracted_tickers + [t.upper() for t in (args.tickers or [])])
+    )
     if all_tickers:
         console.print(f"  [dim]symbols: {', '.join(all_tickers)}[/dim]")
     if all_tickers and impact and args.score_companies:
@@ -1222,13 +1348,21 @@ async def _process_one_fmp_article(
                 tw = [s for s in scores if s.score > 0]
                 hw = list(reversed([s for s in scores if s.score < 0]))
                 if tw or hw:
-                    tw_str = "  ".join(f"[green]{s.ticker} +{s.score:.2f}[/green]" for s in tw[:2])
-                    hw_str = "  ".join(f"[red]{s.ticker} {s.score:.2f}[/red]" for s in hw[:2])
-                    console.print(f"  tailwinds: {tw_str or '—'}   headwinds: {hw_str or '—'}")
+                    tw_str = "  ".join(
+                        f"[green]{s.ticker} +{s.score:.2f}[/green]" for s in tw[:2]
+                    )
+                    hw_str = "  ".join(
+                        f"[red]{s.ticker} {s.score:.2f}[/red]" for s in hw[:2]
+                    )
+                    console.print(
+                        f"  tailwinds: {tw_str or '—'}   headwinds: {hw_str or '—'}"
+                    )
         except Exception as exc:
             logger.warning("company scoring failed for article %d: %s", article_id, exc)
     elif all_tickers:
-        console.print("  [dim]skipping company vector build/scoring (use --score-companies to enable)[/dim]")
+        console.print(
+            "  [dim]skipping company vector build/scoring (use --score-companies to enable)[/dim]"
+        )
 
     console.print()
 
@@ -1274,16 +1408,20 @@ async def _process_one_x_post(
         console.print(f"  [dim]published: {published_at}[/dim]")
     if metrics:
         likes = metrics.get("like_count", 0)
-        rts   = metrics.get("retweet_count", 0)
+        rts = metrics.get("retweet_count", 0)
         console.print(f"  [dim]likes={likes}  retweets={rts}[/dim]")
 
     article_hash = _sha256(text)
     if article_hash in seen_hashes:
-        console.print("  [dim]skipped — duplicate content already processed in this run[/dim]")
+        console.print(
+            "  [dim]skipped — duplicate content already processed in this run[/dim]"
+        )
         return False
 
     client = None if args.no_persist else get_supabase_client()
-    existing = None if client is None else _check_existing(client, article_hash, url=url)
+    existing = (
+        None if client is None else _check_existing(client, article_hash, url=url)
+    )
     from_cache = existing is not None and not args.refresh
 
     article_id = -1
@@ -1296,23 +1434,33 @@ async def _process_one_x_post(
         article_id, impact = existing
         heads = _heads_from_db(article_id)
         extracted_tickers = load_article_tickers(client, article_id, source="extracted")
-        console.print(f"  [dim]already in DB (id={article_id}) — skipped LLM scoring[/dim]")
+        console.print(
+            f"  [dim]already in DB (id={article_id}) — skipped LLM scoring[/dim]"
+        )
     else:
         heads, extracted_tickers = await asyncio.gather(
             score_article(text),
             extract_tickers(text),
         )
-        _normalize_relationship_and_sentiment_heads(heads, ticker_alias_map, company_alias_map)
+        _normalize_relationship_and_sentiment_heads(
+            heads, ticker_alias_map, company_alias_map
+        )
         extracted_tickers = [
-            t for t in (
+            t
+            for t in (
                 _canonicalize_ticker_token(t, ticker_alias_map, company_alias_map)
                 for t in extracted_tickers
-            ) if t
+            )
+            if t
         ]
         extracted_tickers = list(dict.fromkeys(extracted_tickers))
         impact = aggregate_heads(heads)
 
-    symbol_canonical = _canonicalize_ticker_token(symbol, ticker_alias_map, company_alias_map) if symbol else ""
+    symbol_canonical = (
+        _canonicalize_ticker_token(symbol, ticker_alias_map, company_alias_map)
+        if symbol
+        else ""
+    )
     if symbol_canonical and symbol_canonical not in extracted_tickers:
         extracted_tickers = [symbol_canonical] + extracted_tickers
 
@@ -1320,16 +1468,31 @@ async def _process_one_x_post(
         if existing is not None and args.refresh:
             _delete_heads_and_vector(client, existing[0])
             article_id = _persist(
-                client, text, article_hash, url, title, "x.com",
-                heads, impact, existing_article_id=existing[0],
-                published_at=published_at, publisher=publisher,
+                client,
+                text,
+                article_hash,
+                url,
+                title,
+                "x.com",
+                heads,
+                impact,
+                existing_article_id=existing[0],
+                published_at=published_at,
+                publisher=publisher,
                 article_stream="x_post",
             )
         else:
             article_id = _persist(
-                client, text, article_hash, url, title, "x.com",
-                heads, impact,
-                published_at=published_at, publisher=publisher,
+                client,
+                text,
+                article_hash,
+                url,
+                title,
+                "x.com",
+                heads,
+                impact,
+                published_at=published_at,
+                publisher=publisher,
                 article_stream="x_post",
             )
 
@@ -1337,12 +1500,16 @@ async def _process_one_x_post(
         try:
             enqueue_article_embedding_job(article_id)
         except Exception as exc:
-            logger.warning("[score_news] failed to enqueue embedding job for article %s: %s", article_id, exc)
+            logger.warning(
+                "[score_news] failed to enqueue embedding job for article %s: %s",
+                article_id,
+                exc,
+            )
 
     if client is not None and article_id >= 0 and extracted_tickers:
         save_article_tickers(client, article_id, extracted_tickers, source="extracted")
         explicit = []
-        for t in (args.tickers or []):
+        for t in args.tickers or []:
             ct = _canonicalize_ticker_token(t, ticker_alias_map, company_alias_map)
             if ct:
                 explicit.append(ct)
@@ -1358,10 +1525,14 @@ async def _process_one_x_post(
     top_str = "  ".join(f"{d} {s:+.2f}" for d, s in top) if top else "no signals"
     mentioned = ", ".join(extracted_tickers[:5]) if extracted_tickers else "—"
     pub = published_at or "—"
-    console.print(f"  [dim]id={article_id}  published={pub}  mentioned={mentioned}[/dim]")
+    console.print(
+        f"  [dim]id={article_id}  published={pub}  mentioned={mentioned}[/dim]"
+    )
     console.print(f"  [dim]top signals: {top_str}[/dim]")
 
-    all_tickers = list(dict.fromkeys(extracted_tickers + [t.upper() for t in (args.tickers or [])]))
+    all_tickers = list(
+        dict.fromkeys(extracted_tickers + [t.upper() for t in (args.tickers or [])])
+    )
     if all_tickers and impact and args.score_companies:
         try:
             company_vectors = await build_vectors(all_tickers, use_cache=True)
@@ -1370,13 +1541,21 @@ async def _process_one_x_post(
                 tw = [s for s in scores if s.score > 0]
                 hw = list(reversed([s for s in scores if s.score < 0]))
                 if tw or hw:
-                    tw_str = "  ".join(f"[green]{s.ticker} +{s.score:.2f}[/green]" for s in tw[:2])
-                    hw_str = "  ".join(f"[red]{s.ticker} {s.score:.2f}[/red]" for s in hw[:2])
-                    console.print(f"  tailwinds: {tw_str or '—'}   headwinds: {hw_str or '—'}")
+                    tw_str = "  ".join(
+                        f"[green]{s.ticker} +{s.score:.2f}[/green]" for s in tw[:2]
+                    )
+                    hw_str = "  ".join(
+                        f"[red]{s.ticker} {s.score:.2f}[/red]" for s in hw[:2]
+                    )
+                    console.print(
+                        f"  tailwinds: {tw_str or '—'}   headwinds: {hw_str or '—'}"
+                    )
         except Exception as exc:
             logger.warning("company scoring failed for X post %d: %s", article_id, exc)
     elif all_tickers:
-        console.print("  [dim]skipping company vector build/scoring (use --score-companies to enable)[/dim]")
+        console.print(
+            "  [dim]skipping company vector build/scoring (use --score-companies to enable)[/dim]"
+        )
 
     console.print()
 
@@ -1406,10 +1585,14 @@ async def _process_x_news(args: argparse.Namespace) -> None:
         console.print(f"[red]{exc}[/red]")
         return
 
-    posts = fetcher.fetch_stock_posts(tickers=tickers or None, max_results=x_limit, accounts=x_accounts)
+    posts = fetcher.fetch_stock_posts(
+        tickers=tickers or None, max_results=x_limit, accounts=x_accounts
+    )
 
     if not posts:
-        console.print("[yellow]No X posts returned (check X_BEARER_TOKEN, tickers, and accounts).[/yellow]")
+        console.print(
+            "[yellow]No X posts returned (check X_BEARER_TOKEN, tickers, and accounts).[/yellow]"
+        )
         return
 
     console.print(f"Fetched [bold]{len(posts)}[/bold] X posts\n")
@@ -1426,9 +1609,14 @@ async def _process_x_news(args: argparse.Namespace) -> None:
     total_processed = 0
     for i, post in enumerate(posts, 1):
         is_new = await _process_one_x_post(
-            args, post, seen_ids, seen_hashes,
-            ticker_alias_map, company_alias_map,
-            index=i, batch_total=len(posts),
+            args,
+            post,
+            seen_ids,
+            seen_hashes,
+            ticker_alias_map,
+            company_alias_map,
+            index=i,
+            batch_total=len(posts),
         )
         total_processed += 1
         if is_new:
@@ -1438,7 +1626,8 @@ async def _process_x_news(args: argparse.Namespace) -> None:
         today = date.today()
         try:
             mark_source_day_dry(
-                source_stream, today,
+                source_stream,
+                today,
                 pages_checked=0,
                 articles_found=total_processed,
                 note="all X posts already in DB (0 new inserts)",
@@ -1448,7 +1637,6 @@ async def _process_x_news(args: argparse.Namespace) -> None:
             )
         except Exception as exc:
             logger.warning("[score_news] failed to mark X dry: %s", exc)
-
 
 
 async def _process_fmp_news(args: argparse.Namespace) -> None:
@@ -1471,7 +1659,9 @@ async def _process_fmp_news(args: argparse.Namespace) -> None:
                         + "[/dim]\n",
                     )
         except Exception as exc:
-            logger.warning("[score_news] failed to check dry days for FMP range: %s", exc)
+            logger.warning(
+                "[score_news] failed to check dry days for FMP range: %s", exc
+            )
 
     fetcher = FMPFetcher()
     articles = await _fmp_fetch_articles(fetcher, args)
@@ -1485,7 +1675,8 @@ async def _process_fmp_news(args: argparse.Namespace) -> None:
                 target = from_d if from_d == to_d else None
                 if target:
                     mark_source_day_dry(
-                        source_stream, target,
+                        source_stream,
+                        target,
                         pages_checked=args.page + 1,
                         articles_found=0,
                         note="FMP returned 0 articles for date range",
@@ -1498,7 +1689,9 @@ async def _process_fmp_news(args: argparse.Namespace) -> None:
         return
 
     feed = getattr(args, "fmp_news_feed", "stock")
-    console.print(f"\nFetched [bold]{len(articles)}[/bold] articles from FMP ([cyan]{feed}[/cyan])\n")
+    console.print(
+        f"\nFetched [bold]{len(articles)}[/bold] articles from FMP ([cyan]{feed}[/cyan])\n"
+    )
 
     seen_urls: set[str] = set()
     seen_hashes: set[str] = set()
@@ -1512,21 +1705,33 @@ async def _process_fmp_news(args: argparse.Namespace) -> None:
     total_processed = 0
     for i, article in enumerate(articles, 1):
         is_new = await _process_one_fmp_article(
-            args, article, seen_urls, seen_hashes,
-            ticker_alias_map, company_alias_map,
-            index=i, batch_total=len(articles),
+            args,
+            article,
+            seen_urls,
+            seen_hashes,
+            ticker_alias_map,
+            company_alias_map,
+            index=i,
+            batch_total=len(articles),
         )
         total_processed += 1
         if is_new:
             new_inserts += 1
 
-    if not args.no_persist and total_processed > 0 and new_inserts == 0 and args.from_date and args.to_date:
+    if (
+        not args.no_persist
+        and total_processed > 0
+        and new_inserts == 0
+        and args.from_date
+        and args.to_date
+    ):
         try:
             from_d = date.fromisoformat(args.from_date)
             to_d = date.fromisoformat(args.to_date)
             if from_d == to_d:
                 mark_source_day_dry(
-                    source_stream, from_d,
+                    source_stream,
+                    from_d,
                     pages_checked=args.page + 1,
                     articles_found=total_processed,
                     note="all articles already in DB (0 new inserts)",
@@ -1566,7 +1771,8 @@ async def _run_sparse_fill_for_day(
     pages_checked = 0
 
     for attempt in range(1, _FMP_SPARSE_FILL_RANDOM_TRIES + 1):
-        page = random.randint(0, _FMP_SPARSE_FILL_RANDOM_PAGE_MAX)
+        # making sure that when we retry, we narrow down the page range
+        page = random.randint(0, int(_FMP_SPARSE_FILL_RANDOM_PAGE_MAX / attempt))
         pages_checked += 1
         articles = await _fmp_fetch_articles(
             fetcher,
@@ -1602,9 +1808,14 @@ async def _run_sparse_fill_for_day(
 
         for i, article in enumerate(articles, 1):
             is_new = await _process_one_fmp_article(
-                args, article, seen_urls, seen_hashes,
-                ticker_alias_map, company_alias_map,
-                index=i, batch_total=len(articles),
+                args,
+                article,
+                seen_urls,
+                seen_hashes,
+                ticker_alias_map,
+                company_alias_map,
+                index=i,
+                batch_total=len(articles),
             )
             if is_new:
                 added += 1
@@ -1642,7 +1853,9 @@ async def _run_sparse_fill_for_day(
         )
         _mark_dry_if_exhausted(source_stream, target_day, pages_checked, added)
     else:
-        console.print(f"\n[green]Day complete: {added} new article(s) inserted.[/green]")
+        console.print(
+            f"\n[green]Day complete: {added} new article(s) inserted.[/green]"
+        )
     return added
 
 
@@ -1689,8 +1902,14 @@ async def _process_fmp_sparse_fill(args: argparse.Namespace) -> None:
             logger.warning("[score_news] failed to load dry days: %s", exc)
 
     while True:
-        counts = count_news_articles_per_calendar_day_eastern(n_days, article_stream=stream_filter)
-        candidate_days = {d: c for d, c in counts.items() if d not in dry_days} if dry_skip else counts
+        counts = count_news_articles_per_calendar_day_eastern(
+            n_days, article_stream=stream_filter
+        )
+        candidate_days = (
+            {d: c for d, c in counts.items() if d not in dry_days}
+            if dry_skip
+            else counts
+        )
         if not candidate_days:
             console.print(
                 "\n[yellow]All days in window are marked dry or excluded — nothing to process.[/yellow]",
@@ -1747,12 +1966,21 @@ async def _process_fmp_sparse_fill(args: argparse.Namespace) -> None:
             dry_marker = " [yellow](dry)[/yellow]" if d in dry_days else ""
             bar = "█" if d == target_day else "░"
             ex = " (done)" if d in excluded else ""
-            console.print(f"  {bar} {d.isoformat()}  {counts[d]:>4} articles{ex}{dry_marker}")
+            console.print(
+                f"  {bar} {d.isoformat()}  {counts[d]:>4} articles{ex}{dry_marker}"
+            )
 
         await _run_sparse_fill_for_day(
-            args, fetcher, target_day, m_new, seen_urls, seen_hashes,
-            ticker_alias_map, company_alias_map,
-            source_stream=source_stream, dry_skip=dry_skip,
+            args,
+            fetcher,
+            target_day,
+            m_new,
+            seen_urls,
+            seen_hashes,
+            ticker_alias_map,
+            company_alias_map,
+            source_stream=source_stream,
+            dry_skip=dry_skip,
         )
 
         if not loop:
@@ -1782,12 +2010,17 @@ def _health_job_name_from_namespace(args: argparse.Namespace) -> str | None:
 
 def main(argv: list[str] | None = None) -> None:
     import sys as _sys
+
     argv_list = list(argv if argv is not None else _sys.argv[1:])
     args = _parse_args(argv_list)
 
     if args.clear_dry:
         count = clear_dry_days(source_stream=args.clear_dry_stream or None)
-        scope = f"stream '{args.clear_dry_stream}'" if args.clear_dry_stream else "all streams"
+        scope = (
+            f"stream '{args.clear_dry_stream}'"
+            if args.clear_dry_stream
+            else "all streams"
+        )
         console.print(f"Cleared [bold]{count}[/bold] dry-day record(s) for {scope}.")
         return
 
@@ -1795,6 +2028,7 @@ def main(argv: list[str] | None = None) -> None:
     if job_name:
         try:
             from src.health import JobHeartbeat
+
             with JobHeartbeat(job_name, expected_interval=1.0):
                 asyncio.run(_main(args))
         except ImportError:
