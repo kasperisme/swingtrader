@@ -42,6 +42,7 @@ Usage:
     # Re-score all articles with no non-empty impact heads (e.g. failed due to LLM errors)
     python -m news_impact.score_news_cli --rescore
     python -m news_impact.score_news_cli --rescore --rescore-concurrency 10 --rescore-batch-size 100
+    python -m news_impact.score_news_cli --rescore --rescore-limit 200  # cap articles to rescore
     python -m news_impact.score_news_cli --rescore --no-persist  # dry run — score without DB writes
 
     # Embed + score companies
@@ -177,6 +178,8 @@ _TICKER_TOKEN_RE = re.compile(r"^[A-Z0-9]{1,8}(?:\.[A-Z]{1,2})?$")
 _FMP_NEWS_MAX_LIMIT = 250
 # Rescore: rows fetched per PostgREST page when scanning the DB
 _RESCORE_PAGE_SIZE = 1000
+# Number of head clusters — used to detect articles where all heads returned empty scores
+_RESCORE_HEAD_COUNT = 11
 # Sparse-fill (--sparse-fill): FMP returns date-filtered news sorted newest-first; total
 # pages unknown. Randomize start page (inclusive) for uniform coverage; then paginate
 # forward with no fixed page ceiling until a short/empty response or m_new is reached.
@@ -758,6 +761,14 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         type=int,
         default=50,
         help="With --rescore: articles fetched per DB query (default: 50)",
+    )
+    parser.add_argument(
+        "--rescore-limit",
+        dest="rescore_limit",
+        type=int,
+        default=None,
+        metavar="N",
+        help="With --rescore: cap total articles to rescore (oldest unscored first)",
     )
     parser.add_argument(
         "--from",
@@ -2033,41 +2044,37 @@ async def _process_fmp_sparse_fill(args: argparse.Namespace) -> None:
 # ── Rescore (--rescore) ───────────────────────────────────────────────────────
 
 
-def _rescore_paginate_all(client, table: str, select: str, filters: dict | None = None) -> list[dict]:
-    """Paginate through a table and return all rows."""
+def _rescore_fetch_unscored_ids(client) -> list[int]:
+    """
+    Equivalent to:
+      SELECT article_id FROM news_impact_heads
+      WHERE scores_json = '{}'
+      GROUP BY article_id HAVING count(*) = 11
+    PostgREST groups server-side via count() — one row per article_id.
+    """
     schema = get_schema()
-    result = []
+    console.print("[dim]Querying DB for unscored articles…[/dim]")
+
+    unscored: list[int] = []
     offset = 0
     while True:
-        q = client.schema(schema).table(table).select(select).range(offset, offset + _RESCORE_PAGE_SIZE - 1)
-        for col, val in (filters or {}).items():
-            q = q.neq(col, val)
-        res = q.execute()
-        rows = res.data or []
-        result.extend(rows)
+        rows = (
+            client.schema(schema)
+            .table("news_impact_heads")
+            .select("article_id, count()")
+            .eq("scores_json", "{}")
+            .range(offset, offset + _RESCORE_PAGE_SIZE - 1)
+            .execute()
+            .data or []
+        )
+        unscored.extend(r["article_id"] for r in rows if r.get("count") == _RESCORE_HEAD_COUNT)
         if len(rows) < _RESCORE_PAGE_SIZE:
             break
         offset += _RESCORE_PAGE_SIZE
-    return result
 
-
-def _rescore_fetch_unscored_ids(client) -> list[int]:
-    """
-    Return IDs of all news_articles where no head has scores_json != '{}' —
-    i.e. articles with zero heads OR all heads empty.
-    """
-    console.print("[dim]Querying DB for unscored articles…[/dim]")
-    all_ids = {row["id"] for row in _rescore_paginate_all(client, "news_articles", "id")}
-    scored_ids = {
-        row["article_id"]
-        for row in _rescore_paginate_all(
-            client, "news_impact_heads", "article_id", filters={"scores_json": "{}"}
-        )
-    }
-    unscored = sorted(all_ids - scored_ids)
+    unscored.sort()
     console.print(
-        f"[dim]Found {len(all_ids)} articles total, "
-        f"{len(scored_ids)} with non-empty heads → [bold]{len(unscored)} to rescore[/bold][/dim]"
+        f"[dim]Found [bold]{len(unscored)}[/bold] articles with all {_RESCORE_HEAD_COUNT} heads empty[/dim]"
     )
     return unscored
 
@@ -2185,6 +2192,12 @@ async def _process_rescore(args: argparse.Namespace) -> None:
     """Re-score all articles with no non-empty impact heads."""
     client = get_supabase_client()
     ids = _rescore_fetch_unscored_ids(client)
+
+    rescore_limit = getattr(args, "rescore_limit", None)
+    if rescore_limit is not None and rescore_limit > 0:
+        ids = ids[:rescore_limit]
+        console.print(f"[dim]--rescore-limit {rescore_limit}: capped to {len(ids)} article(s)[/dim]")
+
     total = len(ids)
 
     if total == 0:
