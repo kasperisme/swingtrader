@@ -39,6 +39,11 @@ Usage:
     python -m news_impact.score_news_cli --x-news --x-accounts realDonaldTrump elonmusk
     python -m news_impact.score_news_cli --x-news --tickers DJT --x-accounts realDonaldTrump
 
+    # Re-score all articles with no non-empty impact heads (e.g. failed due to LLM errors)
+    python -m news_impact.score_news_cli --rescore
+    python -m news_impact.score_news_cli --rescore --rescore-concurrency 10 --rescore-batch-size 100
+    python -m news_impact.score_news_cli --rescore --no-persist  # dry run — score without DB writes
+
     # Embed + score companies
     python -m news_impact.score_news_cli --text "..." --tickers AAPL MSFT NVDA JPM XOM
     python -m news_impact.score_news_cli --url "..." --tickers AAPL MSFT --use-cache
@@ -170,6 +175,8 @@ _TICKER_TOKEN_RE = re.compile(r"^[A-Z0-9]{1,8}(?:\.[A-Z]{1,2})?$")
 
 # FMP stock / general news API limits (see fmp_fetcher)
 _FMP_NEWS_MAX_LIMIT = 250
+# Rescore: rows fetched per PostgREST page when scanning the DB
+_RESCORE_PAGE_SIZE = 1000
 # Sparse-fill (--sparse-fill): FMP returns date-filtered news sorted newest-first; total
 # pages unknown. Randomize start page (inclusive) for uniform coverage; then paginate
 # forward with no fixed page ceiling until a short/empty response or m_new is reached.
@@ -693,6 +700,15 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         action="store_true",
         help="Fetch recent X posts mentioning stock cashtags (requires --tickers)",
     )
+    source.add_argument(
+        "--rescore",
+        action="store_true",
+        help=(
+            "Re-score all articles with no non-empty impact heads "
+            "(e.g. failed due to LLM errors). "
+            "See --rescore-concurrency, --rescore-batch-size, --no-persist."
+        ),
+    )
 
     parser.add_argument(
         "--fmp-news-feed",
@@ -728,6 +744,20 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         metavar="ACCOUNT",
         default=None,
         help="Specific X accounts to fetch posts from (without @ symbol)",
+    )
+    parser.add_argument(
+        "--rescore-concurrency",
+        dest="rescore_concurrency",
+        type=int,
+        default=5,
+        help="With --rescore: max articles scored in parallel (default: 5)",
+    )
+    parser.add_argument(
+        "--rescore-batch-size",
+        dest="rescore_batch_size",
+        type=int,
+        default=50,
+        help="With --rescore: articles fetched per DB query (default: 50)",
     )
     parser.add_argument(
         "--from",
@@ -918,6 +948,11 @@ async def _main(args: argparse.Namespace) -> None:
             console.print("[red]--x-news requires --tickers and/or --x-accounts[/red]")
             sys.exit(1)
         await _process_x_news(args)
+        return
+
+    # Rescore batch mode — separate flow
+    if args.rescore:
+        await _process_rescore(args)
         return
 
     # 1. Load article text
@@ -1995,13 +2030,239 @@ async def _process_fmp_sparse_fill(args: argparse.Namespace) -> None:
             break
 
 
+# ── Rescore (--rescore) ───────────────────────────────────────────────────────
+
+
+def _rescore_paginate_all(client, table: str, select: str, filters: dict | None = None) -> list[dict]:
+    """Paginate through a table and return all rows."""
+    schema = get_schema()
+    result = []
+    offset = 0
+    while True:
+        q = client.schema(schema).table(table).select(select).range(offset, offset + _RESCORE_PAGE_SIZE - 1)
+        for col, val in (filters or {}).items():
+            q = q.neq(col, val)
+        res = q.execute()
+        rows = res.data or []
+        result.extend(rows)
+        if len(rows) < _RESCORE_PAGE_SIZE:
+            break
+        offset += _RESCORE_PAGE_SIZE
+    return result
+
+
+def _rescore_fetch_unscored_ids(client) -> list[int]:
+    """
+    Return IDs of all news_articles where no head has scores_json != '{}' —
+    i.e. articles with zero heads OR all heads empty.
+    """
+    console.print("[dim]Querying DB for unscored articles…[/dim]")
+    all_ids = {row["id"] for row in _rescore_paginate_all(client, "news_articles", "id")}
+    scored_ids = {
+        row["article_id"]
+        for row in _rescore_paginate_all(
+            client, "news_impact_heads", "article_id", filters={"scores_json": "{}"}
+        )
+    }
+    unscored = sorted(all_ids - scored_ids)
+    console.print(
+        f"[dim]Found {len(all_ids)} articles total, "
+        f"{len(scored_ids)} with non-empty heads → [bold]{len(unscored)} to rescore[/bold][/dim]"
+    )
+    return unscored
+
+
+def _rescore_fetch_articles_batch(client, ids: list[int]) -> list[dict]:
+    schema = get_schema()
+    res = (
+        client.schema(schema)
+        .table("news_articles")
+        .select("id, body, title, url, published_at, publisher, article_stream, article_hash")
+        .in_("id", ids)
+        .execute()
+    )
+    return res.data or []
+
+
+def _rescore_has_non_empty_heads(client, article_id: int) -> bool:
+    schema = get_schema()
+    res = (
+        client.schema(schema)
+        .table("news_impact_heads")
+        .select("article_id")
+        .eq("article_id", article_id)
+        .neq("scores_json", "{}")
+        .limit(1)
+        .execute()
+    )
+    return bool(res.data)
+
+
+async def _rescore_one_article(
+    client,
+    row: dict,
+    ticker_alias_map: dict,
+    company_alias_map: dict,
+    semaphore: asyncio.Semaphore,
+    *,
+    index: int,
+    total: int,
+    no_persist: bool = False,
+) -> bool:
+    """Score a single article and persist results. Returns True on success."""
+    article_id = row["id"]
+    body = _strip_html(row.get("body") or "")
+    title = row.get("title") or ""
+
+    if not body.strip():
+        console.print(f"  [{index}/{total}] id={article_id} — skipped (empty body)")
+        return False
+
+    if client is not None and _rescore_has_non_empty_heads(client, article_id):
+        console.print(f"  [{index}/{total}] id={article_id} — already scored, skipping")
+        return False
+
+    async with semaphore:
+        console.print(f"[bold cyan][{index}/{total}][/bold cyan] id={article_id}  {title[:65]}")
+        try:
+            heads, extracted_tickers = await asyncio.gather(
+                score_article(body),
+                extract_tickers(body),
+            )
+        except Exception as exc:
+            console.print(f"  [red]id={article_id} scoring failed: {exc}[/red]")
+            return False
+
+    _normalize_relationship_and_sentiment_heads(heads, ticker_alias_map, company_alias_map)
+    extracted_tickers = [
+        t for t in (
+            _canonicalize_ticker_token(t, ticker_alias_map, company_alias_map)
+            for t in extracted_tickers
+        ) if t
+    ]
+    extracted_tickers = list(dict.fromkeys(extracted_tickers))
+    impact = aggregate_heads(heads)
+
+    top = top_dimensions(impact, n=3)
+    top_str = "  ".join(f"{d} {s:+.2f}" for d, s in top) if top else "no signals"
+    console.print(
+        f"  id={article_id}  signals: {top_str}  "
+        f"tickers: {', '.join(extracted_tickers[:5]) or '—'}"
+    )
+
+    if no_persist or client is None:
+        return True
+
+    clean_hash = _sha256(body)
+    client.schema(get_schema()).table("news_articles").update({
+        "body": body,
+        "article_hash": clean_hash,
+    }).eq("id", article_id).execute()
+
+    _delete_heads_and_vector(client, article_id)
+    _persist(
+        client,
+        body,
+        clean_hash,
+        row.get("url"),
+        title,
+        row.get("url"),
+        heads,
+        impact,
+        existing_article_id=article_id,
+        published_at=row.get("published_at"),
+        publisher=row.get("publisher"),
+        article_stream=row.get("article_stream"),
+    )
+
+    if extracted_tickers:
+        save_article_tickers(client, article_id, extracted_tickers, source="extracted")
+
+    return True
+
+
+async def _process_rescore(args: argparse.Namespace) -> None:
+    """Re-score all articles with no non-empty impact heads."""
+    client = get_supabase_client()
+    ids = _rescore_fetch_unscored_ids(client)
+    total = len(ids)
+
+    if total == 0:
+        console.print("[green]No unscored articles found — nothing to do.[/green]")
+        return
+
+    console.print(
+        f"[bold]Rescoring {total} articles "
+        f"(concurrency={args.rescore_concurrency}, batch-size={args.rescore_batch_size})[/bold]"
+    )
+    if args.no_persist:
+        console.print("[yellow]--no-persist: scoring without DB writes[/yellow]")
+        db_client = None
+    else:
+        db_client = client
+
+    try:
+        ticker_alias_map, company_alias_map = _load_identity_alias_maps()
+    except Exception as exc:
+        logger.warning("[score_news] failed to load identity alias maps: %s", exc)
+        ticker_alias_map, company_alias_map = {}, {}
+
+    semaphore = asyncio.Semaphore(args.rescore_concurrency)
+    done = 0
+    failed = 0
+
+    for batch_start in range(0, total, args.rescore_batch_size):
+        batch_ids = ids[batch_start : batch_start + args.rescore_batch_size]
+        rows = _rescore_fetch_articles_batch(client, batch_ids)
+        row_map = {r["id"]: r for r in rows}
+
+        tasks = []
+        for i, article_id in enumerate(batch_ids):
+            row = row_map.get(article_id)
+            if row is None:
+                console.print(f"  id={article_id} — not found in DB, skipping")
+                continue
+            tasks.append(_rescore_one_article(
+                db_client,
+                row,
+                ticker_alias_map,
+                company_alias_map,
+                semaphore,
+                index=batch_start + i + 1,
+                total=total,
+                no_persist=args.no_persist,
+            ))
+
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+        for r in results:
+            if isinstance(r, Exception):
+                console.print(f"[red]Unhandled error: {r}[/red]")
+                failed += 1
+            elif r:
+                done += 1
+            else:
+                failed += 1
+
+        console.print(
+            f"[dim]Batch done ({min(batch_start + args.rescore_batch_size, total)}/{total}). "
+            f"Progress: {done} rescored, {failed} failed[/dim]\n"
+        )
+
+    console.print(
+        f"\n[bold green]Done.[/bold green] "
+        f"{done} rescored, {failed} failed out of {total} unscored articles."
+    )
+
+
 def _health_job_name_from_namespace(args: argparse.Namespace) -> str | None:
     """
     Distinct job_health name from parsed CLI so concurrent cron jobs do not
     clobber each other's rows. None for single-article invocations (no tracking).
     """
-    if not (args.fmp_news or args.x_news or args.sparse_fill is not None):
+    if not (args.fmp_news or args.x_news or args.sparse_fill is not None or getattr(args, "rescore", False)):
         return None
+    if getattr(args, "rescore", False):
+        return "news_rescore"
     feed = getattr(args, "fmp_news_feed", None) or "stock"
     if args.sparse_fill is not None:
         return f"news_backfill_{feed}"

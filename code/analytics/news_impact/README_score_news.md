@@ -67,6 +67,11 @@ python -m news_impact.score_news_cli --x-news --tickers TSLA --x-limit 50
 python -m news_impact.score_news_cli --x-news --tickers AAPL --x-accounts finansworld seekingalpha
 python -m news_impact.score_news_cli --x-news --tickers TSLA --x-accounts tsla elonmusk --x-limit 100
 
+# Re-score all articles with no non-empty impact heads (e.g. failed due to LLM errors)
+python -m news_impact.score_news_cli --rescore
+python -m news_impact.score_news_cli --rescore --rescore-concurrency 10 --rescore-batch-size 100
+python -m news_impact.score_news_cli --rescore --no-persist  # dry run — score without DB writes
+
 ## Options
 
 ### Article source (mutually exclusive, one required)
@@ -77,6 +82,8 @@ python -m news_impact.score_news_cli --x-news --tickers TSLA --x-accounts tsla e
 | `--text TEXT` | Article text supplied inline                                           |
 | `--file PATH` | Read article text from a local file                                    |
 | `--fmp-news`  | Fetch news from FMP stable APIs and score each article (see `--fmp-news-feed`) |
+| `--x-news`    | Fetch recent X posts mentioning stock cashtags (requires `--tickers` and/or `--x-accounts`) |
+| `--rescore`   | Re-score all articles with no non-empty impact heads (see rescore options below) |
 
 ### FMP news options (only with `--fmp-news`)
 
@@ -89,6 +96,16 @@ python -m news_impact.score_news_cli --x-news --tickers TSLA --x-accounts tsla e
 | `--to YYYY-MM-DD`            | —       | End date filter for FMP fetch (inclusive)                                                                                                                                                                                                                                      |
 | `--sparse-fill N_DAYS M_NEW` | —       | Query `news_articles` for per-day counts (UTC); choose the day with the fewest rows (earliest day on ties); fetch that day from FMP and paginate until `M_NEW` **new inserts** or API exhaustion. Overrides `--from`, `--to`, and `--page`. Requires DB (omit `--no-persist`). |
 | `--sparse-fill-loop`         | off     | With `--sparse-fill`: after each day’s run, re-query counts and process the **next** sparsest day (skipping days already done this run) until each day in the N-day window has had one pass. |
+
+### Rescore options (only with `--rescore`)
+
+| Flag                       | Default | Description                                                                  |
+| -------------------------- | ------- | ---------------------------------------------------------------------------- |
+| `--rescore-concurrency N`  | `5`     | Max articles scored in parallel                                              |
+| `--rescore-batch-size N`   | `50`    | Articles fetched from DB per query                                           |
+| `--no-persist`             | off     | Score without writing to DB (dry run)                                        |
+
+An article is considered unscored when it has no `news_impact_heads` rows, or all its head rows have `scores_json = '{}'`.
 
 ### Tickers and company scoring
 
@@ -182,6 +199,9 @@ python -m news_impact.score_news_cli --fmp-news --to 2025-11-30
 | `--page N`                   | `0`     | FMP: pagination index (≤ 100).                                          |
 | `--published-at ISO`         | —       | Stored publication timestamp.                                           |
 | `--refresh`                  | off     | Re-score existing DB article.                                           |
+| `--rescore`                  | off     | Batch mode: re-score all articles with no non-empty impact heads.       |
+| `--rescore-batch-size N`     | `50`    | Rescore: articles fetched per DB query.                                 |
+| `--rescore-concurrency N`    | `5`     | Rescore: max articles scored in parallel.                               |
 | `--score-companies`          | off     | Compute tailwinds/headwinds vs company vectors.                         |
 | `--sparse-fill N_DAYS M_NEW` | —       | FMP: fill sparsest UTC day in the last `N_DAYS` until `M_NEW` new rows. |
 | `--sparse-fill-loop`         | off     | After each sparse day, continue with the next sparsest (see FMP options). |
