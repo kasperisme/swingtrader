@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import { Check, ArrowRight, Loader2 } from "lucide-react";
+import { Check, ArrowRight } from "lucide-react";
 import type { LandingPricingPlan } from "@/lib/sanity/types";
 
 type Props = {
@@ -37,8 +37,6 @@ export function PricingTierSwitcher({
     allTiers[0]?.name ?? "",
   );
 
-  const [loading, setLoading] = useState(false);
-
   const plan = allTiers.find((p) => p.name === selected);
   if (!plan) return null;
 
@@ -49,27 +47,6 @@ export function PricingTierSwitcher({
     !isFree && phase3PriceNum > currentPriceNum
       ? Math.round(((phase3PriceNum - currentPriceNum) / phase3PriceNum) * 100)
       : 0;
-
-  async function handleCheckout() {
-    setLoading(true);
-    try {
-      const res = await fetch("/api/stripe/checkout", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ plan: selected.toLowerCase(), interval: "monthly" }),
-      });
-      const data = (await res.json().catch(() => ({}))) as { url?: string; error?: string };
-      if (data.url) {
-        window.location.href = data.url;
-      } else {
-        alert(data.error ?? "Something went wrong. Please try again.");
-      }
-    } catch {
-      alert("Network error. Please try again.");
-    } finally {
-      setLoading(false);
-    }
-  }
 
   return (
     <div className="relative mt-10 overflow-hidden rounded-2xl border border-violet-500/40 bg-violet-500/5 p-6 shadow-xl shadow-violet-500/10 md:p-8">
@@ -162,21 +139,13 @@ export function PricingTierSwitcher({
               <ArrowRight className="h-4 w-4" />
             </Link>
           ) : (
-            <button
-              type="button"
-              onClick={handleCheckout}
-              disabled={loading}
-              className="inline-flex items-center justify-center gap-2 rounded-xl bg-violet-600 px-7 py-3 text-sm font-semibold text-white shadow-lg shadow-violet-500/20 transition-all hover:bg-violet-500 disabled:pointer-events-none disabled:opacity-60"
+            <Link
+              href="/auth/sign-up"
+              className="inline-flex items-center justify-center gap-2 rounded-xl bg-violet-600 px-7 py-3 text-sm font-semibold text-white shadow-lg shadow-violet-500/20 transition-all hover:bg-violet-500"
             >
-              {loading ? (
-                <Loader2 className="h-4 w-4 animate-spin" />
-              ) : (
-                <>
-                  {plan.ctaLabel ?? "Lock in this rate"}
-                  <ArrowRight className="h-4 w-4" />
-                </>
-              )}
-            </button>
+              {plan.ctaLabel ?? "Lock in this rate"}
+              <ArrowRight className="h-4 w-4" />
+            </Link>
           )}
           {!isFree && founderNote && (
             <p className="text-xs leading-5 text-muted-foreground sm:max-w-[280px]">

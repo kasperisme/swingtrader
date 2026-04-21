@@ -18,6 +18,14 @@ import { AddToScreening } from "@/components/add-to-screening";
 
 const DEFAULT_TICKERS = ["SPY", "QQQ", "IWM"] as const;
 
+type QuickRange = "7d" | "30d" | "90d" | "1y" | "3y" | "custom";
+
+const pad2 = (n: number) => String(n).padStart(2, "0");
+
+function localDateStr(d: Date): string {
+  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
+}
+
 function parseTickersParam(raw: string | undefined): string[] {
   if (!raw?.trim()) return [...DEFAULT_TICKERS];
   const parts = raw
@@ -53,6 +61,33 @@ export function ChartsPageClient({
   const [aiChatMessages, setAiChatMessages] = useState<ChartAiChatMessage[]>([]);
   const [workspaceReady, setWorkspaceReady] = useState(false);
   const saveSeq = useRef(0);
+
+  const [quickRange, setQuickRange] = useState<QuickRange>("1y");
+  const [dateFrom, setDateFrom] = useState<string>("");
+  const [dateTo, setDateTo] = useState<string>("");
+
+  const todayStr = useMemo(() => localDateStr(new Date()), []);
+
+  function applyQuickRange(range: QuickRange) {
+    setQuickRange(range);
+    if (range === "custom") return;
+    const days =
+      range === "7d" ? 7 : range === "30d" ? 30 : range === "90d" ? 90 : range === "1y" ? 365 : 365 * 3;
+    const end = new Date();
+    const start = new Date(end);
+    start.setDate(start.getDate() - days);
+    setDateFrom(localDateStr(start));
+    setDateTo(localDateStr(end));
+  }
+
+  useEffect(() => {
+    applyQuickRange("1y");
+  }, []);
+
+  const dateRange = useMemo<{ from: string; to: string } | undefined>(() => {
+    if (!dateFrom || !dateTo) return undefined;
+    return { from: dateFrom, to: dateTo };
+  }, [dateFrom, dateTo]);
 
   useEffect(() => {
     setChartData([]);
@@ -212,6 +247,52 @@ export function ChartsPageClient({
         </p>
       ) : null}
 
+      {/* Date range toolbar — same design as news-trends */}
+      <div className="flex items-stretch rounded-xl border border-border bg-card overflow-x-auto overflow-y-visible">
+        <div className="flex items-center px-3 py-2 border-r border-border shrink-0">
+          <span className="text-[10px] font-medium text-muted-foreground/60 uppercase tracking-wide">
+            Range
+          </span>
+        </div>
+        {(["7d", "30d", "90d", "1y", "3y"] as QuickRange[]).map((r) => (
+          <button
+            key={r}
+            onClick={() => applyQuickRange(r)}
+            className={`text-[11px] px-3 py-2 transition-colors cursor-pointer border-r border-border ${
+              quickRange === r
+                ? "bg-foreground text-background"
+                : "text-muted-foreground hover:text-foreground"
+            }`}
+          >
+            {r}
+          </button>
+        ))}
+        <div className="flex items-center gap-1.5 px-3 py-2 border-r border-border shrink-0">
+          <input
+            type="date"
+            value={dateFrom}
+            max={dateTo || todayStr}
+            onChange={(e) => {
+              setDateFrom(e.target.value);
+              setQuickRange("custom");
+            }}
+            className="text-[11px] bg-transparent text-foreground focus:outline-none cursor-pointer"
+          />
+          <span className="text-[10px] text-muted-foreground/40">—</span>
+          <input
+            type="date"
+            value={dateTo}
+            min={dateFrom}
+            max={todayStr}
+            onChange={(e) => {
+              setDateTo(e.target.value);
+              setQuickRange("custom");
+            }}
+            className="text-[11px] bg-transparent text-foreground focus:outline-none cursor-pointer"
+          />
+        </div>
+      </div>
+
       <div className="rounded-lg border border-border overflow-hidden">
         <TickerChartsPanel
           symbols={symbols}
@@ -236,6 +317,7 @@ export function ChartsPageClient({
           onAnnotationAdd={handleAnnotationAdd}
           onAnnotationDelete={handleAnnotationDelete}
           symbolPicker={selectedTicker ? <AddToScreening ticker={selectedTicker} /> : undefined}
+          dateRange={dateRange}
         />
         {selectedTicker && (
           <ChartAiChat

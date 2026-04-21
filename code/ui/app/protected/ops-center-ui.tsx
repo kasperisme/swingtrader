@@ -6,12 +6,13 @@ import {
   Briefcase,
   Loader2,
   ArrowRight,
-  Newspaper,
+  TrendingUp,
   BarChart3,
-  BookOpen,
+  Network,
 } from "lucide-react";
 import { buildPortfolioFromTrades, type PortfolioPosition } from "@/app/protected/trades/portfolio-from-trades";
 import { fmpGetQuote } from "@/app/actions/fmp";
+import { PortfolioValueChart } from "./portfolio-value-chart";
 
 export type UserTradeRow = {
   id: number;
@@ -250,10 +251,10 @@ function PortfolioTable({ trades }: { trades: UserTradeRow[] }) {
 
 const quickLinks = [
   {
-    href: "/protected/articles",
-    label: "Articles",
-    description: "Semantic search across the news pipeline",
-    icon: Newspaper,
+    href: "/protected/news-trends",
+    label: "News Trends",
+    description: "Track trending topics and sentiment shifts",
+    icon: TrendingUp,
   },
   {
     href: "/protected/screenings",
@@ -262,10 +263,10 @@ const quickLinks = [
     icon: BarChart3,
   },
   {
-    href: "/protected/daily-narrative",
-    label: "Daily Narrative",
-    description: "AI briefing for your positions",
-    icon: BookOpen,
+    href: "/protected/relations",
+    label: "Network Graph",
+    description: "Explore entity relationships and connections",
+    icon: Network,
   },
 ];
 
@@ -273,6 +274,7 @@ export function OpsCenterUI({ initialTrades }: { initialTrades: UserTradeRow[] }
   return (
     <div className="space-y-8">
       <PortfolioTable trades={initialTrades} />
+      <PortfolioValueChart trades={initialTrades} />
 
       <section>
         <h2 className="text-sm font-semibold uppercase tracking-widest text-muted-foreground mb-3">Quick links</h2>

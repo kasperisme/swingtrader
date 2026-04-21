@@ -1,8 +1,8 @@
 import Image from "next/image";
 import Link from "next/link";
+import { UserCircle } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { Button } from "@/components/ui/button";
-import { LogoutButton } from "@/components/logout-button";
 import { SiteHeaderMobileNav } from "@/components/site-header-mobile-nav";
 import { SiteHeaderDesktopAuthedNav } from "@/components/site-header-desktop-authed-nav";
 import { CavemanToggle } from "@/components/caveman-toggle";
@@ -90,11 +90,11 @@ export async function SiteHeader() {
           <CavemanToggle />
           <Link
             href="/protected/profile"
-            className="text-sm text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
+            className="inline-flex items-center justify-center h-8 w-8 rounded-lg border border-border bg-background/80 text-muted-foreground transition-colors hover:text-foreground hover:bg-muted"
+            aria-label="Profile"
           >
-            {user?.email ?? ""}
+            <UserCircle className="h-4 w-4" />
           </Link>
-          <LogoutButton />
         </div>
       ) : (
         <div className="hidden shrink-0 items-center gap-2 md:flex">

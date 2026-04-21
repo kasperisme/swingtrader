@@ -62,6 +62,8 @@ export type TickerChartsPanelProps = {
   onAnnotationDelete?: (id: string) => void;
   /** When false, removes bordered chart frame (used in screenings deep-dive). */
   showChartFrame?: boolean;
+  /** Date range to pass to the OHLC fetch (controls initial from/to). */
+  dateRange?: { from: string; to: string };
 };
 
 export function TickerChartsPanel({
@@ -88,6 +90,7 @@ export function TickerChartsPanel({
   onAnnotationAdd,
   onAnnotationDelete,
   showChartFrame = true,
+  dateRange,
 }: TickerChartsPanelProps) {
   const idx = useMemo(() => {
     const i = selectedTicker ? symbols.indexOf(selectedTicker) : -1;
@@ -420,6 +423,7 @@ export function TickerChartsPanel({
           drawingRole={drawingRole}
           onAnnotationAdd={onAnnotationAdd}
           onAnnotationDelete={onAnnotationDelete}
+          dateRange={dateRange}
         />
       </div>
 

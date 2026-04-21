@@ -125,6 +125,7 @@ export function CandlestickSvg({
   drawingRole = "info",
   onAnnotationAdd,
   onAnnotationDelete,
+  dateRange,
 }: {
   symbol: string;
   onPointChange?: (point: ChartPoint | null) => void;
@@ -137,6 +138,7 @@ export function CandlestickSvg({
   drawingRole?: import("./types").AnnotationRole;
   onAnnotationAdd?: (ann: ChartAnnotation) => void;
   onAnnotationDelete?: (id: string) => void;
+  dateRange?: { from: string; to: string };
 }) {
   const [data, setData] = useState<OhlcBar[]>([]);
   const [loading, setLoading] = useState(false);
@@ -218,7 +220,7 @@ export function CandlestickSvg({
       try {
         // Read cached view and OHLC data in parallel.
         const [ohlcResult, cached] = await Promise.all([
-          fmpGetOhlc(sym),
+          fmpGetOhlc(sym, undefined, dateRange),
           readChartViewCache(),
         ]);
         if (sym !== symbolRef.current) return; // navigated away
@@ -248,7 +250,7 @@ export function CandlestickSvg({
         if (sym === symbolRef.current) setLoading(false);
       }
     })();
-  }, [symbol]);
+  }, [symbol, dateRange?.from, dateRange?.to]);
 
   // Debounced cache write — fires 600 ms after the view settles.
   // Uses refs inside the timeout so values are always current when it fires.

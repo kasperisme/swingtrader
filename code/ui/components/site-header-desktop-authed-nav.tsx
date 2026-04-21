@@ -35,7 +35,10 @@ function NavDropLink({
 export function SiteHeaderDesktopAuthedNav() {
   return (
     <nav className="hidden min-w-0 items-center gap-2 md:flex">
-      <Link href="/protected" className="text-sm font-medium text-foreground transition-colors hover:text-amber-500 cursor-pointer">
+      <Link
+        href="/protected"
+        className="text-sm font-medium text-foreground transition-colors hover:text-amber-500 cursor-pointer"
+      >
         Portfolio
       </Link>
       <details className="group relative" name="desktop-main-nav">
@@ -47,7 +50,7 @@ export function SiteHeaderDesktopAuthedNav() {
           <NavDropLink href="/protected/articles">Articles</NavDropLink>
           <NavDropLink href="/protected/news-trends">News Trends</NavDropLink>
           <NavDropLink href="/protected/charts">Charts</NavDropLink>
-          <NavDropLink href="/protected/relationships">Explore</NavDropLink>
+          <NavDropLink href="/protected/relations">Relations</NavDropLink>
         </div>
       </details>
       <details className="group relative" name="desktop-main-nav">
@@ -57,7 +60,9 @@ export function SiteHeaderDesktopAuthedNav() {
         </summary>
         <div className={navDropdownPanelClass}>
           <NavDropLink href="/protected/screenings">Screenings</NavDropLink>
-          <NavDropLink href="/protected/daily-narrative">Daily Narrative</NavDropLink>
+          <NavDropLink href="/protected/daily-narrative">
+            Daily Narrative
+          </NavDropLink>
           <NavDropLink href="/protected/trades">Trades</NavDropLink>
         </div>
       </details>
