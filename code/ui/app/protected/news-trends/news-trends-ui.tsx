@@ -4,7 +4,6 @@ import type { MouseEvent as ReactMouseEvent } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import {
-  Brush,
   LineChart,
   ComposedChart,
   Line,
@@ -15,7 +14,6 @@ import {
   YAxis,
   CartesianGrid,
   Tooltip,
-  Legend,
   ReferenceArea,
   ReferenceLine,
   ResponsiveContainer,
@@ -1400,7 +1398,7 @@ export function NewsTrendsUI({
     endIndex: number;
   } | null>(null);
 
-  /** Click-drag on the chart: highlight a period (separate from brush zoom) */
+  /** Double-click drag on the chart: highlight a period */
   const [rangeSelectDrag, setRangeSelectDrag] = useState<{
     start: number;
     cur: number;
@@ -1416,19 +1414,28 @@ export function NewsTrendsUI({
   const [periodModalSortDir, setPeriodModalSortDir] = useState<"desc" | "asc">(
     "desc",
   );
+  const [isPanning, setIsPanning] = useState(false);
   const rangeDragRef = useRef<{ start: number; cur: number } | null>(null);
-  const brushBlockRef = useRef(false);
+  const panDragRef = useRef<{
+    startX: number;
+    start: number;
+    end: number;
+  } | null>(null);
+  /** "pan" = click drag pans window; "select" = double-click drag selects period */
+  const dragModeRef = useRef<"pan" | "select">("pan");
+  const lastClickTimeRef = useRef(0);
+  const didDragRef = useRef(false);
   /** Outer chart stack (plot uses full width); used with clientX for stable index mapping. */
   const chartSelectAreaRef = useRef<HTMLDivElement>(null);
 
-  const dataLen = chartDataWithBenchmark.length;
-  const lastIdx = Math.max(0, dataLen - 1);
+  const fullDataLen = chartDataWithBenchmark.length;
+  const lastIdx = Math.max(0, fullDataLen - 1);
   const plotLeftGutterPx = 40;
   const plotRightGutterPx = benchmark !== "none" ? 56 : 12;
 
   const dataBoundsKey =
-    dataLen > 0
-      ? `${chartDataWithBenchmark[0].date}:${chartDataWithBenchmark[dataLen - 1].date}:${dataLen}`
+    fullDataLen > 0
+      ? `${chartDataWithBenchmark[0].date}:${chartDataWithBenchmark[fullDataLen - 1].date}:${fullDataLen}`
       : "";
 
   useEffect(() => {
@@ -1450,31 +1457,15 @@ export function NewsTrendsUI({
     : lastIdx;
   const normalizedBrushStart = Math.min(clampedBrushStart, clampedBrushEnd);
   const normalizedBrushEnd = Math.max(clampedBrushStart, clampedBrushEnd);
-  const hasValidControlledBrush =
-    brushRange != null &&
-    Number.isFinite(normalizedBrushStart) &&
-    Number.isFinite(normalizedBrushEnd) &&
-    normalizedBrushStart >= 0 &&
-    normalizedBrushEnd <= lastIdx;
 
-  const handleBrushChange = (
-    next: { startIndex?: number; endIndex?: number } | null,
-  ) => {
-    if (!next) {
-      setBrushRange(null);
-      return;
-    }
-    const nextStartRaw = next.startIndex;
-    const nextEndRaw = next.endIndex;
-    if (!Number.isFinite(nextStartRaw) || !Number.isFinite(nextEndRaw)) return;
-    const nextStart = Math.max(0, Math.min(lastIdx, nextStartRaw as number));
-    const nextEnd = Math.max(0, Math.min(lastIdx, nextEndRaw as number));
-    if (nextStart === 0 && nextEnd === lastIdx) {
-      setBrushRange(null);
-    } else {
-      setBrushRange({ startIndex: nextStart, endIndex: nextEnd });
-    }
-  };
+  // Slice to visible window — Y-axis autoscales naturally on the sliced data
+  const visibleChartData = useMemo(
+    () => chartDataWithBenchmark.slice(normalizedBrushStart, normalizedBrushEnd + 1),
+    [chartDataWithBenchmark, normalizedBrushStart, normalizedBrushEnd],
+  );
+  const dataLen = visibleChartData.length;
+
+  const DBLCLICK_MS = 350;
 
   const applyRangeDragClientX = useCallback(
     (clientX: number) => {
@@ -1497,25 +1488,26 @@ export function NewsTrendsUI({
     [dataLen, plotLeftGutterPx, plotRightGutterPx],
   );
 
-  const finishRangeDrag = useCallback(() => {
+  const finishDrag = useCallback(() => {
+    if (dragModeRef.current === "pan") {
+      panDragRef.current = null;
+      setIsPanning(false);
+      return;
+    }
     const d = rangeDragRef.current;
     if (!d) return;
     rangeDragRef.current = null;
     setRangeSelectDrag(null);
-    if (d.start === d.cur) {
-      setPeriodSelection(null);
-      setPeriodZeitgeistOpen(false);
-      return;
-    }
+    if (d.start === d.cur) return;
     const lo = Math.min(d.start, d.cur);
     const hi = Math.max(d.start, d.cur);
     setPeriodSelection({ start: lo, end: hi });
   }, []);
 
   useEffect(() => {
-    window.addEventListener("mouseup", finishRangeDrag);
-    return () => window.removeEventListener("mouseup", finishRangeDrag);
-  }, [finishRangeDrag]);
+    window.addEventListener("mouseup", finishDrag);
+    return () => window.removeEventListener("mouseup", finishDrag);
+  }, [finishDrag]);
 
   useEffect(() => {
     const onMove = (e: MouseEvent) => {
@@ -1545,39 +1537,180 @@ export function NewsTrendsUI({
     _state: MouseHandlerDataParam,
     event?: ReactMouseEvent<SVGGraphicsElement>,
   ) => {
-    if (brushBlockRef.current) {
-      brushBlockRef.current = false;
-      return;
-    }
     if (dataLen < 2 || !event) return;
     const node = chartSelectAreaRef.current;
     if (!node) return;
-    const idx = clientXToDataIndex(
-      event.clientX,
-      node.getBoundingClientRect(),
-      dataLen,
-      plotLeftGutterPx,
-      plotRightGutterPx,
-    );
-    rangeDragRef.current = { start: idx, cur: idx };
-    setRangeSelectDrag({ start: idx, cur: idx });
+    const now = Date.now();
+    const isSecondClick = now - lastClickTimeRef.current < DBLCLICK_MS;
+    lastClickTimeRef.current = now;
+    dragModeRef.current = isSecondClick ? "select" : "pan";
+    didDragRef.current = false;
+    if (dragModeRef.current === "select") {
+      const idx = clientXToDataIndex(
+        event.clientX,
+        node.getBoundingClientRect(),
+        dataLen,
+        plotLeftGutterPx,
+        plotRightGutterPx,
+      );
+      rangeDragRef.current = { start: idx, cur: idx };
+      setRangeSelectDrag({ start: idx, cur: idx });
+      panDragRef.current = null;
+      setIsPanning(false);
+      return;
+    }
+    rangeDragRef.current = null;
+    setRangeSelectDrag(null);
+    panDragRef.current = {
+      startX: event.clientX,
+      start: normalizedBrushStart,
+      end: normalizedBrushEnd,
+    };
+    setIsPanning(true);
   };
 
   const handleChartMouseMove = (
     _state: MouseHandlerDataParam,
     event?: ReactMouseEvent<SVGGraphicsElement>,
   ) => {
-    if (!rangeDragRef.current || !event) return;
-    applyRangeDragClientX(event.clientX);
+    if (!event) return;
+    if (dragModeRef.current === "select" && rangeDragRef.current) {
+      const before = rangeDragRef.current.cur;
+      applyRangeDragClientX(event.clientX);
+      if (rangeDragRef.current?.cur !== before) {
+        didDragRef.current = true;
+      }
+      return;
+    }
+    if (dragModeRef.current === "pan" && panDragRef.current) {
+      const node = chartSelectAreaRef.current;
+      if (!node || fullDataLen < 2) return;
+      const visLen = panDragRef.current.end - panDragRef.current.start + 1;
+      const rect = node.getBoundingClientRect();
+      const plotWidth = Math.max(
+        1,
+        rect.width - plotLeftGutterPx - plotRightGutterPx,
+      );
+      const deltaPx = event.clientX - panDragRef.current.startX;
+      if (Math.abs(deltaPx) > 2) {
+        didDragRef.current = true;
+      }
+      if (visLen >= fullDataLen) {
+        // No brush zoom window to pan inside: shift the date selector range instead.
+        const fromStr = dateFrom || minDate;
+        const toStr = dateTo || maxDate;
+        if (fromStr && toStr && minDate && maxDate) {
+          const [fy, fm, fd] = fromStr.split("-").map(Number);
+          const [ty, tm, td] = toStr.split("-").map(Number);
+          const [minY, minM, minD] = minDate.split("-").map(Number);
+          const [maxY, maxM, maxD] = maxDate.split("-").map(Number);
+          const baseFrom = new Date(fy, fm - 1, fd);
+          const baseTo = new Date(ty, tm - 1, td);
+          const minBound = new Date(minY, minM - 1, minD);
+          const maxBound = new Date(maxY, maxM - 1, maxD);
+          const spanDays = Math.max(
+            1,
+            Math.round((baseTo.getTime() - baseFrom.getTime()) / 86400000),
+          );
+          const shiftDays = Math.round((-deltaPx / plotWidth) * spanDays);
+          if (shiftDays !== 0) {
+            const nextFrom = new Date(baseFrom);
+            const nextTo = new Date(baseTo);
+            nextFrom.setDate(nextFrom.getDate() + shiftDays);
+            nextTo.setDate(nextTo.getDate() + shiftDays);
+            if (nextFrom < minBound) {
+              const adjust = Math.round(
+                (minBound.getTime() - nextFrom.getTime()) / 86400000,
+              );
+              nextFrom.setDate(nextFrom.getDate() + adjust);
+              nextTo.setDate(nextTo.getDate() + adjust);
+            } else if (nextTo > maxBound) {
+              const adjust = Math.round(
+                (nextTo.getTime() - maxBound.getTime()) / 86400000,
+              );
+              nextFrom.setDate(nextFrom.getDate() - adjust);
+              nextTo.setDate(nextTo.getDate() - adjust);
+            }
+            setQuickRange("custom");
+            setDateFrom(localDateStr(nextFrom));
+            setDateTo(localDateStr(nextTo));
+            setBrushRange(null);
+          }
+        }
+        return;
+      }
+      const shift = Math.round((-deltaPx / plotWidth) * visLen);
+      if (shift === 0) return;
+      const maxStart = Math.max(0, fullDataLen - visLen);
+      const newStart = Math.max(
+        0,
+        Math.min(maxStart, panDragRef.current.start + shift),
+      );
+      const newEnd = newStart + visLen - 1;
+      if (newStart === 0 && newEnd === fullDataLen - 1) {
+        setBrushRange(null);
+      } else {
+        setBrushRange({ startIndex: newStart, endIndex: newEnd });
+      }
+      setPeriodSelection(null);
+      setPeriodZeitgeistOpen(false);
+    }
   };
 
   const handleChartDoubleClick = (state: MouseHandlerDataParam) => {
-    setBrushRange(null);
+    if (didDragRef.current) return;
     const label = (state as { activeLabel?: unknown })?.activeLabel;
     if (typeof label === "string") {
       setArticleModalDate(label);
     }
   };
+
+  // Wheel handler: two-finger scroll = pan, pinch / ctrl+scroll = zoom
+  const handleChartWheel = useCallback(
+    (e: WheelEvent) => {
+      e.preventDefault();
+      if (fullDataLen < 2) return;
+      const start = normalizedBrushStart;
+      const end = normalizedBrushEnd;
+      const visLen = end - start + 1;
+
+      if (e.ctrlKey) {
+        // Zoom around centre
+        const factor = e.deltaY > 0 ? 1.2 : 0.833;
+        const centre = (start + end) / 2;
+        const half = Math.max(1, Math.round((visLen * factor) / 2));
+        const newStart = Math.max(0, Math.round(centre - half));
+        const newEnd = Math.min(fullDataLen - 1, Math.round(centre + half));
+        if (newStart === 0 && newEnd === fullDataLen - 1) {
+          setBrushRange(null);
+        } else {
+          setBrushRange({ startIndex: newStart, endIndex: newEnd });
+        }
+      } else {
+        // Pan left / right
+        const delta = e.deltaX !== 0 ? e.deltaX : e.deltaY;
+        const step = Math.max(1, Math.round(visLen * 0.12 * Math.sign(delta)));
+        const newStart = Math.max(0, Math.min(fullDataLen - visLen, start + step));
+        const newEnd = newStart + visLen - 1;
+        if (newStart === 0 && newEnd === fullDataLen - 1) {
+          setBrushRange(null);
+        } else {
+          setBrushRange({ startIndex: newStart, endIndex: newEnd });
+        }
+      }
+      // Clear period selection since indices shift
+      setPeriodSelection(null);
+      setPeriodZeitgeistOpen(false);
+    },
+    [fullDataLen, normalizedBrushStart, normalizedBrushEnd],
+  );
+
+  useEffect(() => {
+    const el = chartSelectAreaRef.current;
+    if (!el) return;
+    el.addEventListener("wheel", handleChartWheel, { passive: false });
+    return () => el.removeEventListener("wheel", handleChartWheel);
+  }, [handleChartWheel]);
 
   const highlightLoHi = useMemo(() => {
     if (rangeSelectDrag) {
@@ -1596,11 +1729,11 @@ export function NewsTrendsUI({
   }, [rangeSelectDrag, periodSelection]);
 
   const periodArticles = useMemo(() => {
-    if (!periodSelection || chartDataWithBenchmark.length === 0) return [];
+    if (!periodSelection || visibleChartData.length === 0) return [];
     const lo = Math.min(periodSelection.start, periodSelection.end);
     const hi = Math.max(periodSelection.start, periodSelection.end);
-    const startBucket = String(chartDataWithBenchmark[lo]?.date ?? "");
-    const endBucket = String(chartDataWithBenchmark[hi]?.date ?? "");
+    const startBucket = String(visibleChartData[lo]?.date ?? "");
+    const endBucket = String(visibleChartData[hi]?.date ?? "");
     if (!startBucket || !endBucket) return [];
     return articlesInBucketRange(
       filteredArticles,
@@ -1615,7 +1748,7 @@ export function NewsTrendsUI({
           new Date(b.published_at).getTime() -
           new Date(a.published_at).getTime(),
       );
-  }, [periodSelection, chartDataWithBenchmark, filteredArticles, viewMode, useDbAggregates]);
+  }, [periodSelection, visibleChartData, filteredArticles, viewMode, useDbAggregates]);
 
   const sortedPeriodArticles = useMemo(() => {
     if (periodArticles.length === 0) return periodArticles;
@@ -1974,19 +2107,19 @@ export function NewsTrendsUI({
                   )}
                 </p>
                 <p className="text-[11px] text-muted-foreground/70 mt-0.5">
-                  −1 bearish → +1 bullish · drag chart to select range ·
-                  dbl-click for articles
+                  −1 bearish → +1 bullish · drag to pan · dbl-click drag to
+                  select range · dbl-click for articles
                   {benchmark !== "none" ? " · OHLC ticks = benchmark" : ""}
                 </p>
               </div>
             </div>
             <div
               ref={chartSelectAreaRef}
-              className="relative select-none [&_.recharts-wrapper]:cursor-crosshair [&_.recharts-brush]:cursor-grab"
-              onMouseDownCapture={(e) => {
-                const t = e.target as HTMLElement | null;
-                brushBlockRef.current = !!t?.closest?.(".recharts-brush");
-              }}
+              className={`relative select-none ${
+                isPanning
+                  ? "[&_.recharts-wrapper]:cursor-grabbing"
+                  : "[&_.recharts-wrapper]:cursor-grab"
+              }`}
             >
               {awaitingHourlyCluster ? (
                 <div
@@ -2055,7 +2188,7 @@ export function NewsTrendsUI({
                     )}
                   <ResponsiveContainer width="100%" height={chartHeight}>
                 <ComposedChart
-                  data={chartDataWithBenchmark}
+                  data={visibleChartData}
                   margin={{ top: 5, right: 10, left: 0, bottom: 8 }}
                   onMouseDown={handleChartMouseDown}
                   onMouseMove={handleChartMouseMove}
@@ -2128,11 +2261,11 @@ export function NewsTrendsUI({
                   />
                   {highlightLoHi &&
                   dataLen > 1 &&
-                  chartDataWithBenchmark[highlightLoHi.lo]?.date != null &&
-                  chartDataWithBenchmark[highlightLoHi.hi]?.date != null ? (
+                  visibleChartData[highlightLoHi.lo]?.date != null &&
+                  visibleChartData[highlightLoHi.hi]?.date != null ? (
                     <ReferenceArea
-                      x1={chartDataWithBenchmark[highlightLoHi.lo]!.date}
-                      x2={chartDataWithBenchmark[highlightLoHi.hi]!.date}
+                      x1={visibleChartData[highlightLoHi.lo]!.date}
+                      x2={visibleChartData[highlightLoHi.hi]!.date}
                       stroke="hsl(var(--primary) / 0.4)"
                       strokeWidth={1}
                       fill="hsl(var(--primary) / 0.1)"
@@ -2270,27 +2403,6 @@ export function NewsTrendsUI({
                       barSize={10}
                     />
                   )}
-                  {dataLen > 1 ? (
-                    <Brush
-                      dataKey="date"
-                      height={32}
-                      stroke="hsl(var(--border))"
-                      fill="hsl(var(--muted))"
-                      travellerWidth={6}
-                      startIndex={
-                        hasValidControlledBrush
-                          ? normalizedBrushStart
-                          : undefined
-                      }
-                      endIndex={
-                        hasValidControlledBrush ? normalizedBrushEnd : undefined
-                      }
-                      onChange={handleBrushChange}
-                      tickFormatter={(v: string) =>
-                        formatChartAxisTick(v, viewMode, useDbAggregates)
-                      }
-                    />
-                  ) : null}
                 </ComposedChart>
               </ResponsiveContainer>
                 </>
@@ -2381,7 +2493,7 @@ export function NewsTrendsUI({
       {/* Selected period — article list (placeholder for future AI zeitgeist + citations) */}
       {periodZeitgeistOpen &&
         periodSelection &&
-        chartDataWithBenchmark.length > 0 && (
+        visibleChartData.length > 0 && (
           <div
             className="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
             onClick={() => setPeriodZeitgeistOpen(false)}
@@ -2402,7 +2514,7 @@ export function NewsTrendsUI({
                   <p className="text-xs text-muted-foreground mt-1">
                     {formatChartAxisTick(
                       String(
-                        chartDataWithBenchmark[
+                        visibleChartData[
                           Math.min(periodSelection.start, periodSelection.end)
                         ]?.date ?? "",
                       ),
@@ -2412,7 +2524,7 @@ export function NewsTrendsUI({
                     {" → "}
                     {formatChartAxisTick(
                       String(
-                        chartDataWithBenchmark[
+                        visibleChartData[
                           Math.max(periodSelection.start, periodSelection.end)
                         ]?.date ?? "",
                       ),
