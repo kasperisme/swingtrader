@@ -22,15 +22,17 @@ export default function NewsTrendsPage() {
         </p>
       </div>
 
-      <Suspense
-        fallback={
-          <div className="text-sm text-muted-foreground animate-pulse">
-            Loading trends…
-          </div>
-        }
-      >
-        <TrendsData />
-      </Suspense>
+      <div className="sm:-mx-2 lg:-mx-4 xl:-mx-8">
+        <Suspense
+          fallback={
+            <div className="text-sm text-muted-foreground animate-pulse">
+              Loading trends…
+            </div>
+          }
+        >
+          <TrendsData />
+        </Suspense>
+      </div>
     </div>
   );
 }

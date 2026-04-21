@@ -65,15 +65,17 @@ export default function ChartsPage({ searchParams }: PageProps) {
         </p>
       </div>
 
-      <Suspense
-        fallback={
-          <div className="text-sm text-muted-foreground animate-pulse">
-            Loading charts…
-          </div>
-        }
-      >
-        <ChartsBody searchParams={searchParams} />
-      </Suspense>
+      <div className="sm:-mx-2 lg:-mx-4 xl:-mx-8">
+        <Suspense
+          fallback={
+            <div className="text-sm text-muted-foreground animate-pulse">
+              Loading charts…
+            </div>
+          }
+        >
+          <ChartsBody searchParams={searchParams} />
+        </Suspense>
+      </div>
     </div>
   );
 }

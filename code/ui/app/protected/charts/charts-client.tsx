@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Loader2 } from "lucide-react";
+import { Loader2, ChevronLeft, ChevronRight } from "lucide-react";
 import { chartWorkspaceLoad, chartWorkspaceSave, type ChartAiChatMessage } from "@/app/actions/chart-workspace";
 import { relationshipsResolveTicker } from "@/app/actions/relationships";
 import { TickerSearchCombobox } from "@/components/ticker-search-combobox";
@@ -15,16 +15,10 @@ import {
 } from "@/components/ticker-charts";
 import { ChartAiChat } from "@/components/chart-ai-chat";
 import { AddToScreening } from "@/components/add-to-screening";
+import { ChartDateRangePicker } from "@/components/chart-date-range-picker";
 
 const DEFAULT_TICKERS = ["SPY", "QQQ", "IWM"] as const;
 
-type QuickRange = "7d" | "30d" | "90d" | "1y" | "3y" | "custom";
-
-const pad2 = (n: number) => String(n).padStart(2, "0");
-
-function localDateStr(d: Date): string {
-  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
-}
 
 function parseTickersParam(raw: string | undefined): string[] {
   if (!raw?.trim()) return [...DEFAULT_TICKERS];
@@ -60,34 +54,10 @@ export function ChartsPageClient({
   const [annotations, setAnnotations] = useState<ChartAnnotation[]>([]);
   const [aiChatMessages, setAiChatMessages] = useState<ChartAiChatMessage[]>([]);
   const [workspaceReady, setWorkspaceReady] = useState(false);
+  const [aiChatOpen, setAiChatOpen] = useState(true);
   const saveSeq = useRef(0);
 
-  const [quickRange, setQuickRange] = useState<QuickRange>("1y");
-  const [dateFrom, setDateFrom] = useState<string>("");
-  const [dateTo, setDateTo] = useState<string>("");
-
-  const todayStr = useMemo(() => localDateStr(new Date()), []);
-
-  function applyQuickRange(range: QuickRange) {
-    setQuickRange(range);
-    if (range === "custom") return;
-    const days =
-      range === "7d" ? 7 : range === "30d" ? 30 : range === "90d" ? 90 : range === "1y" ? 365 : 365 * 3;
-    const end = new Date();
-    const start = new Date(end);
-    start.setDate(start.getDate() - days);
-    setDateFrom(localDateStr(start));
-    setDateTo(localDateStr(end));
-  }
-
-  useEffect(() => {
-    applyQuickRange("1y");
-  }, []);
-
-  const dateRange = useMemo<{ from: string; to: string } | undefined>(() => {
-    if (!dateFrom || !dateTo) return undefined;
-    return { from: dateFrom, to: dateTo };
-  }, [dateFrom, dateTo]);
+  const [dateRange, setDateRange] = useState<{ from: string; to: string } | undefined>();
 
   useEffect(() => {
     setChartData([]);
@@ -215,7 +185,7 @@ export function ChartsPageClient({
   );
 
   return (
-    <div className="flex flex-col gap-4">
+    <div className="flex flex-col gap-4 w-full">
       <div className="grid gap-3 md:grid-cols-6">
         <TickerSearchCombobox
           className="md:col-span-5"
@@ -247,88 +217,63 @@ export function ChartsPageClient({
         </p>
       ) : null}
 
-      {/* Date range toolbar — same design as news-trends */}
-      <div className="flex items-stretch rounded-xl border border-border bg-card overflow-x-auto overflow-y-visible">
-        <div className="flex items-center px-3 py-2 border-r border-border shrink-0">
-          <span className="text-[10px] font-medium text-muted-foreground/60 uppercase tracking-wide">
-            Range
-          </span>
-        </div>
-        {(["7d", "30d", "90d", "1y", "3y"] as QuickRange[]).map((r) => (
-          <button
-            key={r}
-            onClick={() => applyQuickRange(r)}
-            className={`text-[11px] px-3 py-2 transition-colors cursor-pointer border-r border-border ${
-              quickRange === r
-                ? "bg-foreground text-background"
-                : "text-muted-foreground hover:text-foreground"
-            }`}
-          >
-            {r}
-          </button>
-        ))}
-        <div className="flex items-center gap-1.5 px-3 py-2 border-r border-border shrink-0">
-          <input
-            type="date"
-            value={dateFrom}
-            max={dateTo || todayStr}
-            onChange={(e) => {
-              setDateFrom(e.target.value);
-              setQuickRange("custom");
-            }}
-            className="text-[11px] bg-transparent text-foreground focus:outline-none cursor-pointer"
-          />
-          <span className="text-[10px] text-muted-foreground/40">—</span>
-          <input
-            type="date"
-            value={dateTo}
-            min={dateFrom}
-            max={todayStr}
-            onChange={(e) => {
-              setDateTo(e.target.value);
-              setQuickRange("custom");
-            }}
-            className="text-[11px] bg-transparent text-foreground focus:outline-none cursor-pointer"
-          />
-        </div>
-      </div>
+      <ChartDateRangePicker onChange={setDateRange} />
 
-      <div className="rounded-lg border border-border overflow-hidden">
-        <TickerChartsPanel
-          symbols={symbols}
-          selectedTicker={selectedTicker}
-          onSelect={setSelectedTicker}
-          dismissed={dismissed}
-          onDismiss={noop}
-          onRestore={noop}
-          getStatus={getStatus}
-          onSetStatus={onSetStatus}
-          hasComment={hasComment}
-          onEditComment={noop}
-          getTickerMeta={getTickerMeta}
-          getPivotMarker={getPivotMarker}
-          onSetPivotMarker={onSetPivotMarker}
-          onClearPivotMarker={onClearPivotMarker}
-          screeningToolbar={false}
-          showChevronSymbolNav={false}
-          showSymbolHeadline={false}
-          annotations={annotations}
-          onChartData={setChartData}
-          onAnnotationAdd={handleAnnotationAdd}
-          onAnnotationDelete={handleAnnotationDelete}
-          symbolPicker={selectedTicker ? <AddToScreening ticker={selectedTicker} /> : undefined}
-          dateRange={dateRange}
-        />
-        {selectedTicker && (
-          <ChartAiChat
-            key={selectedTicker}
-            symbol={selectedTicker}
-            ohlcData={chartData}
+      <div className="flex items-stretch w-full">
+        <div className="flex-1 min-w-0">
+          <TickerChartsPanel
+            symbols={symbols}
+            selectedTicker={selectedTicker}
+            onSelect={setSelectedTicker}
+            dismissed={dismissed}
+            onDismiss={noop}
+            onRestore={noop}
+            getStatus={getStatus}
+            onSetStatus={onSetStatus}
+            hasComment={hasComment}
+            onEditComment={noop}
+            getTickerMeta={getTickerMeta}
+            getPivotMarker={getPivotMarker}
+            onSetPivotMarker={onSetPivotMarker}
+            onClearPivotMarker={onClearPivotMarker}
+            screeningToolbar={false}
+            showChevronSymbolNav={false}
+            showSymbolHeadline={false}
             annotations={annotations}
-            onAnnotations={handleAiAnnotations}
-            messages={aiChatMessages}
-            setMessages={setAiChatMessages}
+            onChartData={setChartData}
+            onAnnotationAdd={handleAnnotationAdd}
+            onAnnotationDelete={handleAnnotationDelete}
+            symbolPicker={selectedTicker ? <AddToScreening ticker={selectedTicker} /> : undefined}
+            dateRange={dateRange}
           />
+        </div>
+
+        {/* Collapse toggle strip */}
+        <button
+          type="button"
+          onClick={() => setAiChatOpen((v) => !v)}
+          className="flex items-center justify-center w-5 shrink-0 border-l border-border bg-background hover:bg-muted transition-colors"
+          title={aiChatOpen ? "Collapse AI chat" : "Expand AI chat"}
+        >
+          {aiChatOpen
+            ? <ChevronRight className="w-3 h-3 text-muted-foreground" />
+            : <ChevronLeft className="w-3 h-3 text-muted-foreground" />}
+        </button>
+
+        {/* AI chat side panel */}
+        {aiChatOpen && selectedTicker && (
+          <div className="w-[340px] shrink-0 flex flex-col border-l border-border">
+            <ChartAiChat
+              key={selectedTicker}
+              symbol={selectedTicker}
+              ohlcData={chartData}
+              annotations={annotations}
+              onAnnotations={handleAiAnnotations}
+              messages={aiChatMessages}
+              setMessages={setAiChatMessages}
+              side
+            />
+          </div>
         )}
       </div>
     </div>

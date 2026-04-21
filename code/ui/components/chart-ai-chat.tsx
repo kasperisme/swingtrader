@@ -1,12 +1,12 @@
 "use client";
 
 import { useState, useRef, useEffect, type Dispatch, type SetStateAction } from "react";
-import { Bot, Send, Loader2, Trash2 } from "lucide-react";
+import { Bot, Send, Loader2, Trash2, ChevronDown, ChevronRight } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import type { ChartAnnotation } from "@/components/ticker-charts/types";
 import type { OhlcBar } from "@/components/ticker-charts/types";
 import { ANNOTATION_COLORS } from "@/components/ticker-charts/types";
-import type { ChartAiChatMessage } from "@/app/actions/chart-workspace";
+import type { ChartAiChatMessage, PersonaReport } from "@/app/actions/chart-workspace";
 import type { PersonaId } from "@/lib/chart-ai/personas";
 import { PERSONA_LABELS } from "@/lib/chart-ai/personas";
 
@@ -39,6 +39,50 @@ function PersonaBadges({ personas }: { personas: PersonaId[] }) {
           <span className="w-1.5 h-1.5 rounded-full" style={{ background: PERSONA_COLORS[p] }} />
           {PERSONA_LABELS[p]}
         </span>
+      ))}
+    </div>
+  );
+}
+
+function PersonaReportSection({ report, loading }: { report: PersonaReport; loading?: boolean }) {
+  const [open, setOpen] = useState(false);
+  const color = PERSONA_COLORS[report.id as PersonaId] ?? "#6b7280";
+  return (
+    <div className="border rounded-md overflow-hidden" style={{ borderColor: `${color}40` }}>
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="w-full flex items-center justify-between px-2.5 py-1.5 text-[10px] font-medium hover:bg-muted/30 transition-colors"
+        style={{ color }}
+      >
+        <span className="flex items-center gap-1.5">
+          <span className="w-1.5 h-1.5 rounded-full" style={{ background: color }} />
+          {report.label}
+          {loading && <Loader2 className="w-2.5 h-2.5 animate-spin opacity-60" />}
+        </span>
+        {open ? <ChevronDown className="w-3 h-3 opacity-60" /> : <ChevronRight className="w-3 h-3 opacity-60" />}
+      </button>
+      {open && (
+        <div className="px-2.5 pb-2 pt-1 border-t" style={{ borderColor: `${color}30` }}>
+          {report.error ? (
+            <p className="text-[10px] text-red-400">{report.error}</p>
+          ) : (
+            <div className="prose prose-sm prose-invert max-w-none text-[10px] leading-relaxed prose-p:my-0.5 prose-ul:my-0.5 prose-li:my-0 prose-strong:text-foreground">
+              <ReactMarkdown>{report.analysis || "…"}</ReactMarkdown>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function PersonaReports({ reports, loading }: { reports: PersonaReport[]; loading?: boolean }) {
+  if (!reports.length) return null;
+  return (
+    <div className="flex flex-col gap-1 mt-1.5">
+      {reports.map((r) => (
+        <PersonaReportSection key={r.id} report={r} loading={loading} />
       ))}
     </div>
   );
@@ -79,6 +123,7 @@ interface ChartAiChatProps {
   onAnnotations: (annotations: ChartAnnotation[]) => void;
   messages: ChartAiChatMessage[];
   setMessages: Dispatch<SetStateAction<ChartAiChatMessage[]>>;
+  side?: boolean;
 }
 
 export function ChartAiChat({
@@ -88,10 +133,12 @@ export function ChartAiChat({
   onAnnotations,
   messages,
   setMessages,
+  side = false,
 }: ChartAiChatProps) {
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
   const [streamingAnnotations, setStreamingAnnotations] = useState<ChartAnnotation[]>([]);
+  const [streamingPersonas, setStreamingPersonas] = useState<PersonaReport[]>([]);
   const abortRef = useRef<AbortController | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
 
@@ -109,6 +156,7 @@ export function ChartAiChat({
     setInput("");
     setLoading(true);
     setStreamingAnnotations([]);
+    setStreamingPersonas([]);
 
     abortRef.current?.abort();
     const controller = new AbortController();
@@ -117,6 +165,7 @@ export function ChartAiChat({
     const history = historyAfterUser;
     let assistantContent = "";
     let newAnnotations: ChartAnnotation[] = [];
+    const collectedPersonas: PersonaReport[] = [];
 
     try {
       const res = await fetch("/api/ai/chart", {
@@ -135,7 +184,6 @@ export function ChartAiChat({
       const reader = res.body.getReader();
       const decoder = new TextDecoder();
       let buf = "";
-      let annotationsParsed = false;
 
       setMessages((prev) => [...prev, { role: "assistant", content: "" }]);
 
@@ -145,41 +193,39 @@ export function ChartAiChat({
 
         buf += decoder.decode(value, { stream: true });
 
-        if (!annotationsParsed) {
-          const nl = buf.indexOf("\n");
-          if (nl !== -1) {
-            const firstLine = buf.slice(0, nl);
-            buf = buf.slice(nl + 1);
-            annotationsParsed = true;
+        // Process all complete NDJSON lines
+        const lines = buf.split("\n");
+        buf = lines.pop() ?? "";
 
-            if (firstLine.startsWith("A:")) {
-              try {
-                newAnnotations = JSON.parse(firstLine.slice(2)) as ChartAnnotation[];
-                setStreamingAnnotations(newAnnotations);
-                onAnnotations(newAnnotations);
-              } catch {
-                /* ignore malformed annotation line */
-              }
-            } else {
-              assistantContent += firstLine;
-              setMessages((prev) => {
-                const copy = [...prev];
-                copy[copy.length - 1] = { role: "assistant", content: assistantContent };
-                return copy;
-              });
-            }
+        for (const line of lines) {
+          if (!line.trim()) continue;
+          let msg: Record<string, unknown>;
+          try { msg = JSON.parse(line) as Record<string, unknown>; }
+          catch { continue; }
+
+          if (msg.type === "persona") {
+            const report: PersonaReport = {
+              id: msg.id as string,
+              label: msg.label as string,
+              analysis: msg.analysis as string,
+              error: msg.error as string | null,
+            };
+            collectedPersonas.push(report);
+            setStreamingPersonas((prev) => [...prev, report]);
+          } else if (msg.type === "annotations") {
+            newAnnotations = msg.data as ChartAnnotation[];
+            setStreamingAnnotations(newAnnotations);
+            onAnnotations(newAnnotations);
+          } else if (msg.type === "analysis") {
+            assistantContent = msg.content as string;
+            setMessages((prev) => {
+              const copy = [...prev];
+              copy[copy.length - 1] = { role: "assistant", content: assistantContent };
+              return copy;
+            });
+          } else if (msg.type === "error") {
+            setMessages((prev) => [...prev, { role: "assistant", content: `Error: ${String(msg.message)}` }]);
           }
-        }
-
-        if (annotationsParsed && buf) {
-          assistantContent += buf;
-          buf = "";
-          const snapshot = assistantContent;
-          setMessages((prev) => {
-            const copy = [...prev];
-            copy[copy.length - 1] = { role: "assistant", content: snapshot };
-            return copy;
-          });
         }
       }
     } catch (err: unknown) {
@@ -188,20 +234,20 @@ export function ChartAiChat({
       }
     } finally {
       setLoading(false);
-      if (newAnnotations.length) {
-        setMessages((prev) => {
-          const copy = [...prev];
-          const last = copy[copy.length - 1];
-          if (last?.role === "assistant") {
-            copy[copy.length - 1] = {
-              ...last,
-              chartAnnotations: newAnnotations,
-            };
-          }
-          return copy;
-        });
-      }
+      setMessages((prev) => {
+        const copy = [...prev];
+        const last = copy[copy.length - 1];
+        if (last?.role === "assistant") {
+          copy[copy.length - 1] = {
+            ...last,
+            ...(newAnnotations.length ? { chartAnnotations: newAnnotations } : {}),
+            ...(collectedPersonas.length ? { personaReports: collectedPersonas } : {}),
+          };
+        }
+        return copy;
+      });
       setStreamingAnnotations([]);
+      setStreamingPersonas([]);
     }
   }
 
@@ -209,12 +255,13 @@ export function ChartAiChat({
     abortRef.current?.abort();
     setMessages([]);
     setStreamingAnnotations([]);
+    setStreamingPersonas([]);
     onAnnotations([]);
     setInput("");
   }
 
   return (
-    <div className="flex flex-col border-t border-border bg-background">
+    <div className={`flex flex-col bg-background ${side ? "h-full" : "border-t border-border"}`}>
       <div className="flex items-center justify-between px-4 py-2 border-b border-border">
         <div className="flex items-center gap-2 text-xs font-medium text-muted-foreground">
           <Bot className="w-3.5 h-3.5" />
@@ -234,7 +281,7 @@ export function ChartAiChat({
       </div>
 
       {messages.length > 0 && (
-        <div className="flex flex-col gap-3 px-4 py-3 max-h-64 overflow-y-auto text-sm">
+        <div className={`flex flex-col gap-3 px-4 py-3 overflow-y-auto text-sm ${side ? "flex-1" : "max-h-64"}`}>
           {messages.map((m, i) => (
             <div key={i} className={`flex flex-col gap-0.5 ${m.role === "user" ? "items-end" : "items-start"}`}>
               {m.role === "user" ? (
@@ -243,8 +290,16 @@ export function ChartAiChat({
                 </span>
               ) : (
                 <div className="max-w-[90%]">
+                  {/* Streaming persona panels — shown while loading the last message */}
+                  {loading && i === messages.length - 1 && streamingPersonas.length > 0 && (
+                    <PersonaReports reports={streamingPersonas} loading />
+                  )}
+                  {/* Stored persona panels — shown on completed messages */}
+                  {!loading && m.personaReports && m.personaReports.length > 0 && (
+                    <PersonaReports reports={m.personaReports} />
+                  )}
                   <div
-                    className="prose prose-sm prose-invert max-w-none text-xs leading-relaxed
+                    className="prose prose-sm prose-invert max-w-none text-xs leading-relaxed mt-1.5
                     prose-p:my-1 prose-ul:my-1 prose-li:my-0 prose-strong:text-foreground
                     prose-headings:text-foreground prose-headings:text-xs"
                   >
@@ -256,9 +311,7 @@ export function ChartAiChat({
                   {m.chartAnnotations && m.chartAnnotations.length > 0 ? (
                     <AnnotationPills annotations={m.chartAnnotations} />
                   ) : null}
-                  {loading &&
-                  i === messages.length - 1 &&
-                  streamingAnnotations.length > 0 ? (
+                  {loading && i === messages.length - 1 && streamingAnnotations.length > 0 ? (
                     <AnnotationPills annotations={streamingAnnotations} />
                   ) : null}
                 </div>
@@ -268,7 +321,9 @@ export function ChartAiChat({
           {loading && messages[messages.length - 1]?.role === "user" && (
             <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
               <Loader2 className="w-3 h-3 animate-spin" />
-              Running personas…
+              {streamingPersonas.length === 0
+                ? "Running personas…"
+                : `Personas: ${streamingPersonas.length}/4 complete…`}
             </div>
           )}
           <div ref={bottomRef} />

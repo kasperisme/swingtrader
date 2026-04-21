@@ -51,8 +51,11 @@ import {
 } from "./screenings-filters-model";
 import { TickerSidebar } from "./ticker-sidebar";
 import { TickerContextMenu, type NoteStatus as ContextMenuNoteStatus } from "./ticker-context-menu";
-import type { OhlcBar } from "@/components/ticker-charts/types";
+import type { OhlcBar, ChartAnnotation } from "@/components/ticker-charts/types";
 import { useQuotes, type FmpQuote } from "@/lib/use-quotes";
+import { chartWorkspaceLoad, chartWorkspaceSave, type ChartAiChatMessage } from "@/app/actions/chart-workspace";
+import { ChartAiChat } from "@/components/chart-ai-chat";
+import { ChartDateRangePicker } from "@/components/chart-date-range-picker";
 
 export interface ScanRun {
   id: number;
@@ -1387,6 +1390,46 @@ export function ScreeningsUI({
     setContextMenu({ ticker, x: e.clientX, y: e.clientY });
   }, []);
   const [selectedTicker, setSelectedTicker] = useState<string | null>(null);
+  const [chartAnnotations, setChartAnnotations] = useState<ChartAnnotation[]>([]);
+  const [chartAiMessages, setChartAiMessages] = useState<ChartAiChatMessage[]>([]);
+  const [chartWorkspaceReady, setChartWorkspaceReady] = useState(false);
+  const chartSaveSeq = useRef(0);
+  const [chartDateRange, setChartDateRange] = useState<{ from: string; to: string } | undefined>();
+
+  useEffect(() => {
+    setChartWorkspaceReady(false);
+    setChartAnnotations([]);
+    setChartAiMessages([]);
+    if (!selectedTicker) return;
+    let cancelled = false;
+    void chartWorkspaceLoad(selectedTicker).then((res) => {
+      if (cancelled) return;
+      if (res.ok) {
+        setChartAnnotations(res.data.annotations);
+        setChartAiMessages(res.data.aiChatMessages);
+      }
+      if (!cancelled) setChartWorkspaceReady(true);
+    });
+    return () => { cancelled = true; };
+  }, [selectedTicker]);
+
+  useEffect(() => {
+    if (!selectedTicker || !chartWorkspaceReady) return;
+    const seq = ++chartSaveSeq.current;
+    const t = setTimeout(() => {
+      if (seq !== chartSaveSeq.current) return;
+      void chartWorkspaceSave(selectedTicker, { annotations: chartAnnotations, aiChatMessages: chartAiMessages });
+    }, 750);
+    return () => clearTimeout(t);
+  }, [chartAnnotations, chartAiMessages, selectedTicker, chartWorkspaceReady]);
+
+  const handleChartAiAnnotations = useCallback((anns: ChartAnnotation[]) => {
+    setChartAnnotations((prev) => [
+      ...prev.filter((a) => a.origin === "user"),
+      ...anns.map((a) => ({ ...a, origin: "ai" as const })),
+    ]);
+  }, []);
+
   const [workflowEditor, setWorkflowEditor] = useState<{
     scanRowId: number;
     ticker: string;
@@ -2497,27 +2540,52 @@ export function ScreeningsUI({
             </div>
             <div className="flex-1 min-w-0 min-h-0 flex flex-col gap-4 overflow-y-auto">
               {activeView === "charts" ? (
-                <TickerChartsPanel
-                  symbols={chartSymbols}
-                  selectedTicker={selectedTicker}
-                  onSelect={setSelectedTicker}
-                  dismissed={dismissedSymbols}
-                  onDismiss={dismissTicker}
-                  onRestore={restoreTicker}
-                  getStatus={getTickerStatus}
-                  onSetStatus={setTickerStatus}
-                  hasComment={tickerHasComment}
-                  onEditComment={editTickerComment}
-                  getTickerMeta={getTickerMeta}
-                  getPivotMarker={getTickerPivotMarker}
-                  onSetPivotMarker={setTickerPivotMarker}
-                  onClearPivotMarker={clearTickerPivotMarker}
-                  showChevronSymbolNav={false}
-                  screeningToolbar={false}
-                  showSymbolHeadline={false}
-                  showChartFrame={false}
-                  onChartData={(rows: OhlcBar[]) => { ohlcvDataRef.current = rows; }}
-                />
+                <div className="flex flex-col gap-3 w-full min-h-0">
+                  <ChartDateRangePicker onChange={setChartDateRange} />
+                  <div className="flex items-stretch w-full min-h-0">
+                    <div className="flex-1 min-w-0">
+                      <TickerChartsPanel
+                        symbols={chartSymbols}
+                        selectedTicker={selectedTicker}
+                        onSelect={setSelectedTicker}
+                        dismissed={dismissedSymbols}
+                        onDismiss={dismissTicker}
+                        onRestore={restoreTicker}
+                        getStatus={getTickerStatus}
+                        onSetStatus={setTickerStatus}
+                        hasComment={tickerHasComment}
+                        onEditComment={editTickerComment}
+                        getTickerMeta={getTickerMeta}
+                        getPivotMarker={getTickerPivotMarker}
+                        onSetPivotMarker={setTickerPivotMarker}
+                        onClearPivotMarker={clearTickerPivotMarker}
+                        showChevronSymbolNav={false}
+                        screeningToolbar={false}
+                        showSymbolHeadline={false}
+                        showChartFrame={false}
+                        annotations={chartAnnotations}
+                        onChartData={(rows: OhlcBar[]) => { ohlcvDataRef.current = rows; }}
+                        onAnnotationAdd={(ann) => setChartAnnotations((prev) => [...prev, ann])}
+                        onAnnotationDelete={(id) => setChartAnnotations((prev) => prev.filter((a) => a.id !== id))}
+                        dateRange={chartDateRange}
+                      />
+                    </div>
+                    {selectedTicker && (
+                      <div className="w-[320px] shrink-0 flex flex-col border-l border-border">
+                        <ChartAiChat
+                          key={selectedTicker}
+                          symbol={selectedTicker}
+                          ohlcData={ohlcvDataRef.current}
+                          annotations={chartAnnotations}
+                          onAnnotations={handleChartAiAnnotations}
+                          messages={chartAiMessages}
+                          setMessages={setChartAiMessages}
+                          side
+                        />
+                      </div>
+                    )}
+                  </div>
+                </div>
               ) : activeView === "relationship" ? (
                 <ScreeningsRelationshipNetworkPanel
                   symbols={filteredSymbols}

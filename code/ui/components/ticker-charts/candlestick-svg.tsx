@@ -234,7 +234,10 @@ export function CandlestickSvg({
         const n = rows.length;
         const defaultLen = Math.min(CHART_DEFAULT_VIEWPORT_BARS, n);
 
-        if (cached) {
+        // Global IndexedDB zoom is shared across tickers. When the parent passes an
+        // explicit OHLC window, prefer a sane default viewport so a prior 12-bar zoom
+        // does not hide a newly chosen multi-year range.
+        if (cached && dateRange == null) {
           setViewportBars(cached.viewportBars);
           setPriceOffset(cached.priceOffset);
           // Scroll position is not cached globally — always show most recent bars.
@@ -277,10 +280,6 @@ export function CandlestickSvg({
   useEffect(() => {
     onChartData?.(data);
   }, [data, onChartData]);
-
-  useEffect(() => {
-    console.log("[Chart] annotations prop changed:", annotations, "data bars:", data.length);
-  }, [annotations, data.length]);
 
   // Allow viewStart to extend one bar past the last bar (future panning).
   // Constraint: at least 1 data bar must remain in viewport → viewStart ≤ data.length - 1.
@@ -514,9 +513,10 @@ export function CandlestickSvg({
 
       const zoomOut = e.deltaY > 0;
       const curV = viewportBarsRef.current;
-      const nextV = Math.round(
-        curV * (zoomOut ? CHART_ZOOM_WHEEL_FACTOR : 1 / CHART_ZOOM_WHEEL_FACTOR),
-      );
+      // Ceil/floor so zoom-out can escape CHART_MIN_VIEWPORT_BARS (round(12*1.04) === 12).
+      const nextV = zoomOut
+        ? Math.ceil(curV * CHART_ZOOM_WHEEL_FACTOR)
+        : Math.floor(curV / CHART_ZOOM_WHEEL_FACTOR);
       const clampedV = Math.max(
         CHART_MIN_VIEWPORT_BARS,
         Math.min(CHART_MAX_VIEWPORT_BARS, nextV),

@@ -169,7 +169,7 @@ export async function POST(req: Request) {
 
   const { symbol, ohlcData, annotations: existingAnnotations = [], messages: history } = body;
 
-  // Fetch persona-specific context in parallel
+  // Fetch persona-specific context before opening the stream
   const tData = performance.now();
   const [sentimentCtx, riskCtx, fundamentalsCtx] = await Promise.all([
     fetchSentimentContext(symbol).catch(() => null),
@@ -178,116 +178,122 @@ export async function POST(req: Request) {
   ]);
   console.log(`[chart-ai] data-fetch: ${Math.round(performance.now() - tData)}ms`);
 
-  // Build persona context strings (graceful degradation if data is missing)
   const sentimentContextStr = sentimentCtx ? formatSentimentContext(sentimentCtx) : "No sentiment data available.";
   const riskContextStr = riskCtx ? formatRiskContext(riskCtx) : "No risk data available.";
   const fundamentalsContextStr = fundamentalsCtx ? formatFundamentalsContext(fundamentalsCtx) : "No fundamental data available.";
 
-  // Run all 4 persona analyses in parallel
-  const tPersonas = performance.now();
-  const [techResult, sentimentResult, riskResult, fundamentalsResult] = await Promise.all([
-    callPersona("technical", symbol, ohlcData, "Provide your technical analysis based on the price and volume data above.", existingAnnotations),
-    callPersona("sentiment", symbol, ohlcData, sentimentContextStr, existingAnnotations),
-    callPersona("risk", symbol, ohlcData, riskContextStr, existingAnnotations),
-    callPersona("fundamentals", symbol, ohlcData, fundamentalsContextStr, existingAnnotations),
-  ]);
-  console.log(`[chart-ai] personas: ${Math.round(performance.now() - tPersonas)}ms (tech=${Math.round(techResult.ms)}ms sentiment=${Math.round(sentimentResult.ms)}ms risk=${Math.round(riskResult.ms)}ms fundamentals=${Math.round(fundamentalsResult.ms)}ms)`);
-
-  // Assemble specialist reports for orchestrator
-  const specialistReports: string[] = [];
-  const personas: { id: PersonaId; label: string; analysis: string }[] = [];
-
-  const allResults = [
-    { id: "technical" as PersonaId, ...techResult },
-    { id: "sentiment" as PersonaId, ...sentimentResult },
-    { id: "risk" as PersonaId, ...riskResult },
-    { id: "fundamentals" as PersonaId, ...fundamentalsResult },
-  ];
-
-  for (const r of allResults) {
-    const label = PERSONA_LABELS[r.id];
-    if (r.error) {
-      specialistReports.push(`### ${label} Analysis\n[Error: ${r.error}]`);
-      personas.push({ id: r.id, label, analysis: `[Error: ${r.error}]` });
-    } else if (r.analysis) {
-      specialistReports.push(`### ${label} Analysis\n${r.analysis}`);
-      personas.push({ id: r.id, label, analysis: r.analysis });
-    } else {
-      specialistReports.push(`### ${label} Analysis\n[No data available]`);
-      personas.push({ id: r.id, label, analysis: "[No data available]" });
-    }
-  }
-
-  // Build orchestrator prompt
-  const orchestratorInput = [
-    `OHLC data for ${symbol} (last 60 sessions):\n\`\`\`\n${ohlcSummary(ohlcData)}\n\`\`\``,
-    existingAnnotations.length > 0
-      ? `\nExisting chart annotations (${existingAnnotations.length}):\n` +
-        existingAnnotations.map((a) => {
-          if (a.type === "horizontal") return `- horizontal ${a.role} at $${a.price}${a.label ? ` "${a.label}"` : ""}`;
-          if (a.type === "zone") return `- zone ${a.role} $${a.priceBottom}–$${a.priceTop}${a.label ? ` "${a.label}"` : ""}`;
-          if (a.type === "trend_line") return `- trend_line ${a.role} from ${a.fromDate} $${a.fromPrice} to ${a.toDate} $${a.toPrice}${a.label ? ` "${a.label}"` : ""}`;
-          return "";
-        }).join("\n")
-      : "",
-    `\n## Specialist Reports\n\n${specialistReports.join("\n\n")}`,
-  ].join("\n");
-
-  const orchestratorMessages: OllamaMessage[] = [
-    { role: "system", content: ORCHESTRATOR_PROMPT(symbol) },
-    ...history.map(m => ({ role: m.role as OllamaMessage["role"], content: m.content })),
-    { role: "user", content: orchestratorInput },
-  ];
-
-  // Call orchestrator with draw_on_chart tool
-  const tOrchestrator = performance.now();
-  const upstream = await fetch(`${OLLAMA_HOST}/api/chat`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${process.env.OLLAMA_API_KEY ?? ""}`,
-    },
-    body: JSON.stringify({ model: DEFAULT_MODEL, messages: orchestratorMessages, tools: [DRAW_CHART_TOOL], stream: false }),
-  });
-
-  if (!upstream.ok) {
-    const t = await upstream.text();
-    return new Response(`Ollama error ${upstream.status}: ${t}`, { status: 502 });
-  }
-
-  let result: { message?: { content?: string; tool_calls?: { function: { name: string; arguments: unknown } }[] } };
-  try { result = await upstream.json() as typeof result; }
-  catch { return new Response("Invalid response from model", { status: 502 }); }
-  console.log(`[chart-ai] orchestrator: ${Math.round(performance.now() - tOrchestrator)}ms`);
-
-  const message = result.message ?? {};
-  const toolCalls = message.tool_calls ?? [];
-  let annotations: ChartAnnotation[] = [];
-  let analysisText = message.content ?? "";
-
-  for (const tc of toolCalls) {
-    if (tc.function.name === "draw_on_chart") {
-      const args = (typeof tc.function.arguments === "string"
-        ? JSON.parse(tc.function.arguments)
-        : tc.function.arguments) as { annotations?: RawAnnotation[]; analysis?: string };
-      annotations = parseAnnotations(args.annotations ?? []);
-      if (args.analysis) analysisText = args.analysis;
-    }
-  }
-
-  // Prepend persona labels to analysis for client-side rendering
-  const personaLine = personas.map((p) => `${p.label}`).join("|");
-  const enrichedAnalysis = `<!-- personas:${personaLine} -->\n${analysisText}`;
-
   const encoder = new TextEncoder();
-  console.log(`[chart-ai] total: ${Math.round(performance.now() - tTotal)}ms (data | personas | orchestrator)`);
+  const emit = (controller: ReadableStreamDefaultController, obj: unknown) =>
+    controller.enqueue(encoder.encode(JSON.stringify(obj) + "\n"));
+
   const stream = new ReadableStream({
-    start(controller) {
-      controller.enqueue(encoder.encode(`A:${JSON.stringify(annotations)}\n`));
-      controller.enqueue(encoder.encode(enrichedAnalysis));
-      controller.close();
+    async start(controller) {
+      try {
+        const tPersonas = performance.now();
+
+        // Run all 4 personas concurrently — each emits to the stream as soon as it resolves
+        const [techResult, sentimentResult, riskResult, fundamentalsResult] = await Promise.all([
+          callPersona("technical", symbol, ohlcData, "Provide your technical analysis based on the price and volume data above.", existingAnnotations)
+            .then((r) => { emit(controller, { type: "persona", id: "technical", label: PERSONA_LABELS.technical, analysis: r.analysis, error: r.error ?? null }); return r; }),
+          callPersona("sentiment", symbol, ohlcData, sentimentContextStr, existingAnnotations)
+            .then((r) => { emit(controller, { type: "persona", id: "sentiment", label: PERSONA_LABELS.sentiment, analysis: r.analysis, error: r.error ?? null }); return r; }),
+          callPersona("risk", symbol, ohlcData, riskContextStr, existingAnnotations)
+            .then((r) => { emit(controller, { type: "persona", id: "risk", label: PERSONA_LABELS.risk, analysis: r.analysis, error: r.error ?? null }); return r; }),
+          callPersona("fundamentals", symbol, ohlcData, fundamentalsContextStr, existingAnnotations)
+            .then((r) => { emit(controller, { type: "persona", id: "fundamentals", label: PERSONA_LABELS.fundamentals, analysis: r.analysis, error: r.error ?? null }); return r; }),
+        ]);
+
+        console.log(`[chart-ai] personas: ${Math.round(performance.now() - tPersonas)}ms (tech=${Math.round(techResult.ms)}ms sentiment=${Math.round(sentimentResult.ms)}ms risk=${Math.round(riskResult.ms)}ms fundamentals=${Math.round(fundamentalsResult.ms)}ms)`);
+
+        // Assemble specialist reports for orchestrator
+        const specialistReports: string[] = [];
+        const personas: { id: PersonaId; label: string; analysis: string }[] = [];
+
+        for (const r of [
+          { id: "technical" as PersonaId, ...techResult },
+          { id: "sentiment" as PersonaId, ...sentimentResult },
+          { id: "risk" as PersonaId, ...riskResult },
+          { id: "fundamentals" as PersonaId, ...fundamentalsResult },
+        ]) {
+          const label = PERSONA_LABELS[r.id];
+          if (r.error) {
+            specialistReports.push(`### ${label} Analysis\n[Error: ${r.error}]`);
+            personas.push({ id: r.id, label, analysis: `[Error: ${r.error}]` });
+          } else if (r.analysis) {
+            specialistReports.push(`### ${label} Analysis\n${r.analysis}`);
+            personas.push({ id: r.id, label, analysis: r.analysis });
+          } else {
+            specialistReports.push(`### ${label} Analysis\n[No data available]`);
+            personas.push({ id: r.id, label, analysis: "[No data available]" });
+          }
+        }
+
+        const orchestratorInput = [
+          `OHLC data for ${symbol} (last 60 sessions):\n\`\`\`\n${ohlcSummary(ohlcData)}\n\`\`\``,
+          existingAnnotations.length > 0
+            ? `\nExisting chart annotations (${existingAnnotations.length}):\n` +
+              existingAnnotations.map((a) => {
+                if (a.type === "horizontal") return `- horizontal ${a.role} at $${a.price}${a.label ? ` "${a.label}"` : ""}`;
+                if (a.type === "zone") return `- zone ${a.role} $${a.priceBottom}–$${a.priceTop}${a.label ? ` "${a.label}"` : ""}`;
+                if (a.type === "trend_line") return `- trend_line ${a.role} from ${a.fromDate} $${a.fromPrice} to ${a.toDate} $${a.toPrice}${a.label ? ` "${a.label}"` : ""}`;
+                return "";
+              }).join("\n")
+            : "",
+          `\n## Specialist Reports\n\n${specialistReports.join("\n\n")}`,
+        ].join("\n");
+
+        const orchestratorMessages: OllamaMessage[] = [
+          { role: "system", content: ORCHESTRATOR_PROMPT(symbol) },
+          ...history.map((m) => ({ role: m.role as OllamaMessage["role"], content: m.content })),
+          { role: "user", content: orchestratorInput },
+        ];
+
+        const tOrchestrator = performance.now();
+        const upstream = await fetch(`${OLLAMA_HOST}/api/chat`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${process.env.OLLAMA_API_KEY ?? ""}`,
+          },
+          body: JSON.stringify({ model: DEFAULT_MODEL, messages: orchestratorMessages, tools: [DRAW_CHART_TOOL], stream: false }),
+        });
+
+        if (!upstream.ok) {
+          const t = await upstream.text();
+          emit(controller, { type: "error", message: `Ollama error ${upstream.status}: ${t}` });
+          return;
+        }
+
+        let result: { message?: { content?: string; tool_calls?: { function: { name: string; arguments: unknown } }[] } };
+        try { result = await upstream.json() as typeof result; }
+        catch { emit(controller, { type: "error", message: "Invalid response from model" }); return; }
+        console.log(`[chart-ai] orchestrator: ${Math.round(performance.now() - tOrchestrator)}ms  total: ${Math.round(performance.now() - tTotal)}ms`);
+
+        const message = result.message ?? {};
+        const toolCalls = message.tool_calls ?? [];
+        let annotations: ChartAnnotation[] = [];
+        let analysisText = message.content ?? "";
+
+        for (const tc of toolCalls) {
+          if (tc.function.name === "draw_on_chart") {
+            const args = (typeof tc.function.arguments === "string"
+              ? JSON.parse(tc.function.arguments)
+              : tc.function.arguments) as { annotations?: RawAnnotation[]; analysis?: string };
+            annotations = parseAnnotations(args.annotations ?? []);
+            if (args.analysis) analysisText = args.analysis;
+          }
+        }
+
+        const personaLine = personas.map((p) => p.label).join("|");
+        emit(controller, { type: "annotations", data: annotations });
+        emit(controller, { type: "analysis", content: `<!-- personas:${personaLine} -->\n${analysisText}` });
+      } catch (err) {
+        emit(controller, { type: "error", message: String(err) });
+      } finally {
+        controller.close();
+      }
     },
   });
 
-  return new Response(stream, { headers: { "Content-Type": "text/plain; charset=utf-8" } });
+  return new Response(stream, { headers: { "Content-Type": "application/x-ndjson; charset=utf-8" } });
 }

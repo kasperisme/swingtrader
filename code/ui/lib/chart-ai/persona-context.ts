@@ -5,6 +5,25 @@ export type SentimentContext = {
   recentHeadlines: { title: string | null; sentiment_score: number; confidence: number | null; published_at: string | null }[];
 };
 
+export type EarningsQuarter = {
+  date: string;
+  eps: number | null;
+  epsEstimated: number | null;
+  revenue: number | null;
+  revenueEstimated: number | null;
+  beat: boolean;
+};
+
+export type FmpKeyMetrics = {
+  roe: number | null;
+  roic: number | null;
+  currentRatio: number | null;
+  debtToEquity: number | null;
+  peRatioTTM: number | null;
+  priceToSalesTTM: number | null;
+  shortRatio: number | null;
+};
+
 export type RiskContext = {
   financialStructure: Record<string, number> | null;
   macroSensitivity: Record<string, number> | null;
@@ -12,13 +31,81 @@ export type RiskContext = {
   supplyChainExposure: Record<string, number> | null;
   valuationPositioning: Record<string, number> | null;
   beta: number | null;
+  keyMetrics: FmpKeyMetrics | null;
 };
 
 export type FundamentalsContext = {
   companyProfile: { sector: string | null; industry: string | null; marketCap: number | null; description: string | null } | null;
   growthProfile: Record<string, number> | null;
   businessModel: Record<string, number> | null;
+  earnings: EarningsQuarter[] | null;
+  keyMetrics: FmpKeyMetrics | null;
 };
+
+async function fmpFetch<T>(path: string, revalidate = 3600): Promise<T | null> {
+  const apiKey = process.env.FMP_API_KEY;
+  if (!apiKey) return null;
+  try {
+    const res = await fetch(
+      `https://financialmodelingprep.com${path}&apikey=${encodeURIComponent(apiKey)}`,
+      { next: { revalidate } },
+    );
+    if (!res.ok) return null;
+    return await res.json() as T;
+  } catch {
+    return null;
+  }
+}
+
+async function fetchFmpEarnings(ticker: string): Promise<EarningsQuarter[] | null> {
+  const raw = await fmpFetch<unknown[]>(
+    `/api/v3/historical/earning_calendar/${encodeURIComponent(ticker)}?limit=8`,
+  );
+  if (!Array.isArray(raw) || raw.length === 0) return null;
+  const quarters: EarningsQuarter[] = [];
+  for (const row of raw) {
+    const r = row as Record<string, unknown>;
+    const eps = r.eps != null ? Number(r.eps) : null;
+    const epsEst = r.epsEstimated != null ? Number(r.epsEstimated) : null;
+    const rev = r.revenue != null ? Number(r.revenue) : null;
+    const revEst = r.revenueEstimated != null ? Number(r.revenueEstimated) : null;
+    const date = r.date ? String(r.date) : null;
+    if (!date) continue;
+    quarters.push({
+      date,
+      eps: Number.isFinite(eps) ? eps : null,
+      epsEstimated: Number.isFinite(epsEst) ? epsEst : null,
+      revenue: Number.isFinite(rev) ? rev : null,
+      revenueEstimated: Number.isFinite(revEst) ? revEst : null,
+      beat: eps != null && epsEst != null && eps >= epsEst,
+    });
+  }
+  return quarters.length > 0 ? quarters : null;
+}
+
+async function fetchFmpKeyMetrics(ticker: string): Promise<FmpKeyMetrics | null> {
+  const [ttmRaw, quarterlyRaw] = await Promise.all([
+    fmpFetch<unknown[]>(`/api/v3/key-metrics-ttm/${encodeURIComponent(ticker)}?limit=1`),
+    fmpFetch<unknown[]>(`/api/v3/key-metrics/${encodeURIComponent(ticker)}?period=quarter&limit=2`),
+  ]);
+
+  const n = (v: unknown) => (v != null && Number.isFinite(Number(v)) ? Number(v) : null);
+
+  const ttm = Array.isArray(ttmRaw) && ttmRaw.length > 0 ? ttmRaw[0] as Record<string, unknown> : null;
+  const q = Array.isArray(quarterlyRaw) && quarterlyRaw.length > 0 ? quarterlyRaw[0] as Record<string, unknown> : null;
+
+  if (!ttm && !q) return null;
+
+  return {
+    roe: n(q?.roe ?? ttm?.roeTTM),
+    roic: n(q?.roic ?? ttm?.roicTTM),
+    currentRatio: n(q?.currentRatio ?? ttm?.currentRatioTTM),
+    debtToEquity: n(q?.debtToEquity ?? ttm?.debtToEquityTTM),
+    peRatioTTM: n(ttm?.peRatioTTM),
+    priceToSalesTTM: n(ttm?.priceToSalesRatioTTM),
+    shortRatio: n(ttm?.shortRatioTTM ?? q?.shortRatio),
+  };
+}
 
 function asNumberMap(v: unknown): Record<string, number> | null {
   if (!v || typeof v !== "object" || Array.isArray(v)) return null;
@@ -81,9 +168,10 @@ export async function fetchRiskContext(ticker: string): Promise<RiskContext> {
   let valuationPositioning: Record<string, number> | null = null;
   let beta: number | null = null;
 
-  const [vectorsRes, tickerRes] = await Promise.all([
+  const [vectorsRes, tickerRes, keyMetrics] = await Promise.all([
     supabase.schema("swingtrader").from("company_vectors").select("dimensions_json").eq("ticker", ticker).order("date", { ascending: false }).limit(1),
     supabase.schema("swingtrader").from("tickers").select("beta").eq("symbol", ticker).limit(1),
+    fetchFmpKeyMetrics(ticker).catch(() => null),
   ]);
 
   if (!vectorsRes.error && vectorsRes.data?.[0]) {
@@ -108,7 +196,7 @@ export async function fetchRiskContext(ticker: string): Promise<RiskContext> {
     beta = (tickerRes.data[0] as Record<string, unknown>).beta == null ? null : Number((tickerRes.data[0] as Record<string, unknown>).beta);
   }
 
-  return { financialStructure, macroSensitivity, geoTradeExposure, supplyChainExposure, valuationPositioning, beta };
+  return { financialStructure, macroSensitivity, geoTradeExposure, supplyChainExposure, valuationPositioning, beta, keyMetrics };
 }
 
 export async function fetchFundamentalsContext(ticker: string): Promise<FundamentalsContext> {
@@ -117,9 +205,11 @@ export async function fetchFundamentalsContext(ticker: string): Promise<Fundamen
   let growthProfile: Record<string, number> | null = null;
   let businessModel: Record<string, number> | null = null;
 
-  const [profileRes, vectorsRes] = await Promise.all([
+  const [profileRes, vectorsRes, earnings, keyMetrics] = await Promise.all([
     supabase.schema("swingtrader").from("tickers").select("sector, industry, market_cap, company_name").eq("symbol", ticker).limit(1),
     supabase.schema("swingtrader").from("company_vectors").select("dimensions_json").eq("ticker", ticker).order("date", { ascending: false }).limit(1),
+    fetchFmpEarnings(ticker).catch(() => null),
+    fetchFmpKeyMetrics(ticker).catch(() => null),
   ]);
 
   if (!profileRes.error && profileRes.data?.[0]) {
@@ -147,7 +237,7 @@ export async function fetchFundamentalsContext(ticker: string): Promise<Fundamen
     }
   }
 
-  return { companyProfile, growthProfile, businessModel };
+  return { companyProfile, growthProfile, businessModel, earnings, keyMetrics };
 }
 
 export function formatSentimentContext(ctx: SentimentContext): string {
@@ -177,26 +267,41 @@ export function formatSentimentContext(ctx: SentimentContext): string {
 
 export function formatRiskContext(ctx: RiskContext): string {
   const lines: string[] = ["## Risk Factors"];
+
+  if (ctx.beta != null) lines.push(`Beta: ${ctx.beta.toFixed(2)}`);
+
+  if (ctx.keyMetrics) {
+    const km = ctx.keyMetrics;
+    lines.push("\nFinancial Health:");
+    if (km.currentRatio != null) lines.push(`- Current Ratio: ${km.currentRatio.toFixed(2)}`);
+    if (km.debtToEquity != null) lines.push(`- Debt/Equity: ${km.debtToEquity.toFixed(2)}`);
+    if (km.roe != null) lines.push(`- ROE: ${(km.roe * 100).toFixed(1)}%`);
+    if (km.roic != null) lines.push(`- ROIC: ${(km.roic * 100).toFixed(1)}%`);
+    lines.push("\nValuation:");
+    if (km.peRatioTTM != null) lines.push(`- P/E (TTM): ${km.peRatioTTM.toFixed(1)}`);
+    if (km.priceToSalesTTM != null) lines.push(`- P/S (TTM): ${km.priceToSalesTTM.toFixed(2)}`);
+    if (km.shortRatio != null) lines.push(`- Short Ratio: ${km.shortRatio.toFixed(1)} days`);
+  }
+
   const section = (label: string, data: Record<string, number> | null) => {
     if (!data) return;
     lines.push(`\n${label}:`);
-    for (const [k, v] of Object.entries(data)) {
-      lines.push(`- ${k}: ${v.toFixed(3)}`);
-    }
+    for (const [k, v] of Object.entries(data)) lines.push(`- ${k}: ${v.toFixed(3)}`);
   };
-  section("Financial Structure", ctx.financialStructure);
   section("Macro Sensitivity", ctx.macroSensitivity);
   section("Geography/Trade Exposure", ctx.geoTradeExposure);
   section("Supply Chain Exposure", ctx.supplyChainExposure);
-  section("Valuation Positioning", ctx.valuationPositioning);
-  if (ctx.beta != null) lines.push(`\nBeta: ${ctx.beta.toFixed(2)}`);
-  const hasData = ctx.financialStructure || ctx.macroSensitivity || ctx.geoTradeExposure || ctx.supplyChainExposure || ctx.valuationPositioning || ctx.beta != null;
+  section("Financial Structure (vectors)", ctx.financialStructure);
+  section("Valuation Positioning (vectors)", ctx.valuationPositioning);
+
+  const hasData = ctx.beta != null || ctx.keyMetrics || ctx.financialStructure || ctx.macroSensitivity || ctx.geoTradeExposure || ctx.supplyChainExposure || ctx.valuationPositioning;
   if (!hasData) lines.push("No risk data available for this ticker.");
   return lines.join("\n");
 }
 
 export function formatFundamentalsContext(ctx: FundamentalsContext): string {
   const lines: string[] = ["## Fundamentals"];
+
   if (ctx.companyProfile) {
     lines.push(`Sector: ${ctx.companyProfile.sector ?? "unknown"}, Industry: ${ctx.companyProfile.industry ?? "unknown"}`);
     if (ctx.companyProfile.marketCap != null) {
@@ -204,15 +309,56 @@ export function formatFundamentalsContext(ctx: FundamentalsContext): string {
       lines.push(`Market Cap: ${b >= 1 ? `$${b.toFixed(1)}B` : `$${(ctx.companyProfile.marketCap / 1e6).toFixed(0)}M`}`);
     }
   }
+
+  if (ctx.earnings && ctx.earnings.length > 0) {
+    lines.push("\nEarnings (last quarters, newest first):");
+    for (const q of ctx.earnings.slice(0, 6)) {
+      const eps = q.eps != null ? `$${q.eps.toFixed(2)}` : "n/a";
+      const epsEst = q.epsEstimated != null ? `est $${q.epsEstimated.toFixed(2)}` : "";
+      const rev = q.revenue != null
+        ? q.revenue >= 1e9 ? `rev $${(q.revenue / 1e9).toFixed(2)}B` : `rev $${(q.revenue / 1e6).toFixed(0)}M`
+        : "";
+      const beat = q.beat ? "✓ beat" : q.epsEstimated != null ? "✗ miss" : "";
+      lines.push(`- ${q.date}: EPS ${eps} ${epsEst} ${beat}  ${rev}`.trim());
+    }
+
+    // Compute YoY EPS growth (current vs 4 quarters ago)
+    if (ctx.earnings.length >= 5) {
+      const cur = ctx.earnings[0].eps;
+      const yearAgo = ctx.earnings[4].eps;
+      if (cur != null && yearAgo != null && yearAgo !== 0) {
+        const yoy = ((cur - yearAgo) / Math.abs(yearAgo)) * 100;
+        lines.push(`EPS YoY growth: ${yoy >= 0 ? "+" : ""}${yoy.toFixed(1)}%`);
+      }
+    }
+
+    // Beat rate
+    const beats = ctx.earnings.slice(0, 4).filter((q) => q.beat).length;
+    const withEst = ctx.earnings.slice(0, 4).filter((q) => q.epsEstimated != null).length;
+    if (withEst > 0) lines.push(`Beat rate (last ${withEst}Q): ${beats}/${withEst}`);
+  }
+
+  if (ctx.keyMetrics) {
+    const km = ctx.keyMetrics;
+    lines.push("\nKey Metrics:");
+    if (km.roe != null) lines.push(`- ROE: ${(km.roe * 100).toFixed(1)}%`);
+    if (km.roic != null) lines.push(`- ROIC: ${(km.roic * 100).toFixed(1)}%`);
+    if (km.currentRatio != null) lines.push(`- Current Ratio: ${km.currentRatio.toFixed(2)}`);
+    if (km.debtToEquity != null) lines.push(`- Debt/Equity: ${km.debtToEquity.toFixed(2)}`);
+    if (km.peRatioTTM != null) lines.push(`- P/E (TTM): ${km.peRatioTTM.toFixed(1)}`);
+    if (km.priceToSalesTTM != null) lines.push(`- P/S (TTM): ${km.priceToSalesTTM.toFixed(2)}`);
+  }
+
   if (ctx.growthProfile) {
-    lines.push("\nGrowth Profile:");
+    lines.push("\nGrowth Profile (vectors):");
     for (const [k, v] of Object.entries(ctx.growthProfile)) lines.push(`- ${k}: ${v.toFixed(3)}`);
   }
   if (ctx.businessModel) {
-    lines.push("\nBusiness Model:");
+    lines.push("\nBusiness Model (vectors):");
     for (const [k, v] of Object.entries(ctx.businessModel)) lines.push(`- ${k}: ${v.toFixed(3)}`);
   }
-  const hasData = ctx.companyProfile || ctx.growthProfile || ctx.businessModel;
+
+  const hasData = ctx.companyProfile || ctx.earnings || ctx.keyMetrics || ctx.growthProfile || ctx.businessModel;
   if (!hasData) lines.push("No fundamental data available for this ticker.");
   return lines.join("\n");
 }

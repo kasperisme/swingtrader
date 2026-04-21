@@ -23,6 +23,8 @@ Prio 2:
 [ ] Ensure robustness of telegram bots
 [ ] Make sure network graph doesnt update when user selects something in current scope
 
+[ ] Add news trend personas to chart AI that gets company vector and news trend data from supabase
+
 Marketing:
 [ ] Set up pricing and early sign up offer
 [ ] Setup instagram and tiktok bots to post about site
