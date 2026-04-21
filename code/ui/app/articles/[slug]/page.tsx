@@ -630,10 +630,10 @@ async function ArticleData({ params }: { params: Promise<{ slug?: string }> }) {
     <div className="mx-auto max-w-5xl px-4 py-8 sm:px-6 sm:py-10">
       <div className="mb-6">
         <Link
-          href="/"
+          href="/protected/articles"
           className="text-sm text-muted-foreground hover:text-foreground"
         >
-          ← Back to home
+          ← Back to articles
         </Link>
       </div>
       <article className="pb-5 border-b border-border/60">

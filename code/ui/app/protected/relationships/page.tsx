@@ -9,7 +9,9 @@ async function fetchCompanyVectors(): Promise<TickerRow[]> {
   const { data, error } = await supabase
     .schema("swingtrader")
     .from("company_vectors")
-    .select("ticker, vector_date, dimensions_json, raw_json, metadata_json, fetched_at")
+    .select(
+      "ticker, vector_date, dimensions_json, raw_json, metadata_json, fetched_at",
+    )
     .order("ticker", { ascending: true })
     .order("vector_date", { ascending: false });
 
@@ -27,7 +29,12 @@ async function fetchCompanyVectors(): Promise<TickerRow[]> {
 
     let dimensions: Record<string, number | null> = {};
     let raw: Record<string, number | null> = {};
-    let metadata = { name: row.ticker, sector: "", industry: "", market_cap: null as number | null };
+    let metadata = {
+      name: row.ticker,
+      sector: "",
+      industry: "",
+      market_cap: null as number | null,
+    };
 
     try {
       dimensions = JSON.parse(row.dimensions_json ?? "{}");
@@ -65,15 +72,10 @@ async function RelationshipsData() {
 
 export default function RelationshipsPage() {
   return (
-    <div className="flex-1 w-full flex flex-col gap-6">
-      <div>
-        <p className="text-xs font-semibold uppercase tracking-widest text-amber-500">Network</p>
-        <h1 className="mt-1 text-2xl font-bold tracking-tight">Explore</h1>
-      </div>
-
+    <div className="sm:-mx-2 lg:-mx-4 xl:-mx-8 flex flex-col h-[calc(100svh-9rem)] min-h-[480px] w-[85vw] content-center">
       <Suspense
         fallback={
-          <div className="text-sm text-muted-foreground animate-pulse rounded-lg border border-border p-6">
+          <div className="flex-1 flex items-center justify-center text-sm text-muted-foreground animate-pulse">
             Loading explore view…
           </div>
         }

@@ -425,8 +425,8 @@ export function NetworkGraphD3({
     <svg
       ref={svgRef}
       viewBox={`0 0 ${GW} ${GH}`}
-      overflow="visible"
-      className="w-full touch-none overflow-visible"
+      preserveAspectRatio="none"
+      className="w-full h-full touch-none block"
       role="img"
       aria-label="Ticker relationship network graph"
     />

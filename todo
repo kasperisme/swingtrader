@@ -1,22 +1,26 @@
 Ops:
 
-[ ] Make sure openclaw does use whats app to communicate with subagents
+[x] Make sure openclaw does use whats app to communicate with subagents
 [ ] Send daily operational reports
 
 Dev:
 Prio 1:
-[x] Implement stripe
 [ ] Implement pricing gates throughout the application and API
+[x] Implement stripe
+[x] Setup X ingestion (show trump x posts in the graph)
+[x] Ensure that backfilling backfills on stream and not total
+[x] Ensure that dry days on streams are tracked
 
 Prio 2:
+[ ] Move articles to own subpage and have protected root be ops center for users
+[ ] Make the network graph fill out the space better
+[ ] Make the pricing button on the landing page not redirect to stripe, but to signup page
 [ ] Make sure IBD screener script runs through API
 [ ] Set up company vector updating
 [ ] Implement anlytical agent in screening sites as well (copy from chart)
-[ ] Setup X ingestion (show trump x posts in the graph)
 [ ] Get embedding searching to work with the ollama model
 [ ] Seperate newsimpactscreener FMP integration with personal API key
 [ ] Ensure robustness of telegram bots
-[ ] Ensure that backfilling backfills on stream and not total
 
 Marketing:
 [ ] Set up pricing and early sign up offer
