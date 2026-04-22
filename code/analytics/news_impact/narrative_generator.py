@@ -33,7 +33,6 @@ import asyncio
 import json
 import logging
 import os
-import time
 from collections import defaultdict, deque
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
@@ -50,8 +49,10 @@ _EASTERN = ZoneInfo("America/New_York")
 _DEFAULT_LOOKBACK_HOURS = 24
 _DEFAULT_NETWORK_LOOKBACK_DAYS = max(1, int(os.environ.get("NARRATIVE_NETWORK_LOOKBACK_DAYS", "365")))
 _OLLAMA_NARRATIVE_MODEL = os.environ.get("OLLAMA_NARRATIVE_MODEL") or os.environ.get("OLLAMA_IMPACT_MODEL", "devstral")
-_OLLAMA_NARRATIVE_TOKENS = int(os.environ.get("OLLAMA_NARRATIVE_TOKENS", "3072"))
-_OLLAMA_NARRATIVE_TIMEOUT = float(os.environ.get("OLLAMA_NARRATIVE_TIMEOUT", "180"))
+_OLLAMA_NARRATIVE_TOKENS = int(os.environ.get("OLLAMA_NARRATIVE_TOKENS", "3072"))  # kept for back-compat
+_OLLAMA_NARRATIVE_TIMEOUT = float(os.environ.get("OLLAMA_NARRATIVE_TIMEOUT", "120"))
+_OLLAMA_SECTION_TOKENS = int(os.environ.get("OLLAMA_NARRATIVE_SECTION_TOKENS", "1024"))
+_OLLAMA_PULSE_TOKENS = int(os.environ.get("OLLAMA_NARRATIVE_PULSE_TOKENS", "512"))
 _USE_SEMANTIC_RETRIEVAL = os.environ.get("USE_SEMANTIC_RETRIEVAL", "true").strip().lower() not in {"0", "false", "no", "off"}
 _REL_GRAPH_HOPS = max(1, int(os.environ.get("NARRATIVE_REL_GRAPH_HOPS", "2")))
 _REL_DECAY = max(0.0, min(1.0, float(os.environ.get("NARRATIVE_REL_DECAY", "0.7"))))
@@ -818,86 +819,95 @@ def _fetch_opted_in_users(conn) -> list[tuple[str, int]]:
 
 
 # ── Ollama narrative synthesis ────────────────────────────────────────────────
+# The narrative is split into 5 sequential focused calls instead of one giant
+# prompt that causes Ollama timeouts. Calls 1-4 each handle one section with
+# only the data relevant to that section. Call 5 (orchestrator) writes the
+# market_pulse using the output of 1-4 plus semantic evidence.
 
-_NARRATIVE_SYSTEM = """\
+_SECTION_SYSTEM = """\
 You are a concise pre-market briefing assistant for a swing trader.
-Your job: synthesise recent news and its impact on specific portfolio positions \
-and screening candidates. Be direct and actionable. Avoid waffle. No markdown.
-Return ONLY valid JSON as specified — no preamble, no explanation outside the JSON."""
+Be direct and actionable. No markdown. Return ONLY valid JSON as specified — \
+no preamble, no explanation outside the JSON."""
 
-_NARRATIVE_USER_TEMPLATE = """\
+_PORTFOLIO_WATCH_TEMPLATE = """\
 Date: {date} (US Eastern premarket)
 
 === PORTFOLIO POSITIONS ===
 {portfolio_block}
 
-=== ACTIVE SCREENING CANDIDATES ===
-{screening_block}
-
-=== RECENT NEWS HITS (last {lookback_hours}h) ===
-Each line starts with article_id=... — cite these integer ids in "sources" and market_pulse_sources only.
+=== PORTFOLIO NEWS (last {lookback_hours}h) ===
+Each line starts with article_id= — use only those integer ids in sources.
 {news_block}
 
+Return ONLY this JSON (empty array if no news hits):
+{{"portfolio_watch": [
+  {{"ticker": "AAPL", "sentiment": 0.65, "narrative": "One or two sentences.", "action": "monitor", "sources": [{{"article_id": 123}}]}}
+]}}
+Rules: only tickers with news above. sentiment -1.0..+1.0. action: monitor|review|urgent."""
+
+_SCREENING_UPDATE_TEMPLATE = """\
+Date: {date} (US Eastern premarket)
+
+=== SCREENING CANDIDATES ===
+{screening_block}
+
+=== SCREENING NEWS (last {lookback_hours}h) ===
+Each line starts with article_id= — use only those integer ids in sources.
+{news_block}
+
+Return ONLY this JSON (empty array if no news hits):
+{{"screening_update": [
+  {{"ticker": "MSFT", "narrative": "One sentence.", "sources": [{{"article_id": 456}}]}}
+]}}
+Rules: only tickers with news above. Exclude portfolio tickers."""
+
+_RELATED_UPDATE_TEMPLATE = """\
+Date: {date} (US Eastern premarket)
+
 === RELATED NETWORK NEWS (graph-expanded) ===
+Each line starts with article_id= — use only those integer ids in sources.
 {related_news_block}
+
+Return ONLY this JSON (empty array if nothing relevant):
+{{"related_network_update": [
+  {{"ticker": "LLY", "anchor_ticker": "NOVO.B", "narrative": "One sentence.", "sources": [{{"article_id": 789}}]}}
+]}}
+Rules: only tickers from the block above. anchor_ticker = the portfolio/screening ticker in the graph path."""
+
+_ALERT_WATCH_TEMPLATE = """\
+Date: {date} (US Eastern premarket)
 
 === ACTIVE ALERTS ===
 {alerts_block}
 
-=== SEMANTIC EVIDENCE (retrieved chunks) ===
+=== RECENT NEWS FOR ALERT TICKERS (last {lookback_hours}h) ===
+Each line starts with article_id= — use only those integer ids in sources.
+{news_block}
+
+Return ONLY this JSON (empty array if no alerts near trigger):
+{{"alert_watch": [
+  {{"ticker": "TSLA", "alert_type": "stop_loss", "alert_price": 220.0, "pct_away": -3.2, "narrative": "One sentence.", "sources": [{{"article_id": 111}}]}}
+]}}
+Rules: only alerts where abs(pct_away) <= 5. Include all fields shown above."""
+
+_MARKET_PULSE_TEMPLATE = """\
+Date: {date} (US Eastern premarket)
+
+=== PORTFOLIO SIGNALS (already analysed) ===
+{portfolio_summary}
+
+=== SCREENING SIGNALS (already analysed) ===
+{screening_summary}
+
+=== SEMANTIC EVIDENCE (retrieved news chunks) ===
+Each line starts with article_id= — use only those integer ids in market_pulse_sources.
 {semantic_block}
 
-Generate a daily narrative JSON with this exact structure:
-{{
-  "portfolio_watch": [
-    {{
-      "ticker": "AAPL",
-      "sentiment": 0.65,
-      "narrative": "One or two sentences on what happened and why it matters for this position.",
-      "action": "monitor",
-      "sources": [{{"article_id": 12345}}]
-    }}
-  ],
-  "screening_update": [
-    {{
-      "ticker": "MSFT",
-      "narrative": "One sentence on news impact for this setup candidate.",
-      "sources": [{{"article_id": 67890}}]
-    }}
-  ],
-  "related_network_update": [
-    {{
-      "ticker": "LLY",
-      "anchor_ticker": "NOVO.B",
-      "narrative": "One sentence about why this related-company news matters for the anchor ticker.",
-      "sources": [{{"article_id": 22222}}]
-    }}
-  ],
-  "alert_watch": [
-    {{
-      "ticker": "TSLA",
-      "alert_type": "stop_loss",
-      "alert_price": 220.0,
-      "pct_away": -3.2,
-      "narrative": "Approaching stop. Negative sentiment from earnings miss narrative.",
-      "sources": [{{"article_id": 111}}]
-    }}
-  ],
-  "market_pulse": "Two or three sentences summarising the key macro themes from today's news that affect these positions.",
-  "market_pulse_sources": [12345, 67890]
-}}
+Write market_pulse: 2-3 sentences on the key macro themes from today's news that affect these positions.
+Cite up to 5 article_id integers from the semantic evidence block.
 
-Rules:
-- Only include tickers that appear in the news hits above. Skip tickers with no news.
-- sentiment: -1.0 (very negative) to +1.0 (very positive) for this specific ticker.
-- action: one of "monitor" | "review" | "urgent" (urgent = needs attention today).
-- alert_watch: only include alerts where pct_away is within 5% of the trigger level.
-- market_pulse: required even if brief.
-- related_network_update: use only tickers from the RELATED NETWORK NEWS block and include anchor_ticker when clear from the provided path.
-- sources: for each portfolio_watch, screening_update, related_network_update, and alert_watch item, include "sources" as a JSON array of objects {{"article_id": <int>}} for every article you relied on. Use only article_id values that appear in the news hits block or related network block. Omit "sources" or use [] if none apply.
-- market_pulse_sources: array of article_id integers drawn from the news hits that informed market_pulse; use [] if not article-specific.
-- Return {{"portfolio_watch":[],"screening_update":[],"related_network_update":[],"alert_watch":[],"market_pulse":"No significant news in the lookback window.","market_pulse_sources":[]}} if nothing relevant found.
-"""
+Return ONLY this JSON:
+{{"market_pulse": "...", "market_pulse_sources": [12345, 67890]}}"""
 
 
 def _build_portfolio_block(positions: list[OpenPosition]) -> str:
@@ -1175,55 +1185,147 @@ def _parse_narrative_json(raw: str) -> dict:
     return {}
 
 
-async def _generate_narrative_text(ctx: UserContext) -> tuple[dict, int]:
+async def _call_section(
+    prompt: str,
+    user_id: str,
+    section: str,
+    num_predict: int,
+) -> tuple[dict, int]:
     """
-    Call Ollama with context; returns (parsed_narrative_dict, latency_ms).
-    Falls back to an empty narrative structure on any error.
+    Call Ollama for one focused section. Returns (parsed_dict, latency_ms).
+    On any error returns ({}, 0) so the caller can fall back gracefully.
     """
-    portfolio_block = _build_portfolio_block(ctx.open_positions)
-    screening_block = _build_screening_block(ctx.active_screen_tickers)
-    news_block = _build_news_block(ctx.portfolio_news, ctx.screening_news)
-    related_news_block = _build_related_news_block(
-        ctx.related_news,
-        ctx.related_ticker_scores,
-        ctx.related_ticker_paths,
-    )
-    alerts_block = _build_alerts_block(ctx.alert_items)
-    semantic_block = _build_semantic_block(ctx.semantic_evidence)
-
-    prompt = _NARRATIVE_USER_TEMPLATE.format(
-        date=ctx.narrative_date.strftime("%A %B %-d, %Y"),
-        portfolio_block=portfolio_block,
-        screening_block=screening_block,
-        news_block=news_block,
-        related_news_block=related_news_block,
-        alerts_block=alerts_block,
-        semantic_block=semantic_block,
-        lookback_hours=ctx.lookback_hours,
-    )
-
-    t0 = time.monotonic()
     try:
         raw, latency_ms = await ollama_chat(
             prompt=prompt,
-            system=_NARRATIVE_SYSTEM,
+            system=_SECTION_SYSTEM,
             model=_OLLAMA_NARRATIVE_MODEL,
             timeout=_OLLAMA_NARRATIVE_TIMEOUT,
+            num_predict=num_predict,
         )
     except OllamaError as exc:
-        logger.error("[narrative] Ollama error for user %s: %s", ctx.user_id, exc)
-        return _empty_narrative(), 0
-
+        logger.error("[narrative] Ollama error user=%s section=%s: %s", user_id, section, exc)
+        return {}, 0
     parsed = _parse_narrative_json(raw)
     if not parsed:
-        logger.warning("[narrative] could not parse Ollama response for user %s: %r", ctx.user_id, raw[:200])
-        return _empty_narrative(), latency_ms
-
-    catalog = _article_catalog_from_context(ctx)
-    _enrich_narrative_sources(parsed, catalog)
-    parsed = _enforce_section_ticker_integrity(parsed, ctx)
-
+        logger.warning(
+            "[narrative] parse failed user=%s section=%s raw=%r",
+            user_id, section, raw[:200],
+        )
     return parsed, latency_ms
+
+
+def _summarize_section_for_pulse(items: list[dict], label: str) -> str:
+    """One-liner per item for the market_pulse orchestrator prompt."""
+    if not items:
+        return f"  (no {label} signals)"
+    return "\n".join(
+        f"  {it.get('ticker','?')}: {str(it.get('narrative',''))[:100]}"
+        for it in items
+    )
+
+
+async def _generate_narrative_text(ctx: UserContext) -> tuple[dict, int]:
+    """
+    Generate narrative by making 5 sequential focused Ollama calls instead of
+    one giant prompt. Each section call only receives the data it needs, keeping
+    prompts small and avoiding Ollama timeouts.
+
+      1. portfolio_watch    — positions + portfolio news
+      2. screening_update   — screening tickers + screening news
+      3. related_network_update — related network news
+      4. alert_watch        — active alerts + alert-ticker news
+      5. market_pulse       — orchestrator using outputs of 1-4 + semantic evidence
+
+    Returns (parsed_narrative_dict, total_latency_ms).
+    """
+    date_str = ctx.narrative_date.strftime("%A %B %-d, %Y")
+    catalog = _article_catalog_from_context(ctx)
+    total_ms = 0
+    narrative: dict = _empty_narrative()
+
+    # ── 1. portfolio_watch ────────────────────────────────────────────────────
+    if ctx.open_positions and any(ctx.portfolio_news.values()):
+        portfolio_news_block = _build_news_block(ctx.portfolio_news, {})
+        prompt = _PORTFOLIO_WATCH_TEMPLATE.format(
+            date=date_str,
+            portfolio_block=_build_portfolio_block(ctx.open_positions),
+            news_block=portfolio_news_block,
+            lookback_hours=ctx.lookback_hours,
+        )
+        parsed, ms = await _call_section(prompt, ctx.user_id, "portfolio_watch", _OLLAMA_SECTION_TOKENS)
+        total_ms += ms
+        narrative["portfolio_watch"] = parsed.get("portfolio_watch", [])
+        logger.info("[narrative] portfolio_watch user=%s items=%d latency=%dms",
+                    ctx.user_id, len(narrative["portfolio_watch"]), ms)
+
+    # ── 2. screening_update ───────────────────────────────────────────────────
+    if ctx.active_screen_tickers and any(ctx.screening_news.values()):
+        screening_news_block = _build_news_block({}, ctx.screening_news)
+        prompt = _SCREENING_UPDATE_TEMPLATE.format(
+            date=date_str,
+            screening_block=_build_screening_block(ctx.active_screen_tickers),
+            news_block=screening_news_block,
+            lookback_hours=ctx.lookback_hours,
+        )
+        parsed, ms = await _call_section(prompt, ctx.user_id, "screening_update", _OLLAMA_SECTION_TOKENS)
+        total_ms += ms
+        narrative["screening_update"] = parsed.get("screening_update", [])
+        logger.info("[narrative] screening_update user=%s items=%d latency=%dms",
+                    ctx.user_id, len(narrative["screening_update"]), ms)
+
+    # ── 3. related_network_update ─────────────────────────────────────────────
+    if ctx.related_news and any(ctx.related_news.values()):
+        related_news_block = _build_related_news_block(
+            ctx.related_news, ctx.related_ticker_scores, ctx.related_ticker_paths,
+        )
+        prompt = _RELATED_UPDATE_TEMPLATE.format(
+            date=date_str,
+            related_news_block=related_news_block,
+        )
+        parsed, ms = await _call_section(prompt, ctx.user_id, "related_network_update", _OLLAMA_SECTION_TOKENS)
+        total_ms += ms
+        narrative["related_network_update"] = parsed.get("related_network_update", [])
+        logger.info("[narrative] related_network_update user=%s items=%d latency=%dms",
+                    ctx.user_id, len(narrative["related_network_update"]), ms)
+
+    # ── 4. alert_watch ────────────────────────────────────────────────────────
+    if ctx.alert_items:
+        alert_tickers = {a.ticker.upper() for a in ctx.alert_items}
+        alert_news = {
+            t: v for t, v in {**ctx.portfolio_news, **ctx.screening_news}.items()
+            if t.upper() in alert_tickers
+        }
+        prompt = _ALERT_WATCH_TEMPLATE.format(
+            date=date_str,
+            alerts_block=_build_alerts_block(ctx.alert_items),
+            news_block=_build_news_block(alert_news, {}),
+            lookback_hours=ctx.lookback_hours,
+        )
+        parsed, ms = await _call_section(prompt, ctx.user_id, "alert_watch", _OLLAMA_SECTION_TOKENS)
+        total_ms += ms
+        narrative["alert_watch"] = parsed.get("alert_watch", [])
+        logger.info("[narrative] alert_watch user=%s items=%d latency=%dms",
+                    ctx.user_id, len(narrative["alert_watch"]), ms)
+
+    # ── 5. market_pulse (orchestrator) ────────────────────────────────────────
+    prompt = _MARKET_PULSE_TEMPLATE.format(
+        date=date_str,
+        portfolio_summary=_summarize_section_for_pulse(narrative["portfolio_watch"], "portfolio"),
+        screening_summary=_summarize_section_for_pulse(narrative["screening_update"], "screening"),
+        semantic_block=_build_semantic_block(ctx.semantic_evidence),
+    )
+    parsed, ms = await _call_section(prompt, ctx.user_id, "market_pulse", _OLLAMA_PULSE_TOKENS)
+    total_ms += ms
+    narrative["market_pulse"] = parsed.get("market_pulse") or "No significant news in the lookback window."
+    narrative["market_pulse_sources"] = parsed.get("market_pulse_sources") or []
+    logger.info("[narrative] market_pulse user=%s latency=%dms", ctx.user_id, ms)
+
+    # ── Enrich + integrity ────────────────────────────────────────────────────
+    _enrich_narrative_sources(narrative, catalog)
+    narrative = _enforce_section_ticker_integrity(narrative, ctx)
+
+    return narrative, total_ms
 
 
 def _empty_narrative() -> dict:
@@ -1434,12 +1536,12 @@ def build_prompt_for_user(
     narrative_date: Optional[date] = None,
     lookback_hours: int = _DEFAULT_LOOKBACK_HOURS,
     network_lookback_days: int = _DEFAULT_NETWORK_LOOKBACK_DAYS,
-) -> tuple["UserContext", str]:
+) -> tuple["UserContext", dict[str, str]]:
     """
-    Build and return the full Ollama prompt for one user without calling the model.
+    Build and return all section prompts for one user without calling the model.
     Useful for dry-run inspection and input validation.
 
-    Returns (ctx, prompt_string).
+    Returns (ctx, {section_name: prompt_string}).
     """
     if narrative_date is None:
         narrative_date = datetime.now(_EASTERN).date()
@@ -1449,27 +1551,45 @@ def build_prompt_for_user(
         lookback_hours,
         network_lookback_days=network_lookback_days,
     )
-    portfolio_block = _build_portfolio_block(ctx.open_positions)
-    screening_block = _build_screening_block(ctx.active_screen_tickers)
-    news_block = _build_news_block(ctx.portfolio_news, ctx.screening_news)
-    related_news_block = _build_related_news_block(
-        ctx.related_news,
-        ctx.related_ticker_scores,
-        ctx.related_ticker_paths,
-    )
-    alerts_block = _build_alerts_block(ctx.alert_items)
-    semantic_block = _build_semantic_block(ctx.semantic_evidence)
-    prompt = _NARRATIVE_USER_TEMPLATE.format(
-        date=ctx.narrative_date.strftime("%A %B %-d, %Y"),
-        portfolio_block=portfolio_block,
-        screening_block=screening_block,
-        news_block=news_block,
-        related_news_block=related_news_block,
-        alerts_block=alerts_block,
-        semantic_block=semantic_block,
+    date_str = ctx.narrative_date.strftime("%A %B %-d, %Y")
+    prompts: dict[str, str] = {}
+
+    prompts["portfolio_watch"] = _PORTFOLIO_WATCH_TEMPLATE.format(
+        date=date_str,
+        portfolio_block=_build_portfolio_block(ctx.open_positions),
+        news_block=_build_news_block(ctx.portfolio_news, {}),
         lookback_hours=ctx.lookback_hours,
     )
-    return ctx, prompt
+    prompts["screening_update"] = _SCREENING_UPDATE_TEMPLATE.format(
+        date=date_str,
+        screening_block=_build_screening_block(ctx.active_screen_tickers),
+        news_block=_build_news_block({}, ctx.screening_news),
+        lookback_hours=ctx.lookback_hours,
+    )
+    prompts["related_network_update"] = _RELATED_UPDATE_TEMPLATE.format(
+        date=date_str,
+        related_news_block=_build_related_news_block(
+            ctx.related_news, ctx.related_ticker_scores, ctx.related_ticker_paths,
+        ),
+    )
+    alert_tickers = {a.ticker.upper() for a in ctx.alert_items}
+    alert_news = {
+        t: v for t, v in {**ctx.portfolio_news, **ctx.screening_news}.items()
+        if t.upper() in alert_tickers
+    }
+    prompts["alert_watch"] = _ALERT_WATCH_TEMPLATE.format(
+        date=date_str,
+        alerts_block=_build_alerts_block(ctx.alert_items),
+        news_block=_build_news_block(alert_news, {}),
+        lookback_hours=ctx.lookback_hours,
+    )
+    prompts["market_pulse"] = _MARKET_PULSE_TEMPLATE.format(
+        date=date_str,
+        portfolio_summary="(dry-run — run generate_for_user to populate)",
+        screening_summary="(dry-run — run generate_for_user to populate)",
+        semantic_block=_build_semantic_block(ctx.semantic_evidence),
+    )
+    return ctx, prompts
 
 
 async def generate_for_user(

@@ -27,6 +27,7 @@ async def chat(
     system: str,
     model: Optional[str] = None,
     timeout: float = 60.0,
+    num_predict: Optional[int] = None,
 ) -> tuple[str, int]:
     """
     Send a chat request to the local Ollama instance.
@@ -54,7 +55,7 @@ async def chat(
     base_url = os.environ.get("OLLAMA_BASE_URL", _DEFAULT_BASE).rstrip("/")
     url      = f"{base_url}/api/chat"
 
-    num_predict = int(os.environ.get("OLLAMA_NUM_PREDICT", "1024"))
+    num_predict = num_predict if num_predict is not None else int(os.environ.get("OLLAMA_NUM_PREDICT", "1024"))
 
     payload = {
         "model": resolved_model,
