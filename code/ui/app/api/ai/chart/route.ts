@@ -309,6 +309,7 @@ export async function POST(req: Request) {
           }
         }
 
+        console.log(`[chart-ai] tool_calls: ${toolCalls.length}, annotations: ${annotations.length}, has_content: ${!!message.content}`);
         const personaLine = personas.map((p) => p.label).join("|");
         emit(controller, { type: "annotations", data: annotations });
         emit(controller, { type: "analysis", content: `<!-- personas:${personaLine} -->\n${analysisText}` });
