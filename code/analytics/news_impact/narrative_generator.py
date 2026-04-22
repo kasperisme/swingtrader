@@ -422,6 +422,38 @@ def _fetch_active_screen_tickers(conn, user_id: str) -> list[str]:
     return [r[0] for r in (cur.fetchall() or [])]
 
 
+def _fetch_ticker_aliases(conn, canonical_tickers: list[str]) -> dict[str, str]:
+    """
+    Return a map of {alias_norm → canonical_ticker} for all known aliases of the
+    given canonical tickers, using the same security_identity_map table as
+    _resolve_canonical_tickers (i.e. the same method the UI uses).
+    The canonical tickers themselves are included so the query covers everything.
+    """
+    if not canonical_tickers:
+        return {}
+    schema = get_schema()
+    sql = f"""
+        SELECT alias_value_norm, canonical_ticker
+        FROM {schema}.security_identity_map
+        WHERE alias_kind = 'ticker'
+          AND canonical_ticker = ANY(%s)
+        ORDER BY verified DESC, confidence DESC, id ASC
+    """
+    cur = conn.cursor()
+    cur.execute(sql, ([t.upper() for t in canonical_tickers],))
+    rows = cur.fetchall() or []
+    alias_to_canonical: dict[str, str] = {}
+    for alias_norm, canonical in rows:
+        norm = _normalize_ticker(str(alias_norm))
+        canon = _normalize_ticker(str(canonical))
+        if norm and canon and norm not in alias_to_canonical:
+            alias_to_canonical[norm] = canon
+    # Always include the canonical tickers themselves as identity mappings
+    for t in canonical_tickers:
+        alias_to_canonical.setdefault(t, t)
+    return alias_to_canonical
+
+
 def _fetch_ticker_news(
     conn,
     tickers: list[str],
@@ -430,6 +462,8 @@ def _fetch_ticker_news(
     """
     For each ticker, find recent articles and the TICKER_SENTIMENT score.
     Also pulls TICKER_RELATIONSHIPS data for relationship insights.
+    Articles tagged under any known alias of a ticker are included and mapped
+    back to the canonical ticker (same alias table the UI uses).
     Returns {ticker: [TickerNewsItem, ...]}
     """
     if not tickers:
@@ -438,10 +472,14 @@ def _fetch_ticker_news(
     if not normalized_tickers:
         return {}
 
+    # Build full alias → canonical map and the expanded query set
+    alias_to_canonical = _fetch_ticker_aliases(conn, normalized_tickers)
+    all_query_tickers = list(alias_to_canonical.keys())  # canonical + all aliases
+
     schema = get_schema()
     since = datetime.now(_EASTERN) - timedelta(hours=lookback_hours)
 
-    # Fetch articles mentioning these tickers
+    # Fetch articles mentioning these tickers (or any of their aliases)
     sql_articles = f"""
         SELECT
             nat.ticker,
@@ -456,7 +494,7 @@ def _fetch_ticker_news(
         ORDER BY nat.ticker, COALESCE(na.published_at, na.created_at) DESC
     """
     cur = conn.cursor()
-    cur.execute(sql_articles, (normalized_tickers, since))
+    cur.execute(sql_articles, (all_query_tickers, since))
     article_rows = cur.fetchall() or []
 
     # Collect unique article IDs to fetch heads in one query
@@ -501,39 +539,49 @@ def _fetch_ticker_news(
                 })
         relationships_by_article[row[0]] = parsed
 
-    # Build output grouped by ticker
+    # Build output grouped by canonical ticker
     result: dict[str, list[TickerNewsItem]] = {t: [] for t in normalized_tickers}
     seen: set[tuple[str, int]] = set()
 
-    for ticker, article_id, title, url, published_at in article_rows:
-        ticker = _normalize_ticker(ticker)
-        key = (ticker, article_id)
+    for raw_ticker, article_id, title, url, published_at in article_rows:
+        # Map alias back to the canonical ticker we were asked about
+        norm = _normalize_ticker(raw_ticker)
+        canonical = alias_to_canonical.get(norm, norm)
+        if canonical not in result:
+            continue
+
+        key = (canonical, article_id)
         if key in seen:
             continue
         seen.add(key)
 
         scores, reasons = sentiment_by_article.get(article_id, ({}, {}))
-        ticker_upper = ticker.upper()
-        sentiment_score = float(scores.get(ticker_upper, 0.0))
-        sentiment_reason = reasons.get(ticker_upper, "")
+        # Sentiment scores may be keyed by either the alias or the canonical ticker;
+        # try canonical first, then the alias that matched.
+        canonical_upper = canonical.upper()
+        alias_upper = norm.upper()
+        sentiment_score = float(
+            scores.get(canonical_upper) or scores.get(alias_upper) or 0.0
+        )
+        sentiment_reason = reasons.get(canonical_upper) or reasons.get(alias_upper) or ""
 
-        # Filter relationships to ones involving this ticker
+        # Filter relationships to ones involving this ticker (canonical or alias)
         all_rels = relationships_by_article.get(article_id, [])
         relevant_rels = [
             r for r in all_rels
-            if r["from"] == ticker_upper or r["to"] == ticker_upper
+            if r["from"] in (canonical_upper, alias_upper)
+            or r["to"] in (canonical_upper, alias_upper)
         ]
 
-        if ticker in result:
-            result[ticker].append(TickerNewsItem(
-                article_id=article_id,
-                title=title or "",
-                url=url or "",
-                published_at=published_at,
-                sentiment_score=sentiment_score,
-                sentiment_reason=sentiment_reason,
-                relationships=relevant_rels,
-            ))
+        result[canonical].append(TickerNewsItem(
+            article_id=article_id,
+            title=title or "",
+            url=url or "",
+            published_at=published_at,
+            sentiment_score=sentiment_score,
+            sentiment_reason=sentiment_reason,
+            relationships=relevant_rels,
+        ))
 
     return result
 

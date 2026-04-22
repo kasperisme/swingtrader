@@ -2067,9 +2067,12 @@ def _rescore_fetch_unscored_ids(client) -> list[int]:
             .order("article_id", desc=True)
             .range(offset, offset + _RESCORE_PAGE_SIZE - 1)
             .execute()
-            .data or []
+            .data
+            or []
         )
-        unscored.extend(r["article_id"] for r in rows if r.get("count") == _RESCORE_HEAD_COUNT)
+        unscored.extend(
+            r["article_id"] for r in rows if r.get("count") == _RESCORE_HEAD_COUNT
+        )
         if len(rows) < _RESCORE_PAGE_SIZE:
             break
         offset += _RESCORE_PAGE_SIZE
@@ -2083,13 +2086,11 @@ def _rescore_fetch_unscored_ids(client) -> list[int]:
 
 def _rescore_fetch_incomplete_ids(client) -> list[int]:
     """
-    Find articles that need a re-run by processing_status:
-      NULL     — scored before this column existed; status unknown
-      partial  — some heads timed out; worth retrying
-      failed   — all heads failed (API key expired / total outage); retry after fix
+    Find articles with processing_status = 'failed' — all heads failed, worth retrying
+    after an API key fix or outage recovery.
     """
     schema = get_schema()
-    console.print("[dim]Querying DB for null/partial/failed articles…[/dim]")
+    console.print("[dim]Querying DB for failed articles…[/dim]")
 
     ids: list[int] = []
     offset = 0
@@ -2098,11 +2099,12 @@ def _rescore_fetch_incomplete_ids(client) -> list[int]:
             client.schema(schema)
             .table("news_articles")
             .select("id")
-            .or_("processing_status.is.null,processing_status.in.(partial,failed)")
+            .or_("processing_status.in.(partial,failed)")
             .order("id", desc=True)
             .range(offset, offset + _RESCORE_PAGE_SIZE - 1)
             .execute()
-            .data or []
+            .data
+            or []
         )
         ids.extend(r["id"] for r in rows)
         if len(rows) < _RESCORE_PAGE_SIZE:
@@ -2110,7 +2112,7 @@ def _rescore_fetch_incomplete_ids(client) -> list[int]:
         offset += _RESCORE_PAGE_SIZE
 
     console.print(
-        f"[dim]Found [bold]{len(ids)}[/bold] articles with null/partial/failed processing_status[/dim]"
+        f"[dim]Found [bold]{len(ids)}[/bold] articles with failed processing_status[/dim]"
     )
     return ids
 
@@ -2120,7 +2122,9 @@ def _rescore_fetch_articles_batch(client, ids: list[int]) -> list[dict]:
     res = (
         client.schema(schema)
         .table("news_articles")
-        .select("id, body, title, url, published_at, publisher, article_stream, article_hash, processing_status")
+        .select(
+            "id, body, title, url, published_at, publisher, article_stream, article_hash, processing_status"
+        )
         .in_("id", ids)
         .execute()
     )
@@ -2163,12 +2167,18 @@ async def _rescore_one_article(
 
     status = row.get("processing_status")
     needs_rescore = status in ("partial", "failed")
-    if not needs_rescore and client is not None and _rescore_has_non_empty_heads(client, article_id):
+    if (
+        not needs_rescore
+        and client is not None
+        and _rescore_has_non_empty_heads(client, article_id)
+    ):
         console.print(f"  [{index}/{total}] id={article_id} — already scored, skipping")
         return False
 
     async with semaphore:
-        console.print(f"[bold cyan][{index}/{total}][/bold cyan] id={article_id}  {title[:65]}")
+        console.print(
+            f"[bold cyan][{index}/{total}][/bold cyan] id={article_id}  {title[:65]}"
+        )
         try:
             heads, extracted_tickers = await asyncio.gather(
                 score_article(body),
@@ -2178,12 +2188,16 @@ async def _rescore_one_article(
             console.print(f"  [red]id={article_id} scoring failed: {exc}[/red]")
             return False
 
-    _normalize_relationship_and_sentiment_heads(heads, ticker_alias_map, company_alias_map)
+    _normalize_relationship_and_sentiment_heads(
+        heads, ticker_alias_map, company_alias_map
+    )
     extracted_tickers = [
-        t for t in (
+        t
+        for t in (
             _canonicalize_ticker_token(t, ticker_alias_map, company_alias_map)
             for t in extracted_tickers
-        ) if t
+        )
+        if t
     ]
     extracted_tickers = list(dict.fromkeys(extracted_tickers))
     impact = aggregate_heads(heads)
@@ -2199,10 +2213,12 @@ async def _rescore_one_article(
         return True
 
     clean_hash = _sha256(body)
-    client.schema(get_schema()).table("news_articles").update({
-        "body": body,
-        "article_hash": clean_hash,
-    }).eq("id", article_id).execute()
+    client.schema(get_schema()).table("news_articles").update(
+        {
+            "body": body,
+            "article_hash": clean_hash,
+        }
+    ).eq("id", article_id).execute()
 
     _delete_heads_and_vector(client, article_id)
     _persist(
@@ -2240,14 +2256,16 @@ async def _process_rescore(args: argparse.Namespace) -> None:
             ids.append(aid)
     console.print(
         f"[dim]Total candidates: [bold]{len(ids)}[/bold] "
-        f"({len(unscored_ids)} all-heads-empty + {len(incomplete_ids)} null/partial/failed status, "
+        f"({len(unscored_ids)} all-heads-empty + {len(incomplete_ids)} failed status, "
         f"{len(set(unscored_ids) & set(incomplete_ids))} overlap)[/dim]"
     )
 
     rescore_limit = getattr(args, "rescore_limit", None)
     if rescore_limit is not None and rescore_limit > 0:
         ids = ids[:rescore_limit]
-        console.print(f"[dim]--rescore-limit {rescore_limit}: capped to {len(ids)} article(s)[/dim]")
+        console.print(
+            f"[dim]--rescore-limit {rescore_limit}: capped to {len(ids)} article(s)[/dim]"
+        )
 
     total = len(ids)
 
@@ -2286,16 +2304,18 @@ async def _process_rescore(args: argparse.Namespace) -> None:
             if row is None:
                 console.print(f"  id={article_id} — not found in DB, skipping")
                 continue
-            tasks.append(_rescore_one_article(
-                db_client,
-                row,
-                ticker_alias_map,
-                company_alias_map,
-                semaphore,
-                index=batch_start + i + 1,
-                total=total,
-                no_persist=args.no_persist,
-            ))
+            tasks.append(
+                _rescore_one_article(
+                    db_client,
+                    row,
+                    ticker_alias_map,
+                    company_alias_map,
+                    semaphore,
+                    index=batch_start + i + 1,
+                    total=total,
+                    no_persist=args.no_persist,
+                )
+            )
 
         results = await asyncio.gather(*tasks, return_exceptions=True)
         for r in results:
@@ -2323,7 +2343,12 @@ def _health_job_name_from_namespace(args: argparse.Namespace) -> str | None:
     Distinct job_health name from parsed CLI so concurrent cron jobs do not
     clobber each other's rows. None for single-article invocations (no tracking).
     """
-    if not (args.fmp_news or args.x_news or args.sparse_fill is not None or getattr(args, "rescore", False)):
+    if not (
+        args.fmp_news
+        or args.x_news
+        or args.sparse_fill is not None
+        or getattr(args, "rescore", False)
+    ):
         return None
     if getattr(args, "rescore", False):
         return "news_rescore"
