@@ -2083,13 +2083,13 @@ def _rescore_fetch_unscored_ids(client) -> list[int]:
 
 def _rescore_fetch_incomplete_ids(client) -> list[int]:
     """
-    Find articles already tracked by processing_status that need a re-run:
+    Find articles that need a re-run by processing_status:
+      NULL     — scored before this column existed; status unknown
       partial  — some heads timed out; worth retrying
       failed   — all heads failed (API key expired / total outage); retry after fix
-    NULL rows are handled by _rescore_fetch_unscored_ids via the heads table.
     """
     schema = get_schema()
-    console.print("[dim]Querying DB for partial/failed articles…[/dim]")
+    console.print("[dim]Querying DB for null/partial/failed articles…[/dim]")
 
     ids: list[int] = []
     offset = 0
@@ -2098,7 +2098,7 @@ def _rescore_fetch_incomplete_ids(client) -> list[int]:
             client.schema(schema)
             .table("news_articles")
             .select("id")
-            .in_("processing_status", ["partial", "failed"])
+            .or_("processing_status.is.null,processing_status.in.(partial,failed)")
             .order("id", desc=True)
             .range(offset, offset + _RESCORE_PAGE_SIZE - 1)
             .execute()
@@ -2110,7 +2110,7 @@ def _rescore_fetch_incomplete_ids(client) -> list[int]:
         offset += _RESCORE_PAGE_SIZE
 
     console.print(
-        f"[dim]Found [bold]{len(ids)}[/bold] articles with partial/failed processing_status[/dim]"
+        f"[dim]Found [bold]{len(ids)}[/bold] articles with null/partial/failed processing_status[/dim]"
     )
     return ids
 
@@ -2240,7 +2240,7 @@ async def _process_rescore(args: argparse.Namespace) -> None:
             ids.append(aid)
     console.print(
         f"[dim]Total candidates: [bold]{len(ids)}[/bold] "
-        f"({len(unscored_ids)} unscored + {len(incomplete_ids)} partial/failed, "
+        f"({len(unscored_ids)} all-heads-empty + {len(incomplete_ids)} null/partial/failed status, "
         f"{len(set(unscored_ids) & set(incomplete_ids))} overlap)[/dim]"
     )
 
