@@ -13,8 +13,8 @@ import { Loader2 } from "lucide-react";
 import { fmpGetOhlc } from "@/app/actions/fmp";
 import { readChartViewCache, putChartViewCache } from "@/lib/chart-view-cache";
 import { subtractCalendarDays } from "@/lib/fmp-date-utils";
-import type { ChartPoint, OhlcBar, PivotMarker, ChartAnnotation } from "./types";
-import { resolvePivotBarIndex, ANNOTATION_COLORS } from "./types";
+import type { ChartPoint, OhlcBar, EntryMarker, ChartAnnotation } from "./types";
+import { resolveEntryBarIndex, ANNOTATION_COLORS } from "./types";
 
 interface Crosshair {
   barIdx: number;
@@ -116,10 +116,10 @@ function smaPathD(
 export function CandlestickSvg({
   symbol,
   onPointChange,
-  pivotMarker,
+  entryMarker,
   onChartMetrics,
   onChartData,
-  onAutoPivot,
+  onAutoEntry,
   annotations = [],
   drawingMode = "none",
   drawingRole = "info",
@@ -129,10 +129,10 @@ export function CandlestickSvg({
 }: {
   symbol: string;
   onPointChange?: (point: ChartPoint | null) => void;
-  pivotMarker?: PivotMarker | null;
+  entryMarker?: EntryMarker | null;
   onChartMetrics?: (m: { lastClose: number } | null) => void;
   onChartData?: (rows: OhlcBar[]) => void;
-  onAutoPivot?: (point: ChartPoint) => void;
+  onAutoEntry?: (point: ChartPoint) => void;
   annotations?: ChartAnnotation[];
   drawingMode?: "none" | "horizontal" | "zone" | "trend_line";
   drawingRole?: import("./types").AnnotationRole;
@@ -991,12 +991,12 @@ export function CandlestickSvg({
           return null;
         })}
 
-        {/* Pivot marker: dot at bar + horizontal line to the right edge of the price pane */}
-        {pivotMarker && (() => {
-          const pbi = resolvePivotBarIndex(data, pivotMarker);
+        {/* Entry marker: dot at bar + horizontal line to the right edge of the price pane */}
+        {entryMarker && (() => {
+          const pbi = resolveEntryBarIndex(data, entryMarker);
           if (pbi < sliceStart || pbi > sliceStart + n - 1) return null;
           const px = xOf(pbi - sliceStart);
-          const py = toY(pivotMarker.price);
+          const py = toY(entryMarker.price);
           const inPane = py >= PAD_T && py <= H_PRICE - PAD_B;
           if (!inPane) return null;
           return (
@@ -1314,14 +1314,14 @@ export function CandlestickSvg({
         const anchorPct = ((showBelow ? y2 : y1) / H) * 100;
 
         function autoFindPivot() {
-          if (!onAutoPivot) return;
+          if (!onAutoEntry) return;
           let bestIdx = minIdx;
           for (let i = minIdx + 1; i <= maxIdx; i++) {
             if ((data[i]?.high ?? 0) > (data[bestIdx]?.high ?? 0)) bestIdx = i;
           }
           const bar = data[bestIdx];
           if (!bar) return;
-          onAutoPivot({
+          onAutoEntry({
             barIdx: bestIdx,
             date: bar.date,
             price: bar.high,
@@ -1346,13 +1346,13 @@ export function CandlestickSvg({
             <span className="px-2 text-[10px] font-medium text-muted-foreground uppercase tracking-wide border-r border-border py-1.5">
               Selection
             </span>
-            {onAutoPivot && (
+            {onAutoEntry && (
               <button
                 type="button"
                 onClick={autoFindPivot}
                 className="px-3 py-1.5 text-xs font-medium hover:bg-muted transition-colors whitespace-nowrap"
               >
-                Auto find pivot
+                Auto find entry
               </button>
             )}
           </div>

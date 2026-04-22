@@ -10,7 +10,7 @@ import {
   type ChartAnnotation,
   type ChartPoint,
   type OhlcBar,
-  type PivotMarker,
+  type EntryMarker,
   type TickerChartNoteStatus,
 } from "@/components/ticker-charts";
 import { ChartAiChat } from "@/components/chart-ai-chat";
@@ -49,7 +49,7 @@ export function ChartsPageClient({
   );
   const [resolveError, setResolveError] = useState<string | null>(null);
   const [resolving, setResolving] = useState(false);
-  const [pivots, setPivots] = useState<Record<string, PivotMarker | null>>({});
+  const [pivots, setPivots] = useState<Record<string, EntryMarker | null>>({});
   const [chartData, setChartData] = useState<OhlcBar[]>([]);
   const [annotations, setAnnotations] = useState<ChartAnnotation[]>([]);
   const [aiChatMessages, setAiChatMessages] = useState<ChartAiChatMessage[]>([]);
@@ -138,11 +138,11 @@ export function ChartsPageClient({
     }
   }, [searchInput]);
 
-  const getPivotMarker = useCallback(
+  const getEntryMarker = useCallback(
     (ticker: string) => pivots[ticker] ?? null,
     [pivots],
   );
-  const onSetPivotMarker = useCallback((ticker: string, point: ChartPoint) => {
+  const onSetEntryMarker = useCallback((ticker: string, point: ChartPoint) => {
     setPivots((prev) => ({
       ...prev,
       [ticker]: {
@@ -152,7 +152,7 @@ export function ChartsPageClient({
       },
     }));
   }, []);
-  const onClearPivotMarker = useCallback((ticker: string) => {
+  const onClearEntryMarker = useCallback((ticker: string) => {
     setPivots((prev) => {
       const next = { ...prev };
       delete next[ticker];
@@ -233,9 +233,9 @@ export function ChartsPageClient({
             hasComment={hasComment}
             onEditComment={noop}
             getTickerMeta={getTickerMeta}
-            getPivotMarker={getPivotMarker}
-            onSetPivotMarker={onSetPivotMarker}
-            onClearPivotMarker={onClearPivotMarker}
+            getEntryMarker={getEntryMarker}
+            onSetEntryMarker={onSetEntryMarker}
+            onClearEntryMarker={onClearEntryMarker}
             screeningToolbar={false}
             showChevronSymbolNav={false}
             showSymbolHeadline={false}

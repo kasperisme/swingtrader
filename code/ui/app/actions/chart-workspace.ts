@@ -3,11 +3,18 @@
 import { createClient } from "@/lib/supabase/server";
 import type { ChartAnnotation } from "@/components/ticker-charts/types";
 
+export type PersonaScores = {
+  confidence: number;
+  short_term: number;
+  long_term: number;
+};
+
 export type PersonaReport = {
   id: string;
   label: string;
   analysis: string;
   error?: string | null;
+  scores?: PersonaScores;
 };
 
 export type ChartAiChatMessage = {

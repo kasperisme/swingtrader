@@ -14,9 +14,9 @@ import { fmpGetPriceAtDate } from "@/app/actions/fmp";
 import { relationshipsResolveTicker } from "@/app/actions/relationships";
 import {
   TickerChartsPanel,
-  pivotFromMetadata,
+  entryFromMetadata,
   type ChartPoint,
-  type PivotMarker,
+  type EntryMarker,
 } from "@/components/ticker-charts";
 import { createClient } from "@/lib/supabase/client";
 import {
@@ -1083,7 +1083,7 @@ function TradeMonitoringView({
   getStatus,
   filteredSymbolSet,
 }: {
-  entries: { row: ScreeningRow; pivot: PivotMarker }[];
+  entries: { row: ScreeningRow; pivot: EntryMarker }[];
   quotes: Record<string, FmpQuote | null>;
   loadingQuotes: boolean;
   selectedTicker: string | null;
@@ -1613,23 +1613,23 @@ export function ScreeningsUI({
   }, [rowNotes]);
 
   const tradeMonitoringRows = useMemo(() => {
-    const out: { row: ScreeningRow; pivot: PivotMarker }[] = [];
+    const out: { row: ScreeningRow; pivot: EntryMarker }[] = [];
     for (const row of rows) {
       if (!row.symbol) continue;
-      const p = pivotFromMetadata(rowNotes.get(row.scan_row_id)?.metadata_json);
+      const p = entryFromMetadata(rowNotes.get(row.scan_row_id)?.metadata_json);
       if (p) out.push({ row, pivot: p });
     }
     out.sort((a, b) => (a.row.symbol ?? "").localeCompare(b.row.symbol ?? ""));
     return out;
   }, [rows, rowNotes]);
 
-  const hasAnyPivotMarkers = tradeMonitoringRows.length > 0;
+  const hasAnyEntryMarkers = tradeMonitoringRows.length > 0;
 
   useEffect(() => {
-    if (activeView === "tradeMonitoring" && !hasAnyPivotMarkers) {
+    if (activeView === "tradeMonitoring" && !hasAnyEntryMarkers) {
       setActiveView("charts");
     }
-  }, [activeView, hasAnyPivotMarkers]);
+  }, [activeView, hasAnyEntryMarkers]);
 
   async function upsertRowNote(row: ScreeningRow, patch: {
     status?: NoteStatus;
@@ -1750,10 +1750,10 @@ export function ScreeningsUI({
     openWorkflowModalForRow(row);
   }
 
-  function getTickerPivotMarker(ticker: string): PivotMarker | null {
+  function getTickerEntryMarker(ticker: string): EntryMarker | null {
     const row = rowBySymbol.get(ticker);
     if (!row) return null;
-    return pivotFromMetadata(rowNotes.get(row.scan_row_id)?.metadata_json);
+    return entryFromMetadata(rowNotes.get(row.scan_row_id)?.metadata_json);
   }
 
   function getTickerComment(ticker: string): string | null {
@@ -1762,24 +1762,39 @@ export function ScreeningsUI({
     return rowNotes.get(row.scan_row_id)?.comment ?? null;
   }
 
-  async function setTickerPivotMarker(ticker: string, point: ChartPoint) {
+  async function setTickerEntryMarker(
+    ticker: string,
+    point: ChartPoint,
+    direction?: "long" | "short",
+    takeProfit?: number | null,
+    stopLoss?: number | null,
+  ) {
     const row = rowBySymbol.get(ticker);
     if (!row) return;
     const prev = rowNotes.get(row.scan_row_id);
     const rest = { ...(prev?.metadata_json ?? {}) };
     delete (rest as { pivot_points?: unknown }).pivot_points;
+    delete (rest as { pivot?: unknown }).pivot;
     const nextMetadata: Record<string, unknown> = {
       ...rest,
-      pivot: { barIdx: point.barIdx, date: point.date, price: point.price },
+      entry: {
+        barIdx: point.barIdx,
+        date: point.date,
+        price: point.price,
+        ...(direction ? { direction } : {}),
+        ...(takeProfit != null ? { take_profit: takeProfit } : {}),
+        ...(stopLoss != null ? { stop_loss: stopLoss } : {}),
+      },
     };
     await upsertRowNote(row, { metadataJson: nextMetadata });
   }
 
-  async function clearTickerPivotMarker(ticker: string) {
+  async function clearTickerEntryMarker(ticker: string) {
     const row = rowBySymbol.get(ticker);
     if (!row) return;
     const prev = rowNotes.get(row.scan_row_id);
     const rest = { ...(prev?.metadata_json ?? {}) };
+    delete (rest as { entry?: unknown }).entry;
     delete (rest as { pivot?: unknown }).pivot;
     delete (rest as { pivot_points?: unknown }).pivot_points;
     await upsertRowNote(row, { metadataJson: rest });
@@ -2223,7 +2238,7 @@ export function ScreeningsUI({
     { id: "relationship", label: "Relationships", icon: <Activity className="w-3.5 h-3.5" /> },
   ];
 
-  const tradeMonitoringDisabled = !hasAnyPivotMarkers;
+  const tradeMonitoringDisabled = !hasAnyEntryMarkers;
   const tradeMonitoringTitle = tradeMonitoringDisabled
     ? "Set a pivot on the Charts tab (right-click) to enable this view"
     : undefined;
@@ -2556,9 +2571,9 @@ export function ScreeningsUI({
                         hasComment={tickerHasComment}
                         onEditComment={editTickerComment}
                         getTickerMeta={getTickerMeta}
-                        getPivotMarker={getTickerPivotMarker}
-                        onSetPivotMarker={setTickerPivotMarker}
-                        onClearPivotMarker={clearTickerPivotMarker}
+                        getEntryMarker={getTickerEntryMarker}
+                        onSetEntryMarker={setTickerEntryMarker}
+                        onClearEntryMarker={clearTickerEntryMarker}
                         showChevronSymbolNav={false}
                         screeningToolbar={false}
                         showSymbolHeadline={false}
@@ -2580,6 +2595,21 @@ export function ScreeningsUI({
                           onAnnotations={handleChartAiAnnotations}
                           messages={chartAiMessages}
                           setMessages={setChartAiMessages}
+                          onSaveEntry={(price, direction, takeProfit, stopLoss) => {
+                            const ohlc = ohlcvDataRef.current;
+                            const lastIdx = ohlc.length - 1;
+                            const last = ohlc[lastIdx];
+                            if (!last) return;
+                            void setTickerEntryMarker(selectedTicker, {
+                              barIdx: lastIdx,
+                              date: last.date,
+                              price,
+                              open: last.open,
+                              high: last.high,
+                              low: last.low,
+                              close: last.close,
+                            }, direction, takeProfit, stopLoss);
+                          }}
                           side
                         />
                       </div>

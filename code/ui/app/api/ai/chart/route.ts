@@ -3,13 +3,16 @@ import type { ChartAnnotation, AnnotationRole } from "@/components/ticker-charts
 import type { OhlcBar } from "@/components/ticker-charts/types";
 import { OLLAMA_HOST, DEFAULT_MODEL } from "@/lib/ollama";
 import { PERSONA_PROMPTS, ORCHESTRATOR_PROMPT, PERSONA_LABELS, type PersonaId } from "@/lib/chart-ai/personas";
+import type { PersonaScores } from "@/app/actions/chart-workspace";
 import {
   fetchSentimentContext,
   fetchRiskContext,
   fetchFundamentalsContext,
+  fetchNewsTrendContext,
   formatSentimentContext,
   formatRiskContext,
   formatFundamentalsContext,
+  formatNewsTrendContext,
 } from "@/lib/chart-ai/persona-context";
 
 type OllamaMessage = { role: "system" | "user" | "assistant"; content: string };
@@ -106,13 +109,29 @@ const DRAW_CHART_TOOL = {
   },
 };
 
+function parsePersonaScores(raw: string): { analysis: string; scores: PersonaScores | undefined } {
+  const match = raw.match(/\nSCORES:\s*(\{[^\n]+\})\s*$/);
+  if (!match) return { analysis: raw.trim(), scores: undefined };
+  try {
+    const parsed = JSON.parse(match[1]) as { confidence?: unknown; short_term?: unknown; long_term?: unknown };
+    const clamp = (v: unknown) => Math.min(100, Math.max(0, Math.round(Number(v))));
+    if (typeof parsed.confidence === "number" || typeof parsed.short_term === "number" || typeof parsed.long_term === "number") {
+      return {
+        analysis: raw.slice(0, match.index).trim(),
+        scores: { confidence: clamp(parsed.confidence ?? 50), short_term: clamp(parsed.short_term ?? 50), long_term: clamp(parsed.long_term ?? 50) },
+      };
+    }
+  } catch { /* fall through */ }
+  return { analysis: raw.trim(), scores: undefined };
+}
+
 async function callPersona(
   personaId: PersonaId,
   symbol: string,
   ohlcData: OhlcBar[],
   personaContext: string,
   existingAnnotations: ChartAnnotation[],
-): Promise<{ analysis: string; error?: string; ms: number }> {
+): Promise<{ analysis: string; scores?: PersonaScores; error?: string; ms: number }> {
   const t0 = performance.now();
   const systemPrompt = PERSONA_PROMPTS[personaId](symbol);
   const dataBlock = `OHLC data for ${symbol} (last 60 sessions):\n\`\`\`\n${ohlcSummary(ohlcData)}\n\`\`\``;
@@ -148,7 +167,8 @@ async function callPersona(
     }
 
     const result = await res.json() as { message?: { content?: string } };
-    return { analysis: result.message?.content?.trim() ?? "", ms: performance.now() - t0 };
+    const { analysis, scores } = parsePersonaScores(result.message?.content?.trim() ?? "");
+    return { analysis, scores, ms: performance.now() - t0 };
   } catch (err) {
     return { analysis: "", error: `${PERSONA_LABELS[personaId]} persona error: ${err instanceof Error ? err.message : String(err)}`, ms: performance.now() - t0 };
   }
@@ -171,16 +191,18 @@ export async function POST(req: Request) {
 
   // Fetch persona-specific context before opening the stream
   const tData = performance.now();
-  const [sentimentCtx, riskCtx, fundamentalsCtx] = await Promise.all([
+  const [sentimentCtx, riskCtx, fundamentalsCtx, newsTrendCtx] = await Promise.all([
     fetchSentimentContext(symbol).catch(() => null),
     fetchRiskContext(symbol).catch(() => null),
     fetchFundamentalsContext(symbol).catch(() => null),
+    fetchNewsTrendContext(symbol).catch(() => null),
   ]);
   console.log(`[chart-ai] data-fetch: ${Math.round(performance.now() - tData)}ms`);
 
   const sentimentContextStr = sentimentCtx ? formatSentimentContext(sentimentCtx) : "No sentiment data available.";
   const riskContextStr = riskCtx ? formatRiskContext(riskCtx) : "No risk data available.";
   const fundamentalsContextStr = fundamentalsCtx ? formatFundamentalsContext(fundamentalsCtx) : "No fundamental data available.";
+  const newsTrendContextStr = newsTrendCtx ? formatNewsTrendContext(newsTrendCtx) : "No news trend data available.";
 
   const encoder = new TextEncoder();
   const emit = (controller: ReadableStreamDefaultController, obj: unknown) =>
@@ -191,19 +213,21 @@ export async function POST(req: Request) {
       try {
         const tPersonas = performance.now();
 
-        // Run all 4 personas concurrently — each emits to the stream as soon as it resolves
-        const [techResult, sentimentResult, riskResult, fundamentalsResult] = await Promise.all([
+        // Run all 5 personas concurrently — each emits to the stream as soon as it resolves
+        const [techResult, sentimentResult, riskResult, fundamentalsResult, newsTrendResult] = await Promise.all([
           callPersona("technical", symbol, ohlcData, "Provide your technical analysis based on the price and volume data above.", existingAnnotations)
-            .then((r) => { emit(controller, { type: "persona", id: "technical", label: PERSONA_LABELS.technical, analysis: r.analysis, error: r.error ?? null }); return r; }),
+            .then((r) => { emit(controller, { type: "persona", id: "technical", label: PERSONA_LABELS.technical, analysis: r.analysis, scores: r.scores ?? null, error: r.error ?? null }); return r; }),
           callPersona("sentiment", symbol, ohlcData, sentimentContextStr, existingAnnotations)
-            .then((r) => { emit(controller, { type: "persona", id: "sentiment", label: PERSONA_LABELS.sentiment, analysis: r.analysis, error: r.error ?? null }); return r; }),
+            .then((r) => { emit(controller, { type: "persona", id: "sentiment", label: PERSONA_LABELS.sentiment, analysis: r.analysis, scores: r.scores ?? null, error: r.error ?? null }); return r; }),
           callPersona("risk", symbol, ohlcData, riskContextStr, existingAnnotations)
-            .then((r) => { emit(controller, { type: "persona", id: "risk", label: PERSONA_LABELS.risk, analysis: r.analysis, error: r.error ?? null }); return r; }),
+            .then((r) => { emit(controller, { type: "persona", id: "risk", label: PERSONA_LABELS.risk, analysis: r.analysis, scores: r.scores ?? null, error: r.error ?? null }); return r; }),
           callPersona("fundamentals", symbol, ohlcData, fundamentalsContextStr, existingAnnotations)
-            .then((r) => { emit(controller, { type: "persona", id: "fundamentals", label: PERSONA_LABELS.fundamentals, analysis: r.analysis, error: r.error ?? null }); return r; }),
+            .then((r) => { emit(controller, { type: "persona", id: "fundamentals", label: PERSONA_LABELS.fundamentals, analysis: r.analysis, scores: r.scores ?? null, error: r.error ?? null }); return r; }),
+          callPersona("newsTrend", symbol, ohlcData, newsTrendContextStr, existingAnnotations)
+            .then((r) => { emit(controller, { type: "persona", id: "newsTrend", label: PERSONA_LABELS.newsTrend, analysis: r.analysis, scores: r.scores ?? null, error: r.error ?? null }); return r; }),
         ]);
 
-        console.log(`[chart-ai] personas: ${Math.round(performance.now() - tPersonas)}ms (tech=${Math.round(techResult.ms)}ms sentiment=${Math.round(sentimentResult.ms)}ms risk=${Math.round(riskResult.ms)}ms fundamentals=${Math.round(fundamentalsResult.ms)}ms)`);
+        console.log(`[chart-ai] personas: ${Math.round(performance.now() - tPersonas)}ms (tech=${Math.round(techResult.ms)}ms sentiment=${Math.round(sentimentResult.ms)}ms risk=${Math.round(riskResult.ms)}ms fundamentals=${Math.round(fundamentalsResult.ms)}ms newsTrend=${Math.round(newsTrendResult.ms)}ms)`);
 
         // Assemble specialist reports for orchestrator
         const specialistReports: string[] = [];
@@ -214,6 +238,7 @@ export async function POST(req: Request) {
           { id: "sentiment" as PersonaId, ...sentimentResult },
           { id: "risk" as PersonaId, ...riskResult },
           { id: "fundamentals" as PersonaId, ...fundamentalsResult },
+          { id: "newsTrend" as PersonaId, ...newsTrendResult },
         ]) {
           const label = PERSONA_LABELS[r.id];
           if (r.error) {

@@ -117,6 +117,123 @@ function asNumberMap(v: unknown): Record<string, number> | null {
   return Object.keys(out).length > 0 ? out : null;
 }
 
+export type DimensionTrendEntry = {
+  dimension_key: string;
+  companyExposure: number;
+  avgTrend14d: number | null;
+  avgTrendRecent7d: number | null;
+  avgTrendPrior7d: number | null;
+};
+
+export type NewsTrendContext = {
+  entries: DimensionTrendEntry[];
+  totalDimensionsAnalysed: number;
+  hasCompanyProfile: boolean;
+};
+
+export async function fetchNewsTrendContext(ticker: string): Promise<NewsTrendContext> {
+  const supabase = await createClient();
+
+  const cutoff = new Date();
+  cutoff.setUTCDate(cutoff.getUTCDate() - 14);
+  const cutoffStr = cutoff.toISOString().slice(0, 10);
+
+  const midpoint = new Date();
+  midpoint.setUTCDate(midpoint.getUTCDate() - 7);
+  const midpointStr = midpoint.toISOString().slice(0, 10);
+
+  // Get company's dimension exposure profile
+  const vectorsRes = await supabase
+    .schema("swingtrader")
+    .from("company_vectors")
+    .select("dimensions_json")
+    .eq("ticker", ticker)
+    .order("date", { ascending: false })
+    .limit(1);
+
+  const dims = !vectorsRes.error && vectorsRes.data?.[0]
+    ? asNumberMap((vectorsRes.data[0] as Record<string, unknown>).dimensions_json)
+    : null;
+
+  // Derive top dimensions: company-specific if available, else most active from the trend view
+  let topDims: string[];
+  let hasCompanyProfile = false;
+
+  if (dims) {
+    topDims = Object.entries(dims)
+      .filter(([, v]) => v > 0.25)
+      .sort(([, a], [, b]) => b - a)
+      .slice(0, 12)
+      .map(([k]) => k);
+    hasCompanyProfile = topDims.length > 0;
+  } else {
+    topDims = [];
+  }
+
+  // Fallback: if no company profile, find the most active dimensions by article volume
+  if (topDims.length === 0) {
+    const activeRes = await supabase
+      .from("news_trends_dimension_daily_v")
+      .select("dimension_key, article_count")
+      .gte("bucket_day", cutoffStr)
+      .order("article_count", { ascending: false })
+      .limit(200);
+
+    if (!activeRes.error && Array.isArray(activeRes.data)) {
+      const counts: Record<string, number> = {};
+      for (const row of activeRes.data as { dimension_key: string; article_count: number }[]) {
+        counts[row.dimension_key] = (counts[row.dimension_key] ?? 0) + (row.article_count ?? 0);
+      }
+      topDims = Object.entries(counts)
+        .sort(([, a], [, b]) => b - a)
+        .slice(0, 12)
+        .map(([k]) => k);
+    }
+  }
+
+  if (topDims.length === 0) return { entries: [], totalDimensionsAnalysed: 0, hasCompanyProfile: false };
+
+  // Fetch last 14 days of dimension trend data for selected dimensions
+  const trendRes = await supabase
+    .from("news_trends_dimension_daily_v")
+    .select("bucket_day, dimension_key, dimension_weighted_avg")
+    .gte("bucket_day", cutoffStr)
+    .in("dimension_key", topDims)
+    .order("bucket_day", { ascending: false });
+
+  const rows = (!trendRes.error && Array.isArray(trendRes.data))
+    ? trendRes.data as { bucket_day: string; dimension_key: string; dimension_weighted_avg: number | null }[]
+    : [];
+
+  // Aggregate per dimension
+  const recent7: Record<string, number[]> = {};
+  const prior7: Record<string, number[]> = {};
+  for (const row of rows) {
+    const v = row.dimension_weighted_avg;
+    if (v == null) continue;
+    const bucket = row.bucket_day as string;
+    const dim = row.dimension_key as string;
+    if (bucket >= midpointStr) {
+      (recent7[dim] ??= []).push(v);
+    } else {
+      (prior7[dim] ??= []).push(v);
+    }
+  }
+
+  const avg = (arr: number[] | undefined) =>
+    arr && arr.length > 0 ? arr.reduce((s, v) => s + v, 0) / arr.length : null;
+
+  const entries: DimensionTrendEntry[] = topDims.map((key) => ({
+    dimension_key: key,
+    companyExposure: dims?.[key] ?? 0,
+    avgTrend14d: avg([...(recent7[key] ?? []), ...(prior7[key] ?? [])]),
+    avgTrendRecent7d: avg(recent7[key]),
+    avgTrendPrior7d: avg(prior7[key]),
+  }));
+
+  return { entries, totalDimensionsAnalysed: topDims.length, hasCompanyProfile };
+}
+
 export async function fetchSentimentContext(ticker: string): Promise<SentimentContext> {
   const supabase = await createClient();
   const windows: SentimentContext["windows"] = [];
@@ -360,5 +477,35 @@ export function formatFundamentalsContext(ctx: FundamentalsContext): string {
 
   const hasData = ctx.companyProfile || ctx.earnings || ctx.keyMetrics || ctx.growthProfile || ctx.businessModel;
   if (!hasData) lines.push("No fundamental data available for this ticker.");
+  return lines.join("\n");
+}
+
+export function formatNewsTrendContext(ctx: NewsTrendContext): string {
+  if (ctx.entries.length === 0) return "No news trend dimension data available for this ticker.";
+
+  const profileNote = ctx.hasCompanyProfile
+    ? "company-specific dimensions by exposure"
+    : "NOTE: no company vector profile found — showing top market-wide dimensions by article volume instead; exposure column is not applicable";
+
+  const lines: string[] = [
+    `## News Trend Context (last 14 days · ${profileNote})`,
+    "Columns: dimension | company exposure | 14d avg trend | recent 7d | prior 7d | direction",
+  ];
+
+  for (const e of ctx.entries) {
+    const fmt = (v: number | null) => v == null ? "n/a" : v.toFixed(3);
+    let direction = "stable";
+    if (e.avgTrendRecent7d != null && e.avgTrendPrior7d != null) {
+      const delta = e.avgTrendRecent7d - e.avgTrendPrior7d;
+      if (delta > 0.05) direction = "RISING";
+      else if (delta < -0.05) direction = "FALLING";
+    } else if (e.avgTrendRecent7d != null) {
+      direction = e.avgTrendRecent7d > 0.05 ? "positive" : e.avgTrendRecent7d < -0.05 ? "negative" : "neutral";
+    }
+    const exposure = ctx.hasCompanyProfile ? e.companyExposure.toFixed(2) : "n/a";
+    lines.push(
+      `- ${e.dimension_key}: exposure=${exposure} | 14d=${fmt(e.avgTrend14d)} | r7d=${fmt(e.avgTrendRecent7d)} | p7d=${fmt(e.avgTrendPrior7d)} | ${direction}`,
+    );
+  }
   return lines.join("\n");
 }

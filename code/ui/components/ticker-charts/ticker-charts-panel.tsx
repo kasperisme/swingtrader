@@ -21,7 +21,7 @@ import {
   MousePointer2,
 } from "lucide-react";
 import { CandlestickSvg } from "./candlestick-svg";
-import type { AnnotationRole, ChartAnnotation, ChartPoint, OhlcBar, PivotMarker } from "./types";
+import type { AnnotationRole, ChartAnnotation, ChartPoint, OhlcBar, EntryMarker } from "./types";
 
 export type TickerChartNoteStatus =
   | "active"
@@ -41,9 +41,9 @@ export type TickerChartsPanelProps = {
   hasComment: (ticker: string) => boolean;
   onEditComment: (ticker: string) => void;
   getTickerMeta: (ticker: string) => { sector: string; industry: string; subSector?: string };
-  getPivotMarker: (ticker: string) => PivotMarker | null;
-  onSetPivotMarker: (ticker: string, point: ChartPoint) => void;
-  onClearPivotMarker: (ticker: string) => void;
+  getEntryMarker: (ticker: string) => EntryMarker | null;
+  onSetEntryMarker: (ticker: string, point: ChartPoint) => void;
+  onClearEntryMarker: (ticker: string) => void;
   /** When false, hides dismiss / status / note controls (e.g. standalone research page). */
   screeningToolbar?: boolean;
   /** Optional control rendered before the “next” chevron (e.g. screenings symbol dropdown). */
@@ -78,9 +78,9 @@ export function TickerChartsPanel({
   hasComment,
   onEditComment,
   getTickerMeta,
-  getPivotMarker,
-  onSetPivotMarker,
-  onClearPivotMarker,
+  getEntryMarker,
+  onSetEntryMarker,
+  onClearEntryMarker,
   screeningToolbar = true,
   symbolPicker,
   showChevronSymbolNav = true,
@@ -120,16 +120,16 @@ export function TickerChartsPanel({
   const meta = getTickerMeta(symbol);
   const status = getStatus(symbol);
   const commentExists = hasComment(symbol);
-  const pivotMarker = getPivotMarker(symbol);
+  const entryMarker = getEntryMarker(symbol);
   const [activePoint, setActivePoint] = useState<ChartPoint | null>(null);
   const activePointRef = useRef<ChartPoint | null>(null);
   activePointRef.current = activePoint;
-  const [pivotMenu, setPivotMenu] = useState<{
+  const [entryMenu, setEntryMenu] = useState<{
     x: number;
     y: number;
     pointSnapshot: ChartPoint | null;
   } | null>(null);
-  const pivotMenuRef = useRef<HTMLDivElement>(null);
+  const entryMenuRef = useRef<HTMLDivElement>(null);
   const [chartLastClose, setChartLastClose] = useState<number | null>(null);
   const [chartData, setChartData] = useState<OhlcBar[]>([]);
   const [copyState, setCopyState] = useState<"idle" | "ok" | "err">("idle");
@@ -150,16 +150,16 @@ export function TickerChartsPanel({
     setCopyState("idle");
   }, [symbol]);
 
-  const pivotVsHeader = useMemo(() => {
-    if (!pivotMarker) return null;
+  const entryVsHeader = useMemo(() => {
+    if (!entryMarker) return null;
     const refPrice = activePoint?.price ?? chartLastClose;
     if (refPrice == null) return null;
-    const pivot = pivotMarker.price;
-    const d = refPrice - pivot;
-    const dp = Math.abs(pivot) > 1e-9 ? (d / pivot) * 100 : 0;
+    const entryPrice = entryMarker.price;
+    const d = refPrice - entryPrice;
+    const dp = Math.abs(entryPrice) > 1e-9 ? (d / entryPrice) * 100 : 0;
     const source = activePoint ? "Crosshair" : "Last close";
     return { source, d, dp };
-  }, [pivotMarker, activePoint, chartLastClose]);
+  }, [entryMarker, activePoint, chartLastClose]);
 
   async function copyOhlcvToClipboard() {
     if (chartData.length === 0) return;
@@ -179,13 +179,13 @@ export function TickerChartsPanel({
   }
 
   useEffect(() => {
-    if (!pivotMenu) return;
+    if (!entryMenu) return;
     function onPointerDown(e: PointerEvent) {
-      if (pivotMenuRef.current?.contains(e.target as Node)) return;
-      setPivotMenu(null);
+      if (entryMenuRef.current?.contains(e.target as Node)) return;
+      setEntryMenu(null);
     }
     function onKey(e: KeyboardEvent) {
-      if (e.key === "Escape") setPivotMenu(null);
+      if (e.key === "Escape") setEntryMenu(null);
     }
     document.addEventListener("pointerdown", onPointerDown, true);
     document.addEventListener("keydown", onKey);
@@ -193,7 +193,7 @@ export function TickerChartsPanel({
       document.removeEventListener("pointerdown", onPointerDown, true);
       document.removeEventListener("keydown", onKey);
     };
-  }, [pivotMenu]);
+  }, [entryMenu]);
 
   const footerTail = screeningToolbar
     ? `${symbols.length} stocks in current filter`
@@ -285,20 +285,20 @@ export function TickerChartsPanel({
           </>
         )}
 
-        {pivotVsHeader && pivotMarker && (
+        {entryVsHeader && entryMarker && (
           <div
             className="flex flex-col items-end gap-0.5 text-right shrink-0 min-w-0"
-            title={`Pivot $${pivotMarker.price.toFixed(2)} · ${pivotVsHeader.source} vs pivot`}
+            title={`Entry $${entryMarker.price.toFixed(2)} · ${entryVsHeader.source} vs entry`}
           >
             <span className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
-              vs pivot
+              vs entry
             </span>
             <span
-              className={`text-xs font-semibold tabular-nums whitespace-nowrap ${pivotVsHeader.d >= 0 ? "text-emerald-600 dark:text-emerald-400" : "text-rose-500"}`}
+              className={`text-xs font-semibold tabular-nums whitespace-nowrap ${entryVsHeader.d >= 0 ? "text-emerald-600 dark:text-emerald-400" : "text-rose-500"}`}
             >
-              {pivotVsHeader.source}: {pivotVsHeader.d >= 0 ? "+" : ""}
-              {pivotVsHeader.d.toFixed(2)} ({pivotVsHeader.d >= 0 ? "+" : ""}
-              {pivotVsHeader.dp.toFixed(2)}%)
+              {entryVsHeader.source}: {entryVsHeader.d >= 0 ? "+" : ""}
+              {entryVsHeader.d.toFixed(2)} ({entryVsHeader.d >= 0 ? "+" : ""}
+              {entryVsHeader.dp.toFixed(2)}%)
             </span>
           </div>
         )}
@@ -400,10 +400,10 @@ export function TickerChartsPanel({
             ? "relative border border-border rounded-lg p-4 bg-background"
             : "relative"
         }
-        title="Drag left/right to pan time · Drag up/down to pan price · Double-click to reset price pan · Right-click for pivot options"
+        title="Drag left/right to pan time · Drag up/down to pan price · Double-click to reset price pan · Right-click for entry options"
         onContextMenu={(e) => {
           e.preventDefault();
-          setPivotMenu({
+          setEntryMenu({
             x: e.clientX,
             y: e.clientY,
             pointSnapshot: activePointRef.current,
@@ -414,10 +414,10 @@ export function TickerChartsPanel({
           key={symbol}
           symbol={symbol}
           onPointChange={setActivePoint}
-          pivotMarker={pivotMarker}
+          entryMarker={entryMarker}
           onChartMetrics={onChartMetrics}
           onChartData={onChartData}
-          onAutoPivot={(point) => onSetPivotMarker(symbol, point)}
+          onAutoEntry={(point) => onSetEntryMarker(symbol, point)}
           annotations={annotations}
           drawingMode={drawingMode}
           drawingRole={drawingRole}
@@ -427,31 +427,31 @@ export function TickerChartsPanel({
         />
       </div>
 
-      {pivotMenu && (
+      {entryMenu && (
         <div
-          ref={pivotMenuRef}
+          ref={entryMenuRef}
           role="menu"
           className="fixed z-[100] min-w-[200px] rounded-md border border-border bg-popover py-1 text-popover-foreground shadow-md"
           style={{
-            left: Math.min(pivotMenu.x, window.innerWidth - 210),
-            top: Math.min(pivotMenu.y, window.innerHeight - 140),
+            left: Math.min(entryMenu.x, window.innerWidth - 210),
+            top: Math.min(entryMenu.y, window.innerHeight - 140),
           }}
           onPointerDown={(e) => e.stopPropagation()}
         >
           <div className="px-2 py-1.5 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
-            Pivot
+            Entry
           </div>
-          {pivotMarker && (
+          {entryMarker && (
             <div
               className="px-2 pb-1.5 text-[11px] text-muted-foreground border-b border-border truncate"
-              title={`${pivotMarker.date} @ $${pivotMarker.price.toFixed(2)}`}
+              title={`${entryMarker.date} @ $${entryMarker.price.toFixed(2)}`}
             >
-              Current: {pivotMarker.date} @ ${pivotMarker.price.toFixed(2)}
+              Current: {entryMarker.date} @ ${entryMarker.price.toFixed(2)}
             </div>
           )}
-          {!pivotMenu.pointSnapshot && (
+          {!entryMenu.pointSnapshot && (
             <div className="px-2 pb-1 text-[11px] text-muted-foreground border-b border-border">
-              Move crosshair on chart, then right-click to capture a pivot
+              Move crosshair on chart, then right-click to capture an entry
               point.
             </div>
           )}
@@ -459,32 +459,32 @@ export function TickerChartsPanel({
             type="button"
             role="menuitem"
             className="flex w-full items-center px-3 py-2 text-left text-sm hover:bg-muted disabled:opacity-40 disabled:pointer-events-none"
-            disabled={!pivotMenu.pointSnapshot}
+            disabled={!entryMenu.pointSnapshot}
             onClick={() => {
-              if (pivotMenu.pointSnapshot)
-                onSetPivotMarker(symbol, pivotMenu.pointSnapshot);
-              setPivotMenu(null);
+              if (entryMenu.pointSnapshot)
+                onSetEntryMarker(symbol, entryMenu.pointSnapshot);
+              setEntryMenu(null);
             }}
           >
-            Set pivot at crosshair
+            Set entry at crosshair
           </button>
           <button
             type="button"
             role="menuitem"
             className="flex w-full items-center px-3 py-2 text-left text-sm text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-40 disabled:pointer-events-none"
-            disabled={!pivotMarker}
+            disabled={!entryMarker}
             onClick={() => {
-              onClearPivotMarker(symbol);
-              setPivotMenu(null);
+              onClearEntryMarker(symbol);
+              setEntryMenu(null);
             }}
           >
-            Clear pivot
+            Clear entry
           </button>
         </div>
       )}
 
       <p className="text-xs text-muted-foreground text-center">
-        {footerNavHint}Right-click chart for pivot · {footerTail}
+        {footerNavHint}Right-click chart for entry · {footerTail}
       </p>
     </div>
   );
