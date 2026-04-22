@@ -1,15 +1,21 @@
-import { Suspense } from "react";
 import { createClient } from "@/lib/supabase/server";
+import { getUserSubscriptionTier } from "@/lib/subscription";
+import { computeNewsTrendsGate } from "@/lib/gate";
 import { loadClusterDailyTrends } from "@/lib/news-trends/load-news-trends";
 import { NewsTrendsClient } from "./news-trends-client";
+import type { TimeGate } from "@/lib/gate";
+import type { PlanTier } from "@/lib/plans";
 
-async function TrendsData() {
+export default async function NewsTrendsPage() {
   const supabase = await createClient();
-  const clusterDaily = await loadClusterDailyTrends(supabase);
-  return <NewsTrendsClient clusterDaily={clusterDaily} />;
-}
 
-export default function NewsTrendsPage() {
+  const [clusterDaily, tier] = await Promise.all([
+    loadClusterDailyTrends(supabase),
+    getUserSubscriptionTier(supabase),
+  ]);
+
+  const gate: TimeGate = computeNewsTrendsGate(tier);
+
   return (
     <div className="flex-1 w-full flex flex-col gap-6">
       <div>
@@ -22,17 +28,11 @@ export default function NewsTrendsPage() {
         </p>
       </div>
 
-      <div className="sm:-mx-2 lg:-mx-4 xl:-mx-8">
-        <Suspense
-          fallback={
-            <div className="text-sm text-muted-foreground animate-pulse">
-              Loading trends…
-            </div>
-          }
-        >
-          <TrendsData />
-        </Suspense>
-      </div>
+      <NewsTrendsClient
+        clusterDaily={clusterDaily}
+        gate={gate}
+        tier={tier}
+      />
     </div>
   );
 }

@@ -7,32 +7,43 @@ import {
   readNewsTrendsHydrationBundle,
 } from "@/lib/news-trends/news-trends-idb-cache";
 import { NewsTrendsUI } from "./news-trends-ui";
+import { UpgradePrompt } from "@/components/upgrade-prompt";
 import type {
   ClusterTrendRow,
   DimensionTrendRow,
   ViewMode,
 } from "./news-trends-series";
+import type { TimeGate } from "@/lib/gate";
+import type { PlanTier } from "@/lib/plans";
 
 type DailySupplementResponse = {
   articles: ArticleImpact[];
+  gate?: TimeGate;
 };
 
 type HourlySupplementResponse = {
   clusterHourly: ClusterTrendRow[];
+  gate?: TimeGate;
 };
 
 type DimensionDailyResponse = {
   dimensionDaily: DimensionTrendRow[];
+  gate?: TimeGate;
 };
 
 type DimensionHourlyResponse = {
   dimensionHourly: DimensionTrendRow[];
+  gate?: TimeGate;
 };
 
 export function NewsTrendsClient({
   clusterDaily,
+  gate,
+  tier,
 }: {
   clusterDaily: ClusterTrendRow[];
+  gate: TimeGate;
+  tier: PlanTier;
 }) {
   const [articles, setArticles] = useState<ArticleImpact[]>([]);
   const [clusterHourly, setClusterHourly] = useState<ClusterTrendRow[]>([]);
@@ -260,6 +271,19 @@ export function NewsTrendsClient({
       )}
       {hasMounted && dimensionFetchError != null && (
         <p className="text-sm text-destructive">{dimensionFetchError}</p>
+      )}
+      {gate.enabled && (
+        <UpgradePrompt
+          requiredPlan={gate.upgradePlan}
+          userPlan={tier}
+          message={
+            tier === "observer"
+              ? `Observer access is limited to the last 24 hours. Upgrade to Investor for 30-day history or Trader for full access.`
+              : tier === "investor"
+                ? `Investor access includes 30-day history. Upgrade to Trader for unlimited trends.`
+                : undefined
+          }
+        />
       )}
       <NewsTrendsUI
         articles={articles}

@@ -2,7 +2,11 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Loader2, ChevronLeft, ChevronRight } from "lucide-react";
-import { chartWorkspaceLoad, chartWorkspaceSave, type ChartAiChatMessage } from "@/app/actions/chart-workspace";
+import {
+  chartWorkspaceLoad,
+  chartWorkspaceSave,
+  type ChartAiChatMessage,
+} from "@/app/actions/chart-workspace";
 import { relationshipsResolveTicker } from "@/app/actions/relationships";
 import { TickerSearchCombobox } from "@/components/ticker-search-combobox";
 import {
@@ -19,7 +23,6 @@ import { ChartDateRangePicker } from "@/components/chart-date-range-picker";
 
 const DEFAULT_TICKERS = ["SPY", "QQQ", "IWM"] as const;
 
-
 function parseTickersParam(raw: string | undefined): string[] {
   if (!raw?.trim()) return [...DEFAULT_TICKERS];
   const parts = raw
@@ -35,29 +38,31 @@ type Props = {
   suggestionTickers: string[];
 };
 
-export function ChartsPageClient({
-  tickersParam,
-  suggestionTickers,
-}: Props) {
-  const initial = useMemo(() => parseTickersParam(tickersParam), [tickersParam]);
+export function ChartsPageClient({ tickersParam, suggestionTickers }: Props) {
+  const initial = useMemo(
+    () => parseTickersParam(tickersParam),
+    [tickersParam],
+  );
   const [symbols, setSymbols] = useState<string[]>(() => initial);
   const [selectedTicker, setSelectedTicker] = useState<string | null>(
     () => initial[0] ?? null,
   );
-  const [searchInput, setSearchInput] = useState(
-    () => initial[0] ?? "AAPL",
-  );
+  const [searchInput, setSearchInput] = useState(() => initial[0] ?? "AAPL");
   const [resolveError, setResolveError] = useState<string | null>(null);
   const [resolving, setResolving] = useState(false);
   const [pivots, setPivots] = useState<Record<string, EntryMarker | null>>({});
   const [chartData, setChartData] = useState<OhlcBar[]>([]);
   const [annotations, setAnnotations] = useState<ChartAnnotation[]>([]);
-  const [aiChatMessages, setAiChatMessages] = useState<ChartAiChatMessage[]>([]);
+  const [aiChatMessages, setAiChatMessages] = useState<ChartAiChatMessage[]>(
+    [],
+  );
   const [workspaceReady, setWorkspaceReady] = useState(false);
   const [aiChatOpen, setAiChatOpen] = useState(true);
   const saveSeq = useRef(0);
 
-  const [dateRange, setDateRange] = useState<{ from: string; to: string } | undefined>();
+  const [dateRange, setDateRange] = useState<
+    { from: string; to: string } | undefined
+  >();
 
   useEffect(() => {
     setChartData([]);
@@ -115,7 +120,9 @@ export function ChartsPageClient({
     for (const t of symbols) base.add(t);
     const q = searchInput.trim().toUpperCase();
     if (q) base.add(q);
-    return Array.from(base).filter(Boolean).sort((a, b) => a.localeCompare(b));
+    return Array.from(base)
+      .filter(Boolean)
+      .sort((a, b) => a.localeCompare(b));
   }, [searchInput, suggestionTickers, symbols]);
 
   const applyResolvedTicker = useCallback(async () => {
@@ -160,12 +167,15 @@ export function ChartsPageClient({
     });
   }, []);
 
-  const handleAiAnnotations = useCallback((aiAnnotations: ChartAnnotation[]) => {
-    setAnnotations((prev) => [
-      ...prev.filter((a) => a.origin === "user"),
-      ...aiAnnotations.map((a) => ({ ...a, origin: "ai" as const })),
-    ]);
-  }, []);
+  const handleAiAnnotations = useCallback(
+    (aiAnnotations: ChartAnnotation[]) => {
+      setAnnotations((prev) => [
+        ...prev.filter((a) => a.origin === "user"),
+        ...aiAnnotations.map((a) => ({ ...a, origin: "ai" as const })),
+      ]);
+    },
+    [],
+  );
 
   const handleAnnotationAdd = useCallback((ann: ChartAnnotation) => {
     setAnnotations((prev) => [...prev, ann]);
@@ -176,8 +186,14 @@ export function ChartsPageClient({
   }, []);
 
   const noop = useCallback(() => {}, []);
-  const getStatus = useCallback((_ticker: string): TickerChartNoteStatus => "active", []);
-  const onSetStatus = useCallback((_t: string, _s: TickerChartNoteStatus) => {}, []);
+  const getStatus = useCallback(
+    (_ticker: string): TickerChartNoteStatus => "active",
+    [],
+  );
+  const onSetStatus = useCallback(
+    (_t: string, _s: TickerChartNoteStatus) => {},
+    [],
+  );
   const hasComment = useCallback(() => false, []);
   const getTickerMeta = useCallback(
     (_ticker: string) => ({ sector: "", industry: "" }),
@@ -219,7 +235,10 @@ export function ChartsPageClient({
 
       <ChartDateRangePicker onChange={setDateRange} />
 
-      <div className="flex items-stretch w-full">
+      <div
+        className="flex items-stretch w-full"
+        style={aiChatOpen ? { minHeight: "calc(100dvh - 20rem)" } : undefined}
+      >
         <div className="flex-1 min-w-0">
           <TickerChartsPanel
             symbols={symbols}
@@ -243,7 +262,11 @@ export function ChartsPageClient({
             onChartData={setChartData}
             onAnnotationAdd={handleAnnotationAdd}
             onAnnotationDelete={handleAnnotationDelete}
-            symbolPicker={selectedTicker ? <AddToScreening ticker={selectedTicker} /> : undefined}
+            symbolPicker={
+              selectedTicker ? (
+                <AddToScreening ticker={selectedTicker} />
+              ) : undefined
+            }
             dateRange={dateRange}
           />
         </div>
@@ -255,14 +278,16 @@ export function ChartsPageClient({
           className="flex items-center justify-center w-5 shrink-0 border-l border-border bg-background hover:bg-muted transition-colors"
           title={aiChatOpen ? "Collapse AI chat" : "Expand AI chat"}
         >
-          {aiChatOpen
-            ? <ChevronRight className="w-3 h-3 text-muted-foreground" />
-            : <ChevronLeft className="w-3 h-3 text-muted-foreground" />}
+          {aiChatOpen ? (
+            <ChevronRight className="w-3 h-3 text-muted-foreground" />
+          ) : (
+            <ChevronLeft className="w-3 h-3 text-muted-foreground" />
+          )}
         </button>
 
         {/* AI chat side panel */}
         {aiChatOpen && selectedTicker && (
-          <div className="w-[340px] shrink-0 flex flex-col border-l border-border">
+          <div className="w-[340px] shrink-0 flex flex-col border-l border-border min-h-0">
             <ChartAiChat
               key={selectedTicker}
               symbol={selectedTicker}

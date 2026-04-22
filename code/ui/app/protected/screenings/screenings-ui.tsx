@@ -1,15 +1,44 @@
 "use client";
 
-import { useState, useMemo, useEffect, useCallback, useRef, type ReactNode } from "react";
+import {
+  useState,
+  useMemo,
+  useEffect,
+  useCallback,
+  useRef,
+  type ReactNode,
+} from "react";
 import { useRouter } from "next/navigation";
 import {
-  CheckCircle, XCircle, Search, ChevronDown, ChevronUp,
-  BarChart2, List, TrendingUp, Loader2, Newspaper, Trash2, RotateCcw, Star, MessageSquare,
-  Activity, Copy, Gauge, Plus, Bot, FolderPlus,
+  CheckCircle,
+  XCircle,
+  Search,
+  ChevronDown,
+  ChevronUp,
+  ChevronLeft,
+  ChevronRight,
+  BarChart2,
+  List,
+  TrendingUp,
+  Loader2,
+  Newspaper,
+  Trash2,
+  RotateCcw,
+  Star,
+  MessageSquare,
+  Activity,
+  Copy,
+  Gauge,
+  Plus,
+  Bot,
+  FolderPlus,
 } from "lucide-react";
 import { AiAnalysisPanel } from "@/components/ai-analysis-panel";
 import { CLUSTERS } from "../vectors/dimensions";
-import { NewsTrendsUI, type ArticleImpact } from "../news-trends/news-trends-ui";
+import {
+  NewsTrendsUI,
+  type ArticleImpact,
+} from "../news-trends/news-trends-ui";
 import { fmpGetPriceAtDate } from "@/app/actions/fmp";
 import { relationshipsResolveTicker } from "@/app/actions/relationships";
 import {
@@ -50,10 +79,20 @@ import {
   countScreeningsFilterRules,
 } from "./screenings-filters-model";
 import { TickerSidebar } from "./ticker-sidebar";
-import { TickerContextMenu, type NoteStatus as ContextMenuNoteStatus } from "./ticker-context-menu";
-import type { OhlcBar, ChartAnnotation } from "@/components/ticker-charts/types";
+import {
+  TickerContextMenu,
+  type NoteStatus as ContextMenuNoteStatus,
+} from "./ticker-context-menu";
+import type {
+  OhlcBar,
+  ChartAnnotation,
+} from "@/components/ticker-charts/types";
 import { useQuotes, type FmpQuote } from "@/lib/use-quotes";
-import { chartWorkspaceLoad, chartWorkspaceSave, type ChartAiChatMessage } from "@/app/actions/chart-workspace";
+import {
+  chartWorkspaceLoad,
+  chartWorkspaceSave,
+  type ChartAiChatMessage,
+} from "@/app/actions/chart-workspace";
 import { ChartAiChat } from "@/components/chart-ai-chat";
 import { ChartDateRangePicker } from "@/components/chart-date-range-picker";
 
@@ -132,7 +171,8 @@ export interface ScanRowNote {
 // ─── small display helpers ───────────────────────────────────────────────────
 
 function Check({ value }: { value: boolean | null | undefined }) {
-  if (value == null) return <span className="text-muted-foreground/40 text-xs">—</span>;
+  if (value == null)
+    return <span className="text-muted-foreground/40 text-xs">—</span>;
   return value ? (
     <CheckCircle className="w-4 h-4 text-emerald-500 shrink-0" />
   ) : (
@@ -154,7 +194,9 @@ function Num({
   if (value == null) return <span className="text-muted-foreground/40">—</span>;
   const formatted = `${value >= 0 ? "+" : ""}${value.toFixed(decimals)}${suffix}`;
   const color = colorize
-    ? value >= 0 ? "text-emerald-600 dark:text-emerald-400" : "text-rose-500"
+    ? value >= 0
+      ? "text-emerald-600 dark:text-emerald-400"
+      : "text-rose-500"
     : "";
   return <span className={`tabular-nums ${color}`}>{formatted}</span>;
 }
@@ -162,11 +204,15 @@ function Num({
 function RsBadge({ rank }: { rank: number | null }) {
   if (rank == null) return <span className="text-muted-foreground">—</span>;
   const color =
-    rank >= 90 ? "bg-emerald-500/20 text-emerald-600 dark:text-emerald-400" :
-    rank >= 70 ? "bg-amber-500/20 text-amber-600 dark:text-amber-400" :
-    "bg-muted text-muted-foreground";
+    rank >= 90
+      ? "bg-emerald-500/20 text-emerald-600 dark:text-emerald-400"
+      : rank >= 70
+        ? "bg-amber-500/20 text-amber-600 dark:text-amber-400"
+        : "bg-muted text-muted-foreground";
   return (
-    <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium tabular-nums ${color}`}>
+    <span
+      className={`inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium tabular-nums ${color}`}
+    >
       {rank}
     </span>
   );
@@ -232,7 +278,14 @@ const DEFAULT_FILTERS = DEFAULT_SCREENINGS_FILTERS;
 /** Sort column: `symbol` or any key present in rowData (discovered per run). */
 type SortKey = string;
 type SortDir = "asc" | "desc";
-type ViewTab = "results" | "quotes" | "charts" | "news" | "sentiment" | "relationship" | "tradeMonitoring";
+type ViewTab =
+  | "results"
+  | "quotes"
+  | "charts"
+  | "news"
+  | "sentiment"
+  | "relationship"
+  | "tradeMonitoring";
 
 const DEEP_DIVE_VIEWS: ViewTab[] = ["charts", "news", "relationship"];
 
@@ -244,8 +297,18 @@ type ScreeningsPrimaryTabDef = { id: ViewTab; label: string; icon: ReactNode };
 
 // ─── QuotesView ──────────────────────────────────────────────────────────────
 
-type QuoteSortKey = "symbol" | "price" | "changePercentage" | "volume" | "marketCap" |
-  "dayLow" | "dayHigh" | "yearLow" | "yearHigh" | "priceAvg50" | "priceAvg200";
+type QuoteSortKey =
+  | "symbol"
+  | "price"
+  | "changePercentage"
+  | "volume"
+  | "marketCap"
+  | "dayLow"
+  | "dayHigh"
+  | "yearLow"
+  | "yearHigh"
+  | "priceAvg50"
+  | "priceAvg200";
 
 function QuotesView({
   symbols,
@@ -269,33 +332,61 @@ function QuotesView({
   getStatus: (ticker: string) => string;
 }) {
   const [error] = useState<string | null>(null);
-  const QUOTE_SORT_KEYS: QuoteSortKey[] = ["symbol","price","changePercentage","volume","marketCap","dayLow","dayHigh","yearLow","yearHigh","priceAvg50","priceAvg200"];
+  const QUOTE_SORT_KEYS: QuoteSortKey[] = [
+    "symbol",
+    "price",
+    "changePercentage",
+    "volume",
+    "marketCap",
+    "dayLow",
+    "dayHigh",
+    "yearLow",
+    "yearHigh",
+    "priceAvg50",
+    "priceAvg200",
+  ];
   const [sortKey, setSortKeyRaw] = useState<QuoteSortKey>(() => {
     try {
       const v = localStorage.getItem("quotes-sort-key") as QuoteSortKey;
       if (QUOTE_SORT_KEYS.includes(v)) return v;
-    } catch { /* ignore */ }
+    } catch {
+      /* ignore */
+    }
     return "symbol";
   });
   const [sortDir, setSortDirRaw] = useState<"asc" | "desc">(() => {
     try {
       const v = localStorage.getItem("quotes-sort-dir");
       if (v === "asc" || v === "desc") return v;
-    } catch { /* ignore */ }
+    } catch {
+      /* ignore */
+    }
     return "asc";
   });
 
   function setSortKey(k: QuoteSortKey) {
     setSortKeyRaw(k);
-    try { localStorage.setItem("quotes-sort-key", k); } catch { /* ignore */ }
+    try {
+      localStorage.setItem("quotes-sort-key", k);
+    } catch {
+      /* ignore */
+    }
   }
   function setSortDir(d: "asc" | "desc") {
     setSortDirRaw(d);
-    try { localStorage.setItem("quotes-sort-dir", d); } catch { /* ignore */ }
+    try {
+      localStorage.setItem("quotes-sort-dir", d);
+    } catch {
+      /* ignore */
+    }
   }
 
   if (symbols.length === 0) {
-    return <p className="text-sm text-muted-foreground py-8 text-center">No stocks to show.</p>;
+    return (
+      <p className="text-sm text-muted-foreground py-8 text-center">
+        No stocks to show.
+      </p>
+    );
   }
 
   function fmtCap(v: number | null): string {
@@ -332,18 +423,29 @@ function QuotesView({
       }
       const va = qa?.[sortKey] ?? -Infinity;
       const vb = qb?.[sortKey] ?? -Infinity;
-      return sortDir === "asc" ? Number(va) - Number(vb) : Number(vb) - Number(va);
+      return sortDir === "asc"
+        ? Number(va) - Number(vb)
+        : Number(vb) - Number(va);
     });
   }, [symbols, quotes, sortKey, sortDir]);
 
-  function ColHd({ label, col, center }: { label: string; col: QuoteSortKey; center?: boolean }) {
+  function ColHd({
+    label,
+    col,
+    center,
+  }: {
+    label: string;
+    col: QuoteSortKey;
+    center?: boolean;
+  }) {
     const active = sortKey === col;
     return (
       <th
         onClick={() => toggleSort(col)}
         className={`px-3 py-2 text-xs font-medium text-muted-foreground uppercase tracking-wide whitespace-nowrap cursor-pointer select-none hover:text-foreground ${center ? "text-center" : "text-left"} ${active ? "text-foreground" : ""}`}
       >
-        {label}{active ? (sortDir === "asc" ? " ↑" : " ↓") : ""}
+        {label}
+        {active ? (sortDir === "asc" ? " ↑" : " ↓") : ""}
       </th>
     );
   }
@@ -362,12 +464,20 @@ function QuotesView({
           <thead className="bg-muted/40 border-b border-border">
             <tr>
               <ColHd label="Symbol" col="symbol" />
-              <th className="px-3 py-2 text-xs font-medium text-muted-foreground uppercase tracking-wide whitespace-nowrap text-left">Name</th>
+              <th className="px-3 py-2 text-xs font-medium text-muted-foreground uppercase tracking-wide whitespace-nowrap text-left">
+                Name
+              </th>
               <ColHd label="Price" col="price" />
-              <th className="px-3 py-2 text-xs font-medium text-muted-foreground uppercase tracking-wide whitespace-nowrap text-left">Change</th>
+              <th className="px-3 py-2 text-xs font-medium text-muted-foreground uppercase tracking-wide whitespace-nowrap text-left">
+                Change
+              </th>
               <ColHd label="Change %" col="changePercentage" />
-              <th className="px-3 py-2 text-xs font-medium text-muted-foreground uppercase tracking-wide whitespace-nowrap text-left">Open</th>
-              <th className="px-3 py-2 text-xs font-medium text-muted-foreground uppercase tracking-wide whitespace-nowrap text-left">Prev Close</th>
+              <th className="px-3 py-2 text-xs font-medium text-muted-foreground uppercase tracking-wide whitespace-nowrap text-left">
+                Open
+              </th>
+              <th className="px-3 py-2 text-xs font-medium text-muted-foreground uppercase tracking-wide whitespace-nowrap text-left">
+                Prev Close
+              </th>
               <ColHd label="Day Low" col="dayLow" />
               <ColHd label="Day High" col="dayHigh" />
               <ColHd label="52w Low" col="yearLow" />
@@ -379,10 +489,14 @@ function QuotesView({
             </tr>
           </thead>
           <tbody className="divide-y divide-border">
-            {sortedSymbols.map(sym => {
+            {sortedSymbols.map((sym) => {
               const q = quotes[sym];
               const isLoading = loading && q === undefined;
-              const chgColor = q ? (q.changePercentage >= 0 ? "text-emerald-600 dark:text-emerald-400" : "text-rose-500") : "";
+              const chgColor = q
+                ? q.changePercentage >= 0
+                  ? "text-emerald-600 dark:text-emerald-400"
+                  : "text-rose-500"
+                : "";
               const isSelected = sym === selectedTicker;
               const isDismissed = dismissedSymbols.has(sym);
               const isHighlighted = highlightedSymbols.has(sym);
@@ -393,9 +507,10 @@ function QuotesView({
                 pipeline: "border-l-sky-400",
                 active: "border-l-emerald-400",
               };
-              const stripe = isDismissed || isHighlighted || isSelected
-                ? statusStripe[status] ?? "border-l-transparent"
-                : "";
+              const stripe =
+                isDismissed || isHighlighted || isSelected
+                  ? (statusStripe[status] ?? "border-l-transparent")
+                  : "";
               return (
                 <tr
                   key={sym}
@@ -403,21 +518,60 @@ function QuotesView({
                   onDoubleClick={() => onOpenWorkflowEditor(sym)}
                   className={`cursor-pointer transition-colors border-l-[3px] ${stripe || "border-l-transparent"} ${isDismissed ? "opacity-40" : ""} ${isHighlighted ? "bg-amber-500/10" : ""} ${isSelected ? "bg-foreground/10 ring-1 ring-inset ring-foreground/20" : "hover:bg-muted/30"}`}
                 >
-                  <td className="px-3 py-2 font-mono font-semibold whitespace-nowrap">{sym}</td>
-                  <td className="px-3 py-2 text-xs text-muted-foreground max-w-[160px] truncate whitespace-nowrap" title={q?.name}>{isLoading ? "…" : (q?.name ?? "—")}</td>
-                  <td className="px-3 py-2 tabular-nums font-medium">{q ? `$${q.price.toFixed(2)}` : (isLoading ? "…" : "—")}</td>
-                  <td className={`px-3 py-2 tabular-nums ${chgColor}`}>{q ? (q.change >= 0 ? "+" : "") + q.change.toFixed(2) : "—"}</td>
-                  <td className={`px-3 py-2 tabular-nums font-medium ${chgColor}`}>{q ? (q.changePercentage >= 0 ? "+" : "") + q.changePercentage.toFixed(2) + "%" : "—"}</td>
-                  <td className="px-3 py-2 tabular-nums">{q ? `$${q.open.toFixed(2)}` : "—"}</td>
-                  <td className="px-3 py-2 tabular-nums">{q ? `$${q.previousClose.toFixed(2)}` : "—"}</td>
-                  <td className="px-3 py-2 tabular-nums">{q ? `$${q.dayLow.toFixed(2)}` : "—"}</td>
-                  <td className="px-3 py-2 tabular-nums">{q ? `$${q.dayHigh.toFixed(2)}` : "—"}</td>
-                  <td className="px-3 py-2 tabular-nums text-muted-foreground">{q ? `$${q.yearLow.toFixed(2)}` : "—"}</td>
-                  <td className="px-3 py-2 tabular-nums text-muted-foreground">{q ? `$${q.yearHigh.toFixed(2)}` : "—"}</td>
-                  <td className="px-3 py-2 tabular-nums text-muted-foreground">{q ? `$${q.priceAvg50.toFixed(2)}` : "—"}</td>
-                  <td className="px-3 py-2 tabular-nums text-muted-foreground">{q ? `$${q.priceAvg200.toFixed(2)}` : "—"}</td>
-                  <td className="px-3 py-2 tabular-nums">{q ? fmtVol(q.volume) : "—"}</td>
-                  <td className="px-3 py-2 tabular-nums">{q ? fmtCap(q.marketCap) : "—"}</td>
+                  <td className="px-3 py-2 font-mono font-semibold whitespace-nowrap">
+                    {sym}
+                  </td>
+                  <td
+                    className="px-3 py-2 text-xs text-muted-foreground max-w-[160px] truncate whitespace-nowrap"
+                    title={q?.name}
+                  >
+                    {isLoading ? "…" : (q?.name ?? "—")}
+                  </td>
+                  <td className="px-3 py-2 tabular-nums font-medium">
+                    {q ? `$${q.price.toFixed(2)}` : isLoading ? "…" : "—"}
+                  </td>
+                  <td className={`px-3 py-2 tabular-nums ${chgColor}`}>
+                    {q ? (q.change >= 0 ? "+" : "") + q.change.toFixed(2) : "—"}
+                  </td>
+                  <td
+                    className={`px-3 py-2 tabular-nums font-medium ${chgColor}`}
+                  >
+                    {q
+                      ? (q.changePercentage >= 0 ? "+" : "") +
+                        q.changePercentage.toFixed(2) +
+                        "%"
+                      : "—"}
+                  </td>
+                  <td className="px-3 py-2 tabular-nums">
+                    {q ? `$${q.open.toFixed(2)}` : "—"}
+                  </td>
+                  <td className="px-3 py-2 tabular-nums">
+                    {q ? `$${q.previousClose.toFixed(2)}` : "—"}
+                  </td>
+                  <td className="px-3 py-2 tabular-nums">
+                    {q ? `$${q.dayLow.toFixed(2)}` : "—"}
+                  </td>
+                  <td className="px-3 py-2 tabular-nums">
+                    {q ? `$${q.dayHigh.toFixed(2)}` : "—"}
+                  </td>
+                  <td className="px-3 py-2 tabular-nums text-muted-foreground">
+                    {q ? `$${q.yearLow.toFixed(2)}` : "—"}
+                  </td>
+                  <td className="px-3 py-2 tabular-nums text-muted-foreground">
+                    {q ? `$${q.yearHigh.toFixed(2)}` : "—"}
+                  </td>
+                  <td className="px-3 py-2 tabular-nums text-muted-foreground">
+                    {q ? `$${q.priceAvg50.toFixed(2)}` : "—"}
+                  </td>
+                  <td className="px-3 py-2 tabular-nums text-muted-foreground">
+                    {q ? `$${q.priceAvg200.toFixed(2)}` : "—"}
+                  </td>
+                  <td className="px-3 py-2 tabular-nums">
+                    {q ? fmtVol(q.volume) : "—"}
+                  </td>
+                  <td className="px-3 py-2 tabular-nums">
+                    {q ? fmtCap(q.marketCap) : "—"}
+                  </td>
                 </tr>
               );
             })}
@@ -427,7 +581,6 @@ function QuotesView({
     </div>
   );
 }
-
 
 // ─── Screenings relationship network (same DB neighborhood as Explore) ─────
 
@@ -453,7 +606,11 @@ function ScreeningsRelationshipNetworkPanel({
   onSetStatus: (ticker: string, status: NoteStatus) => void;
   hasComment: (ticker: string) => boolean;
   onEditComment: (ticker: string) => void;
-  getTickerMeta: (ticker: string) => { sector: string; industry: string; subSector: string };
+  getTickerMeta: (ticker: string) => {
+    sector: string;
+    industry: string;
+    subSector: string;
+  };
 }) {
   const idx = useMemo(() => {
     const i = selectedTicker ? symbols.indexOf(selectedTicker) : -1;
@@ -461,7 +618,11 @@ function ScreeningsRelationshipNetworkPanel({
   }, [symbols, selectedTicker]);
 
   if (symbols.length === 0) {
-    return <p className="text-sm text-muted-foreground py-8 text-center">No stocks to show.</p>;
+    return (
+      <p className="text-sm text-muted-foreground py-8 text-center">
+        No stocks to show.
+      </p>
+    );
   }
 
   const symbol = symbols[idx]!;
@@ -483,7 +644,10 @@ function ScreeningsRelationshipNetworkPanel({
 
 // ─── SentimentView ───────────────────────────────────────────────────────────
 
-type SentimentSort = { key: "symbol" | "s7d" | "s30d" | "s90d"; dir: "asc" | "desc" };
+type SentimentSort = {
+  key: "symbol" | "s7d" | "s30d" | "s90d";
+  dir: "asc" | "desc";
+};
 
 /** Sum `sentiment_score` for `ticker` from `ticker_sentiment_heads_v` rows on/after `cutoffDate` (UTC date). */
 function computeTickerSentimentWindow(
@@ -502,7 +666,13 @@ function computeTickerSentimentWindow(
   return total;
 }
 
-function SentimentScoreCell({ value, maxAbs }: { value: number; maxAbs: number }) {
+function SentimentScoreCell({
+  value,
+  maxAbs,
+}: {
+  value: number;
+  maxAbs: number;
+}) {
   const pct = maxAbs > 0 ? Math.abs(value) / maxAbs : 0;
   const pos = value >= 0;
   const negligible = Math.abs(value) < 0.01;
@@ -515,15 +685,22 @@ function SentimentScoreCell({ value, maxAbs }: { value: number; maxAbs: number }
           style={{ width: `${pct * 50}%` }}
         />
       </div>
-      <span className={`text-xs font-mono w-14 text-right tabular-nums ${negligible ? "text-muted-foreground" : pos ? "text-emerald-500" : "text-rose-400"}`}>
-        {value >= 0 ? "+" : ""}{value.toFixed(2)}
+      <span
+        className={`text-xs font-mono w-14 text-right tabular-nums ${negligible ? "text-muted-foreground" : pos ? "text-emerald-500" : "text-rose-400"}`}
+      >
+        {value >= 0 ? "+" : ""}
+        {value.toFixed(2)}
       </span>
     </div>
   );
 }
 
 function SentimentTh({
-  col, sort, onSort, children, right,
+  col,
+  sort,
+  onSort,
+  children,
+  right,
 }: {
   col: SentimentSort["key"];
   sort: SentimentSort;
@@ -537,9 +714,12 @@ function SentimentTh({
       onClick={() => onSort(col)}
     >
       {children}
-      {sort.key === col && (sort.dir === "asc"
-        ? <ChevronUp className="w-3 h-3 inline ml-0.5" />
-        : <ChevronDown className="w-3 h-3 inline ml-0.5" />)}
+      {sort.key === col &&
+        (sort.dir === "asc" ? (
+          <ChevronUp className="w-3 h-3 inline ml-0.5" />
+        ) : (
+          <ChevronDown className="w-3 h-3 inline ml-0.5" />
+        ))}
     </th>
   );
 }
@@ -556,12 +736,18 @@ function SentimentView({
   symbols: string[];
   selectedTicker: string | null;
   onSelect: (ticker: string) => void;
-  getTickerMeta: (ticker: string) => { sector: string; industry: string; subSector: string };
+  getTickerMeta: (ticker: string) => {
+    sector: string;
+    industry: string;
+    subSector: string;
+  };
   dismissedSymbols: Set<string>;
   highlightedSymbols: Set<string>;
   getStatus: (ticker: string) => string;
 }) {
-  const [sentimentHeadRows, setSentimentHeadRows] = useState<ScreeningTickerSentimentHeadRow[]>([]);
+  const [sentimentHeadRows, setSentimentHeadRows] = useState<
+    ScreeningTickerSentimentHeadRow[]
+  >([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [sort, setSort] = useState<SentimentSort>({ key: "s7d", dir: "desc" });
@@ -611,22 +797,41 @@ function SentimentView({
   }, []);
 
   const rows = useMemo(() => {
-    return symbols
-      .map(symbol => {
-        const { sector, industry } = getTickerMeta(symbol);
-        return {
+    return symbols.map((symbol) => {
+      const { sector, industry } = getTickerMeta(symbol);
+      return {
+        symbol,
+        sector,
+        industry,
+        s7d: computeTickerSentimentWindow(
+          sentimentHeadRows,
           symbol,
-          sector,
-          industry,
-          s7d: computeTickerSentimentWindow(sentimentHeadRows, symbol, cutoffs.c7),
-          s30d: computeTickerSentimentWindow(sentimentHeadRows, symbol, cutoffs.c30),
-          s90d: computeTickerSentimentWindow(sentimentHeadRows, symbol, cutoffs.c90),
-        };
-      });
+          cutoffs.c7,
+        ),
+        s30d: computeTickerSentimentWindow(
+          sentimentHeadRows,
+          symbol,
+          cutoffs.c30,
+        ),
+        s90d: computeTickerSentimentWindow(
+          sentimentHeadRows,
+          symbol,
+          cutoffs.c90,
+        ),
+      };
+    });
   }, [symbols, sentimentHeadRows, cutoffs, getTickerMeta]);
 
   const maxAbs = useMemo(
-    () => Math.max(...rows.flatMap(r => [Math.abs(r.s7d), Math.abs(r.s30d), Math.abs(r.s90d)]), 0.01),
+    () =>
+      Math.max(
+        ...rows.flatMap((r) => [
+          Math.abs(r.s7d),
+          Math.abs(r.s30d),
+          Math.abs(r.s90d),
+        ]),
+        0.01,
+      ),
     [rows],
   );
 
@@ -638,21 +843,25 @@ function SentimentView({
       if (typeof av === "string" && typeof bv === "string") {
         return dir === "asc" ? av.localeCompare(bv) : bv.localeCompare(av);
       }
-      return dir === "asc" ? (av as number) - (bv as number) : (bv as number) - (av as number);
+      return dir === "asc"
+        ? (av as number) - (bv as number)
+        : (bv as number) - (av as number);
     });
   }, [rows, sort]);
 
   function toggleSort(key: SentimentSort["key"]) {
-    setSort(prev =>
+    setSort((prev) =>
       prev.key === key
         ? { key, dir: prev.dir === "asc" ? "desc" : "asc" }
-        : { key, dir: key === "symbol" ? "asc" : "desc" }
+        : { key, dir: key === "symbol" ? "asc" : "desc" },
     );
   }
 
   if (symbols.length === 0) {
     return (
-      <p className="text-sm text-muted-foreground py-8 text-center">No stocks to show.</p>
+      <p className="text-sm text-muted-foreground py-8 text-center">
+        No stocks to show.
+      </p>
     );
   }
 
@@ -671,15 +880,25 @@ function SentimentView({
       <table className="w-full text-sm">
         <thead className="bg-muted/40 border-b border-border">
           <tr>
-            <SentimentTh col="symbol" sort={sort} onSort={toggleSort}>Symbol</SentimentTh>
-            <th className="px-3 py-2 text-left text-xs font-medium text-muted-foreground uppercase tracking-wide whitespace-nowrap">Sector</th>
-            <SentimentTh col="s7d" sort={sort} onSort={toggleSort} right>7-day</SentimentTh>
-            <SentimentTh col="s30d" sort={sort} onSort={toggleSort} right>30-day</SentimentTh>
-            <SentimentTh col="s90d" sort={sort} onSort={toggleSort} right>90-day</SentimentTh>
+            <SentimentTh col="symbol" sort={sort} onSort={toggleSort}>
+              Symbol
+            </SentimentTh>
+            <th className="px-3 py-2 text-left text-xs font-medium text-muted-foreground uppercase tracking-wide whitespace-nowrap">
+              Sector
+            </th>
+            <SentimentTh col="s7d" sort={sort} onSort={toggleSort} right>
+              7-day
+            </SentimentTh>
+            <SentimentTh col="s30d" sort={sort} onSort={toggleSort} right>
+              30-day
+            </SentimentTh>
+            <SentimentTh col="s90d" sort={sort} onSort={toggleSort} right>
+              90-day
+            </SentimentTh>
           </tr>
         </thead>
         <tbody className="divide-y divide-border">
-          {sorted.map(row => {
+          {sorted.map((row) => {
             const isSelected = selectedTicker === row.symbol;
             const isDismissed = dismissedSymbols.has(row.symbol);
             const isHighlighted = highlightedSymbols.has(row.symbol);
@@ -690,21 +909,35 @@ function SentimentView({
               pipeline: "border-l-sky-400",
               active: "border-l-emerald-400",
             };
-            const stripe = isDismissed || isHighlighted || isSelected
-              ? statusStripe[status] ?? "border-l-transparent"
-              : "";
+            const stripe =
+              isDismissed || isHighlighted || isSelected
+                ? (statusStripe[status] ?? "border-l-transparent")
+                : "";
             return (
-            <tr
-              key={row.symbol}
-              onClick={() => onSelect(row.symbol)}
-              className={`cursor-pointer transition-colors border-l-[3px] ${stripe || "border-l-transparent"} ${isDismissed ? "opacity-40" : ""} ${isHighlighted ? "bg-amber-500/10" : ""} ${isSelected ? "bg-foreground/10 ring-1 ring-inset ring-foreground/20" : "hover:bg-muted/30"}`}
-            >
-              <td className="px-3 py-2 font-mono font-semibold whitespace-nowrap">{row.symbol}</td>
-              <td className="px-3 py-2 text-xs text-muted-foreground whitespace-nowrap max-w-[140px] truncate" title={row.sector || undefined}>{row.sector || "—"}</td>
-              <td className="px-3 py-2"><SentimentScoreCell value={row.s7d} maxAbs={maxAbs} /></td>
-              <td className="px-3 py-2"><SentimentScoreCell value={row.s30d} maxAbs={maxAbs} /></td>
-              <td className="px-3 py-2"><SentimentScoreCell value={row.s90d} maxAbs={maxAbs} /></td>
-            </tr>
+              <tr
+                key={row.symbol}
+                onClick={() => onSelect(row.symbol)}
+                className={`cursor-pointer transition-colors border-l-[3px] ${stripe || "border-l-transparent"} ${isDismissed ? "opacity-40" : ""} ${isHighlighted ? "bg-amber-500/10" : ""} ${isSelected ? "bg-foreground/10 ring-1 ring-inset ring-foreground/20" : "hover:bg-muted/30"}`}
+              >
+                <td className="px-3 py-2 font-mono font-semibold whitespace-nowrap">
+                  {row.symbol}
+                </td>
+                <td
+                  className="px-3 py-2 text-xs text-muted-foreground whitespace-nowrap max-w-[140px] truncate"
+                  title={row.sector || undefined}
+                >
+                  {row.sector || "—"}
+                </td>
+                <td className="px-3 py-2">
+                  <SentimentScoreCell value={row.s7d} maxAbs={maxAbs} />
+                </td>
+                <td className="px-3 py-2">
+                  <SentimentScoreCell value={row.s30d} maxAbs={maxAbs} />
+                </td>
+                <td className="px-3 py-2">
+                  <SentimentScoreCell value={row.s90d} maxAbs={maxAbs} />
+                </td>
+              </tr>
             );
           })}
         </tbody>
@@ -720,10 +953,13 @@ function applyCompanyVector(
   articles: ArticleImpact[],
   companyDims: Record<string, number>,
 ): ArticleImpact[] {
-  return articles.map(a => ({
+  return articles.map((a) => ({
     ...a,
     impact_json: Object.fromEntries(
-      Object.entries(a.impact_json).map(([k, v]) => [k, v * (companyDims[k] ?? 0)])
+      Object.entries(a.impact_json).map(([k, v]) => [
+        k,
+        v * (companyDims[k] ?? 0),
+      ]),
     ),
   }));
 }
@@ -752,7 +988,11 @@ function StockNewsTrendView({
   onSetStatus: (ticker: string, status: NoteStatus) => void;
   hasComment: (ticker: string) => boolean;
   onEditComment: (ticker: string) => void;
-  getTickerMeta: (ticker: string) => { sector: string; industry: string; subSector: string };
+  getTickerMeta: (ticker: string) => {
+    sector: string;
+    industry: string;
+    subSector: string;
+  };
 }) {
   const [articles, setArticles] = useState<ArticleImpact[]>([]);
   const [loading, setLoading] = useState(false);
@@ -774,11 +1014,12 @@ function StockNewsTrendView({
 
   // Only stocks with a vector
   const eligible = useMemo(
-    () => symbols.filter(s => {
-      const d = companyVectorDimensions[s];
-      return d && Object.keys(d).length > 0;
-    }),
-    [symbols, companyVectorDimensions]
+    () =>
+      symbols.filter((s) => {
+        const d = companyVectorDimensions[s];
+        return d && Object.keys(d).length > 0;
+      }),
+    [symbols, companyVectorDimensions],
   );
 
   const idx = useMemo(() => {
@@ -825,7 +1066,8 @@ function StockNewsTrendView({
   if (eligible.length === 0) {
     return (
       <p className="text-sm text-muted-foreground py-8 text-center">
-        None of the filtered stocks have a company vector. Run the vector builder first.
+        None of the filtered stocks have a company vector. Run the vector
+        builder first.
       </p>
     );
   }
@@ -844,12 +1086,16 @@ function StockNewsTrendView({
         )}
       </div>
       {symbol && weightedArticles.length === 0 && articles.length > 0 && (
-        <p className="text-sm text-muted-foreground py-8 text-center">No news data available.</p>
+        <p className="text-sm text-muted-foreground py-8 text-center">
+          No news data available.
+        </p>
       )}
 
       {symbols.length > eligible.length && (
         <p className="text-xs text-muted-foreground">
-          {symbols.length - eligible.length} stock{symbols.length - eligible.length !== 1 ? "s" : ""} skipped — no company vector.
+          {symbols.length - eligible.length} stock
+          {symbols.length - eligible.length !== 1 ? "s" : ""} skipped — no
+          company vector.
         </p>
       )}
     </div>
@@ -872,7 +1118,9 @@ function LogTradeForm({
   const [positionSide, setPositionSide] = useState<"long" | "short">("long");
   const [quantity, setQuantity] = useState("");
   const [pricePerUnit, setPricePerUnit] = useState(
-    defaultPrice != null ? String(Math.round(defaultPrice * 1_000_000) / 1_000_000) : ""
+    defaultPrice != null
+      ? String(Math.round(defaultPrice * 1_000_000) / 1_000_000)
+      : "",
   );
   const [currency, setCurrency] = useState("USD");
   const [executedAtLocal, setExecutedAtLocal] = useState(() => {
@@ -883,7 +1131,9 @@ function LogTradeForm({
   const [tradeNotes, setTradeNotes] = useState("");
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
-  const [priceStatus, setPriceStatus] = useState<"idle" | "loading" | "ok">("idle");
+  const [priceStatus, setPriceStatus] = useState<"idle" | "loading" | "ok">(
+    "idle",
+  );
   const priceFetchGen = useRef(0);
   const priceDirtyRef = useRef(false);
 
@@ -907,7 +1157,9 @@ function LogTradeForm({
           const res = await fmpGetPriceAtDate(ticker, cal);
           if (id !== priceFetchGen.current) return;
           if (res.ok && !priceDirtyRef.current) {
-            setPricePerUnit(String(Math.round(res.data.price * 1_000_000) / 1_000_000));
+            setPricePerUnit(
+              String(Math.round(res.data.price * 1_000_000) / 1_000_000),
+            );
             setPriceStatus("ok");
           } else {
             setPriceStatus("idle");
@@ -919,7 +1171,10 @@ function LogTradeForm({
       void run();
     }, 600);
 
-    return () => { clearTimeout(handle); priceFetchGen.current += 1; };
+    return () => {
+      clearTimeout(handle);
+      priceFetchGen.current += 1;
+    };
   }, [ticker, executedAtLocal]);
 
   async function handleSubmit(e: React.FormEvent) {
@@ -927,15 +1182,28 @@ function LogTradeForm({
     setFormError(null);
     const q = parseFloat(quantity);
     const p = parseFloat(pricePerUnit);
-    if (!Number.isFinite(q) || q <= 0) { setFormError("Quantity must be a positive number."); return; }
-    if (!Number.isFinite(p) || p < 0) { setFormError("Price must be zero or positive."); return; }
+    if (!Number.isFinite(q) || q <= 0) {
+      setFormError("Quantity must be a positive number.");
+      return;
+    }
+    if (!Number.isFinite(p) || p < 0) {
+      setFormError("Price must be zero or positive.");
+      return;
+    }
     const executed = new Date(executedAtLocal);
-    if (Number.isNaN(executed.getTime())) { setFormError("Invalid execution date."); return; }
+    if (Number.isNaN(executed.getTime())) {
+      setFormError("Invalid execution date.");
+      return;
+    }
 
     setSaving(true);
     const supabase = createClient();
     const { data: userData, error: userErr } = await supabase.auth.getUser();
-    if (userErr || !userData.user) { setFormError("Not signed in."); setSaving(false); return; }
+    if (userErr || !userData.user) {
+      setFormError("Not signed in.");
+      setSaving(false);
+      return;
+    }
 
     const { error: dbErr } = await supabase
       .schema("swingtrader")
@@ -953,22 +1221,35 @@ function LogTradeForm({
       });
 
     setSaving(false);
-    if (dbErr) { setFormError(dbErr.message); return; }
+    if (dbErr) {
+      setFormError(dbErr.message);
+      return;
+    }
     router.refresh();
     onDone();
   }
 
-  const inputCls = "rounded-md border border-border bg-background px-2 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-ring";
+  const inputCls =
+    "rounded-md border border-border bg-background px-2 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-ring";
   const selectCls = `${inputCls} pr-6`;
 
   return (
-    <form onSubmit={e => void handleSubmit(e)} className="flex flex-col gap-3 p-4 bg-muted/30 rounded-lg border border-border">
-      <p className="text-xs font-semibold text-foreground">Log trade — <span className="font-mono">{ticker}</span></p>
+    <form
+      onSubmit={(e) => void handleSubmit(e)}
+      className="flex flex-col gap-3 p-4 bg-muted/30 rounded-lg border border-border"
+    >
+      <p className="text-xs font-semibold text-foreground">
+        Log trade — <span className="font-mono">{ticker}</span>
+      </p>
       <div className="flex flex-wrap gap-3 items-end">
         {/* Side */}
         <label className="flex flex-col gap-1 text-xs text-muted-foreground">
           Side
-          <select value={side} onChange={e => setSide(e.target.value as "buy" | "sell")} className={selectCls}>
+          <select
+            value={side}
+            onChange={(e) => setSide(e.target.value as "buy" | "sell")}
+            className={selectCls}
+          >
             <option value="buy">Buy</option>
             <option value="sell">Sell</option>
           </select>
@@ -976,7 +1257,13 @@ function LogTradeForm({
         {/* Position */}
         <label className="flex flex-col gap-1 text-xs text-muted-foreground">
           Position
-          <select value={positionSide} onChange={e => setPositionSide(e.target.value as "long" | "short")} className={selectCls}>
+          <select
+            value={positionSide}
+            onChange={(e) =>
+              setPositionSide(e.target.value as "long" | "short")
+            }
+            className={selectCls}
+          >
             <option value="long">Long</option>
             <option value="short">Short</option>
           </select>
@@ -987,7 +1274,7 @@ function LogTradeForm({
           <input
             type="datetime-local"
             value={executedAtLocal}
-            onChange={e => setExecutedAtLocal(e.target.value)}
+            onChange={(e) => setExecutedAtLocal(e.target.value)}
             className={inputCls}
           />
         </label>
@@ -1000,7 +1287,7 @@ function LogTradeForm({
             step="any"
             placeholder="0"
             value={quantity}
-            onChange={e => setQuantity(e.target.value)}
+            onChange={(e) => setQuantity(e.target.value)}
             className={`${inputCls} w-24`}
             required
           />
@@ -1015,7 +1302,11 @@ function LogTradeForm({
               step="any"
               placeholder="0.00"
               value={pricePerUnit}
-              onChange={e => { priceDirtyRef.current = true; setPricePerUnit(e.target.value); setPriceStatus("idle"); }}
+              onChange={(e) => {
+                priceDirtyRef.current = true;
+                setPricePerUnit(e.target.value);
+                setPriceStatus("idle");
+              }}
               className={`${inputCls} w-28 pr-6`}
               required
             />
@@ -1033,7 +1324,7 @@ function LogTradeForm({
           <input
             type="text"
             value={currency}
-            onChange={e => setCurrency(e.target.value.toUpperCase())}
+            onChange={(e) => setCurrency(e.target.value.toUpperCase())}
             maxLength={4}
             className={`${inputCls} w-16 uppercase`}
           />
@@ -1044,7 +1335,7 @@ function LogTradeForm({
           <input
             type="text"
             value={tradeNotes}
-            onChange={e => setTradeNotes(e.target.value)}
+            onChange={(e) => setTradeNotes(e.target.value)}
             placeholder="e.g. breakout entry"
             className={inputCls}
           />
@@ -1057,7 +1348,11 @@ function LogTradeForm({
           disabled={saving}
           className="flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-foreground text-background text-xs font-medium disabled:opacity-50 hover:opacity-90 transition-opacity"
         >
-          {saving ? <Loader2 className="w-3 h-3 animate-spin" /> : <Plus className="w-3 h-3" />}
+          {saving ? (
+            <Loader2 className="w-3 h-3 animate-spin" />
+          ) : (
+            <Plus className="w-3 h-3" />
+          )}
           {saving ? "Saving…" : "Save trade"}
         </button>
         <button
@@ -1095,30 +1390,63 @@ function TradeMonitoringView({
   filteredSymbolSet: Set<string>;
 }) {
   const [logTradeTicker, setLogTradeTicker] = useState<string | null>(null);
-  type TradeSortKey = "symbol" | "sector" | "RS_Rank" | "Passed" | "pivotDate" | "pivotPrice" | "latest" | "vsPivotPct" | "workflow" | "results";
-  const TRADE_SORT_KEYS: TradeSortKey[] = ["symbol", "sector", "RS_Rank", "Passed", "pivotDate", "pivotPrice", "latest", "vsPivotPct", "workflow", "results"];
+  type TradeSortKey =
+    | "symbol"
+    | "sector"
+    | "RS_Rank"
+    | "Passed"
+    | "pivotDate"
+    | "pivotPrice"
+    | "latest"
+    | "vsPivotPct"
+    | "workflow"
+    | "results";
+  const TRADE_SORT_KEYS: TradeSortKey[] = [
+    "symbol",
+    "sector",
+    "RS_Rank",
+    "Passed",
+    "pivotDate",
+    "pivotPrice",
+    "latest",
+    "vsPivotPct",
+    "workflow",
+    "results",
+  ];
   const [sortKey, setSortKeyRaw] = useState<TradeSortKey>(() => {
     try {
       const v = localStorage.getItem("trade-monitor-sort-key") as TradeSortKey;
       if (TRADE_SORT_KEYS.includes(v)) return v;
-    } catch { /* ignore */ }
+    } catch {
+      /* ignore */
+    }
     return "RS_Rank";
   });
   const [sortDir, setSortDirRaw] = useState<"asc" | "desc">(() => {
     try {
       const v = localStorage.getItem("trade-monitor-sort-dir");
       if (v === "asc" || v === "desc") return v;
-    } catch { /* ignore */ }
+    } catch {
+      /* ignore */
+    }
     return "desc";
   });
 
   function setSortKey(k: TradeSortKey) {
     setSortKeyRaw(k);
-    try { localStorage.setItem("trade-monitor-sort-key", k); } catch { /* ignore */ }
+    try {
+      localStorage.setItem("trade-monitor-sort-key", k);
+    } catch {
+      /* ignore */
+    }
   }
   function setSortDir(d: "asc" | "desc") {
     setSortDirRaw(d);
-    try { localStorage.setItem("trade-monitor-sort-dir", d); } catch { /* ignore */ }
+    try {
+      localStorage.setItem("trade-monitor-sort-dir", d);
+    } catch {
+      /* ignore */
+    }
   }
 
   function toggleSort(k: TradeSortKey) {
@@ -1127,7 +1455,11 @@ function TradeMonitoringView({
       return;
     }
     setSortKey(k);
-    setSortDir(k === "symbol" || k === "sector" || k === "pivotDate" || k === "workflow" ? "asc" : "desc");
+    setSortDir(
+      k === "symbol" || k === "sector" || k === "pivotDate" || k === "workflow"
+        ? "asc"
+        : "desc",
+    );
   }
 
   const sorted = useMemo(() => {
@@ -1139,8 +1471,14 @@ function TradeMonitoringView({
       const qB = quotes[symB];
       const dA = qA?.price != null ? qA.price - a.pivot.price : null;
       const dB = qB?.price != null ? qB.price - b.pivot.price : null;
-      const dpA = dA != null && Math.abs(a.pivot.price) > 1e-9 ? (dA / a.pivot.price) * 100 : null;
-      const dpB = dB != null && Math.abs(b.pivot.price) > 1e-9 ? (dB / b.pivot.price) * 100 : null;
+      const dpA =
+        dA != null && Math.abs(a.pivot.price) > 1e-9
+          ? (dA / a.pivot.price) * 100
+          : null;
+      const dpB =
+        dB != null && Math.abs(b.pivot.price) > 1e-9
+          ? (dB / b.pivot.price) * 100
+          : null;
       const stA = getStatus(symA);
       const stB = getStatus(symB);
       const inA = filteredSymbolSet.has(symA);
@@ -1148,13 +1486,19 @@ function TradeMonitoringView({
 
       let cmp = 0;
       if (sortKey === "symbol") cmp = symA.localeCompare(symB);
-      else if (sortKey === "sector") cmp = (a.row.sector ?? "").localeCompare(b.row.sector ?? "");
-      else if (sortKey === "RS_Rank") cmp = (a.row.RS_Rank ?? -1) - (b.row.RS_Rank ?? -1);
-      else if (sortKey === "Passed") cmp = Number(a.row.Passed) - Number(b.row.Passed);
-      else if (sortKey === "pivotDate") cmp = a.pivot.date.localeCompare(b.pivot.date);
+      else if (sortKey === "sector")
+        cmp = (a.row.sector ?? "").localeCompare(b.row.sector ?? "");
+      else if (sortKey === "RS_Rank")
+        cmp = (a.row.RS_Rank ?? -1) - (b.row.RS_Rank ?? -1);
+      else if (sortKey === "Passed")
+        cmp = Number(a.row.Passed) - Number(b.row.Passed);
+      else if (sortKey === "pivotDate")
+        cmp = a.pivot.date.localeCompare(b.pivot.date);
       else if (sortKey === "pivotPrice") cmp = a.pivot.price - b.pivot.price;
-      else if (sortKey === "latest") cmp = (qA?.price ?? -Infinity) - (qB?.price ?? -Infinity);
-      else if (sortKey === "vsPivotPct") cmp = (dpA ?? -Infinity) - (dpB ?? -Infinity);
+      else if (sortKey === "latest")
+        cmp = (qA?.price ?? -Infinity) - (qB?.price ?? -Infinity);
+      else if (sortKey === "vsPivotPct")
+        cmp = (dpA ?? -Infinity) - (dpB ?? -Infinity);
       else if (sortKey === "workflow") cmp = stA.localeCompare(stB);
       else if (sortKey === "results") cmp = Number(inA) - Number(inB);
 
@@ -1164,15 +1508,29 @@ function TradeMonitoringView({
     return out;
   }, [entries, quotes, getStatus, filteredSymbolSet, sortKey, sortDir]);
 
-  function ColHd({ label, col, align = "left" }: { label: string; col: TradeSortKey; align?: "left" | "center" | "right" }) {
+  function ColHd({
+    label,
+    col,
+    align = "left",
+  }: {
+    label: string;
+    col: TradeSortKey;
+    align?: "left" | "center" | "right";
+  }) {
     const active = sortKey === col;
-    const alignClass = align === "center" ? "text-center" : align === "right" ? "text-right" : "text-left";
+    const alignClass =
+      align === "center"
+        ? "text-center"
+        : align === "right"
+          ? "text-right"
+          : "text-left";
     return (
       <th
         onClick={() => toggleSort(col)}
         className={`px-3 py-2 text-xs font-medium text-muted-foreground uppercase tracking-wide whitespace-nowrap cursor-pointer select-none hover:text-foreground ${alignClass} ${active ? "text-foreground" : ""}`}
       >
-        {label}{active ? (sortDir === "asc" ? " ↑" : " ↓") : ""}
+        {label}
+        {active ? (sortDir === "asc" ? " ↑" : " ↓") : ""}
       </th>
     );
   }
@@ -1180,7 +1538,8 @@ function TradeMonitoringView({
   if (entries.length === 0) {
     return (
       <p className="text-sm text-muted-foreground py-8 text-center">
-        No pivot markers yet. Set a pivot on the Charts tab (right-click the chart).
+        No pivot markers yet. Set a pivot on the Charts tab (right-click the
+        chart).
       </p>
     );
   }
@@ -1188,9 +1547,13 @@ function TradeMonitoringView({
   return (
     <div className="flex flex-col gap-3">
       <div className="space-y-1">
-        <h3 className="text-sm font-semibold text-foreground">Pivot overview</h3>
+        <h3 className="text-sm font-semibold text-foreground">
+          Pivot overview
+        </h3>
         <p className="text-sm text-muted-foreground">
-          All tickers in this run with a saved chart pivot. Charts still draw the pivot dot and ray; open a row to review price vs pivot on the Charts tab.
+          All tickers in this run with a saved chart pivot. Charts still draw
+          the pivot dot and ray; open a row to review price vs pivot on the
+          Charts tab.
         </p>
       </div>
       {loadingQuotes && (
@@ -1213,7 +1576,10 @@ function TradeMonitoringView({
               <ColHd label="Vs pivot" col="vsPivotPct" align="right" />
               <ColHd label="Workflow" col="workflow" align="center" />
               <ColHd label="Results" col="results" align="center" />
-              <th className="px-3 py-2 text-right text-xs font-medium text-muted-foreground uppercase tracking-wide" aria-hidden />
+              <th
+                className="px-3 py-2 text-right text-xs font-medium text-muted-foreground uppercase tracking-wide"
+                aria-hidden
+              />
             </tr>
           </thead>
           <tbody className="divide-y divide-border">
@@ -1225,8 +1591,16 @@ function TradeMonitoringView({
               const q = quotes[sym];
               const latest = q?.price ?? null;
               const d = latest != null ? latest - pivot.price : null;
-              const dp = d != null && Math.abs(pivot.price) > 1e-9 ? (d / pivot.price) * 100 : null;
-              const distColor = d == null ? "text-muted-foreground" : d >= 0 ? "text-emerald-600 dark:text-emerald-400" : "text-rose-500";
+              const dp =
+                d != null && Math.abs(pivot.price) > 1e-9
+                  ? (d / pivot.price) * 100
+                  : null;
+              const distColor =
+                d == null
+                  ? "text-muted-foreground"
+                  : d >= 0
+                    ? "text-emerald-600 dark:text-emerald-400"
+                    : "text-rose-500";
               const loggingThis = logTradeTicker === sym;
               return (
                 <>
@@ -1236,28 +1610,52 @@ function TradeMonitoringView({
                     onDoubleClick={() => onOpenWorkflowEditor(sym)}
                     className={`cursor-pointer transition-colors ${sel ? "bg-foreground/10 ring-1 ring-inset ring-foreground/20" : "hover:bg-muted/30"}`}
                   >
-                    <td className="px-3 py-2 font-mono font-semibold whitespace-nowrap">{sym}</td>
-                    <td className="px-3 py-2 text-xs text-muted-foreground max-w-[140px] truncate" title={row.sector || undefined}>
+                    <td className="px-3 py-2 font-mono font-semibold whitespace-nowrap">
+                      {sym}
+                    </td>
+                    <td
+                      className="px-3 py-2 text-xs text-muted-foreground max-w-[140px] truncate"
+                      title={row.sector || undefined}
+                    >
                       {row.sector || "—"}
                     </td>
-                    <td className="px-3 py-2 text-center"><RsBadge rank={row.RS_Rank} /></td>
-                    <td className="px-3 py-2 text-center"><Check value={row.Passed} /></td>
-                    <td className="px-3 py-2 text-muted-foreground whitespace-nowrap">{pivot.date}</td>
-                    <td className="px-3 py-2 text-right tabular-nums">${pivot.price.toFixed(2)}</td>
+                    <td className="px-3 py-2 text-center">
+                      <RsBadge rank={row.RS_Rank} />
+                    </td>
+                    <td className="px-3 py-2 text-center">
+                      <Check value={row.Passed} />
+                    </td>
+                    <td className="px-3 py-2 text-muted-foreground whitespace-nowrap">
+                      {pivot.date}
+                    </td>
+                    <td className="px-3 py-2 text-right tabular-nums">
+                      ${pivot.price.toFixed(2)}
+                    </td>
                     <td className="px-3 py-2 text-right tabular-nums font-medium">
                       {latest != null ? `$${latest.toFixed(2)}` : "—"}
                     </td>
-                    <td className={`px-3 py-2 text-right tabular-nums whitespace-nowrap ${distColor}`}>
-                      {d == null || dp == null ? "—" : `${d >= 0 ? "+" : ""}${d.toFixed(2)} (${dp >= 0 ? "+" : ""}${dp.toFixed(2)}%)`}
+                    <td
+                      className={`px-3 py-2 text-right tabular-nums whitespace-nowrap ${distColor}`}
+                    >
+                      {d == null || dp == null
+                        ? "—"
+                        : `${d >= 0 ? "+" : ""}${d.toFixed(2)} (${dp >= 0 ? "+" : ""}${dp.toFixed(2)}%)`}
                     </td>
                     <td className="px-3 py-2 text-center">
-                      <span className="text-xs text-muted-foreground capitalize">{st}</span>
+                      <span className="text-xs text-muted-foreground capitalize">
+                        {st}
+                      </span>
                     </td>
                     <td className="px-3 py-2 text-center">
                       {inFilter ? (
-                        <span className="text-[11px] text-emerald-600 dark:text-emerald-400">Shown</span>
+                        <span className="text-[11px] text-emerald-600 dark:text-emerald-400">
+                          Shown
+                        </span>
                       ) : (
-                        <span className="text-[11px] text-muted-foreground" title="Hidden by current Results filters — still on chart list">
+                        <span
+                          className="text-[11px] text-muted-foreground"
+                          title="Hidden by current Results filters — still on chart list"
+                        >
                           Outside filter
                         </span>
                       )}
@@ -1266,7 +1664,7 @@ function TradeMonitoringView({
                       <div className="flex items-center justify-end gap-3">
                         <button
                           type="button"
-                          onClick={e => {
+                          onClick={(e) => {
                             e.stopPropagation();
                             setLogTradeTicker(loggingThis ? null : sym);
                           }}
@@ -1278,7 +1676,7 @@ function TradeMonitoringView({
                         </button>
                         <button
                           type="button"
-                          onClick={e => {
+                          onClick={(e) => {
                             e.stopPropagation();
                             onSelect(sym);
                             onGoToCharts();
@@ -1314,13 +1712,33 @@ function TradeMonitoringView({
 
 // ─── main component ──────────────────────────────────────────────────────────
 
-const TECH_CRITERIA: { key: keyof ScreeningRow; short: string; label: string }[] = [
-  { key: "PriceOverSMA150And200", short: "P>SMA", label: "Price > SMA150 & SMA200" },
+const TECH_CRITERIA: {
+  key: keyof ScreeningRow;
+  short: string;
+  label: string;
+}[] = [
+  {
+    key: "PriceOverSMA150And200",
+    short: "P>SMA",
+    label: "Price > SMA150 & SMA200",
+  },
   { key: "SMA150AboveSMA200", short: "150>200", label: "SMA150 > SMA200" },
-  { key: "SMA50AboveSMA150And200", short: "50>150", label: "SMA50 > SMA150 & SMA200" },
+  {
+    key: "SMA50AboveSMA150And200",
+    short: "50>150",
+    label: "SMA50 > SMA150 & SMA200",
+  },
   { key: "SMA200Slope", short: "200↗", label: "SMA200 Uptrending" },
-  { key: "PriceAbove25Percent52WeekLow", short: ">Low", label: "Price > 52wk Low +25%" },
-  { key: "PriceWithin25Percent52WeekHigh", short: "<High", label: "Price within 25% of 52wk High" },
+  {
+    key: "PriceAbove25Percent52WeekLow",
+    short: ">Low",
+    label: "Price > 52wk Low +25%",
+  },
+  {
+    key: "PriceWithin25Percent52WeekHigh",
+    short: "<High",
+    label: "Price within 25% of 52wk High",
+  },
   { key: "RSOver70", short: "RS>70", label: "RS > 70" },
 ];
 
@@ -1343,28 +1761,39 @@ export function ScreeningsUI({
   const [search, setSearch] = useState("");
   const [filters, setFiltersState] = useState<Filters>(DEFAULT_FILTERS);
 
-  const setFilters = useCallback((f: Filters | ((prev: Filters) => Filters)) => {
-    setFiltersState((prev) => {
-      const next = typeof f === "function" ? f(prev) : f;
-      try {
-        localStorage.setItem("screenings-filters", JSON.stringify(next));
-      } catch {
-        /* ignore */
-      }
-      return next;
-    });
-  }, []);
+  const setFilters = useCallback(
+    (f: Filters | ((prev: Filters) => Filters)) => {
+      setFiltersState((prev) => {
+        const next = typeof f === "function" ? f(prev) : f;
+        try {
+          localStorage.setItem("screenings-filters", JSON.stringify(next));
+        } catch {
+          /* ignore */
+        }
+        return next;
+      });
+    },
+    [],
+  );
   const [sortKey, setSortKeyState] = useState<SortKey>("RS_Rank");
   const [sortDir, setSortDirState] = useState<SortDir>("desc");
 
   function setSortKey(k: SortKey) {
     setSortKeyState(k);
-    try { localStorage.setItem("screenings-sort-key", k); } catch { /* ignore */ }
+    try {
+      localStorage.setItem("screenings-sort-key", k);
+    } catch {
+      /* ignore */
+    }
   }
   function setSortDir(d: SortDir | ((prev: SortDir) => SortDir)) {
-    setSortDirState(prev => {
+    setSortDirState((prev) => {
       const next = typeof d === "function" ? d(prev) : d;
-      try { localStorage.setItem("screenings-sort-dir", next); } catch { /* ignore */ }
+      try {
+        localStorage.setItem("screenings-sort-dir", next);
+      } catch {
+        /* ignore */
+      }
       return next;
     });
   }
@@ -1383,18 +1812,32 @@ export function ScreeningsUI({
     document.body.classList.toggle("hide-site-header", collapsed);
   }, [collapsed]);
   const [addFilterOpen, setAddFilterOpen] = useState(false);
-  const [contextMenu, setContextMenu] = useState<{ ticker: string; x: number; y: number } | null>(null);
+  const [contextMenu, setContextMenu] = useState<{
+    ticker: string;
+    x: number;
+    y: number;
+  } | null>(null);
   const ohlcvDataRef = useRef<OhlcBar[]>([]);
-  const handleContextMenu = useCallback((ticker: string, e: React.MouseEvent) => {
-    e.preventDefault();
-    setContextMenu({ ticker, x: e.clientX, y: e.clientY });
-  }, []);
+  const handleContextMenu = useCallback(
+    (ticker: string, e: React.MouseEvent) => {
+      e.preventDefault();
+      setContextMenu({ ticker, x: e.clientX, y: e.clientY });
+    },
+    [],
+  );
   const [selectedTicker, setSelectedTicker] = useState<string | null>(null);
-  const [chartAnnotations, setChartAnnotations] = useState<ChartAnnotation[]>([]);
-  const [chartAiMessages, setChartAiMessages] = useState<ChartAiChatMessage[]>([]);
+  const [chartAnnotations, setChartAnnotations] = useState<ChartAnnotation[]>(
+    [],
+  );
+  const [chartAiMessages, setChartAiMessages] = useState<ChartAiChatMessage[]>(
+    [],
+  );
+  const [chartAiOpen, setChartAiOpen] = useState(true);
   const [chartWorkspaceReady, setChartWorkspaceReady] = useState(false);
   const chartSaveSeq = useRef(0);
-  const [chartDateRange, setChartDateRange] = useState<{ from: string; to: string } | undefined>();
+  const [chartDateRange, setChartDateRange] = useState<
+    { from: string; to: string } | undefined
+  >();
 
   useEffect(() => {
     setChartWorkspaceReady(false);
@@ -1410,7 +1853,9 @@ export function ScreeningsUI({
       }
       if (!cancelled) setChartWorkspaceReady(true);
     });
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, [selectedTicker]);
 
   useEffect(() => {
@@ -1418,7 +1863,10 @@ export function ScreeningsUI({
     const seq = ++chartSaveSeq.current;
     const t = setTimeout(() => {
       if (seq !== chartSaveSeq.current) return;
-      void chartWorkspaceSave(selectedTicker, { annotations: chartAnnotations, aiChatMessages: chartAiMessages });
+      void chartWorkspaceSave(selectedTicker, {
+        annotations: chartAnnotations,
+        aiChatMessages: chartAiMessages,
+      });
     }, 750);
     return () => clearTimeout(t);
   }, [chartAnnotations, chartAiMessages, selectedTicker, chartWorkspaceReady]);
@@ -1460,11 +1908,21 @@ export function ScreeningsUI({
         const tagsRaw = parsed.noteTagsAny;
         setFiltersState({
           ...DEFAULT_FILTERS,
-          ...(typeof statusRaw === "string" ? { status: statusRaw as Filters["status"] } : {}),
-          ...(hrn === "any" || hrn === "yes" || hrn === "no" ? { hasRowNote: hrn } : {}),
-          ...(nh === "any" || nh === "yes" || nh === "no" ? { noteHighlighted: nh } : {}),
-          ...(nc === "any" || nc === "with" || nc === "without" ? { noteComment: nc } : {}),
-          ...(typeof parsed.noteStage === "string" ? { noteStage: parsed.noteStage } : {}),
+          ...(typeof statusRaw === "string"
+            ? { status: statusRaw as Filters["status"] }
+            : {}),
+          ...(hrn === "any" || hrn === "yes" || hrn === "no"
+            ? { hasRowNote: hrn }
+            : {}),
+          ...(nh === "any" || nh === "yes" || nh === "no"
+            ? { noteHighlighted: nh }
+            : {}),
+          ...(nc === "any" || nc === "with" || nc === "without"
+            ? { noteComment: nc }
+            : {}),
+          ...(typeof parsed.noteStage === "string"
+            ? { noteStage: parsed.noteStage }
+            : {}),
           ...(typeof parsed.notePriorityMin === "string"
             ? { notePriorityMin: parsed.notePriorityMin }
             : {}),
@@ -1482,17 +1940,21 @@ export function ScreeningsUI({
             : {}),
           ...(Array.isArray(tagsRaw)
             ? {
-                noteTagsAny: tagsRaw.filter((t): t is string => typeof t === "string"),
+                noteTagsAny: tagsRaw.filter(
+                  (t): t is string => typeof t === "string",
+                ),
               }
             : {}),
           boolRequire: {
             ...DEFAULT_FILTERS.boolRequire,
-            ...((parsed.boolRequire as Record<string, boolean> | undefined) ?? {}),
+            ...((parsed.boolRequire as Record<string, boolean> | undefined) ??
+              {}),
             ...(legacy.dynamicTruthys ?? {}),
           },
           boolReject: {
             ...DEFAULT_FILTERS.boolReject,
-            ...((parsed.boolReject as Record<string, boolean> | undefined) ?? {}),
+            ...((parsed.boolReject as Record<string, boolean> | undefined) ??
+              {}),
           },
           numMin: {
             ...DEFAULT_FILTERS.numMin,
@@ -1513,15 +1975,18 @@ export function ScreeningsUI({
           },
           stringOneOf: {
             ...DEFAULT_FILTERS.stringOneOf,
-            ...((parsed.stringOneOf as Record<string, string[]> | undefined) ?? {}),
+            ...((parsed.stringOneOf as Record<string, string[]> | undefined) ??
+              {}),
           },
           stringContains: {
             ...DEFAULT_FILTERS.stringContains,
-            ...((parsed.stringContains as Record<string, string> | undefined) ?? {}),
+            ...((parsed.stringContains as Record<string, string> | undefined) ??
+              {}),
           },
           stringEquals: {
             ...DEFAULT_FILTERS.stringEquals,
-            ...((parsed.stringEquals as Record<string, string> | undefined) ?? {}),
+            ...((parsed.stringEquals as Record<string, string> | undefined) ??
+              {}),
           },
         });
       }
@@ -1550,7 +2015,7 @@ export function ScreeningsUI({
 
   // ── Row-level workflow annotations ───────────────────────────────────────
   const [rowNotes, setRowNotes] = useState<Map<number, ScanRowNote>>(
-    () => new Map(initialNotes.map(n => [n.scan_row_id, n]))
+    () => new Map(initialNotes.map((n) => [n.scan_row_id, n])),
   );
 
   useEffect(() => {
@@ -1631,12 +2096,15 @@ export function ScreeningsUI({
     }
   }, [activeView, hasAnyEntryMarkers]);
 
-  async function upsertRowNote(row: ScreeningRow, patch: {
-    status?: NoteStatus;
-    highlighted?: boolean;
-    comment?: string | null;
-    metadataJson?: Record<string, unknown>;
-  }) {
+  async function upsertRowNote(
+    row: ScreeningRow,
+    patch: {
+      status?: NoteStatus;
+      highlighted?: boolean;
+      comment?: string | null;
+      metadataJson?: Record<string, unknown>;
+    },
+  ) {
     const now = new Date().toISOString();
     const prev = rowNotes.get(row.scan_row_id);
     const next: ScanRowNote = {
@@ -1646,7 +2114,8 @@ export function ScreeningsUI({
       user_id: prev?.user_id ?? "",
       status: patch.status ?? prev?.status ?? "active",
       highlighted: patch.highlighted ?? prev?.highlighted ?? false,
-      comment: patch.comment !== undefined ? patch.comment : (prev?.comment ?? null),
+      comment:
+        patch.comment !== undefined ? patch.comment : (prev?.comment ?? null),
       stage: prev?.stage ?? null,
       priority: prev?.priority ?? null,
       tags: prev?.tags ?? [],
@@ -1655,7 +2124,7 @@ export function ScreeningsUI({
       updated_at: now,
     };
 
-    setRowNotes(prevMap => new Map(prevMap).set(row.scan_row_id, next));
+    setRowNotes((prevMap) => new Map(prevMap).set(row.scan_row_id, next));
     try {
       const res = await screeningsUpsertDismissNote({
         scanRowId: row.scan_row_id,
@@ -1668,7 +2137,7 @@ export function ScreeningsUI({
       });
       if (!res.ok) throw new Error(res.error);
     } catch {
-      setRowNotes(prevMap => {
+      setRowNotes((prevMap) => {
         const m = new Map(prevMap);
         if (prev) m.set(row.scan_row_id, prev);
         else m.delete(row.scan_row_id);
@@ -1721,7 +2190,11 @@ export function ScreeningsUI({
     return !!rowNotes.get(row.scan_row_id)?.comment;
   }
 
-  function getTickerMeta(ticker: string): { sector: string; industry: string; subSector: string } {
+  function getTickerMeta(ticker: string): {
+    sector: string;
+    industry: string;
+    subSector: string;
+  } {
     const row = rowBySymbol.get(ticker);
     return {
       sector: row?.sector ?? "",
@@ -1808,7 +2281,7 @@ export function ScreeningsUI({
 
   async function saveWorkflowEditor() {
     if (!workflowEditor) return;
-    const row = rows.find(r => r.scan_row_id === workflowEditor.scanRowId);
+    const row = rows.find((r) => r.scan_row_id === workflowEditor.scanRowId);
     if (!row) {
       setWorkflowEditor(null);
       return;
@@ -1816,7 +2289,9 @@ export function ScreeningsUI({
     setSavingWorkflowEditor(true);
     try {
       const nextStatus = workflowEditor.status;
-      const nextComment = workflowEditor.comment.trim() ? workflowEditor.comment.trim() : null;
+      const nextComment = workflowEditor.comment.trim()
+        ? workflowEditor.comment.trim()
+        : null;
       await upsertRowNote(row, { status: nextStatus, comment: nextComment });
       if (nextStatus === "dismissed" && selectedTicker === row.symbol) {
         setSelectedTicker(null);
@@ -1835,12 +2310,18 @@ export function ScreeningsUI({
   );
 
   const boolFilterKeys = useMemo(
-    () => [...inferBooleanFilterKeys(rows, dataColumnKeys)].sort((a, b) => a.localeCompare(b)),
+    () =>
+      [...inferBooleanFilterKeys(rows, dataColumnKeys)].sort((a, b) =>
+        a.localeCompare(b),
+      ),
     [rows, dataColumnKeys],
   );
 
   const numFilterKeys = useMemo(
-    () => [...inferNumericFilterKeys(rows, dataColumnKeys)].sort((a, b) => a.localeCompare(b)),
+    () =>
+      [...inferNumericFilterKeys(rows, dataColumnKeys)].sort((a, b) =>
+        a.localeCompare(b),
+      ),
     [rows, dataColumnKeys],
   );
 
@@ -1865,15 +2346,16 @@ export function ScreeningsUI({
     if (rows.length === 0) return;
     const ok = sortKey === "symbol" || dataColumnKeys.includes(sortKey);
     if (ok) return;
-    const next =
-      dataColumnKeys.includes("RS_Rank")
-        ? "RS_Rank"
-        : dataColumnKeys.includes("Passed")
-          ? "Passed"
-          : (dataColumnKeys[0] ?? "symbol");
+    const next = dataColumnKeys.includes("RS_Rank")
+      ? "RS_Rank"
+      : dataColumnKeys.includes("Passed")
+        ? "Passed"
+        : (dataColumnKeys[0] ?? "symbol");
     setSortKeyState(next);
     setSortDirState(
-      next === "symbol" || ["sector", "industry", "subSector"].includes(next) ? "asc" : "desc",
+      next === "symbol" || ["sector", "industry", "subSector"].includes(next)
+        ? "asc"
+        : "desc",
     );
   }, [rows.length, dataColumnKeys, sortKey]);
 
@@ -1963,7 +2445,10 @@ export function ScreeningsUI({
     } else {
       setSortKey(key);
       const ascDefault =
-        key === "symbol" || key === "sector" || key === "industry" || key === "subSector";
+        key === "symbol" ||
+        key === "sector" ||
+        key === "industry" ||
+        key === "subSector";
       setSortDir(ascDefault ? "asc" : "desc");
     }
   }
@@ -2093,7 +2578,9 @@ export function ScreeningsUI({
       for (const [k, sub] of Object.entries(filters.stringContains)) {
         const needle = sub.trim().toLowerCase();
         if (!needle) continue;
-        const hay = stringifyRowDataValueForFilter(getRowDataValue(r, k)).toLowerCase();
+        const hay = stringifyRowDataValueForFilter(
+          getRowDataValue(r, k),
+        ).toLowerCase();
         if (!hay.includes(needle)) return false;
       }
       for (const [k, exact] of Object.entries(filters.stringEquals)) {
@@ -2126,9 +2613,13 @@ export function ScreeningsUI({
 
     result = [...result].sort((a, b) => {
       let cmp = 0;
-      if (sortKey === "symbol") cmp = (a.symbol ?? "").localeCompare(b.symbol ?? "");
+      if (sortKey === "symbol")
+        cmp = (a.symbol ?? "").localeCompare(b.symbol ?? "");
       else
-        cmp = compareRowDataValues(getRowDataValue(a, sortKey), getRowDataValue(b, sortKey));
+        cmp = compareRowDataValues(
+          getRowDataValue(a, sortKey),
+          getRowDataValue(b, sortKey),
+        );
       return sortDir === "asc" ? cmp : -cmp;
     });
 
@@ -2148,7 +2639,10 @@ export function ScreeningsUI({
     return true;
   }, [selectedRunId, search, filtered.length, rows]);
 
-  const filteredSymbols = useMemo(() => filtered.map(r => r.symbol).filter(Boolean) as string[], [filtered]);
+  const filteredSymbols = useMemo(
+    () => filtered.map((r) => r.symbol).filter(Boolean) as string[],
+    [filtered],
+  );
 
   const { quotes, loading: quotesLoading } = useQuotes(filteredSymbols);
 
@@ -2163,7 +2657,7 @@ export function ScreeningsUI({
       }
     }
     const extras = tradeMonitoringRows
-      .map(e => e.row.symbol)
+      .map((e) => e.row.symbol)
       .filter((s): s is string => !!s && !seen.has(s));
     extras.sort((a, b) => a.localeCompare(b));
     for (const s of extras) {
@@ -2173,53 +2667,79 @@ export function ScreeningsUI({
     return out;
   }, [filteredSymbols, tradeMonitoringRows]);
 
-  const filteredSymbolSet = useMemo(() => new Set(filteredSymbols), [filteredSymbols]);
+  const filteredSymbolSet = useMemo(
+    () => new Set(filteredSymbols),
+    [filteredSymbols],
+  );
 
-  const selectedRun = runs.find(r => r.id === selectedRunId) ?? runs[0] ?? null;
+  const selectedRun =
+    runs.find((r) => r.id === selectedRunId) ?? runs[0] ?? null;
 
   function buildAiMessage(r: ScreeningRow): string {
     const parts: string[] = [];
     if (r.RS_Rank != null) parts.push(`RS Rank: ${r.RS_Rank}`);
     if (r.adr_pct != null) parts.push(`ADR: ${r.adr_pct.toFixed(1)}%`);
-    if (r.vol_ratio_today != null) parts.push(`Vol ratio: ${r.vol_ratio_today.toFixed(2)}`);
-    if (r.up_down_vol_ratio != null) parts.push(`Up/down vol ratio: ${r.up_down_vol_ratio.toFixed(2)}`);
-    if (r.within_buy_range != null) parts.push(`In buy range: ${r.within_buy_range}`);
+    if (r.vol_ratio_today != null)
+      parts.push(`Vol ratio: ${r.vol_ratio_today.toFixed(2)}`);
+    if (r.up_down_vol_ratio != null)
+      parts.push(`Up/down vol ratio: ${r.up_down_vol_ratio.toFixed(2)}`);
+    if (r.within_buy_range != null)
+      parts.push(`In buy range: ${r.within_buy_range}`);
     if (r.extended != null) parts.push(`Extended: ${r.extended}`);
     if (r.accumulation != null) parts.push(`Accumulation: ${r.accumulation}`);
-    if (r.rs_line_new_high != null) parts.push(`RS line new high: ${r.rs_line_new_high}`);
+    if (r.rs_line_new_high != null)
+      parts.push(`RS line new high: ${r.rs_line_new_high}`);
     if (r.PriceOverSMA150And200) parts.push(`Price > SMA150 & SMA200: true`);
     if (r.SMA150AboveSMA200) parts.push(`SMA150 > SMA200: true`);
     if (r.SMA50AboveSMA150And200) parts.push(`SMA50 > SMA150 & SMA200: true`);
     if (r.SMA200Slope) parts.push(`SMA200 slope up: true`);
-    if (r.PriceAbove25Percent52WeekLow) parts.push(`Price > 25% above 52w low: true`);
-    if (r.PriceWithin25Percent52WeekHigh) parts.push(`Price within 25% of 52w high: true`);
+    if (r.PriceAbove25Percent52WeekLow)
+      parts.push(`Price > 25% above 52w low: true`);
+    if (r.PriceWithin25Percent52WeekHigh)
+      parts.push(`Price within 25% of 52w high: true`);
     if (r.RSOver70) parts.push(`RS > 70: true`);
-    if (r.eps_growth_yoy != null) parts.push(`EPS growth YoY: ${r.eps_growth_yoy.toFixed(0)}%`);
-    if (r.rev_growth_yoy != null) parts.push(`Revenue growth YoY: ${r.rev_growth_yoy.toFixed(0)}%`);
-    if (r.eps_accelerating != null) parts.push(`EPS accelerating: ${r.eps_accelerating}`);
+    if (r.eps_growth_yoy != null)
+      parts.push(`EPS growth YoY: ${r.eps_growth_yoy.toFixed(0)}%`);
+    if (r.rev_growth_yoy != null)
+      parts.push(`Revenue growth YoY: ${r.rev_growth_yoy.toFixed(0)}%`);
+    if (r.eps_accelerating != null)
+      parts.push(`EPS accelerating: ${r.eps_accelerating}`);
     if (r.roe != null) parts.push(`ROE: ${r.roe.toFixed(1)}%`);
-    if (r.inst_pct_accumulating != null) parts.push(`Inst. accumulating: ${r.inst_pct_accumulating.toFixed(0)}%`);
+    if (r.inst_pct_accumulating != null)
+      parts.push(`Inst. accumulating: ${r.inst_pct_accumulating.toFixed(0)}%`);
     if (r.sector) parts.push(`Sector: ${r.sector}`);
     if (r.industry) parts.push(`Industry: ${r.industry}`);
-    if (r.sector_rank != null && r.total_sectors != null) parts.push(`Sector rank: ${r.sector_rank}/${r.total_sectors}`);
+    if (r.sector_rank != null && r.total_sectors != null)
+      parts.push(`Sector rank: ${r.sector_rank}/${r.total_sectors}`);
 
     return `Analyse this stock as a potential swing trade setup:\n\nSymbol: ${r.symbol}\n${parts.join("\n")}\n\nGive a concise assessment: setup quality, entry criteria, key risks, and whether this is worth acting on now.`;
   }
 
   function SortIcon({ col }: { col: SortKey }) {
     if (sortKey !== col) return null;
-    return sortDir === "asc"
-      ? <ChevronUp className="w-3 h-3 inline ml-0.5" />
-      : <ChevronDown className="w-3 h-3 inline ml-0.5" />;
+    return sortDir === "asc" ? (
+      <ChevronUp className="w-3 h-3 inline ml-0.5" />
+    ) : (
+      <ChevronDown className="w-3 h-3 inline ml-0.5" />
+    );
   }
 
-  function Th({ col, children, center }: { col: SortKey; children: React.ReactNode; center?: boolean }) {
+  function Th({
+    col,
+    children,
+    center,
+  }: {
+    col: SortKey;
+    children: React.ReactNode;
+    center?: boolean;
+  }) {
     return (
       <th
         className={`px-3 py-2 text-xs font-medium text-muted-foreground uppercase tracking-wide cursor-pointer select-none hover:text-foreground whitespace-nowrap ${center ? "text-center" : "text-left"}`}
         onClick={() => toggleSort(col)}
       >
-        {children}<SortIcon col={col} />
+        {children}
+        <SortIcon col={col} />
       </th>
     );
   }
@@ -2227,15 +2747,35 @@ export function ScreeningsUI({
   /** Many symbols at once — same filtered list. */
   const multiSymbolViewTabs: ScreeningsPrimaryTabDef[] = [
     { id: "results", label: "Results", icon: <List className="w-3.5 h-3.5" /> },
-    { id: "quotes", label: "Quotes", icon: <TrendingUp className="w-3.5 h-3.5" /> },
-    { id: "sentiment", label: "Sentiment", icon: <Gauge className="w-3.5 h-3.5" /> },
+    {
+      id: "quotes",
+      label: "Quotes",
+      icon: <TrendingUp className="w-3.5 h-3.5" />,
+    },
+    {
+      id: "sentiment",
+      label: "Sentiment",
+      icon: <Gauge className="w-3.5 h-3.5" />,
+    },
   ];
 
   /** One selected ticker — row highlight or prev/next in the tab bar. */
   const deepDiveViewTabs: ScreeningsPrimaryTabDef[] = [
-    { id: "charts", label: "Charts", icon: <BarChart2 className="w-3.5 h-3.5" /> },
-    { id: "news", label: "News Trend", icon: <Newspaper className="w-3.5 h-3.5" /> },
-    { id: "relationship", label: "Relationships", icon: <Activity className="w-3.5 h-3.5" /> },
+    {
+      id: "charts",
+      label: "Charts",
+      icon: <BarChart2 className="w-3.5 h-3.5" />,
+    },
+    {
+      id: "news",
+      label: "News Trend",
+      icon: <Newspaper className="w-3.5 h-3.5" />,
+    },
+    {
+      id: "relationship",
+      label: "Relationships",
+      icon: <Activity className="w-3.5 h-3.5" />,
+    },
   ];
 
   const tradeMonitoringDisabled = !hasAnyEntryMarkers;
@@ -2253,7 +2793,9 @@ export function ScreeningsUI({
   return (
     <div className="flex flex-col h-full min-h-0 w-full">
       {/* Collapsible: scan runs + search + filters */}
-      <div className={`shrink-0 transition-all duration-200 overflow-hidden ${collapsed ? "max-h-0 opacity-0" : "max-h-[2000px] opacity-100"}`}>
+      <div
+        className={`shrink-0 transition-all duration-200 overflow-hidden ${collapsed ? "max-h-0 opacity-0" : "max-h-[2000px] opacity-100"}`}
+      >
         {/* Scan runs */}
         <div className="flex flex-col gap-2 mb-4">
           <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between sm:gap-3">
@@ -2293,11 +2835,12 @@ export function ScreeningsUI({
           </div>
           {runs.length === 0 ? (
             <p className="text-sm text-muted-foreground">
-              No screenings yet. Name one above and click Create — then add tickers from Charts or the Add to screening control.
+              No screenings yet. Name one above and click Create — then add
+              tickers from Charts or the Add to screening control.
             </p>
           ) : (
             <div className="flex gap-2 overflow-x-auto pb-1 -mx-1 px-1 [scrollbar-width:thin]">
-              {runs.map(run => {
+              {runs.map((run) => {
                 const active = run.id === (selectedRun?.id ?? null);
                 const busy = deletingRunId === run.id;
                 return (
@@ -2319,8 +2862,15 @@ export function ScreeningsUI({
                           : "hover:bg-muted hover:text-foreground hover:border-foreground/30"
                       } ${busy ? "opacity-60" : ""}`}
                     >
-                      <div className="font-medium leading-tight">{run.scan_date}</div>
-                      <div className="text-xs opacity-80 truncate mt-0.5" title={run.source}>{run.source}</div>
+                      <div className="font-medium leading-tight">
+                        {run.scan_date}
+                      </div>
+                      <div
+                        className="text-xs opacity-80 truncate mt-0.5"
+                        title={run.source}
+                      >
+                        {run.source}
+                      </div>
                     </button>
                     <button
                       type="button"
@@ -2372,7 +2922,11 @@ export function ScreeningsUI({
                 }}
                 disabled={addTickerBusy}
                 className="w-full pl-8 pr-3 py-1.5 text-sm rounded-md border border-input bg-background focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-60"
-                aria-describedby={searchAddTickerOffer ? "screenings-search-add-hint" : undefined}
+                aria-describedby={
+                  searchAddTickerOffer
+                    ? "screenings-search-add-hint"
+                    : undefined
+                }
               />
             </div>
             {searchAddTickerOffer ? (
@@ -2382,7 +2936,10 @@ export function ScreeningsUI({
               >
                 <p className="text-muted-foreground leading-snug">
                   No matches in this screening for{" "}
-                  <span className="font-mono font-medium text-foreground">{search.trim().toUpperCase()}</span>.
+                  <span className="font-mono font-medium text-foreground">
+                    {search.trim().toUpperCase()}
+                  </span>
+                  .
                 </p>
                 <button
                   type="button"
@@ -2391,7 +2948,10 @@ export function ScreeningsUI({
                   className="inline-flex w-fit items-center gap-1.5 rounded-md border border-border bg-background px-2 py-1 font-medium text-foreground transition-colors hover:bg-muted disabled:pointer-events-none disabled:opacity-40"
                 >
                   {addTickerBusy ? (
-                    <Loader2 className="h-3.5 w-3.5 animate-spin shrink-0" aria-hidden />
+                    <Loader2
+                      className="h-3.5 w-3.5 animate-spin shrink-0"
+                      aria-hidden
+                    />
                   ) : (
                     <Plus className="h-3.5 w-3.5 shrink-0" aria-hidden />
                   )}
@@ -2409,7 +2969,11 @@ export function ScreeningsUI({
                 }))
               }
               className={`flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded-md border transition-colors ${filters.status === "dismissed" ? "bg-foreground text-background border-foreground" : "border-border text-muted-foreground hover:text-foreground hover:border-foreground/40"}`}
-              title={filters.status === "dismissed" ? "Switch to active" : "Show dismissed"}
+              title={
+                filters.status === "dismissed"
+                  ? "Switch to active"
+                  : "Show dismissed"
+              }
             >
               <Trash2 className="w-3.5 h-3.5" />
               {dismissedCount} dismissed
@@ -2420,7 +2984,6 @@ export function ScreeningsUI({
             {rows.length > 0 && ` / ${rows.length} screened`}
           </span>
         </div>
-
       </div>
 
       {/* View tabs */}
@@ -2430,11 +2993,15 @@ export function ScreeningsUI({
             <>
               <button
                 type="button"
-                onClick={() => setCollapsed(c => !c)}
+                onClick={() => setCollapsed((c) => !c)}
                 className="mr-1 p-1.5 rounded-md border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
                 title={collapsed ? "Show filters" : "Hide filters"}
               >
-                {collapsed ? <ChevronDown className="w-3.5 h-3.5" /> : <ChevronUp className="w-3.5 h-3.5" />}
+                {collapsed ? (
+                  <ChevronDown className="w-3.5 h-3.5" />
+                ) : (
+                  <ChevronUp className="w-3.5 h-3.5" />
+                )}
               </button>
               <div
                 className="flex flex-wrap items-end gap-1 rounded-md bg-muted/30 px-1 pt-1 pb-0"
@@ -2532,10 +3099,14 @@ export function ScreeningsUI({
       </div>
 
       {/* View content — scrollable area */}
-      <div className={`flex-1 min-h-0 ${isDeepDiveView(activeView) && filteredSymbols.length > 0 ? "overflow-hidden" : "overflow-y-auto"}`}>
+      <div
+        className={`flex-1 min-h-0 ${isDeepDiveView(activeView) && filteredSymbols.length > 0 ? "overflow-hidden" : "overflow-y-auto"}`}
+      >
         {rows.length === 0 ? (
           <div className="text-sm text-muted-foreground py-8 text-center">
-            {selectedRun ? "No results for this run." : "Select a scan run to view results."}
+            {selectedRun
+              ? "No results for this run."
+              : "Select a scan run to view results."}
           </div>
         ) : isDeepDiveView(activeView) && filteredSymbols.length > 0 ? (
           <div className="flex h-full min-h-0 gap-0">
@@ -2553,12 +3124,14 @@ export function ScreeningsUI({
                 onContextMenu={handleContextMenu}
               />
             </div>
-            <div className="flex-1 min-w-0 min-h-0 flex flex-col gap-4 overflow-y-auto">
+            <div
+              className={`flex-1 min-w-0 min-h-0 flex flex-col gap-4 ${activeView === "charts" ? "overflow-hidden" : "overflow-y-auto"}`}
+            >
               {activeView === "charts" ? (
-                <div className="flex flex-col gap-3 w-full min-h-0">
-                  <ChartDateRangePicker onChange={setChartDateRange} />
-                  <div className="flex items-stretch w-full min-h-0">
+                <div className="flex-1 flex flex-col gap-3 w-full min-h-0">
+                  <div className="flex-1 flex items-stretch w-full min-h-0">
                     <div className="flex-1 min-w-0">
+                      <ChartDateRangePicker onChange={setChartDateRange} />
                       <TickerChartsPanel
                         symbols={chartSymbols}
                         selectedTicker={selectedTicker}
@@ -2579,40 +3152,77 @@ export function ScreeningsUI({
                         showSymbolHeadline={false}
                         showChartFrame={false}
                         annotations={chartAnnotations}
-                        onChartData={(rows: OhlcBar[]) => { ohlcvDataRef.current = rows; }}
-                        onAnnotationAdd={(ann) => setChartAnnotations((prev) => [...prev, ann])}
-                        onAnnotationDelete={(id) => setChartAnnotations((prev) => prev.filter((a) => a.id !== id))}
+                        onChartData={(rows: OhlcBar[]) => {
+                          ohlcvDataRef.current = rows;
+                        }}
+                        onAnnotationAdd={(ann) =>
+                          setChartAnnotations((prev) => [...prev, ann])
+                        }
+                        onAnnotationDelete={(id) =>
+                          setChartAnnotations((prev) =>
+                            prev.filter((a) => a.id !== id),
+                          )
+                        }
                         dateRange={chartDateRange}
                       />
                     </div>
                     {selectedTicker && (
-                      <div className="w-[320px] shrink-0 flex flex-col border-l border-border">
-                        <ChartAiChat
-                          key={selectedTicker}
-                          symbol={selectedTicker}
-                          ohlcData={ohlcvDataRef.current}
-                          annotations={chartAnnotations}
-                          onAnnotations={handleChartAiAnnotations}
-                          messages={chartAiMessages}
-                          setMessages={setChartAiMessages}
-                          onSaveEntry={(price, direction, takeProfit, stopLoss) => {
-                            const ohlc = ohlcvDataRef.current;
-                            const lastIdx = ohlc.length - 1;
-                            const last = ohlc[lastIdx];
-                            if (!last) return;
-                            void setTickerEntryMarker(selectedTicker, {
-                              barIdx: lastIdx,
-                              date: last.date,
-                              price,
-                              open: last.open,
-                              high: last.high,
-                              low: last.low,
-                              close: last.close,
-                            }, direction, takeProfit, stopLoss);
-                          }}
-                          side
-                        />
-                      </div>
+                      <>
+                        <button
+                          type="button"
+                          onClick={() => setChartAiOpen((v) => !v)}
+                          className="flex items-center justify-center w-5 shrink-0 border-l border-border bg-background hover:bg-muted transition-colors"
+                          title={
+                            chartAiOpen ? "Collapse AI chat" : "Expand AI chat"
+                          }
+                        >
+                          {chartAiOpen ? (
+                            <ChevronRight className="w-3 h-3 text-muted-foreground" />
+                          ) : (
+                            <ChevronLeft className="w-3 h-3 text-muted-foreground" />
+                          )}
+                        </button>
+                        {chartAiOpen && (
+                          <div className="w-[320px] shrink-0 flex flex-col border-l border-border">
+                            <ChartAiChat
+                              key={selectedTicker}
+                              symbol={selectedTicker}
+                              ohlcData={ohlcvDataRef.current}
+                              annotations={chartAnnotations}
+                              onAnnotations={handleChartAiAnnotations}
+                              messages={chartAiMessages}
+                              setMessages={setChartAiMessages}
+                              onSaveEntry={(
+                                price,
+                                direction,
+                                takeProfit,
+                                stopLoss,
+                              ) => {
+                                const ohlc = ohlcvDataRef.current;
+                                const lastIdx = ohlc.length - 1;
+                                const last = ohlc[lastIdx];
+                                if (!last) return;
+                                void setTickerEntryMarker(
+                                  selectedTicker,
+                                  {
+                                    barIdx: lastIdx,
+                                    date: last.date,
+                                    price,
+                                    open: last.open,
+                                    high: last.high,
+                                    low: last.low,
+                                    close: last.close,
+                                  },
+                                  direction,
+                                  takeProfit,
+                                  stopLoss,
+                                );
+                              }}
+                              side
+                            />
+                          </div>
+                        )}
+                      </>
                     )}
                   </div>
                 </div>
@@ -2665,7 +3275,9 @@ export function ScreeningsUI({
                         return (
                           <th
                             key={k}
-                            title={TECH_CRITERIA.find((t) => t.key === k)?.label ?? k}
+                            title={
+                              TECH_CRITERIA.find((t) => t.key === k)?.label ?? k
+                            }
                             className={`px-2 py-2 text-xs font-medium text-muted-foreground uppercase tracking-wide whitespace-nowrap cursor-pointer select-none hover:text-foreground ${
                               boolCol ? "text-center" : "text-left"
                             }`}
@@ -2690,7 +3302,8 @@ export function ScreeningsUI({
                   <tbody className="divide-y divide-border">
                     {filtered.map((row, i) => {
                       const isSelected = row.symbol === selectedTicker;
-                      const isAiSelected = aiSelectedRow?.scan_row_id === row.scan_row_id;
+                      const isAiSelected =
+                        aiSelectedRow?.scan_row_id === row.scan_row_id;
                       const note = rowNotes.get(row.scan_row_id);
                       const isDismissed = note?.status === "dismissed";
                       const isHighlighted = !!note?.highlighted;
@@ -2701,15 +3314,23 @@ export function ScreeningsUI({
                         pipeline: "border-l-sky-400",
                         active: "border-l-emerald-400",
                       };
-                      const stripe = isDismissed || isHighlighted || isSelected
-                        ? statusStripe[status] ?? "border-l-transparent"
-                        : "";
+                      const stripe =
+                        isDismissed || isHighlighted || isSelected
+                          ? (statusStripe[status] ?? "border-l-transparent")
+                          : "";
                       return (
                         <tr
                           key={row.scan_row_id ?? row.symbol ?? i}
-                          onClick={() => row.symbol && setSelectedTicker(row.symbol)}
-                          onDoubleClick={() => row.symbol && void openTickerWorkflowEditor(row.symbol)}
-                          onContextMenu={(e) => row.symbol && handleContextMenu(row.symbol, e)}
+                          onClick={() =>
+                            row.symbol && setSelectedTicker(row.symbol)
+                          }
+                          onDoubleClick={() =>
+                            row.symbol &&
+                            void openTickerWorkflowEditor(row.symbol)
+                          }
+                          onContextMenu={(e) =>
+                            row.symbol && handleContextMenu(row.symbol, e)
+                          }
                           className={`group cursor-pointer transition-colors border-l-[3px] ${stripe || "border-l-transparent"} ${isDismissed ? "opacity-40" : ""} ${isHighlighted ? "bg-amber-500/10" : ""} ${isSelected ? "bg-foreground/10 ring-1 ring-inset ring-foreground/20" : "hover:bg-muted/30"}`}
                         >
                           <td className="px-3 py-2 font-mono font-semibold whitespace-nowrap">
@@ -2729,14 +3350,21 @@ export function ScreeningsUI({
                           })}
                           <td className="px-3 py-2 text-center">
                             <div className="flex justify-center">
-                              <Check value={vectorTickers.has(row.symbol ?? "")} />
+                              <Check
+                                value={vectorTickers.has(row.symbol ?? "")}
+                              />
                             </div>
                           </td>
-                          <td className="px-2 py-1.5 text-center" onClick={e => e.stopPropagation()}>
+                          <td
+                            className="px-2 py-1.5 text-center"
+                            onClick={(e) => e.stopPropagation()}
+                          >
                             <button
                               type="button"
                               title={`Analyse ${row.symbol} with AI`}
-                              onClick={() => setAiSelectedRow(isAiSelected ? null : row)}
+                              onClick={() =>
+                                setAiSelectedRow(isAiSelected ? null : row)
+                              }
                               className={`p-1 rounded transition-colors ${isAiSelected ? "text-primary bg-primary/10" : "text-muted-foreground hover:text-foreground hover:bg-muted"}`}
                             >
                               <Bot className="w-3.5 h-3.5" />
@@ -2753,17 +3381,22 @@ export function ScreeningsUI({
             {/* Column legend */}
             {filtered.length > 0 && (
               <details className="text-xs text-muted-foreground">
-                <summary className="cursor-pointer hover:text-foreground">Column key</summary>
+                <summary className="cursor-pointer hover:text-foreground">
+                  Column key
+                </summary>
                 <div className="mt-2 grid grid-cols-2 gap-x-6 gap-y-0.5 pl-2">
                   <div>
-                    <span className="font-mono font-medium">Symbol</span> — From scan row (not duplicated from{" "}
+                    <span className="font-mono font-medium">Symbol</span> — From
+                    scan row (not duplicated from{" "}
                     <code className="text-[10px]">row_data</code>)
                   </div>
                   {dataColumnKeys.map((k) => {
                     const tech = TECH_CRITERIA.find((t) => t.key === k);
                     return (
                       <div key={k}>
-                        <span className="font-mono font-medium">{columnHeaderLabel(k)}</span>
+                        <span className="font-mono font-medium">
+                          {columnHeaderLabel(k)}
+                        </span>
                         {tech ? (
                           ` — ${tech.label}`
                         ) : (
@@ -2777,7 +3410,8 @@ export function ScreeningsUI({
                     );
                   })}
                   <div>
-                    <span className="font-mono font-medium">Vec</span> — Company sensitivity vector in database
+                    <span className="font-mono font-medium">Vec</span> — Company
+                    sensitivity vector in database
                   </div>
                 </div>
               </details>
@@ -2852,17 +3486,25 @@ export function ScreeningsUI({
         >
           <div
             className="w-full max-w-md rounded-lg border border-border bg-background p-4 shadow-xl flex flex-col gap-3"
-            onClick={e => e.stopPropagation()}
+            onClick={(e) => e.stopPropagation()}
           >
             <div className="flex items-center justify-between">
               <h3 className="text-base font-semibold">Workflow update</h3>
-              <span className="font-mono text-sm text-muted-foreground">{workflowEditor.ticker}</span>
+              <span className="font-mono text-sm text-muted-foreground">
+                {workflowEditor.ticker}
+              </span>
             </div>
             <label className="flex flex-col gap-1">
               <span className="text-xs text-muted-foreground">Status</span>
               <select
                 value={workflowEditor.status}
-                onChange={e => setWorkflowEditor(prev => prev ? { ...prev, status: e.target.value as NoteStatus } : prev)}
+                onChange={(e) =>
+                  setWorkflowEditor((prev) =>
+                    prev
+                      ? { ...prev, status: e.target.value as NoteStatus }
+                      : prev,
+                  )
+                }
                 className="px-2 py-1.5 text-sm rounded border border-input bg-background focus:outline-none focus:ring-1 focus:ring-ring"
                 disabled={savingWorkflowEditor}
               >
@@ -2876,7 +3518,11 @@ export function ScreeningsUI({
               <span className="text-xs text-muted-foreground">Note</span>
               <textarea
                 value={workflowEditor.comment}
-                onChange={e => setWorkflowEditor(prev => prev ? { ...prev, comment: e.target.value } : prev)}
+                onChange={(e) =>
+                  setWorkflowEditor((prev) =>
+                    prev ? { ...prev, comment: e.target.value } : prev,
+                  )
+                }
                 rows={4}
                 placeholder="Add screening notes..."
                 className="px-2 py-1.5 text-sm rounded border border-input bg-background focus:outline-none focus:ring-1 focus:ring-ring resize-y"
@@ -2903,32 +3549,42 @@ export function ScreeningsUI({
         </div>
       )}
 
-      {contextMenu && (() => {
-        const cm = contextMenu;
-        const note = [...rowNotes.values()].find(n => n.ticker === cm.ticker);
-        return (
-          <TickerContextMenu
-            ticker={cm.ticker}
-            x={cm.x}
-            y={cm.y}
-            onClose={() => setContextMenu(null)}
-            isDismissed={dismissedSymbols.has(cm.ticker)}
-            onDismiss={() => dismissTicker(cm.ticker)}
-            onRestore={() => restoreTicker(cm.ticker)}
-            status={(note?.status ?? "active") as ContextMenuNoteStatus}
-            onSetStatus={(s) => setTickerStatus(cm.ticker, s)}
-            hasComment={tickerHasComment(cm.ticker)}
-            onEditComment={() => editTickerComment(cm.ticker)}
-            onCopyOhlcv={activeView === "charts" && ohlcvDataRef.current.length > 0 ? () => {
-              const header = "date,open,high,low,close,volume";
-              const lines = ohlcvDataRef.current.map(
-                d => `${d.date},${d.open},${d.high},${d.low},${d.close},${d.volume}`
-              );
-              void navigator.clipboard.writeText([header, ...lines].join("\n"));
-            } : null}
-          />
-        );
-      })()}
+      {contextMenu &&
+        (() => {
+          const cm = contextMenu;
+          const note = [...rowNotes.values()].find(
+            (n) => n.ticker === cm.ticker,
+          );
+          return (
+            <TickerContextMenu
+              ticker={cm.ticker}
+              x={cm.x}
+              y={cm.y}
+              onClose={() => setContextMenu(null)}
+              isDismissed={dismissedSymbols.has(cm.ticker)}
+              onDismiss={() => dismissTicker(cm.ticker)}
+              onRestore={() => restoreTicker(cm.ticker)}
+              status={(note?.status ?? "active") as ContextMenuNoteStatus}
+              onSetStatus={(s) => setTickerStatus(cm.ticker, s)}
+              hasComment={tickerHasComment(cm.ticker)}
+              onEditComment={() => editTickerComment(cm.ticker)}
+              onCopyOhlcv={
+                activeView === "charts" && ohlcvDataRef.current.length > 0
+                  ? () => {
+                      const header = "date,open,high,low,close,volume";
+                      const lines = ohlcvDataRef.current.map(
+                        (d) =>
+                          `${d.date},${d.open},${d.high},${d.low},${d.close},${d.volume}`,
+                      );
+                      void navigator.clipboard.writeText(
+                        [header, ...lines].join("\n"),
+                      );
+                    }
+                  : null
+              }
+            />
+          );
+        })()}
     </div>
   );
 }

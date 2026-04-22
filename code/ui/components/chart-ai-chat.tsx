@@ -246,7 +246,7 @@ function PersonaReports({ reports, loadingIds }: { reports: PersonaReport[]; loa
 }
 
 function parsePersonas(content: string): { personas: PersonaId[]; text: string } {
-  const match = content.match(/^<!-- personas:([a-z|]+) -->\n?/);
+  const match = content.match(/^<!-- personas:([^-]+?) -->\n?/);
   if (!match) return { personas: [], text: content };
   const personas = match[1].split("|") as PersonaId[];
   const text = content.slice(match[0].length);
@@ -458,7 +458,7 @@ export function ChartAiChat({
 
       {/* Messages */}
       {messages.length > 0 && (
-        <div className={`flex flex-col gap-4 px-4 py-4 overflow-y-auto ${side ? "flex-1" : "max-h-[420px]"}`}>
+        <div className={`flex flex-col gap-4 px-4 py-4 overflow-y-auto ${side ? "flex-1 min-h-0" : "max-h-[420px]"}`}>
           {messages.map((m, i) => (
             <div key={i} className={`flex flex-col gap-1 ${m.role === "user" ? "items-end" : "items-start"}`}>
               {m.role === "user" ? (
@@ -548,7 +548,7 @@ export function ChartAiChat({
 
       {/* Empty state — prompt chips */}
       {messages.length === 0 && !loading && (
-        <div className="px-4 pt-3 pb-1 flex flex-col gap-2">
+        <div className="flex-1 px-4 pt-3 pb-1 flex flex-col gap-2">
           <p className="text-[10px] text-muted-foreground/35 font-medium uppercase tracking-widest">Suggested</p>
           <div className="flex flex-wrap gap-1.5">
             {PROMPT_CHIPS.map((prompt) => (

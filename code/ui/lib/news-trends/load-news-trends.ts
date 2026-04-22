@@ -82,9 +82,12 @@ async function fetchPagedInBounds<Row>(
   select: string,
   orderCol: string,
   bounds: { gte: string; lt: string },
+  fromGte?: string | null,
 ): Promise<Row[]> {
   let from = 0;
   const out: Row[] = [];
+
+  const effectiveGte = fromGte && fromGte > bounds.gte ? fromGte : bounds.gte;
 
   while (true) {
     const to = from + PAGE_SIZE - 1;
@@ -92,7 +95,7 @@ async function fetchPagedInBounds<Row>(
       .schema("swingtrader")
       .from(table)
       .select(select)
-      .gte(orderCol, bounds.gte)
+      .gte(orderCol, effectiveGte)
       .lt(orderCol, bounds.lt)
       .order(orderCol, { ascending: true })
       .range(from, to);
@@ -117,6 +120,7 @@ async function fetchSegmentedTrendTable<Row>(
   orderCol: string,
   keyFormat: "day" | "timestamp",
   segmentDays: number,
+  fromGte?: string | null,
 ): Promise<Row[]> {
   const segments = buildUtcHalfOpenSegments(
     NEWS_TRENDS_LOOKBACK_DAYS,
@@ -131,6 +135,7 @@ async function fetchSegmentedTrendTable<Row>(
       select,
       orderCol,
       bounds,
+      fromGte,
     );
     out.push(...part);
   }
@@ -139,6 +144,7 @@ async function fetchSegmentedTrendTable<Row>(
 
 export async function loadClusterDailyTrends(
   supabase: SupabaseClient,
+  fromGte?: string | null,
 ): Promise<ClusterTrendRow[]> {
   return fetchSegmentedTrendTable<ClusterTrendRow>(
     supabase,
@@ -147,6 +153,7 @@ export async function loadClusterDailyTrends(
     "bucket_day",
     "day",
     SEGMENT_DAYS_DAILY,
+    fromGte,
   );
 }
 
@@ -170,13 +177,15 @@ export type NewsTrendsHourlySupplementPayload = {
 
 export async function loadNewsTrendsDailySupplement(
   supabase: SupabaseClient,
+  fromGte?: string | null,
 ): Promise<NewsTrendsDailySupplementPayload> {
-  const articles = await loadNewsTrendsArticles(supabase);
+  const articles = await loadNewsTrendsArticles(supabase, fromGte);
   return { articles };
 }
 
 export async function loadNewsTrendsDimensionDaily(
   supabase: SupabaseClient,
+  fromGte?: string | null,
 ): Promise<NewsTrendsDimensionDailyPayload> {
   const dimensionDaily = await fetchSegmentedTrendTable<DimensionTrendRow>(
     supabase,
@@ -185,12 +194,14 @@ export async function loadNewsTrendsDimensionDaily(
     "bucket_day",
     "day",
     SEGMENT_DAYS_DAILY,
+    fromGte,
   );
   return { dimensionDaily };
 }
 
 export async function loadNewsTrendsDimensionHourly(
   supabase: SupabaseClient,
+  fromGte?: string | null,
 ): Promise<NewsTrendsDimensionHourlyPayload> {
   const dimensionHourly = await fetchSegmentedTrendTable<DimensionTrendRow>(
     supabase,
@@ -199,12 +210,14 @@ export async function loadNewsTrendsDimensionHourly(
     "bucket_hour",
     "timestamp",
     SEGMENT_DAYS_HOURLY,
+    fromGte,
   );
   return { dimensionHourly };
 }
 
 export async function loadNewsTrendsHourlySupplement(
   supabase: SupabaseClient,
+  fromGte?: string | null,
 ): Promise<NewsTrendsHourlySupplementPayload> {
   const clusterHourly = await fetchSegmentedTrendTable<ClusterTrendRow>(
     supabase,
@@ -213,12 +226,14 @@ export async function loadNewsTrendsHourlySupplement(
     "bucket_hour",
     "timestamp",
     SEGMENT_DAYS_HOURLY,
+    fromGte,
   );
   return { clusterHourly };
 }
 
 export async function loadNewsTrendsArticles(
   supabase: SupabaseClient,
+  fromGte?: string | null,
 ): Promise<ArticleImpact[]> {
   const segments = buildUtcHalfOpenSegments(
     NEWS_TRENDS_LOOKBACK_DAYS,
@@ -233,6 +248,7 @@ export async function loadNewsTrendsArticles(
       "article_id, published_at, impact_jsonb, confidence_mean, id, title, url, source, slug, image_url, article_created_at",
       "published_at",
       { gte, lt },
+      fromGte,
     );
     allRows.push(...part);
   }

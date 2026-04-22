@@ -54,7 +54,9 @@ export default function ChartsPage({ searchParams }: PageProps) {
         <p className="text-xs font-semibold uppercase tracking-widest text-amber-500">
           Charts
         </p>
-        <h1 className="mt-1 text-2xl font-bold tracking-tight">Ticker charts</h1>
+        <h1 className="mt-1 text-2xl font-bold tracking-tight">
+          Ticker charts
+        </h1>
         <p className="mt-1 text-sm text-muted-foreground">
           Daily OHLCV with SMA overlays and session-only pivot markers. Search
           resolves tickers like Explore, or open with{" "}

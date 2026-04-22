@@ -12,8 +12,11 @@ Prio 1:
 [x] Ensure that dry days on streams are tracked
 [x] Move articles to own subpage and have protected root be ops center for users
 [x] Make the pricing button on the landing page not redirect to stripe, but to signup page
+[x] Add news trend personas to chart AI that gets company vector and news trend data from supabase
 [ ] Implement pricing gates throughout the application and API
-
+[ ] Implement small prompt support in AI chat. Currently all personas are engaged in every prompt
+[ ] Ai chat should fill entire height, and be collapsible
+[ ] When starting a new prompt, navigating to another chart shouldnt reset the prompt, but it should still execute the prompt
 Prio 2:
 [ ] Make sure IBD screener script runs through API
 [ ] Set up company vector updating
@@ -22,8 +25,7 @@ Prio 2:
 [ ] Seperate newsimpactscreener FMP integration with personal API key
 [ ] Ensure robustness of telegram bots
 [ ] Make sure network graph doesnt update when user selects something in current scope
-
-[ ] Add news trend personas to chart AI that gets company vector and news trend data from supabase
+[ ] Optimize for mobile
 
 Marketing:
 [ ] Set up pricing and early sign up offer
