@@ -2051,9 +2051,10 @@ def _rescore_fetch_unscored_ids(client) -> list[int]:
       WHERE scores_json = '{}'
       GROUP BY article_id HAVING count(*) = 11
     PostgREST groups server-side via count() — one row per article_id.
+    Covers articles that predate the processing_status column (NULL status).
     """
     schema = get_schema()
-    console.print("[dim]Querying DB for unscored articles…[/dim]")
+    console.print("[dim]Querying DB for unscored articles (all heads empty)…[/dim]")
 
     unscored: list[int] = []
     offset = 0
@@ -2080,12 +2081,46 @@ def _rescore_fetch_unscored_ids(client) -> list[int]:
     return unscored
 
 
+def _rescore_fetch_incomplete_ids(client) -> list[int]:
+    """
+    Find articles already tracked by processing_status that need a re-run:
+      partial  — some heads timed out; worth retrying
+      failed   — all heads failed (API key expired / total outage); retry after fix
+    NULL rows are handled by _rescore_fetch_unscored_ids via the heads table.
+    """
+    schema = get_schema()
+    console.print("[dim]Querying DB for partial/failed articles…[/dim]")
+
+    ids: list[int] = []
+    offset = 0
+    while True:
+        rows = (
+            client.schema(schema)
+            .table("news_articles")
+            .select("id")
+            .in_("processing_status", ["partial", "failed"])
+            .order("id", desc=True)
+            .range(offset, offset + _RESCORE_PAGE_SIZE - 1)
+            .execute()
+            .data or []
+        )
+        ids.extend(r["id"] for r in rows)
+        if len(rows) < _RESCORE_PAGE_SIZE:
+            break
+        offset += _RESCORE_PAGE_SIZE
+
+    console.print(
+        f"[dim]Found [bold]{len(ids)}[/bold] articles with partial/failed processing_status[/dim]"
+    )
+    return ids
+
+
 def _rescore_fetch_articles_batch(client, ids: list[int]) -> list[dict]:
     schema = get_schema()
     res = (
         client.schema(schema)
         .table("news_articles")
-        .select("id, body, title, url, published_at, publisher, article_stream, article_hash")
+        .select("id, body, title, url, published_at, publisher, article_stream, article_hash, processing_status")
         .in_("id", ids)
         .execute()
     )
@@ -2126,7 +2161,9 @@ async def _rescore_one_article(
         console.print(f"  [{index}/{total}] id={article_id} — skipped (empty body)")
         return False
 
-    if client is not None and _rescore_has_non_empty_heads(client, article_id):
+    status = row.get("processing_status")
+    needs_rescore = status in ("partial", "failed")
+    if not needs_rescore and client is not None and _rescore_has_non_empty_heads(client, article_id):
         console.print(f"  [{index}/{total}] id={article_id} — already scored, skipping")
         return False
 
@@ -2190,9 +2227,22 @@ async def _rescore_one_article(
 
 
 async def _process_rescore(args: argparse.Namespace) -> None:
-    """Re-score all articles with no non-empty impact heads."""
+    """Re-score articles that are unscored, partial, or failed."""
     client = get_supabase_client()
-    ids = _rescore_fetch_unscored_ids(client)
+    unscored_ids = _rescore_fetch_unscored_ids(client)
+    incomplete_ids = _rescore_fetch_incomplete_ids(client)
+    # Merge, deduplicate, keep newest-first order
+    seen: set[int] = set()
+    ids: list[int] = []
+    for aid in sorted(set(unscored_ids) | set(incomplete_ids), reverse=True):
+        if aid not in seen:
+            seen.add(aid)
+            ids.append(aid)
+    console.print(
+        f"[dim]Total candidates: [bold]{len(ids)}[/bold] "
+        f"({len(unscored_ids)} unscored + {len(incomplete_ids)} partial/failed, "
+        f"{len(set(unscored_ids) & set(incomplete_ids))} overlap)[/dim]"
+    )
 
     rescore_limit = getattr(args, "rescore_limit", None)
     if rescore_limit is not None and rescore_limit > 0:
