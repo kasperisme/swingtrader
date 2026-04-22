@@ -122,24 +122,29 @@ async function fetchSegmentedTrendTable<Row>(
   segmentDays: number,
   fromGte?: string | null,
 ): Promise<Row[]> {
+  // Limit segment count to the actual gate window so restricted tiers don't
+  // build 8 segments and fire 8 queries when they only need 1-2.
+  const effectiveLookback = fromGte
+    ? Math.min(
+        Math.ceil((Date.now() - new Date(fromGte).getTime()) / 86_400_000) + 1,
+        NEWS_TRENDS_LOOKBACK_DAYS,
+      )
+    : NEWS_TRENDS_LOOKBACK_DAYS;
+
   const segments = buildUtcHalfOpenSegments(
-    NEWS_TRENDS_LOOKBACK_DAYS,
+    effectiveLookback,
     segmentDays,
     keyFormat,
   );
-  const out: Row[] = [];
-  for (const bounds of segments) {
-    const part = await fetchPagedInBounds<Row>(
-      supabase,
-      table,
-      select,
-      orderCol,
-      bounds,
-      fromGte,
-    );
-    out.push(...part);
-  }
-  return out;
+
+  // Fetch all segments in parallel — each segment is its own bounded slice so
+  // there is no cross-segment ordering dependency.
+  const results = await Promise.all(
+    segments.map((bounds) =>
+      fetchPagedInBounds<Row>(supabase, table, select, orderCol, bounds, fromGte),
+    ),
+  );
+  return results.flat();
 }
 
 export async function loadClusterDailyTrends(

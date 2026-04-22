@@ -113,6 +113,23 @@ def _delete_heads_and_vector(client: Client, article_id: int) -> None:
     _tbl(client, "news_impact_vectors").delete().eq("article_id", article_id).execute()
 
 
+def _processing_status(heads: list[HeadOutput]) -> str:
+    """
+    Derive completeness status from head results.
+      complete — all heads succeeded
+      partial  — mix of successes and failures (e.g. one head timed out)
+      failed   — every head failed (e.g. API key expired)
+    """
+    if not heads:
+        return "failed"
+    failed = sum(1 for h in heads if h.error)
+    if failed == 0:
+        return "complete"
+    if failed == len(heads):
+        return "failed"
+    return "partial"
+
+
 def _persist(
     client: Client,
     body: str,
@@ -136,13 +153,14 @@ def _persist(
     we only write new heads/vector rows (caller must have deleted the old ones).
     """
     now = datetime.now().isoformat()
+    status = _processing_status(heads)
 
     if existing_article_id is not None:
         article_id = existing_article_id
+        update_fields: dict = {"processing_status": status}
         if image_url and str(image_url).strip():
-            _tbl(client, "news_articles").update({
-                "image_url": str(image_url).strip(),
-            }).eq("id", article_id).execute()
+            update_fields["image_url"] = str(image_url).strip()
+        _tbl(client, "news_articles").update(update_fields).eq("id", article_id).execute()
     else:
         url_stored = _normalize_url(url) if url else None
         row = {
@@ -153,6 +171,7 @@ def _persist(
             "source": source,
             "article_hash": article_hash,
             "article_stream": article_stream or "unknown",
+            "processing_status": status,
         }
         if published_at is not None:
             row["published_at"] = published_at
@@ -175,10 +194,10 @@ def _persist(
                 raise
             article_id = existing_row[0]
             _delete_heads_and_vector(client, article_id)
+            collision_update: dict = {"processing_status": status}
             if image_url and str(image_url).strip():
-                _tbl(client, "news_articles").update({
-                    "image_url": str(image_url).strip(),
-                }).eq("id", article_id).execute()
+                collision_update["image_url"] = str(image_url).strip()
+            _tbl(client, "news_articles").update(collision_update).eq("id", article_id).execute()
 
     # Insert one head row per cluster
     if heads:
