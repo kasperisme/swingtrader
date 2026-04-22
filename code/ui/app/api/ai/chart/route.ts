@@ -75,7 +75,7 @@ const DRAW_CHART_TOOL = {
       properties: {
         annotations: {
           type: "array",
-          description: "Annotations to draw. Use an empty array if nothing meaningful to draw.",
+          description: "Annotations to draw on the chart. Must include every price level mentioned in the analysis (entries, stops, targets, support, resistance). Never empty.",
           items: {
             type: "object",
             required: ["type", "role"],

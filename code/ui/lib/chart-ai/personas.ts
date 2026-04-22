@@ -87,7 +87,7 @@ Rules:
 - Only use prices from the OHLC data. Do not fabricate levels.
 - If specialists disagree, explain the tension rather than averaging opinions.
 - Keep it tight — swing traders want signal, not a dissertation.
-- Always call the draw_on_chart tool with your unified annotations.`;
+- You MUST call draw_on_chart. The annotations array must never be empty — draw every price level you mention: entries as "entry", stops as "stop", targets as "target", support as "support", resistance as "resistance". If you write a price in the analysis, it must appear as an annotation.`;
 
 export const PERSONA_LABELS: Record<PersonaId, string> = {
   technical: "Technical",
