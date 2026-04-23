@@ -64,6 +64,10 @@ _REL_MIN_MENTIONS = max(1, int(os.environ.get("NARRATIVE_REL_MIN_MENTIONS", "1")
 _REL_LIMIT_NODES = max(20, int(os.environ.get("NARRATIVE_REL_LIMIT_NODES", "140")))
 _REL_LIMIT_EDGES = max(50, int(os.environ.get("NARRATIVE_REL_LIMIT_EDGES", "360")))
 _BLOCKED_NODE_LABELS = {"N/A"}
+_MAX_NEWS_PER_TICKER_DB = max(1, int(os.environ.get("NARRATIVE_MAX_NEWS_PER_TICKER_DB", "5")))
+_MAX_NEWS_BLOCK_ITEMS = max(1, int(os.environ.get("NARRATIVE_MAX_NEWS_BLOCK_ITEMS", "30")))
+_MAX_RELATED_BLOCK_ITEMS = max(1, int(os.environ.get("NARRATIVE_MAX_RELATED_BLOCK_ITEMS", "20")))
+_MAX_PROMPT_CHARS = max(4096, int(os.environ.get("NARRATIVE_MAX_PROMPT_CHARS", "12000")))
 
 
 # ── Data containers ───────────────────────────────────────────────────────────
@@ -149,7 +153,7 @@ def _fetch_relationship_edges(conn, lookback_days: int) -> list[RelationshipEdge
           AND mention_count >= %s
           AND last_seen_at >= %s
         ORDER BY strength_avg DESC
-        LIMIT 5000
+        LIMIT 2000
     """
     cur = conn.cursor()
     cur.execute(sql, (_REL_MIN_STRENGTH, _REL_MIN_MENTIONS, since))
@@ -493,9 +497,11 @@ def _fetch_ticker_news(
         WHERE nat.ticker = ANY(%s)
           AND COALESCE(na.published_at, na.created_at) >= %s
         ORDER BY nat.ticker, COALESCE(na.published_at, na.created_at) DESC
+        LIMIT %s
     """
     cur = conn.cursor()
-    cur.execute(sql_articles, (all_query_tickers, since))
+    max_articles = _MAX_NEWS_PER_TICKER_DB * len(normalized_tickers)
+    cur.execute(sql_articles, (all_query_tickers, since, max_articles))
     article_rows = cur.fetchall() or []
 
     # Collect unique article IDs to fetch heads in one query
@@ -584,6 +590,12 @@ def _fetch_ticker_news(
             relationships=relevant_rels,
         ))
 
+    for ticker in result:
+        result[ticker] = sorted(
+            result[ticker],
+            key=lambda item: item.published_at or datetime.min,
+            reverse=True,
+        )[:_MAX_NEWS_PER_TICKER_DB]
     return result
 
 
@@ -643,7 +655,7 @@ def _fetch_related_news_from_relationship_edges(
         WHERE h.cluster = 'TICKER_RELATIONSHIPS'
           AND COALESCE(na.published_at, na.created_at) >= %s
         ORDER BY COALESCE(na.published_at, na.created_at) DESC
-        LIMIT 5000
+        LIMIT 1000
     """
     cur.execute(sql_rel, (since,))
     relationship_rows = cur.fetchall() or []
@@ -930,6 +942,7 @@ def _build_screening_block(tickers: list[str]) -> str:
 def _build_news_block(
     portfolio_news: dict[str, list[TickerNewsItem]],
     screening_news: dict[str, list[TickerNewsItem]],
+    max_items: int = _MAX_NEWS_BLOCK_ITEMS,
 ) -> str:
     combined: dict[str, list[TickerNewsItem]] = {}
     for t, items in {**portfolio_news, **screening_news}.items():
@@ -939,11 +952,15 @@ def _build_news_block(
         return "  (no news hits in the lookback window)"
 
     lines: list[str] = []
+    total = 0
     for ticker, items in sorted(combined.items()):
-        if not items:
+        if not items or total >= max_items:
             continue
         lines.append(f"\n  [{ticker}]")
-        for item in items[:3]:  # cap at 3 articles per ticker to control token budget
+        for item in items[:3]:
+            if total >= max_items:
+                break
+            total += 1
             ts = item.published_at.strftime("%H:%M") if item.published_at else "?"
             score_str = f"{item.sentiment_score:+.2f}" if item.sentiment_score else " 0.00"
             lines.append(
@@ -955,6 +972,8 @@ def _build_news_block(
                 lines.append(
                     f"           related: {rel['from']}→{rel['to']} ({rel['type']}) {rel['notes'][:80]}"
                 )
+    if total >= max_items:
+        lines.append(f"\n  ... truncated to {max_items} items")
     return "\n".join(lines) if lines else "  (no news hits)"
 
 
@@ -963,17 +982,19 @@ def _build_related_news_block(
     related_scores: dict[str, float],
     related_paths: dict[str, list[str]],
     per_ticker_limit: int = _REL_ARTICLES_PER_TICKER,
+    max_items: int = _MAX_RELATED_BLOCK_ITEMS,
 ) -> str:
     if not related_news:
         return "  (no graph-related ticker news in the lookback window)"
 
     lines: list[str] = []
+    total = 0
     for ticker, items in sorted(
         related_news.items(),
         key=lambda kv: related_scores.get(kv[0], 0.0),
         reverse=True,
     ):
-        if not items:
+        if not items or total >= max_items:
             continue
         score = related_scores.get(ticker, 0.0)
         path_text = "; ".join(related_paths.get(ticker, []))[:180]
@@ -981,6 +1002,9 @@ def _build_related_news_block(
         if path_text:
             lines.append(f"    path: {path_text}")
         for item in items[:per_ticker_limit]:
+            if total >= max_items:
+                break
+            total += 1
             ts = item.published_at.strftime("%H:%M") if item.published_at else "?"
             score_str = f"{item.sentiment_score:+.2f}" if item.sentiment_score else " 0.00"
             lines.append(
@@ -988,6 +1012,8 @@ def _build_related_news_block(
             )
             if item.sentiment_reason:
                 lines.append(f"           reason: {item.sentiment_reason[:120]}")
+    if total >= max_items:
+        lines.append(f"\n  ... truncated to {max_items} items")
     return "\n".join(lines) if lines else "  (no graph-related ticker news in the lookback window)"
 
 
@@ -1195,6 +1221,12 @@ async def _call_section(
     Call Ollama for one focused section. Returns (parsed_dict, latency_ms).
     On any error returns ({}, 0) so the caller can fall back gracefully.
     """
+    if len(prompt) > _MAX_PROMPT_CHARS:
+        logger.warning(
+            "[narrative] prompt for user=%s section=%s too large (%d > %d chars), truncating",
+            user_id, section, len(prompt), _MAX_PROMPT_CHARS,
+        )
+        prompt = prompt[:_MAX_PROMPT_CHARS]
     try:
         raw, latency_ms = await ollama_chat(
             prompt=prompt,

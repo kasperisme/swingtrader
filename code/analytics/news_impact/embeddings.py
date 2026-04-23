@@ -201,14 +201,14 @@ def process_embedding_jobs(
                 conn.commit()
 
                 cur.execute(
-                    f"SELECT title, body FROM {schema}.news_articles WHERE id=%s LIMIT 1",
+                    f"SELECT title, body, COALESCE(published_at, created_at) FROM {schema}.news_articles WHERE id=%s LIMIT 1",
                     (article_id,),
                 )
                 row = cur.fetchone()
                 if not row:
                     raise RuntimeError("Article not found")
 
-                title, body = row[0] or "", row[1] or ""
+                title, body, published_at = row[0] or "", row[1] or "", row[2]
                 body = _strip_html(body)
                 combined = f"{title}\n\n{body}".strip()
                 chunks = _chunk_text(combined)
@@ -230,15 +230,16 @@ def process_embedding_jobs(
                     cur.execute(
                         f"""
                         INSERT INTO {schema}.news_article_embeddings
-                          (article_id, chunk_index, chunk_hash, chunk_text, embedding, embedding_model)
-                        VALUES (%s, %s, %s, %s, %s::vector, %s)
+                          (article_id, chunk_index, chunk_hash, chunk_text, embedding, embedding_model, published_at)
+                        VALUES (%s, %s, %s, %s, %s::vector, %s, %s)
                         ON CONFLICT (article_id, chunk_index, embedding_model) DO UPDATE
                           SET chunk_hash=EXCLUDED.chunk_hash,
                               chunk_text=EXCLUDED.chunk_text,
                               embedding=EXCLUDED.embedding,
+                              published_at=EXCLUDED.published_at,
                               created_at=NOW()
                         """,
-                        (article_id, i, chunk_hash, chunk, _vector_literal(vec), embed_model),
+                        (article_id, i, chunk_hash, chunk, _vector_literal(vec), embed_model, published_at),
                     )
 
                 cur.execute(

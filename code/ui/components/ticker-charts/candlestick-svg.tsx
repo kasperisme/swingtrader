@@ -126,6 +126,7 @@ export function CandlestickSvg({
   onAnnotationAdd,
   onAnnotationDelete,
   dateRange,
+  interval,
 }: {
   symbol: string;
   onPointChange?: (point: ChartPoint | null) => void;
@@ -139,6 +140,7 @@ export function CandlestickSvg({
   onAnnotationAdd?: (ann: ChartAnnotation) => void;
   onAnnotationDelete?: (id: string) => void;
   dateRange?: { from: string; to: string };
+  interval?: string;
 }) {
   const [data, setData] = useState<OhlcBar[]>([]);
   const [loading, setLoading] = useState(false);
@@ -220,7 +222,7 @@ export function CandlestickSvg({
       try {
         // Read cached view and OHLC data in parallel.
         const [ohlcResult, cached] = await Promise.all([
-          fmpGetOhlc(sym, undefined, dateRange),
+          fmpGetOhlc(sym, interval, dateRange),
           readChartViewCache(),
         ]);
         if (sym !== symbolRef.current) return; // navigated away
@@ -253,7 +255,7 @@ export function CandlestickSvg({
         if (sym === symbolRef.current) setLoading(false);
       }
     })();
-  }, [symbol, dateRange?.from, dateRange?.to]);
+  }, [symbol, dateRange?.from, dateRange?.to, interval]);
 
   // Debounced cache write — fires 600 ms after the view settles.
   // Uses refs inside the timeout so values are always current when it fires.
@@ -415,7 +417,7 @@ export function CandlestickSvg({
     loadingOlderRef.current = true;
     setLoadingOlder(true);
     try {
-      const res = await fmpGetOhlc(sym, "1day", { from: fromYmd, to: oldest });
+      const res = await fmpGetOhlc(sym, interval ?? "1day", { from: fromYmd, to: oldest });
       if (!res.ok || sym !== symbolRef.current) return false;
       const extra = res.data;
       if (extra.length === 0) {
@@ -452,7 +454,7 @@ export function CandlestickSvg({
         setLoadingOlder(false);
       }
     }
-  }, []);
+  }, [interval]);
 
   const ensureOlderHistoryForViewport = useCallback(
     async (targetBars: number) => {
@@ -1033,7 +1035,12 @@ export function CandlestickSvg({
             fontSize={10}
             fill="hsl(var(--muted-foreground))"
           >
-            {displaySlice[i]?.date?.slice(5)} {/* MM-DD */}
+            {(() => {
+              const d = displaySlice[i]?.date ?? "";
+              return d.length > 10
+                ? d.replace(/^(\d{4})-(\d{2})-(\d{2})T(.+)/, "$2-$3 $4").slice(0, 17)
+                : d.slice(5);
+            })()}
           </text>
         ))}
 
@@ -1240,7 +1247,7 @@ export function CandlestickSvg({
                 fill="hsl(var(--background))"
                 fontWeight="500"
               >
-                {bar.date.slice(5)}
+                {bar.date.length > 10 ? bar.date.replace(/^(\d{4})-(\d{2})-(\d{2})T(.+)/, "$2-$3 $4").slice(0, 17) : bar.date.slice(5)}
               </text>
 
               {/* Price label on Y-axis */}

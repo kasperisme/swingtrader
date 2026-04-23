@@ -154,6 +154,19 @@ function pickHistoricalClose(
   return { close, asOfDate: top.date };
 }
 
+export type FmpOhlcInterval = "1hour" | "4hour" | "1day" | "1week";
+
+const VALID_INTERVALS: ReadonlySet<string> = new Set<FmpOhlcInterval>([
+  "1hour",
+  "4hour",
+  "1day",
+  "1week",
+]);
+
+function isValidInterval(v: string): v is FmpOhlcInterval {
+  return VALID_INTERVALS.has(v);
+}
+
 export async function fmpGetOhlc(
   symbolParam: string,
   intervalRaw?: string,
@@ -163,7 +176,9 @@ export async function fmpGetOhlc(
     return { ok: false, error: "symbol required" };
   }
 
-  const interval = intervalRaw === "1hour" ? "1hour" : "1day";
+  const interval: FmpOhlcInterval = isValidInterval(intervalRaw ?? "")
+    ? (intervalRaw as FmpOhlcInterval)
+    : "1day";
   const symbol = normalizeSymbolInput(symbolParam);
 
   const apiKey = process.env.FMP_API_KEY;
@@ -191,21 +206,24 @@ export async function fmpGetOhlc(
   } else {
     const from = new Date(now);
     toStr = now.toISOString().split("T")[0];
-    if (interval === "1hour") {
+    if (interval === "1hour" || interval === "4hour") {
       from.setMonth(from.getMonth() - 6);
+    } else if (interval === "1week") {
+      from.setFullYear(from.getFullYear() - 5);
     } else {
       from.setFullYear(from.getFullYear() - 1);
     }
     fromStr = from.toISOString().split("T")[0];
   }
 
+  const isIntraday = interval === "1hour" || interval === "4hour";
+
   let historical: unknown[] = [];
   let fetched = false;
   for (const candidate of symbolCandidates) {
-    const url =
-      interval === "1hour"
-        ? `https://financialmodelingprep.com/stable/historical-chart/1hour?symbol=${candidate}&from=${fromStr}&to=${toStr}&apikey=${encodeURIComponent(apiKey)}`
-        : `https://financialmodelingprep.com/api/v3/historical-price-full/${candidate}?from=${fromStr}&to=${toStr}&apikey=${encodeURIComponent(apiKey)}`;
+    const url = isIntraday
+      ? `https://financialmodelingprep.com/stable/historical-chart/${interval}?symbol=${candidate}&from=${fromStr}&to=${toStr}&apikey=${encodeURIComponent(apiKey)}`
+      : `https://financialmodelingprep.com/api/v3/historical-price-full/${candidate}?from=${fromStr}&to=${toStr}&apikey=${encodeURIComponent(apiKey)}`;
 
     const res = await fetch(url, { cache: "no-store" });
     if (!res.ok) continue;
@@ -229,7 +247,7 @@ export async function fmpGetOhlc(
       const dateRaw = r.date ?? r.label;
       if (dateRaw == null) return null;
       const dateStr = String(dateRaw);
-      const normalizedDate = interval === "1hour" ? appendEtOffset(dateStr) : dateStr;
+      const normalizedDate = isIntraday ? appendEtOffset(dateStr) : dateStr;
       return {
         date: normalizedDate,
         open: Number(r.open),
@@ -244,7 +262,35 @@ export async function fmpGetOhlc(
   const sorted = [...normalized].sort(
     (a, b) => new Date(a.date).getTime() - new Date(b.date).getTime(),
   );
+
+  if (interval === "1week") {
+    return { ok: true, data: aggregateToWeekly(sorted) };
+  }
+
   return { ok: true, data: sorted };
+}
+
+function aggregateToWeekly(daily: FmpOhlcBar[]): FmpOhlcBar[] {
+  if (daily.length === 0) return [];
+  const weeks = new Map<string, FmpOhlcBar>();
+  for (const bar of daily) {
+    const d = new Date(bar.date + "T00:00:00Z");
+    const dow = d.getUTCDay();
+    const mondayOffset = dow === 0 ? -6 : 1 - dow;
+    const monday = new Date(d);
+    monday.setUTCDate(monday.getUTCDate() + mondayOffset);
+    const key = monday.toISOString().slice(0, 10);
+    const existing = weeks.get(key);
+    if (!existing) {
+      weeks.set(key, { ...bar, date: key });
+    } else {
+      existing.high = Math.max(existing.high, bar.high);
+      existing.low = Math.min(existing.low, bar.low);
+      existing.close = bar.close;
+      existing.volume += bar.volume;
+    }
+  }
+  return [...weeks.values()].sort((a, b) => a.date.localeCompare(b.date));
 }
 
 export async function fmpGetQuote(symbol: string): Promise<FmpQuoteSuccess | FmpActionError> {

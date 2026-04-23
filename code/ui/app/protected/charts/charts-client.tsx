@@ -19,7 +19,7 @@ import {
 } from "@/components/ticker-charts";
 import { ChartAiChat } from "@/components/chart-ai-chat";
 import { AddToScreening } from "@/components/add-to-screening";
-import { ChartDateRangePicker } from "@/components/chart-date-range-picker";
+import { ChartDateRangePicker, type ChartGranularity } from "@/components/chart-date-range-picker";
 
 const DEFAULT_TICKERS = ["SPY", "QQQ", "IWM"] as const;
 
@@ -63,6 +63,7 @@ export function ChartsPageClient({ tickersParam, suggestionTickers }: Props) {
   const [dateRange, setDateRange] = useState<
     { from: string; to: string } | undefined
   >();
+  const [granularity, setGranularity] = useState<ChartGranularity>("1day");
 
   useEffect(() => {
     setChartData([]);
@@ -233,7 +234,7 @@ export function ChartsPageClient({ tickersParam, suggestionTickers }: Props) {
         </p>
       ) : null}
 
-      <ChartDateRangePicker onChange={setDateRange} />
+      <ChartDateRangePicker onChange={setDateRange} onGranularityChange={setGranularity} />
 
       <div
         className="flex items-stretch w-full"
@@ -268,6 +269,7 @@ export function ChartsPageClient({ tickersParam, suggestionTickers }: Props) {
               ) : undefined
             }
             dateRange={dateRange}
+            interval={granularity}
           />
         </div>
 

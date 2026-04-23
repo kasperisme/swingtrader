@@ -2,7 +2,44 @@
 
 import { useEffect, useMemo, useState } from "react";
 
-export type QuickRange = "7d" | "30d" | "90d" | "1y" | "3y" | "custom";
+export type QuickRange = "7d" | "30d" | "90d" | "180d" | "1y" | "3y" | "5y" | "custom";
+
+export type ChartGranularity = "1hour" | "4hour" | "1day" | "1week";
+
+const GRANULARITY_OPTIONS: { value: ChartGranularity; label: string }[] = [
+  { value: "1week", label: "1W" },
+  { value: "1day", label: "1D" },
+  { value: "4hour", label: "4H" },
+  { value: "1hour", label: "1H" },
+];
+
+const RANGE_BY_GRANULARITY: Record<ChartGranularity, { ranges: QuickRange[]; default: QuickRange }> = {
+  "1hour": { ranges: ["7d", "30d", "90d", "180d"], default: "30d" },
+  "4hour": { ranges: ["7d", "30d", "90d", "180d", "1y"], default: "90d" },
+  "1day": { ranges: ["7d", "30d", "90d", "1y", "3y"], default: "1y" },
+  "1week": { ranges: ["30d", "90d", "1y", "3y", "5y"], default: "3y" },
+};
+
+const RANGE_DAYS: Record<Exclude<QuickRange, "custom">, number> = {
+  "7d": 7,
+  "30d": 30,
+  "90d": 90,
+  "180d": 180,
+  "1y": 365,
+  "3y": 365 * 3,
+  "5y": 365 * 5,
+};
+
+const RANGE_LABELS: Record<QuickRange, string> = {
+  "7d": "7d",
+  "30d": "30d",
+  "90d": "90d",
+  "180d": "6m",
+  "1y": "1y",
+  "3y": "3y",
+  "5y": "5y",
+  custom: "custom",
+};
 
 const pad2 = (n: number) => String(n).padStart(2, "0");
 function localDateStr(d: Date) {
@@ -11,20 +48,29 @@ function localDateStr(d: Date) {
 
 interface ChartDateRangePickerProps {
   onChange: (range: { from: string; to: string }) => void;
+  onGranularityChange?: (granularity: ChartGranularity) => void;
   defaultRange?: QuickRange;
+  defaultGranularity?: ChartGranularity;
 }
 
-export function ChartDateRangePicker({ onChange, defaultRange = "1y" }: ChartDateRangePickerProps) {
+export function ChartDateRangePicker({
+  onChange,
+  onGranularityChange,
+  defaultRange = "1y",
+  defaultGranularity = "1day",
+}: ChartDateRangePickerProps) {
   const todayStr = useMemo(() => localDateStr(new Date()), []);
+  const [granularity, setGranularity] = useState<ChartGranularity>(defaultGranularity);
   const [quickRange, setQuickRange] = useState<QuickRange>(defaultRange);
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
 
-  function applyQuickRange(range: QuickRange) {
+  const availableRanges = RANGE_BY_GRANULARITY[granularity].ranges;
+
+  function applyQuickRange(range: QuickRange, emit = true) {
     setQuickRange(range);
     if (range === "custom") return;
-    const days =
-      range === "7d" ? 7 : range === "30d" ? 30 : range === "90d" ? 90 : range === "1y" ? 365 : 365 * 3;
+    const days = RANGE_DAYS[range];
     const end = new Date();
     const start = new Date(end);
     start.setDate(start.getDate() - days);
@@ -32,7 +78,7 @@ export function ChartDateRangePicker({ onChange, defaultRange = "1y" }: ChartDat
     const to = localDateStr(end);
     setDateFrom(from);
     setDateTo(to);
-    onChange({ from, to });
+    if (emit) onChange({ from, to });
   }
 
   useEffect(() => {
@@ -40,12 +86,34 @@ export function ChartDateRangePicker({ onChange, defaultRange = "1y" }: ChartDat
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  useEffect(() => {
+    onGranularityChange?.(granularity);
+  }, [granularity, onGranularityChange]);
+
+  const handleGranularityChange = (g: ChartGranularity) => {
+    const prev = granularity;
+    setGranularity(g);
+
+    const config = RANGE_BY_GRANULARITY[g];
+    if (quickRange === "custom") {
+      if (prev !== g) onChange({ from: dateFrom, to: dateTo });
+      return;
+    }
+
+    const stillAvailable = config.ranges.includes(quickRange as QuickRange);
+    if (stillAvailable) {
+      applyQuickRange(quickRange as QuickRange);
+    } else {
+      applyQuickRange(config.default);
+    }
+  };
+
   return (
     <div className="flex items-stretch rounded-xl border border-border bg-card overflow-x-auto overflow-y-visible">
       <div className="flex items-center px-3 py-2 border-r border-border shrink-0">
         <span className="text-[10px] font-medium text-muted-foreground/60 uppercase tracking-wide">Range</span>
       </div>
-      {(["7d", "30d", "90d", "1y", "3y"] as QuickRange[]).map((r) => (
+      {availableRanges.map((r) => (
         <button
           key={r}
           onClick={() => applyQuickRange(r)}
@@ -53,7 +121,7 @@ export function ChartDateRangePicker({ onChange, defaultRange = "1y" }: ChartDat
             quickRange === r ? "bg-foreground text-background" : "text-muted-foreground hover:text-foreground"
           }`}
         >
-          {r}
+          {RANGE_LABELS[r]}
         </button>
       ))}
       <div className="flex items-center gap-1.5 px-3 py-2 border-r border-border shrink-0">
@@ -81,6 +149,22 @@ export function ChartDateRangePicker({ onChange, defaultRange = "1y" }: ChartDat
           }}
           className="text-[11px] bg-transparent text-foreground focus:outline-none cursor-pointer"
         />
+      </div>
+      <div className="flex items-center px-3 py-2 shrink-0">
+        <span className="text-[10px] font-medium text-muted-foreground/60 uppercase tracking-wide mr-2">Gran</span>
+        {GRANULARITY_OPTIONS.map(({ value, label }) => (
+          <button
+            key={value}
+            onClick={() => handleGranularityChange(value)}
+            className={`text-[11px] px-2.5 py-1 rounded transition-colors cursor-pointer ${
+              granularity === value
+                ? "bg-foreground text-background"
+                : "text-muted-foreground hover:text-foreground"
+            }`}
+          >
+            {label}
+          </button>
+        ))}
       </div>
     </div>
   );

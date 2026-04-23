@@ -49,6 +49,7 @@ import {
   type ClusterTrendRow,
   type DimensionTrendRow,
   type TrendsPeriodRow,
+  type ViewMode as DbViewMode,
 } from "./news-trends-series";
 import type { ArticleImpact } from "./news-trends-types";
 
@@ -83,7 +84,11 @@ const DIM_PALETTE = [
 
 // ── helpers ──────────────────────────────────────────────────────────────────
 
-type ViewMode = "daily" | "hourly";
+type ViewMode = "1hour" | "4hour" | "1day" | "1week";
+
+function isIntradayView(v: ViewMode): boolean {
+  return v === "1hour" || v === "4hour";
+}
 type BenchmarkId = "none" | "sp500" | "nasdaq100";
 type AggregationMode = "period" | "cumulative";
 
@@ -114,7 +119,7 @@ function localDateStr(d: Date): string {
 }
 
 /** X-axis / tooltip: UTC bucket keys → local labels when `utcBuckets`, else legacy local keys. */
-function formatChartAxisTick(value: string, mode: ViewMode, utcBuckets: boolean): string {
+function formatChartAxisTick(value: string, mode: DbViewMode, utcBuckets: boolean): string {
   if (utcBuckets) return formatUtcBucketForDisplay(value, mode);
   if (mode === "hourly") {
     const [datePart, hourPart] = value.split("T");
@@ -312,7 +317,7 @@ function articlesInBucketRange(
   rows: ArticleImpact[],
   startBucket: string,
   endBucket: string,
-  mode: ViewMode,
+  mode: DbViewMode,
   utcChartBuckets: boolean,
 ): ArticleImpact[] {
   const lo = startBucket <= endBucket ? startBucket : endBucket;
@@ -592,7 +597,7 @@ function CustomTooltip({
   payload?: Array<{ name: string; value: number | null; color: string }>;
   label?: string;
   labelMap: Record<string, string>;
-  mode: ViewMode;
+  mode: DbViewMode;
   utcChartBuckets: boolean;
 }) {
   if (!active || !payload?.length) return null;
@@ -727,7 +732,7 @@ function DimensionDrilldown({
   chartData: Array<{ date: string; [key: string]: number | string | null }>;
   maWindow: number;
   latestDimScores: Record<string, number | null>;
-  mode: ViewMode;
+  mode: DbViewMode;
   utcChartBuckets: boolean;
   chartHeight?: number;
   aggregatesLoading?: boolean;
@@ -758,7 +763,6 @@ function DimensionDrilldown({
     });
   }
 
-  // Sort dimensions by latest score (desc)
   const sortedDims = [...dims].sort((a, b) => {
     const sa = latestDimScores[a.key] ?? 0;
     const sb = latestDimScores[b.key] ?? 0;
@@ -766,6 +770,7 @@ function DimensionDrilldown({
   });
 
   const labelMap = Object.fromEntries(dims.map((d) => [d.key, d.label]));
+  const isHourly = mode === "hourly";
 
   return (
     <div
@@ -779,7 +784,7 @@ function DimensionDrilldown({
             {dims.length} dimensions ·{" "}
             {maWindow === 0
               ? "no smoothing"
-              : `${maWindow}${mode === "hourly" ? "h" : "d"} MA`}
+              : `${maWindow}${isHourly ? "h" : "d"} MA`}
           </p>
         </div>
       </div>
@@ -907,15 +912,29 @@ function DimensionDrilldown({
 
 // ── main component ───────────────────────────────────────────────────────────
 
-const MA_OPTIONS: Record<ViewMode, { label: string; value: number }[]> = {
-  daily: [
+const MA_OPTIONS: Record<string, { label: string; value: number }[]> = {
+  "1week": [
+    { label: "Off", value: 0 },
+    { label: "2w", value: 2 },
+    { label: "4w", value: 4 },
+    { label: "8w", value: 8 },
+    { label: "12w", value: 12 },
+  ],
+  "1day": [
     { label: "Off", value: 0 },
     { label: "3d", value: 3 },
     { label: "7d", value: 7 },
     { label: "14d", value: 14 },
     { label: "30d", value: 30 },
   ],
-  hourly: [
+  "4hour": [
+    { label: "Off", value: 0 },
+    { label: "6", value: 2 },
+    { label: "12", value: 3 },
+    { label: "1d", value: 6 },
+    { label: "2d", value: 12 },
+  ],
+  "1hour": [
     { label: "Off", value: 0 },
     { label: "3h", value: 3 },
     { label: "6h", value: 6 },
@@ -924,9 +943,44 @@ const MA_OPTIONS: Record<ViewMode, { label: string; value: number }[]> = {
   ],
 };
 
-const DEFAULT_MA: Record<ViewMode, number> = { daily: 7, hourly: 6 };
+const DEFAULT_MA: Record<string, number> = { "1week": 4, "1day": 7, "4hour": 6, "1hour": 6 };
 
-type QuickRange = "7d" | "30d" | "90d" | "1y" | "custom";
+type QuickRange = "7d" | "30d" | "90d" | "180d" | "1y" | "3y" | "5y" | "custom";
+
+const RANGE_BY_VIEW: Record<string, { ranges: QuickRange[]; default: QuickRange }> = {
+  "1hour": { ranges: ["7d", "30d", "90d", "180d"], default: "30d" },
+  "4hour": { ranges: ["7d", "30d", "90d", "180d", "1y"], default: "90d" },
+  "1day": { ranges: ["7d", "30d", "90d", "1y", "3y"], default: "1y" },
+  "1week": { ranges: ["30d", "90d", "1y", "3y", "5y"], default: "3y" },
+};
+
+const RANGE_DAYS: Record<string, number> = {
+  "7d": 7,
+  "30d": 30,
+  "90d": 90,
+  "180d": 180,
+  "1y": 365,
+  "3y": 365 * 3,
+  "5y": 365 * 5,
+};
+
+const RANGE_LABELS: Record<QuickRange, string> = {
+  "7d": "7d",
+  "30d": "30d",
+  "90d": "90d",
+  "180d": "6m",
+  "1y": "1y",
+  "3y": "3y",
+  "5y": "5y",
+  custom: "custom",
+};
+
+const VIEW_MODE_OPTIONS: { value: ViewMode; label: string }[] = [
+  { value: "1week", label: "1W" },
+  { value: "1day", label: "1D" },
+  { value: "4hour", label: "4H" },
+  { value: "1hour", label: "1H" },
+];
 
 function toDateInputValue(iso: string): string {
   const d = new Date(iso);
@@ -959,11 +1013,13 @@ export function NewsTrendsUI({
   /** True while parent is fetching `news_trends_cluster_hourly_v` after switching to hourly. */
   hourlyClusterLoading?: boolean;
   /** Lazy-load `news_trends_dimension_*_v` when drill-down opens or view mode changes with drill-down open. */
-  onEnsureDimensionAggregates?: (mode: ViewMode) => void;
-  /** Which granularity’s dimension aggregates are currently loading (`false` = idle). */
-  dimensionAggregatesLoading?: false | ViewMode;
+  onEnsureDimensionAggregates?: (mode: DbViewMode) => void;
+  /** Which granularity's dimension aggregates are currently loading (`false` = idle). */
+  dimensionAggregatesLoading?: false | DbViewMode;
 }) {
-  const [viewMode, setViewMode] = useState<ViewMode>("daily");
+  const [viewMode, setViewMode] = useState<ViewMode>("1day");
+  const useDbAggregatesIsDailyEarly = viewMode === "1day" || viewMode === "1week";
+  const dbMode: "daily" | "hourly" = useDbAggregatesIsDailyEarly ? "daily" : "hourly";
   const [maWindow, setMaWindow] = useState(7);
   const [aggregationMode, setAggregationMode] =
     useState<AggregationMode>("period");
@@ -974,13 +1030,13 @@ export function NewsTrendsUI({
 
   useEffect(() => {
     if (!drilldownId) return;
-    onEnsureDimensionAggregates?.(viewMode);
-  }, [drilldownId, viewMode, onEnsureDimensionAggregates]);
+    onEnsureDimensionAggregates?.(dbMode);
+  }, [drilldownId, dbMode, onEnsureDimensionAggregates]);
 
   // Date range filter (local calendar), spanning articles and aggregate buckets
   const allDates = useMemo(() => {
     const fromArticles = articles.map((a) => toDateInputValue(a.published_at));
-    const fromClusters = (rows: ClusterTrendRow[], mode: ViewMode) =>
+    const fromClusters = (rows: ClusterTrendRow[], mode: DbViewMode) =>
       rows
         .map((r) => {
           const raw = mode === "daily" ? r.bucket_day : r.bucket_hour;
@@ -1058,8 +1114,7 @@ export function NewsTrendsUI({
   function applyQuickRange(range: QuickRange) {
     setQuickRange(range);
     if (range === "custom") return;
-    const days =
-      range === "7d" ? 7 : range === "30d" ? 30 : range === "90d" ? 90 : 365;
+    const days = RANGE_DAYS[range] ?? 365;
     const [ey, em, ed] = (maxDate || localDateStr(new Date()))
       .split("-")
       .map(Number);
@@ -1082,12 +1137,17 @@ export function NewsTrendsUI({
 
   function switchMode(mode: ViewMode) {
     setViewMode(mode);
-    setMaWindow((prev) => (prev === 0 ? 0 : DEFAULT_MA[mode]));
-    if (mode === "hourly") {
+    setMaWindow((prev) => (prev === 0 ? 0 : DEFAULT_MA[mode] ?? 7));
+    if (mode === "1hour" || mode === "4hour") {
       onSwitchToHourly?.();
+    }
+    const config = RANGE_BY_VIEW[mode];
+    if (quickRange !== "custom" && !config.ranges.includes(quickRange)) {
+      applyQuickRange(config.default);
     }
   }
 
+  const useDbAggregatesIsDaily = useDbAggregatesIsDailyEarly;
   const useDbAggregates =
     clusterDaily.length > 0 ||
     clusterHourly.length > 0 ||
@@ -1096,16 +1156,16 @@ export function NewsTrendsUI({
 
   const daily = useMemo(() => {
     if (useDbAggregates) {
-      const clusterRows = viewMode === "daily" ? clusterDaily : clusterHourly;
-      const dimRows = viewMode === "daily" ? dimensionDaily : dimensionHourly;
-      const pivoted = pivotTrendAggregates(clusterRows, dimRows, viewMode);
+      const clusterRows = useDbAggregatesIsDaily ? clusterDaily : clusterHourly;
+      const dimRows = useDbAggregatesIsDaily ? dimensionDaily : dimensionHourly;
+      const pivoted = pivotTrendAggregates(clusterRows, dimRows, dbMode);
       const filtered =
         !dateFrom && !dateTo
           ? pivoted
           : pivoted.filter((row) =>
               trendsRowMatchesLocalDateRange(
                 row,
-                viewMode,
+                dbMode,
                 dateFrom || minDate,
                 dateTo || maxDate,
               ),
@@ -1113,17 +1173,20 @@ export function NewsTrendsUI({
       if (filtered.length === 0) return [];
       return fillUtcBucketGaps(
         filtered,
-        viewMode,
+        dbMode,
         filtered[0]!.date,
         filtered[filtered.length - 1]!.date,
       );
     }
-    const raw = buildPeriodDataFromArticlesLocal(filteredArticles, viewMode);
+    const localMode: "daily" | "hourly" = viewMode === "1hour" || viewMode === "4hour" ? "hourly" : "daily";
+    const raw = buildPeriodDataFromArticlesLocal(filteredArticles, localMode);
     const start = dateFrom || minDate;
     const end = dateTo || maxDate;
-    return fillDateGapsLocal(raw, viewMode, start, end);
+    return fillDateGapsLocal(raw, localMode, start, end);
   }, [
     useDbAggregates,
+    useDbAggregatesIsDaily,
+    dbMode,
     viewMode,
     clusterDaily,
     clusterHourly,
@@ -1157,8 +1220,8 @@ export function NewsTrendsUI({
     }
 
     let cancelled = false;
-    const interval = viewMode === "hourly" ? "1hour" : "1day";
-    fmpGetOhlc(symbol, interval)
+    const fmpInterval = viewMode === "1hour" ? "1hour" : viewMode === "4hour" ? "4hour" : viewMode === "1week" ? "1week" : "1day";
+    fmpGetOhlc(symbol, fmpInterval)
       .then((res) => {
         if (!res.ok) throw new Error("Failed benchmark fetch");
         const raw = res.data;
@@ -1218,8 +1281,8 @@ export function NewsTrendsUI({
     >();
     for (const p of benchmarkData) {
       const bucket = useDbAggregates
-        ? benchmarkDateToUtcKey(String(p.date ?? ""), viewMode)
-        : benchmarkDateToLocalChartBucket(String(p.date ?? ""), viewMode);
+        ? benchmarkDateToUtcKey(String(p.date ?? ""), dbMode)
+        : benchmarkDateToLocalChartBucket(String(p.date ?? ""), dbMode);
       if (!bucket) continue;
       if (bucket < startBucket || bucket > endBucket) continue;
       bucketValues.set(bucket, {
@@ -1262,7 +1325,7 @@ export function NewsTrendsUI({
         ] as const;
       }),
     );
-  }, [benchmark, benchmarkData, daily, viewMode, useDbAggregates]);
+  }, [benchmark, benchmarkData, daily, dbMode, useDbAggregates]);
 
   const chartDataWithBenchmark = useMemo(() => {
     if (benchmark === "none" || benchmarkByBucket.size === 0) return chartData;
@@ -1293,7 +1356,7 @@ export function NewsTrendsUI({
   const usSessionMarkers = useMemo(() => {
     if (
       !showUsSessionMarkers ||
-      viewMode !== "hourly" ||
+      (viewMode !== "1hour" && viewMode !== "4hour") ||
       chartDataWithBenchmark.length === 0
     ) {
       return {
@@ -1371,7 +1434,7 @@ export function NewsTrendsUI({
       closeBuckets: Array.from(closeBuckets).sort((a, b) => a.localeCompare(b)),
       sessions: sessions.sort((a, b) => a.start.localeCompare(b.start)),
     };
-  }, [chartDataWithBenchmark, showUsSessionMarkers, viewMode, useDbAggregates]);
+  }, [chartDataWithBenchmark, showUsSessionMarkers, dbMode, useDbAggregates]);
 
   const [articleModalDate, setArticleModalDate] = useState<string | null>(null);
 
@@ -1379,14 +1442,14 @@ export function NewsTrendsUI({
     const map = new Map<string, ArticleImpact[]>();
     for (const a of articles) {
       const bucket = useDbAggregates
-        ? utcBucketFromPublishedAt(a.published_at, viewMode)
-        : articleLocalBucket(a.published_at, viewMode);
+        ? utcBucketFromPublishedAt(a.published_at, dbMode)
+        : articleLocalBucket(a.published_at, dbMode);
       if (!bucket) continue;
       if (!map.has(bucket)) map.set(bucket, []);
       map.get(bucket)!.push(a);
     }
     return map;
-  }, [articles, viewMode, useDbAggregates]);
+  }, [articles, dbMode, useDbAggregates]);
 
   const modalArticles = articleModalDate
     ? (articlesByBucket.get(articleModalDate) ?? [])
@@ -1739,7 +1802,7 @@ export function NewsTrendsUI({
       filteredArticles,
       startBucket,
       endBucket,
-      viewMode,
+      dbMode,
       useDbAggregates,
     )
       .slice()
@@ -1748,7 +1811,7 @@ export function NewsTrendsUI({
           new Date(b.published_at).getTime() -
           new Date(a.published_at).getTime(),
       );
-  }, [periodSelection, visibleChartData, filteredArticles, viewMode, useDbAggregates]);
+  }, [periodSelection, visibleChartData, filteredArticles, dbMode, useDbAggregates]);
 
   const sortedPeriodArticles = useMemo(() => {
     if (periodArticles.length === 0) return periodArticles;
@@ -1856,7 +1919,7 @@ export function NewsTrendsUI({
   );
 
   const awaitingHourlyCluster =
-    hourlyClusterLoading && viewMode === "hourly";
+    hourlyClusterLoading && (viewMode === "1hour" || viewMode === "4hour");
 
   if (
     articles.length === 0 &&
@@ -1880,7 +1943,7 @@ export function NewsTrendsUI({
             Range
           </span>
         </div>
-        {(["7d", "30d", "90d", "1y"] as QuickRange[]).map((r) => (
+        {RANGE_BY_VIEW[viewMode].ranges.map((r) => (
           <button
             key={r}
             onClick={() => applyQuickRange(r)}
@@ -1890,7 +1953,7 @@ export function NewsTrendsUI({
                 : "text-muted-foreground hover:text-foreground"
             }`}
           >
-            {r}
+            {RANGE_LABELS[r]}
           </button>
         ))}
         <div className="flex items-center gap-1.5 px-3 py-2 border-r border-border shrink-0">
@@ -1923,17 +1986,17 @@ export function NewsTrendsUI({
             View
           </span>
           <div className="flex rounded border border-border overflow-hidden">
-            {(["daily", "hourly"] as ViewMode[]).map((mode) => (
+            {VIEW_MODE_OPTIONS.map(({ value, label }) => (
               <button
-                key={mode}
-                onClick={() => switchMode(mode)}
-                className={`text-[11px] px-3 py-1 capitalize transition-colors cursor-pointer ${
-                  viewMode === mode
+                key={value}
+                onClick={() => switchMode(value)}
+                className={`text-[11px] px-3 py-1 transition-colors cursor-pointer ${
+                  viewMode === value
                     ? "bg-foreground text-background"
                     : "text-muted-foreground hover:text-foreground"
                 }`}
               >
-                {mode}
+                {label}
               </button>
             ))}
           </div>
@@ -2052,12 +2115,12 @@ export function NewsTrendsUI({
                     </button>
                     <button
                       onClick={() =>
-                        viewMode === "hourly" &&
+                        isIntradayView(viewMode) &&
                         setShowUsSessionMarkers((v) => !v)
                       }
-                      disabled={viewMode !== "hourly"}
+                      disabled={!isIntradayView(viewMode)}
                       className={`w-full text-left text-[11px] px-2.5 py-1.5 rounded transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed ${
-                        showUsSessionMarkers && viewMode === "hourly"
+                        showUsSessionMarkers && isIntradayView(viewMode)
                           ? "bg-foreground/10 text-foreground"
                           : "text-muted-foreground hover:bg-muted hover:text-foreground"
                       }`}
@@ -2097,7 +2160,7 @@ export function NewsTrendsUI({
                   {maWindow > 0 && (
                     <span className="ml-2 text-[11px] font-normal text-muted-foreground">
                       {maWindow}
-                      {viewMode === "hourly" ? "h" : "d"} MA
+                      {isIntradayView(viewMode) ? "h" : "d"} MA
                     </span>
                   )}
                   {maWindow === 0 && (
@@ -2130,7 +2193,7 @@ export function NewsTrendsUI({
                 </div>
               ) : (
                 <>
-                  {viewMode === "hourly" && showUsSessionMarkers ? (
+                  {isIntradayView(viewMode) && showUsSessionMarkers ? (
                     <div className="pointer-events-none absolute left-2 top-2 z-10 rounded-md border border-border bg-background/90 px-2 py-1 text-[10px] text-muted-foreground shadow-sm">
                       <span className="inline-flex items-center gap-1">
                         <span className="inline-block h-2 w-2 rounded-full bg-[hsl(var(--chart-2))]" />
@@ -2204,7 +2267,7 @@ export function NewsTrendsUI({
                     tick={{ fontSize: 10, fill: "currentColor", opacity: 0.5 }}
                     tickLine={false}
                     tickFormatter={(v: string) =>
-                      formatChartAxisTick(v, viewMode, useDbAggregates)
+                      formatChartAxisTick(v, dbMode, useDbAggregates)
                     }
                     interval="preserveStartEnd"
                   />
@@ -2278,7 +2341,7 @@ export function NewsTrendsUI({
                     content={
                       <CustomTooltip
                         labelMap={clusterLabelMap}
-                        mode={viewMode}
+                        mode={dbMode}
                         utcChartBuckets={useDbAggregates}
                       />
                     }
@@ -2295,7 +2358,7 @@ export function NewsTrendsUI({
                       connectNulls
                     />
                   ) : null}
-                  {viewMode === "hourly" &&
+                  {isIntradayView(viewMode) &&
                     showUsSessionMarkers &&
                     usSessionMarkers.sessions.map((session) => (
                       <ReferenceArea
@@ -2307,7 +2370,7 @@ export function NewsTrendsUI({
                         zIndex={0}
                       />
                     ))}
-                  {viewMode === "hourly" &&
+                  {isIntradayView(viewMode) &&
                     showUsSessionMarkers &&
                     usSessionMarkers.openBuckets.map((bucket) => (
                       <ReferenceLine
@@ -2319,7 +2382,7 @@ export function NewsTrendsUI({
                         strokeWidth={1.4}
                       />
                     ))}
-                  {viewMode === "hourly" &&
+                  {isIntradayView(viewMode) &&
                     showUsSessionMarkers &&
                     usSessionMarkers.closeBuckets.map((bucket) => (
                       <ReferenceLine
@@ -2435,12 +2498,12 @@ export function NewsTrendsUI({
           chartData={dimensionChartData}
           maWindow={maWindow}
           latestDimScores={latestDimScores}
-          mode={viewMode}
+          mode={dbMode}
           utcChartBuckets={useDbAggregates}
           chartHeight={Math.round(chartHeight * 0.65)}
           aggregatesLoading={
             dimensionAggregatesLoading !== false &&
-            dimensionAggregatesLoading === viewMode
+            dimensionAggregatesLoading === dbMode
           }
         />
       )}
@@ -2458,7 +2521,7 @@ export function NewsTrendsUI({
             <div className="flex items-center justify-between px-5 py-4 border-b shrink-0">
               <h2 className="font-semibold text-sm">
                 Articles ·{" "}
-                {formatChartAxisTick(articleModalDate, viewMode, useDbAggregates)}
+                {formatChartAxisTick(articleModalDate, dbMode, useDbAggregates)}
               </h2>
               <span className="text-xs text-muted-foreground mr-auto ml-3">
                 {modalArticles.length} article
@@ -2518,7 +2581,7 @@ export function NewsTrendsUI({
                           Math.min(periodSelection.start, periodSelection.end)
                         ]?.date ?? "",
                       ),
-                      viewMode,
+                      dbMode,
                       useDbAggregates,
                     )}
                     {" → "}
@@ -2528,7 +2591,7 @@ export function NewsTrendsUI({
                           Math.max(periodSelection.start, periodSelection.end)
                         ]?.date ?? "",
                       ),
-                      viewMode,
+                      dbMode,
                       useDbAggregates,
                     )}
                     {" · "}

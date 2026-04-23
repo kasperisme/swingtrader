@@ -64,6 +64,8 @@ export type TickerChartsPanelProps = {
   showChartFrame?: boolean;
   /** Date range to pass to the OHLC fetch (controls initial from/to). */
   dateRange?: { from: string; to: string };
+  /** OHLC granularity: "1hour" | "4hour" | "1day" | "1week". */
+  interval?: string;
 };
 
 export function TickerChartsPanel({
@@ -91,6 +93,7 @@ export function TickerChartsPanel({
   onAnnotationDelete,
   showChartFrame = true,
   dateRange,
+  interval,
 }: TickerChartsPanelProps) {
   const idx = useMemo(() => {
     const i = selectedTicker ? symbols.indexOf(selectedTicker) : -1;
@@ -411,7 +414,7 @@ export function TickerChartsPanel({
         }}
       >
         <CandlestickSvg
-          key={symbol}
+          key={`${symbol}-${interval ?? "1day"}`}
           symbol={symbol}
           onPointChange={setActivePoint}
           entryMarker={entryMarker}
@@ -424,6 +427,7 @@ export function TickerChartsPanel({
           onAnnotationAdd={onAnnotationAdd}
           onAnnotationDelete={onAnnotationDelete}
           dateRange={dateRange}
+          interval={interval}
         />
       </div>
 

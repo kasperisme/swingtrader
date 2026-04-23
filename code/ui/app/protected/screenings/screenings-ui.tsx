@@ -94,7 +94,7 @@ import {
   type ChartAiChatMessage,
 } from "@/app/actions/chart-workspace";
 import { ChartAiChat } from "@/components/chart-ai-chat";
-import { ChartDateRangePicker } from "@/components/chart-date-range-picker";
+import { ChartDateRangePicker, type ChartGranularity } from "@/components/chart-date-range-picker";
 
 export interface ScanRun {
   id: number;
@@ -1838,6 +1838,7 @@ export function ScreeningsUI({
   const [chartDateRange, setChartDateRange] = useState<
     { from: string; to: string } | undefined
   >();
+  const [chartGranularity, setChartGranularity] = useState<ChartGranularity>("1day");
 
   useEffect(() => {
     setChartWorkspaceReady(false);
@@ -3131,7 +3132,7 @@ export function ScreeningsUI({
                 <div className="flex-1 flex flex-col gap-3 w-full min-h-0">
                   <div className="flex-1 flex items-stretch w-full min-h-0">
                     <div className="flex-1 min-w-0">
-                      <ChartDateRangePicker onChange={setChartDateRange} />
+                      <ChartDateRangePicker onChange={setChartDateRange} onGranularityChange={setChartGranularity} />
                       <TickerChartsPanel
                         symbols={chartSymbols}
                         selectedTicker={selectedTicker}
@@ -3164,6 +3165,7 @@ export function ScreeningsUI({
                           )
                         }
                         dateRange={chartDateRange}
+                        interval={chartGranularity}
                       />
                     </div>
                     {selectedTicker && (

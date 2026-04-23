@@ -56,7 +56,12 @@ export function ArticlesSearchPanel({ initialArticles }: { initialArticles: Arti
   const gridArticles = useMemo<ArticleGridItem[]>(() => {
     if (!hasSearched) return initialArticles;
     if (!results.length) return [];
-    return results.map((r) => ({
+    const seen = new Set<number>();
+    return results.filter((r) => {
+      if (seen.has(r.article_id)) return false;
+      seen.add(r.article_id);
+      return true;
+    }).map((r) => ({
       id: r.article_id,
       slug: r.slug ?? null,
       title: r.title ?? null,

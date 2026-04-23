@@ -13,11 +13,12 @@ Prio 1:
 [x] Move articles to own subpage and have protected root be ops center for users
 [x] Make the pricing button on the landing page not redirect to stripe, but to signup page
 [x] Add news trend personas to chart AI that gets company vector and news trend data from supabase
+[x] Ai chat should fill entire height, and be collapsible
 [ ] Implement pricing gates throughout the application and API
 [ ] Implement small prompt support in AI chat. Currently all personas are engaged in every prompt
-[ ] Ai chat should fill entire height, and be collapsible
 [ ] When starting a new prompt, navigating to another chart shouldnt reset the prompt, but it should still execute the prompt
 [ ] Add granularity to chart, and make sure the AI applies the granularity to the prompt
+[ ] The narrative generator fails as too much data is being embedded into the prompt
 
 Prio 2:
 [ ] Make sure IBD screener script runs through API
@@ -28,6 +29,7 @@ Prio 2:
 [ ] Ensure robustness of telegram bots
 [ ] Make sure network graph doesnt update when user selects something in current scope
 [ ] Optimize for mobile
+[ ] In the daily narrative graph, add an AI feature to summerize the narrative in the selected period
 
 Marketing:
 [ ] Set up pricing and early sign up offer
