@@ -11,3 +11,7 @@ psycopg2-binary
 anthropic
 fastmcp
 xdk
+kaleido==0.2.1
+elevenlabs
+matplotlib
+Pillow

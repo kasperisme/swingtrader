@@ -19,8 +19,10 @@ Prio 1:
 [ ] When starting a new prompt, navigating to another chart shouldnt reset the prompt, but it should still execute the prompt
 [ ] Add granularity to chart, and make sure the AI applies the granularity to the prompt
 [ ] The narrative generator fails as too much data is being embedded into the prompt
+[ ] Caching isnt isnt updating correctly (news trends didnt show the last 24 hours)
 
 Prio 2:
+[ ] Refactor analytics scripts to reduce redundancy
 [ ] Make sure IBD screener script runs through API
 [ ] Set up company vector updating
 [ ] Implement anlytical agent in screening sites as well (copy from chart)

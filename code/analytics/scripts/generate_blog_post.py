@@ -278,9 +278,19 @@ def _fmt_dim(dim: str) -> str:
     return dim.replace("_", " ").title()
 
 
-def _fmt_score(score: float) -> str:
-    sign = "+" if score >= 0 else ""
-    return f"{sign}{score:.2f}"
+def _score_tier(score: float) -> str:
+    """Translate a -1..+1 news impact score into human language."""
+    abs_s = abs(score)
+    if abs_s >= 0.6:
+        tier = "strong"
+    elif abs_s >= 0.3:
+        tier = "moderate"
+    elif abs_s >= 0.1:
+        tier = "mild"
+    else:
+        return "neutral"
+    direction = "bullish" if score > 0 else "bearish"
+    return f"{tier} {direction}"
 
 
 # ---------------------------------------------------------------------------
@@ -314,7 +324,7 @@ def _build_prompt(
         tickers = tickers_map.get(a["id"], [])
         ticker_str = ", ".join(tickers) if tickers else "no tickers extracted"
         top = _top_dims(a.get("impact_json") or {}, n=4)
-        dims_str = "\n".join(f"    - {_fmt_dim(d)}: {_fmt_score(s)}" for d, s in top)
+        dims_str = "\n".join(f"    - {_fmt_dim(d)}: {_score_tier(s)}" for d, s in top)
         articles_block += (
             f"\n{i}. **{title}** ({source})\n"
             f"   Tickers: {ticker_str}\n"
@@ -323,7 +333,7 @@ def _build_prompt(
 
     # Aggregate factor moves
     agg = _aggregate_dimensions(articles)[:8]
-    agg_str = "\n".join(f"  - {_fmt_dim(d)}: {_fmt_score(s)} (avg)" for d, s in agg)
+    agg_str = "\n".join(f"  - {_fmt_dim(d)}: {_score_tier(s)}" for d, s in agg)
 
     # Top tickers + company context
     top_tickers = _top_tickers(tickers_map, articles, n=5)
@@ -397,7 +407,7 @@ Write the blog post body. Structure it as:
 
 5. A 1-sentence closing that frames the setup going into {"the open" if mode == "pre-market" else "the close"}.
 
-Use markdown headers (##). Be specific with dimension names. Scores range from -1.0 (very negative impact) to +1.0 (very positive). Keep total length under 500 words.
+Use markdown headers (##). Be specific with dimension names. Describe factor strength in natural language — e.g. "strong bullish tailwind", "moderate bearish headwind", "mild positive lean". Never cite raw numerical scores. Keep total length under 500 words.
 """
     return prompt
 
@@ -697,7 +707,7 @@ def _build_x_thread_prompt(
         ticker_str = " ".join(f"${t}" for t in tickers[:3])
         articles_block += f"\n{i}. {title} {ticker_str}"
 
-    dims_block = "\n".join(f"  {_fmt_dim(d)}: {_fmt_score(s)}" for d, s in agg)
+    dims_block = "\n".join(f"  {_fmt_dim(d)}: {_score_tier(s)}" for d, s in agg)
     ticker_list = ", ".join(f"{i + 1}. ${t}" for i, t in enumerate(top_tickers))
     lead_ticker = f"${top_tickers[0]}" if top_tickers else "the top ticker"
 

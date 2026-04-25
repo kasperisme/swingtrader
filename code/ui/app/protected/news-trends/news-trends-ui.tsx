@@ -507,6 +507,7 @@ function Leaderboard({
       <p className="text-[10px] font-semibold text-muted-foreground/70 uppercase tracking-widest mb-2 px-2">
         {cumulative ? "Cumulative" : maOff ? "Latest" : "MA Score"}
       </p>
+      <div className="grid grid-cols-2 gap-0.5 sm:grid-cols-1">
       {sorted.map(({ cluster, score }) => {
         const color = CLUSTER_COLORS[cluster.id];
         const isSelected = selected.has(cluster.id);
@@ -577,7 +578,8 @@ function Leaderboard({
           </div>
         );
       })}
-      <p className="text-[10px] text-muted-foreground/40 mt-2 px-2 leading-snug">
+      </div>
+      <p className="text-[10px] text-muted-foreground/40 mt-2 px-2 leading-snug hidden sm:block">
         Click to toggle · hover <ChevronRight size={8} className="inline" /> to
         drill
       </p>
@@ -797,7 +799,7 @@ function DimensionDrilldown({
           <span>Loading dimension series…</span>
         </div>
       ) : (
-        <div className="flex gap-6">
+        <div className="flex flex-col gap-4 sm:flex-row sm:gap-6">
         {/* Dimension chart */}
         <div className="flex-1 min-w-0">
           <ResponsiveContainer width="100%" height={chartHeight}>
@@ -863,10 +865,11 @@ function DimensionDrilldown({
         </div>
 
         {/* Dimension scores */}
-        <div className="w-52 shrink-0 flex flex-col gap-1">
+        <div className="w-full sm:w-52 sm:shrink-0 flex flex-col gap-1">
           <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground mb-1">
             Latest Score
           </p>
+          <div className="grid grid-cols-2 gap-0.5 sm:grid-cols-1">
           {sortedDims.map((dim) => {
             const score = latestDimScores[dim.key];
             const isPos = score != null && score > 0.05;
@@ -903,6 +906,7 @@ function DimensionDrilldown({
               </button>
             );
           })}
+          </div>
         </div>
         </div>
       )}
@@ -2147,7 +2151,7 @@ export function NewsTrendsUI({
         </div>
       </div>
 
-      <div className="flex gap-4">
+      <div className="flex flex-col gap-4 sm:flex-row">
         {/* Main cluster chart */}
         <div className="flex-1 min-w-0">
           <div className={showMainChartFrame ? "border rounded-xl p-4" : ""}>
@@ -2475,7 +2479,7 @@ export function NewsTrendsUI({
         </div>
 
         {/* Leaderboard */}
-        <div className="w-52 shrink-0">
+        <div className="w-full sm:w-52 sm:shrink-0">
           <div className="border rounded-xl p-3">
             <Leaderboard
               latest={latestScores}
@@ -2511,11 +2515,11 @@ export function NewsTrendsUI({
       {/* Articles modal */}
       {articleModalDate && (
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
+          className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/50"
           onClick={() => setArticleModalDate(null)}
         >
           <div
-            className="bg-background border rounded-xl shadow-xl w-full max-w-2xl max-h-[80vh] flex flex-col mx-4"
+            className="bg-background border border-b-0 sm:border-b rounded-t-2xl sm:rounded-xl shadow-xl w-full sm:max-w-2xl max-h-[90dvh] sm:max-h-[80vh] flex flex-col sm:mx-4"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="flex items-center justify-between px-5 py-4 border-b shrink-0">
@@ -2558,11 +2562,11 @@ export function NewsTrendsUI({
         periodSelection &&
         visibleChartData.length > 0 && (
           <div
-            className="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
+            className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/50"
             onClick={() => setPeriodZeitgeistOpen(false)}
           >
             <div
-              className="bg-background border rounded-xl shadow-xl w-full max-w-2xl max-h-[80vh] flex flex-col mx-4"
+              className="bg-background border border-b-0 sm:border-b rounded-t-2xl sm:rounded-xl shadow-xl w-full sm:max-w-2xl max-h-[90dvh] sm:max-h-[80vh] flex flex-col sm:mx-4"
               onClick={(e) => e.stopPropagation()}
             >
               <div className="flex items-center justify-between px-5 py-4 border-b shrink-0 gap-3">

@@ -61,6 +61,20 @@ from src.db import get_supabase_client, get_schema  # noqa: E402
 _EASTERN = ZoneInfo("America/New_York")
 logger = logging.getLogger(__name__)
 
+
+def _score_tier(score: float) -> str:
+    """Translate a -1..+1 sentiment score into human language."""
+    abs_s = abs(score)
+    if abs_s >= 0.6:
+        tier = "strong"
+    elif abs_s >= 0.3:
+        tier = "moderate"
+    elif abs_s >= 0.1:
+        tier = "mild"
+    else:
+        return "neutral"
+    return f"{tier} {'bullish' if score > 0 else 'bearish'}"
+
 _TELEGRAM_API = "https://api.telegram.org/bot{token}/{method}"
 _TELEGRAM_MAX_CHARS = 4096  # Telegram hard limit per message
 
@@ -188,7 +202,7 @@ def _narrative_to_telegram(narrative: dict, narrative_date: str) -> str:
             action = item.get("action", "monitor")
             icon = action_icons.get(action, "⚪")
             sentiment = item.get("sentiment", 0)
-            sent_str = f"{sentiment:+.2f}"
+            sent_str = _score_tier(sentiment)
             lines.append(
                 f"{icon} <b>{item.get('ticker','')}</b> {sent_str} — {action.upper()}"
             )

@@ -180,7 +180,6 @@ export function RelationshipNetworkExplorer(
   } | null>(null);
 
   useEffect(() => {
-    if (!fillViewport) return;
     const el = containerRef.current;
     if (!el) return;
     const ro = new ResizeObserver(([entry]) => {
@@ -189,9 +188,9 @@ export function RelationshipNetworkExplorer(
     });
     ro.observe(el);
     return () => ro.disconnect();
-  }, [fillViewport]);
+  }, []);
 
-  const GW = fillViewport ? (dynamicSize?.w ?? 980) : 980;
+  const GW = dynamicSize?.w ?? 980;
   const GH = fillViewport ? (dynamicSize?.h ?? 560) : 560;
   const [sideTab, setSideTab] = useState<
     "overview" | "details" | "vectors" | "sentiment"
@@ -685,7 +684,7 @@ export function RelationshipNetworkExplorer(
                       e.preventDefault();
                       setSelectedRelTypes([...REL_TYPES]);
                     }}
-                    className={`inline-flex cursor-pointer items-center gap-1 rounded border px-1.5 py-0.5 text-[11px] transition-colors ${
+                    className={`inline-flex cursor-pointer items-center gap-1 rounded border px-1.5 py-0.5 min-h-[32px] sm:min-h-0 text-[11px] transition-colors ${
                       active
                         ? "border-foreground/40 text-foreground"
                         : "border-border text-muted-foreground opacity-50 hover:opacity-80"
@@ -757,9 +756,9 @@ export function RelationshipNetworkExplorer(
             <button
               type="button"
               onClick={() => setIsDrawerOpen((prev) => !prev)}
-              className="absolute right-3 top-3 z-40 rounded-md border border-border bg-background px-2.5 py-1 text-xs font-medium text-foreground transition-colors hover:bg-muted"
+              className="absolute right-3 top-3 z-40 rounded-md border border-border bg-background px-2.5 py-1 min-h-[36px] sm:min-h-0 text-xs font-medium text-foreground transition-colors hover:bg-muted"
             >
-              {isDrawerOpen ? "Hide Panel" : "Show Panel"}
+              {isDrawerOpen ? "Hide" : "Details"}
             </button>
             <div
               ref={containerRef}
@@ -796,7 +795,17 @@ export function RelationshipNetworkExplorer(
             </div>
 
             {isDrawerOpen ? (
-              <div className="absolute right-0 top-0 z-30 h-full w-full max-w-[30rem] overflow-y-auto border-l border-border bg-background/95 p-2 backdrop-blur-sm">
+              <>
+                {/* Mobile backdrop — tap to close */}
+                <div
+                  className="sm:hidden fixed inset-0 z-20 bg-black/40"
+                  onClick={() => setIsDrawerOpen(false)}
+                />
+              <div className="fixed sm:absolute bottom-0 left-0 right-0 sm:bottom-auto sm:left-auto sm:right-0 sm:top-0 max-h-[65dvh] sm:max-h-none sm:h-full w-full sm:max-w-[30rem] rounded-t-2xl sm:rounded-none border-t border-border sm:border-t-0 sm:border-l z-30 overflow-y-auto bg-background/95 p-2 backdrop-blur-sm">
+                {/* Drag handle — mobile only */}
+                <div className="sm:hidden flex justify-center pt-1 pb-2">
+                  <div className="w-8 h-1 rounded-full bg-border" />
+                </div>
                 <div className="inline-flex w-fit flex-wrap items-center gap-1 rounded-md bg-muted/60 p-1">
                   <button
                     type="button"
@@ -1485,7 +1494,8 @@ export function RelationshipNetworkExplorer(
                     ) : null}
                   </div>
                 )}
-              </div>
+              </div>{/* end panel */}
+            </>
             ) : null}
           </div>
         </>

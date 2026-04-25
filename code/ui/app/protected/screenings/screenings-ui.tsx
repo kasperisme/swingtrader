@@ -79,6 +79,7 @@ import {
   countScreeningsFilterRules,
 } from "./screenings-filters-model";
 import { TickerSidebar } from "./ticker-sidebar";
+import { MobileTickerBar } from "./mobile-ticker-bar";
 import {
   TickerContextMenu,
   type NoteStatus as ContextMenuNoteStatus,
@@ -460,10 +461,15 @@ function QuotesView({
       )}
       {error && <p className="text-sm text-rose-500">{error}</p>}
       <div className="overflow-x-auto border border-border">
-        <table className="w-full text-sm">
+        <table className="min-w-max w-full text-sm">
           <thead className="bg-muted/40 border-b border-border">
             <tr>
-              <ColHd label="Symbol" col="symbol" />
+              <th
+                onClick={() => toggleSort("symbol")}
+                className={`sticky left-0 z-10 bg-muted/40 px-3 py-2 text-xs font-medium text-muted-foreground uppercase tracking-wide whitespace-nowrap cursor-pointer select-none hover:text-foreground text-left ${sortKey === "symbol" ? "text-foreground" : ""}`}
+              >
+                Symbol{sortKey === "symbol" ? (sortDir === "asc" ? " ↑" : " ↓") : ""}
+              </th>
               <th className="px-3 py-2 text-xs font-medium text-muted-foreground uppercase tracking-wide whitespace-nowrap text-left">
                 Name
               </th>
@@ -518,7 +524,7 @@ function QuotesView({
                   onDoubleClick={() => onOpenWorkflowEditor(sym)}
                   className={`cursor-pointer transition-colors border-l-[3px] ${stripe || "border-l-transparent"} ${isDismissed ? "opacity-40" : ""} ${isHighlighted ? "bg-amber-500/10" : ""} ${isSelected ? "bg-foreground/10 ring-1 ring-inset ring-foreground/20" : "hover:bg-muted/30"}`}
                 >
-                  <td className="px-3 py-2 font-mono font-semibold whitespace-nowrap">
+                  <td className={`sticky left-0 z-10 px-3 py-2 font-mono font-semibold whitespace-nowrap ${isSelected ? "bg-foreground/10" : isHighlighted ? "bg-amber-500/10" : "bg-background"}`}>
                     {sym}
                   </td>
                   <td
@@ -1833,6 +1839,7 @@ export function ScreeningsUI({
     [],
   );
   const [chartAiOpen, setChartAiOpen] = useState(true);
+  const [mobileChatOpen, setMobileChatOpen] = useState(false);
   const [chartWorkspaceReady, setChartWorkspaceReady] = useState(false);
   const chartSaveSeq = useRef(0);
   const [chartDateRange, setChartDateRange] = useState<
@@ -2645,7 +2652,7 @@ export function ScreeningsUI({
     [filtered],
   );
 
-  const { quotes, loading: quotesLoading } = useQuotes(filteredSymbols);
+  const { quotes, loading: quotesLoading } = useQuotes(filteredSymbols.slice(0, 50));
 
   /** Chart carousel includes filtered symbols first, then any pivot-marked tickers not in the current filter so pivots always stay on-chart. */
   const chartSymbols = useMemo(() => {
@@ -2792,7 +2799,7 @@ export function ScreeningsUI({
   }
 
   return (
-    <div className="flex flex-col h-full min-h-0 w-full">
+    <div className="flex flex-col h-full min-h-0 w-full pb-[env(safe-area-inset-bottom,0px)]">
       {/* Collapsible: scan runs + search + filters */}
       <div
         className={`shrink-0 transition-all duration-200 overflow-hidden ${collapsed ? "max-h-0 opacity-0" : "max-h-[2000px] opacity-100"}`}
@@ -2988,114 +2995,122 @@ export function ScreeningsUI({
       </div>
 
       {/* View tabs */}
-      <div className="flex flex-col gap-2 border-b border-border pb-px shrink-0">
-        <div className="flex flex-wrap items-end gap-x-0 gap-y-1">
+      <div className="border-b border-border pb-px shrink-0">
+        <div className="flex items-stretch">
+          {/* Collapse toggle — fixed, not scrollable */}
           {!addFilterOpen && (
-            <>
-              <button
-                type="button"
-                onClick={() => setCollapsed((c) => !c)}
-                className="mr-1 p-1.5 rounded-md border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
-                title={collapsed ? "Show filters" : "Hide filters"}
-              >
-                {collapsed ? (
-                  <ChevronDown className="w-3.5 h-3.5" />
-                ) : (
-                  <ChevronUp className="w-3.5 h-3.5" />
-                )}
-              </button>
-              <div
-                className="flex flex-wrap items-end gap-1 rounded-md bg-muted/30 px-1 pt-1 pb-0"
-                role="group"
-                aria-label="List views — multiple symbols from your filter"
-              >
-                <span className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground px-2 pb-2 shrink-0 max-sm:hidden">
-                  Multi-symbol
-                </span>
-                {multiSymbolViewTabs.map((tab) => (
-                  <button
-                    key={tab.id}
-                    type="button"
-                    onClick={() => setActiveView(tab.id)}
-                    className={`flex items-center gap-1.5 px-3 py-2 text-sm font-medium transition-colors border-b-2 -mb-px rounded-t-md ${
-                      activeView === tab.id
-                        ? "border-foreground text-foreground bg-background"
-                        : "border-transparent text-muted-foreground hover:text-foreground"
-                    }`}
-                  >
-                    {tab.icon}
-                    {tab.label}
-                  </button>
-                ))}
-              </div>
-              <div
-                className="hidden sm:block w-px shrink-0 self-stretch min-h-[2.25rem] bg-border mx-0.5"
-                role="separator"
-                aria-orientation="vertical"
-                aria-hidden
-              />
-              <div
-                className="flex flex-wrap items-end gap-1 rounded-md bg-muted/30 px-1 pt-1 pb-0"
-                role="group"
-                aria-label="Deep dive — one ticker at a time"
-              >
-                <span className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground px-2 pb-2 shrink-0 max-sm:hidden">
-                  Deep dive
-                </span>
-                {deepDiveViewTabs.map((tab) => (
-                  <button
-                    key={tab.id}
-                    type="button"
-                    onClick={() => setActiveView(tab.id)}
-                    className={`flex items-center gap-1.5 px-3 py-2 text-sm font-medium transition-colors border-b-2 -mb-px rounded-t-md ${
-                      activeView === tab.id
-                        ? "border-foreground text-foreground bg-background"
-                        : "border-transparent text-muted-foreground hover:text-foreground"
-                    }`}
-                  >
-                    {tab.icon}
-                    {tab.label}
-                  </button>
-                ))}
-              </div>
-              <div
-                className="hidden sm:block w-px shrink-0 self-stretch min-h-[2.25rem] bg-border mx-0.5"
-                role="separator"
-                aria-orientation="vertical"
-                aria-hidden
-              />
-              <button
-                type="button"
-                disabled={tradeMonitoringDisabled}
-                title={tradeMonitoringTitle}
-                onClick={() => {
-                  if (tradeMonitoringDisabled) return;
-                  setActiveView("tradeMonitoring");
-                }}
-                className={`flex items-center gap-1.5 px-3 py-2 text-sm font-medium transition-colors border-b-2 -mb-px rounded-t-md ${
-                  activeView === "tradeMonitoring"
-                    ? "border-foreground text-foreground bg-muted/30"
-                    : "border-transparent text-muted-foreground hover:text-foreground"
-                } ${tradeMonitoringDisabled ? "opacity-40 cursor-not-allowed hover:text-muted-foreground" : ""}`}
-              >
-                <Activity className="w-3.5 h-3.5" />
-                Trade monitoring
-              </button>
-            </>
+            <button
+              type="button"
+              onClick={() => setCollapsed((c) => !c)}
+              className="shrink-0 self-center mr-1 p-1.5 rounded-md border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+              title={collapsed ? "Show filters" : "Hide filters"}
+            >
+              {collapsed ? (
+                <ChevronDown className="w-3.5 h-3.5" />
+              ) : (
+                <ChevronUp className="w-3.5 h-3.5" />
+              )}
+            </button>
           )}
-          <AddFilterWidget
-            open={addFilterOpen}
-            onOpen={() => setAddFilterOpen(true)}
-            onClose={() => setAddFilterOpen(false)}
-            filters={filters}
-            setFilters={setFilters}
-            noteStageOptions={noteStageOptions}
-            noteTagOptions={noteTagOptions}
-            boolKeys={boolFilterKeys}
-            numKeys={numFilterKeys}
-            categoricalStringCols={categoricalStringCols}
-            freeStringKeys={freeStringKeys}
-          />
+          {/* Scrollable tab strip */}
+          <div className="flex-1 min-w-0 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+            <div className="flex items-end gap-x-0 flex-nowrap min-w-max">
+              {!addFilterOpen && (
+                <>
+                  <div
+                    className="flex items-end gap-1 rounded-md bg-muted/30 px-1 pt-1 pb-0 shrink-0"
+                    role="group"
+                    aria-label="List views — multiple symbols from your filter"
+                  >
+                    <span className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground px-2 pb-2 shrink-0 hidden sm:inline">
+                      Multi-symbol
+                    </span>
+                    {multiSymbolViewTabs.map((tab) => (
+                      <button
+                        key={tab.id}
+                        type="button"
+                        onClick={() => setActiveView(tab.id)}
+                        className={`shrink-0 flex items-center gap-1.5 px-3 py-2 min-h-[44px] sm:min-h-0 sm:py-2 text-sm font-medium transition-colors border-b-2 -mb-px rounded-t-md ${
+                          activeView === tab.id
+                            ? "border-foreground text-foreground bg-background"
+                            : "border-transparent text-muted-foreground hover:text-foreground"
+                        }`}
+                      >
+                        {tab.icon}
+                        <span className="ml-1.5">{tab.label}</span>
+                      </button>
+                    ))}
+                  </div>
+                  <div
+                    className="w-px shrink-0 self-stretch min-h-[2.25rem] bg-border mx-0.5"
+                    role="separator"
+                    aria-orientation="vertical"
+                    aria-hidden
+                  />
+                  <div
+                    className="flex items-end gap-1 rounded-md bg-muted/30 px-1 pt-1 pb-0 shrink-0"
+                    role="group"
+                    aria-label="Deep dive — one ticker at a time"
+                  >
+                    <span className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground px-2 pb-2 shrink-0 hidden sm:inline">
+                      Deep dive
+                    </span>
+                    {deepDiveViewTabs.map((tab) => (
+                      <button
+                        key={tab.id}
+                        type="button"
+                        onClick={() => setActiveView(tab.id)}
+                        className={`shrink-0 flex items-center gap-1.5 px-3 py-2 min-h-[44px] sm:min-h-0 sm:py-2 text-sm font-medium transition-colors border-b-2 -mb-px rounded-t-md ${
+                          activeView === tab.id
+                            ? "border-foreground text-foreground bg-background"
+                            : "border-transparent text-muted-foreground hover:text-foreground"
+                        }`}
+                      >
+                        {tab.icon}
+                        <span className="ml-1.5">{tab.label}</span>
+                      </button>
+                    ))}
+                  </div>
+                  <div
+                    className="w-px shrink-0 self-stretch min-h-[2.25rem] bg-border mx-0.5"
+                    role="separator"
+                    aria-orientation="vertical"
+                    aria-hidden
+                  />
+                  <button
+                    type="button"
+                    disabled={tradeMonitoringDisabled}
+                    title={tradeMonitoringTitle}
+                    onClick={() => {
+                      if (tradeMonitoringDisabled) return;
+                      setActiveView("tradeMonitoring");
+                    }}
+                    className={`shrink-0 flex items-center gap-1.5 px-3 py-2 min-h-[44px] sm:min-h-0 sm:py-2 text-sm font-medium transition-colors border-b-2 -mb-px rounded-t-md ${
+                      activeView === "tradeMonitoring"
+                        ? "border-foreground text-foreground bg-muted/30"
+                        : "border-transparent text-muted-foreground hover:text-foreground"
+                    } ${tradeMonitoringDisabled ? "opacity-40 cursor-not-allowed hover:text-muted-foreground" : ""}`}
+                  >
+                    <Activity className="w-3.5 h-3.5" />
+                    <span className="ml-1.5">Trades</span>
+                  </button>
+                </>
+              )}
+              <AddFilterWidget
+                open={addFilterOpen}
+                onOpen={() => setAddFilterOpen(true)}
+                onClose={() => setAddFilterOpen(false)}
+                filters={filters}
+                setFilters={setFilters}
+                noteStageOptions={noteStageOptions}
+                noteTagOptions={noteTagOptions}
+                boolKeys={boolFilterKeys}
+                numKeys={numFilterKeys}
+                categoricalStringCols={categoricalStringCols}
+                freeStringKeys={freeStringKeys}
+              />
+            </div>
+          </div>
         </div>
       </div>
 
@@ -3110,7 +3125,18 @@ export function ScreeningsUI({
               : "Select a scan run to view results."}
           </div>
         ) : isDeepDiveView(activeView) && filteredSymbols.length > 0 ? (
-          <div className="flex h-full min-h-0 gap-0">
+          <div className="flex flex-col h-full min-h-0">
+            {/* Mobile ticker nav bar — hidden on sm+ */}
+            <MobileTickerBar
+              symbols={filteredSymbols}
+              selectedTicker={selectedTicker}
+              onSelect={setSelectedTicker}
+              quotes={quotes}
+              getStatus={getTickerStatus}
+              dismissedSymbols={dismissedSymbols}
+              highlightedSymbols={highlightedSymbols}
+            />
+            <div className="flex flex-1 min-h-0 gap-0">
             <div className="hidden sm:flex sm:flex-col w-56 shrink-0 xl:w-64 border-r border-border h-full">
               <TickerSidebar
                 symbols={filteredSymbols}
@@ -3170,10 +3196,11 @@ export function ScreeningsUI({
                     </div>
                     {selectedTicker && (
                       <>
+                        {/* Desktop: collapsible sidebar toggle + panel */}
                         <button
                           type="button"
                           onClick={() => setChartAiOpen((v) => !v)}
-                          className="flex items-center justify-center w-5 shrink-0 border-l border-border bg-background hover:bg-muted transition-colors"
+                          className="hidden sm:flex items-center justify-center w-5 shrink-0 border-l border-border bg-background hover:bg-muted transition-colors"
                           title={
                             chartAiOpen ? "Collapse AI chat" : "Expand AI chat"
                           }
@@ -3185,7 +3212,7 @@ export function ScreeningsUI({
                           )}
                         </button>
                         {chartAiOpen && (
-                          <div className="w-[320px] shrink-0 flex flex-col border-l border-border">
+                          <div className="hidden sm:flex w-[320px] shrink-0 flex-col border-l border-border">
                             <ChartAiChat
                               key={selectedTicker}
                               symbol={selectedTicker}
@@ -3194,36 +3221,83 @@ export function ScreeningsUI({
                               onAnnotations={handleChartAiAnnotations}
                               messages={chartAiMessages}
                               setMessages={setChartAiMessages}
-                              onSaveEntry={(
-                                price,
-                                direction,
-                                takeProfit,
-                                stopLoss,
-                              ) => {
+                              onSaveEntry={(price, direction, takeProfit, stopLoss) => {
                                 const ohlc = ohlcvDataRef.current;
                                 const lastIdx = ohlc.length - 1;
                                 const last = ohlc[lastIdx];
                                 if (!last) return;
                                 void setTickerEntryMarker(
                                   selectedTicker,
-                                  {
-                                    barIdx: lastIdx,
-                                    date: last.date,
-                                    price,
-                                    open: last.open,
-                                    high: last.high,
-                                    low: last.low,
-                                    close: last.close,
-                                  },
-                                  direction,
-                                  takeProfit,
-                                  stopLoss,
+                                  { barIdx: lastIdx, date: last.date, price, open: last.open, high: last.high, low: last.low, close: last.close },
+                                  direction, takeProfit, stopLoss,
                                 );
                               }}
                               side
                             />
                           </div>
                         )}
+
+                        {/* Mobile: FAB + bottom sheet */}
+                        <button
+                          type="button"
+                          onClick={() => setMobileChatOpen(true)}
+                          className={`sm:hidden fixed bottom-6 right-4 z-30 flex items-center justify-center w-14 h-14 rounded-full shadow-lg border border-border transition-colors ${chartAiMessages.length > 0 ? "bg-foreground text-background" : "bg-background text-foreground hover:bg-muted"}`}
+                          style={{ bottom: "calc(1.5rem + env(safe-area-inset-bottom, 0px))" }}
+                          aria-label="Open AI chat"
+                        >
+                          <Bot className="w-6 h-6" />
+                          {chartAiMessages.length > 0 && (
+                            <span className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-emerald-500 border-2 border-background" />
+                          )}
+                        </button>
+
+                        {mobileChatOpen && (
+                          <div
+                            className="sm:hidden fixed inset-0 z-40 bg-black/50"
+                            onClick={() => setMobileChatOpen(false)}
+                          />
+                        )}
+                        <div
+                          className={`sm:hidden fixed inset-x-0 bottom-0 z-50 bg-background border-t border-border rounded-t-2xl shadow-2xl flex flex-col transition-transform duration-300 ease-out ${mobileChatOpen ? "translate-y-0" : "translate-y-full"}`}
+                          style={{ height: "88dvh" }}
+                        >
+                          <div className="flex items-center justify-center pt-2.5 pb-1 shrink-0">
+                            <div className="w-10 h-1 rounded-full bg-border" />
+                          </div>
+                          <div className="flex items-center justify-between px-4 py-2 border-b border-border shrink-0">
+                            <span className="font-mono font-bold text-sm">{selectedTicker}</span>
+                            <button
+                              type="button"
+                              onClick={() => setMobileChatOpen(false)}
+                              className="flex items-center justify-center w-8 h-8 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+                              aria-label="Close chat"
+                            >
+                              <ChevronDown className="w-4 h-4" />
+                            </button>
+                          </div>
+                          <div className="flex-1 min-h-0 overflow-hidden">
+                            <ChartAiChat
+                              key={`mobile-${selectedTicker}`}
+                              symbol={selectedTicker}
+                              ohlcData={ohlcvDataRef.current}
+                              annotations={chartAnnotations}
+                              onAnnotations={handleChartAiAnnotations}
+                              messages={chartAiMessages}
+                              setMessages={setChartAiMessages}
+                              onSaveEntry={(price, direction, takeProfit, stopLoss) => {
+                                const ohlc = ohlcvDataRef.current;
+                                const lastIdx = ohlc.length - 1;
+                                const last = ohlc[lastIdx];
+                                if (!last) return;
+                                void setTickerEntryMarker(
+                                  selectedTicker,
+                                  { barIdx: lastIdx, date: last.date, price, open: last.open, high: last.high, low: last.low, close: last.close },
+                                  direction, takeProfit, stopLoss,
+                                );
+                              }}
+                            />
+                          </div>
+                        </div>
                       </>
                     )}
                   </div>
@@ -3259,6 +3333,7 @@ export function ScreeningsUI({
                 />
               )}
             </div>
+            </div>
           </div>
         ) : activeView === "results" ? (
           <>
@@ -3268,10 +3343,15 @@ export function ScreeningsUI({
               </div>
             ) : (
               <div className="overflow-x-auto border border-border">
-                <table className="w-full text-sm">
+                <table className="min-w-max w-full text-sm">
                   <thead className="bg-muted/40 border-b border-border">
                     <tr>
-                      <Th col="symbol">Symbol</Th>
+                      <th
+                        className="sticky left-0 z-10 bg-muted/40 px-3 py-2 text-xs font-medium text-muted-foreground uppercase tracking-wide cursor-pointer select-none hover:text-foreground text-left whitespace-nowrap"
+                        onClick={() => toggleSort("symbol")}
+                      >
+                        Symbol<SortIcon col="symbol" />
+                      </th>
                       {dataColumnKeys.map((k) => {
                         const boolCol = isBooleanColumn(rows, k);
                         return (
@@ -3335,7 +3415,7 @@ export function ScreeningsUI({
                           }
                           className={`group cursor-pointer transition-colors border-l-[3px] ${stripe || "border-l-transparent"} ${isDismissed ? "opacity-40" : ""} ${isHighlighted ? "bg-amber-500/10" : ""} ${isSelected ? "bg-foreground/10 ring-1 ring-inset ring-foreground/20" : "hover:bg-muted/30"}`}
                         >
-                          <td className="px-3 py-2 font-mono font-semibold whitespace-nowrap">
+                          <td className={`sticky left-0 z-10 px-3 py-2 font-mono font-semibold whitespace-nowrap ${isSelected ? "bg-foreground/10" : isHighlighted ? "bg-amber-500/10" : "bg-background"}`}>
                             {row.symbol ?? "—"}
                           </td>
                           {dataColumnKeys.map((k) => {

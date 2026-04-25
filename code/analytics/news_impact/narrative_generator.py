@@ -134,6 +134,21 @@ def _normalize_ticker(ticker: Any) -> str:
     return str(ticker or "").upper().strip()
 
 
+def _score_tier(score: float) -> str:
+    """Translate a -1..+1 sentiment score into human language for LLM context."""
+    abs_s = abs(score)
+    if abs_s >= 0.6:
+        tier = "strong"
+    elif abs_s >= 0.3:
+        tier = "moderate"
+    elif abs_s >= 0.1:
+        tier = "mild"
+    else:
+        return "neutral"
+    direction = "bullish" if score > 0 else "bearish"
+    return f"{tier} {direction}"
+
+
 def _fetch_relationship_edges(conn, lookback_days: int) -> list[RelationshipEdge]:
     """
     Load canonicalized graph edges from ticker_relationship_network_resolved_v.
@@ -962,7 +977,7 @@ def _build_news_block(
                 break
             total += 1
             ts = item.published_at.strftime("%H:%M") if item.published_at else "?"
-            score_str = f"{item.sentiment_score:+.2f}" if item.sentiment_score else " 0.00"
+            score_str = _score_tier(item.sentiment_score) if item.sentiment_score else "neutral"
             lines.append(
                 f"    article_id={item.article_id} | {ts} sentiment={score_str} | {item.title[:100]}"
             )
@@ -1006,7 +1021,7 @@ def _build_related_news_block(
                 break
             total += 1
             ts = item.published_at.strftime("%H:%M") if item.published_at else "?"
-            score_str = f"{item.sentiment_score:+.2f}" if item.sentiment_score else " 0.00"
+            score_str = _score_tier(item.sentiment_score) if item.sentiment_score else "neutral"
             lines.append(
                 f"    article_id={item.article_id} | {ts} sentiment={score_str} | {item.title[:100]}"
             )
