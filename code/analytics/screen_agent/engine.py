@@ -33,6 +33,7 @@ from .data_queries import (
     get_user_alerts,
     get_user_screening_notes,
     search_news,
+    get_ticker_news,
 )
 
 log = logging.getLogger(__name__)
@@ -81,6 +82,11 @@ get_company_vectors(tickers: list[str])
 search_news(query: str, lookback_hours: int = 24, tickers: list[str] | None = None, limit: int = 12)
   Semantic search over news articles using vector similarity. Good for \
   finding macro themes or topic-specific articles.
+
+get_ticker_news(tickers: list[str], hours: int = 24, per_ticker_limit: int = 5)
+  Per-ticker articles with sentiment scores and relationship annotations. \
+  Returns {ticker, article_id, title, url, published_at, sentiment_score, \
+  sentiment_reason, relationships}. Resolves ticker aliases automatically.
 
 ### User-specific tools (scoped to this user's portfolio)
 get_user_positions()
@@ -157,6 +163,7 @@ _TOOL_MAP = {
     "get_top_articles": get_top_articles,
     "get_ticker_relationships": get_ticker_relationships,
     "get_company_vectors": get_company_vectors,
+    "get_ticker_news": get_ticker_news,
 }
 
 _TOOL_MAP_USER = {
@@ -293,6 +300,22 @@ _TOOL_SCHEMAS = [
             },
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_ticker_news",
+            "description": "Per-ticker articles with sentiment scores and relationship annotations. Resolves ticker aliases. Use for portfolio/watchlist news analysis.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "tickers": {"type": "array", "items": {"type": "string"}, "description": "Ticker symbols to fetch news for"},
+                    "hours": {"type": "integer", "description": "Lookback hours", "default": 24},
+                    "per_ticker_limit": {"type": "integer", "description": "Max articles per ticker", "default": 5},
+                },
+                "required": ["tickers"],
+            },
+        },
+    },
 ]
 
 _MAX_TOOL_ROUNDS = 10
@@ -402,13 +425,14 @@ def _format_telegram_alert(name: str, summary: str) -> str:
 
 # ── Run + persist ───────────────────────────────────────────────────────────
 
-def run_screening(screening: dict, dry_run: bool = False) -> dict:
+def run_screening(screening: dict, dry_run: bool = False, is_test: bool = False) -> dict:
     """Run a single screening. Returns the result dict (not yet persisted)."""
     result = run_agent(screening["prompt"], user_id=screening.get("user_id"))
     result["screening_id"] = screening["id"]
     result["user_id"] = screening.get("user_id")
     result["name"] = screening.get("name", "Screening")
     result["dry_run"] = dry_run
+    result["is_test"] = is_test
     return result
 
 
@@ -418,6 +442,7 @@ def persist_and_deliver(result: dict) -> None:
     schema = get_schema()
     now = datetime.now(timezone.utc).isoformat()
 
+    is_test = bool(result.get("is_test"))
     triggered = bool(result.get("triggered"))
     row = {
         "screening_id": result["screening_id"],
@@ -426,6 +451,7 @@ def persist_and_deliver(result: dict) -> None:
         "triggered": triggered,
         "summary": result.get("summary"),
         "data_used": result.get("data_used", {}),
+        "is_test": is_test,
         "delivered": False,
     }
     try:
@@ -434,10 +460,16 @@ def persist_and_deliver(result: dict) -> None:
         log.error("Failed to persist screening result: %s", exc)
         return
 
-    client.schema(schema).table("user_scheduled_screenings").update({
+    update_fields: dict[str, Any] = {
         "last_run_at": now,
         "last_triggered": triggered,
-    }).eq("id", result["screening_id"]).execute()
+    }
+    if is_test:
+        update_fields["run_requested_at"] = None
+
+    client.schema(schema).table("user_scheduled_screenings").update(
+        update_fields,
+    ).eq("id", result["screening_id"]).execute()
 
     if not triggered:
         return
@@ -464,95 +496,3 @@ def persist_and_deliver(result: dict) -> None:
         client.schema(schema).table("user_screening_results").update(
             {"delivered": True},
         ).eq("screening_id", result["screening_id"]).eq("run_at", now).execute()
-
-
-# ── Cron matching ───────────────────────────────────────────────────────────
-
-def _is_due(schedule: str, tz_name: str) -> bool:
-    """Simple cron match: check if the current time matches the schedule."""
-    from zoneinfo import ZoneInfo
-
-    try:
-        parts = schedule.strip().split()
-        if len(parts) != 5:
-            return True
-        minute_s, hour_s, dom_s, month_s, dow_s = parts
-        tz = ZoneInfo(tz_name)
-        now = datetime.now(tz)
-        if not _cron_field_matches(minute_s, now.minute, 0, 59):
-            return False
-        if not _cron_field_matches(hour_s, now.hour, 0, 23):
-            return False
-        if not _cron_field_matches(dom_s, now.day, 1, 31):
-            return False
-        if not _cron_field_matches(month_s, now.month, 1, 12):
-            return False
-        dow = now.isoweekday() % 7
-        if not _cron_field_matches(dow_s, dow, 0, 6):
-            return False
-        return True
-    except Exception:
-        return True
-
-
-def _cron_field_matches(field: str, value: int, lo: int, hi: int) -> bool:
-    if field == "*":
-        return True
-    for part in field.split(","):
-        if "/" in part:
-            base, step = part.split("/", 1)
-            step = int(step)
-            start = lo if base == "*" else int(base)
-            if (value - start) % step == 0:
-                return True
-        elif "-" in part:
-            a, b = part.split("-", 1)
-            if int(a) <= value <= int(b):
-                return True
-        else:
-            if value == int(part):
-                return True
-    return False
-
-
-# ── Master runner ───────────────────────────────────────────────────────────
-
-def run_all_due(dry_run: bool = False) -> list[dict]:
-    """Run all active screenings whose schedule matches the current time."""
-    client = get_supabase_client()
-    schema = get_schema()
-
-    res = (
-        client.schema(schema)
-        .table("user_scheduled_screenings")
-        .select("*")
-        .eq("is_active", True)
-        .execute()
-    )
-    screenings = res.data or []
-    log.info("Found %d active screenings", len(screenings))
-
-    results = []
-    for s in screenings:
-        if not _is_due(s.get("schedule", "* * * * *"), s.get("timezone", "UTC")):
-            continue
-        log.info("Running screening: %s (%s)", s.get("name"), s["id"])
-        try:
-            result = run_screening(s, dry_run=dry_run)
-            if not dry_run:
-                persist_and_deliver(result)
-            results.append(result)
-        except Exception as exc:
-            log.error("Screening %s failed: %s", s["id"], exc)
-            results.append({
-                "screening_id": s["id"],
-                "user_id": s["user_id"],
-                "name": s.get("name"),
-                "triggered": False,
-                "summary": None,
-                "error": str(exc),
-            })
-
-    triggered = sum(1 for r in results if r.get("triggered"))
-    log.info("Ran %d screenings, %d triggered", len(results), triggered)
-    return results

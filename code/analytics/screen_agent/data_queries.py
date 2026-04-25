@@ -362,3 +362,173 @@ def search_news(
         limit=limit,
     )
     return results
+
+
+def get_ticker_news(
+    tickers: list[str],
+    hours: int = 24,
+    per_ticker_limit: int = 5,
+) -> list[dict[str, Any]]:
+    """Per-ticker articles with sentiment scores and relationship annotations.
+
+    Fetches articles mentioning the given tickers (resolving aliases via
+    security_identity_map), then enriches each article with TICKER_SENTIMENT
+    scores and TICKER_RELATIONSHIPS from news_impact_heads.
+
+    Returns list of {ticker, article_id, title, url, published_at,
+                     sentiment_score, sentiment_reason, relationships}.
+    """
+    from src.db import get_pg_connection
+
+    if not tickers:
+        return []
+
+    normalized = list(dict.fromkeys(t.upper().strip() for t in tickers if t and t.strip()))
+    if not normalized:
+        return []
+
+    schema = get_schema()
+    conn = get_pg_connection()
+    try:
+        cur = conn.cursor()
+
+        alias_sql = f"""
+            SELECT alias_value_norm, canonical_ticker
+            FROM {schema}.security_identity_map
+            WHERE alias_kind = 'ticker'
+              AND (canonical_ticker = ANY(%s) OR alias_value_norm = ANY(%s))
+            ORDER BY verified DESC, confidence DESC, id ASC
+        """
+        alias_norms = [t.lower() for t in normalized]
+        cur.execute(alias_sql, (normalized, alias_norms))
+        alias_rows = cur.fetchall() or []
+
+        alias_to_canonical: dict[str, str] = {}
+        for alias_norm, canonical in alias_rows:
+            key = str(alias_norm).upper().strip()
+            canon = str(canonical).upper().strip()
+            if key and canon:
+                alias_to_canonical.setdefault(key, canon)
+        for t in normalized:
+            alias_to_canonical.setdefault(t, t)
+
+        all_query_tickers = list(alias_to_canonical.keys())
+
+        since = datetime.now(timezone.utc) - timedelta(hours=hours)
+        max_articles = per_ticker_limit * len(normalized)
+
+        cur.execute(
+            f"""
+            SELECT
+                nat.ticker,
+                na.id            AS article_id,
+                na.title,
+                na.url,
+                na.published_at
+            FROM {schema}.news_article_tickers nat
+            JOIN {schema}.news_articles na ON na.id = nat.article_id
+            WHERE nat.ticker = ANY(%s)
+              AND COALESCE(na.published_at, na.created_at) >= %s
+            ORDER BY nat.ticker, COALESCE(na.published_at, na.created_at) DESC
+            LIMIT %s
+            """,
+            (all_query_tickers, since, max_articles),
+        )
+        article_rows = cur.fetchall() or []
+
+        article_ids = list({r[1] for r in article_rows})
+        if not article_ids:
+            return []
+
+        cur.execute(
+            f"""
+            SELECT article_id, scores_json, reasoning_json
+            FROM {schema}.news_impact_heads
+            WHERE article_id = ANY(%s)
+              AND cluster = 'TICKER_SENTIMENT'
+            """,
+            (article_ids,),
+        )
+        sentiment_by_article: dict[int, tuple[dict, dict]] = {}
+        for row in (cur.fetchall() or []):
+            sentiment_by_article[row[0]] = (
+                row[1] if isinstance(row[1], dict) else {},
+                row[2] if isinstance(row[2], dict) else {},
+            )
+
+        cur.execute(
+            f"""
+            SELECT article_id, scores_json, reasoning_json
+            FROM {schema}.news_impact_heads
+            WHERE article_id = ANY(%s)
+              AND cluster = 'TICKER_RELATIONSHIPS'
+            """,
+            (article_ids,),
+        )
+        relationships_by_article: dict[int, list[dict]] = {}
+        for row in (cur.fetchall() or []):
+            rel_scores = row[1] if isinstance(row[1], dict) else {}
+            rel_reasoning = row[2] if isinstance(row[2], dict) else {}
+            parsed = []
+            for key, strength in rel_scores.items():
+                parts = str(key).split("__")
+                if len(parts) == 3:
+                    parsed.append({
+                        "from": parts[0],
+                        "to": parts[1],
+                        "type": parts[2],
+                        "strength": strength,
+                        "notes": rel_reasoning.get(key, ""),
+                    })
+            relationships_by_article[row[0]] = parsed
+
+        out: list[dict[str, Any]] = []
+        seen: set[tuple[str, int]] = set()
+
+        for raw_ticker, article_id, title, url, published_at in article_rows:
+            norm = raw_ticker.upper().strip()
+            canonical = alias_to_canonical.get(norm, norm)
+
+            key = (canonical, article_id)
+            if key in seen:
+                continue
+            seen.add(key)
+
+            scores, reasons = sentiment_by_article.get(article_id, ({}, {}))
+            canon_upper = canonical.upper()
+            alias_upper = norm.upper()
+            sentiment_score = float(
+                scores.get(canon_upper) or scores.get(alias_upper) or 0.0
+            )
+            sentiment_reason = str(reasons.get(canon_upper) or reasons.get(alias_upper) or "")
+
+            all_rels = relationships_by_article.get(article_id, [])
+            relevant_rels = [
+                r for r in all_rels
+                if r["from"] in (canon_upper, alias_upper)
+                or r["to"] in (canon_upper, alias_upper)
+            ]
+
+            out.append({
+                "ticker": canonical,
+                "article_id": article_id,
+                "title": title or "",
+                "url": url or "",
+                "published_at": published_at.isoformat() if published_at else None,
+                "sentiment_score": sentiment_score,
+                "sentiment_reason": sentiment_reason,
+                "relationships": relevant_rels,
+            })
+
+        per_ticker: dict[str, list] = {}
+        for item in out:
+            per_ticker.setdefault(item["ticker"], []).append(item)
+
+        flat: list[dict[str, Any]] = []
+        for t in normalized:
+            items = per_ticker.get(t, [])
+            items.sort(key=lambda x: x.get("published_at") or "", reverse=True)
+            flat.extend(items[:per_ticker_limit])
+        return flat
+    finally:
+        conn.close()

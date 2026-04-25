@@ -70,6 +70,20 @@ The caveman/businessman toggle is global (localStorage-backed via `lib/caveman-m
 | `ui-ux-pro-max` | Designing or reviewing UI components, layouts, styles |
 | `taste-skill` | Building any UI — enforces premium design standards, kills generic AI patterns |
 
+## Scheduled Screenings (Agent)
+
+See `.openclaw/skills/screen-agent/SKILL.md` for full setup docs.
+
+Architecture: OpenClaw handles scheduling (one sync cron + per-screening jobs), Python handles execution (LLM agent loop + data tools + Telegram delivery).
+
+Key files:
+- `code/analytics/screen_agent/engine.py` — LLM agent loop, 11 data tools, Telegram delivery
+- `code/analytics/screen_agent/data_queries.py` — Supabase query wrappers (market-wide + user-specific)
+- `code/analytics/screen_agent/sync_crons.py` — Reconciles Supabase screenings with OpenClaw cron jobs
+- `code/analytics/screen_agent/cli.py` — CLI: `run <id>`, `sync`
+- `code/ui/app/actions/screenings-agent.ts` — Server actions + plan gates
+- `code/ui/app/protected/agents/` — UI for managing agents
+
 ## Sanity Studio
 
 Mounted at `/studio`. Use Vision tool for GROQ queries.

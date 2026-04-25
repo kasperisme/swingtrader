@@ -19,6 +19,7 @@ CREATE TABLE IF NOT EXISTS swingtrader.user_scheduled_screenings (
     schedule        TEXT        NOT NULL DEFAULT '0 7 * * 1-5',
     timezone        TEXT        NOT NULL DEFAULT 'America/New_York',
     is_active       BOOLEAN     NOT NULL DEFAULT TRUE,
+    run_requested_at TIMESTAMPTZ,
     last_run_at     TIMESTAMPTZ,
     last_triggered  BOOLEAN,
     created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -30,6 +31,10 @@ CREATE INDEX IF NOT EXISTS idx_scheduled_screenings_user
 
 CREATE INDEX IF NOT EXISTS idx_scheduled_screenings_active
     ON swingtrader.user_scheduled_screenings (is_active) WHERE is_active = TRUE;
+
+CREATE INDEX IF NOT EXISTS idx_scheduled_screenings_requested
+    ON swingtrader.user_scheduled_screenings (run_requested_at)
+    WHERE run_requested_at IS NOT NULL;
 
 CREATE OR REPLACE FUNCTION swingtrader.touch_scheduled_screenings_updated_at()
 RETURNS trigger LANGUAGE plpgsql AS $$
@@ -72,6 +77,7 @@ CREATE TABLE IF NOT EXISTS swingtrader.user_screening_results (
     triggered       BOOLEAN     NOT NULL DEFAULT FALSE,
     summary         TEXT,
     data_used       JSONB,
+    is_test         BOOLEAN     NOT NULL DEFAULT FALSE,
     delivered       BOOLEAN     NOT NULL DEFAULT FALSE,
     created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );

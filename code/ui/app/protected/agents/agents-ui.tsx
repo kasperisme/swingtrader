@@ -1,12 +1,15 @@
 "use client";
 
 import { useState } from "react";
-import { Bot, Pause, Play, Trash2, Plus, Clock, AlertCircle } from "lucide-react";
+import { Bot, Pause, Play, Trash2, Plus, Clock, AlertCircle, Zap, Loader2 } from "lucide-react";
 import {
   type ScheduledScreening,
+  type ScreeningResult,
   createScheduledScreening,
   toggleScreening,
   deleteScheduledScreening,
+  testRunScreening,
+  pollTestResult,
 } from "@/app/actions/screenings-agent";
 
 type Props = {
@@ -211,6 +214,9 @@ function CreateForm({ onClose, atLimit }: { onClose: () => void; atLimit: boolea
 function AgentCard({ screening }: { screening: ScheduledScreening }) {
   const [toggling, setToggling] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [testing, setTesting] = useState(false);
+  const [testResult, setTestResult] = useState<ScreeningResult | null>(null);
+  const [testError, setTestError] = useState<string | null>(null);
 
   async function handleToggle() {
     setToggling(true);
@@ -225,12 +231,45 @@ function AgentCard({ screening }: { screening: ScheduledScreening }) {
     window.location.reload();
   }
 
+  async function handleTestRun() {
+    setTesting(true);
+    setTestResult(null);
+    setTestError(null);
+
+    const req = await testRunScreening(screening.id);
+    if (!req.ok) {
+      setTestError(req.error);
+      setTesting(false);
+      return;
+    }
+
+    const deadline = Date.now() + 3 * 60 * 1000;
+    while (Date.now() < deadline) {
+      await new Promise((r) => setTimeout(r, 3000));
+      const poll = await pollTestResult(screening.id);
+      if (!poll.ok) continue;
+      if (poll.data) {
+        const runAt = new Date(poll.data.run_at).getTime();
+        const requestedAt = screening.run_requested_at
+          ? new Date(screening.run_requested_at).getTime()
+          : 0;
+        if (runAt > Date.now() - 3 * 60 * 1000) {
+          setTestResult(poll.data);
+          setTesting(false);
+          return;
+        }
+      }
+    }
+
+    setTestError("Timed out waiting for result — the Mac Mini agent may not be running.");
+    setTesting(false);
+  }
+
   const preset = SCHEDULE_PRESETS.find((p) => p.cron === screening.schedule);
 
   return (
     <div className={`rounded-2xl border bg-card transition-opacity ${deleting ? "opacity-50 pointer-events-none" : "border-border"}`}>
       <div className="flex items-start gap-3 px-5 py-4">
-        {/* Status dot */}
         <div className={`mt-1 w-2 h-2 rounded-full shrink-0 ${screening.is_active ? "bg-emerald-500" : "bg-muted-foreground/30"}`} />
 
         <div className="flex-1 min-w-0">
@@ -262,9 +301,48 @@ function AgentCard({ screening }: { screening: ScheduledScreening }) {
               <span>Last run {new Date(screening.last_run_at).toLocaleString()}</span>
             )}
           </div>
+
+          {testing && (
+            <div className="mt-3 flex items-center gap-2 text-sm text-muted-foreground">
+              <Loader2 className="w-3.5 h-3.5 animate-spin" />
+              Queued — waiting for Mac Mini to pick up…
+            </div>
+          )}
+          {testError && (
+            <div className="mt-3 rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs text-destructive">
+              {testError}
+            </div>
+          )}
+          {testResult && (
+            <div className={`mt-3 rounded-lg border px-3 py-2.5 text-xs ${
+              testResult.triggered
+                ? "border-amber-500/30 bg-amber-500/5"
+                : "border-border bg-muted/50"
+            }`}>
+              <div className="flex items-center gap-1.5 mb-1">
+                <span className={`font-medium ${testResult.triggered ? "text-amber-600 dark:text-amber-400" : "text-muted-foreground"}`}>
+                  {testResult.triggered ? "Triggered" : "Not triggered"}
+                </span>
+              </div>
+              {testResult.summary && (
+                <p className="text-foreground/80 leading-relaxed">{testResult.summary}</p>
+              )}
+            </div>
+          )}
         </div>
 
         <div className="flex items-center gap-2 shrink-0">
+          <button
+            type="button"
+            onClick={() => void handleTestRun()}
+            disabled={testing}
+            title="Test run now"
+            className="flex items-center justify-center w-8 h-8 rounded-md border border-border text-muted-foreground transition-colors hover:bg-amber-500/10 hover:text-amber-600 hover:border-amber-500/30 disabled:opacity-40"
+          >
+            {testing
+              ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
+              : <Zap className="w-3.5 h-3.5" />}
+          </button>
           <button
             type="button"
             onClick={() => void handleToggle()}

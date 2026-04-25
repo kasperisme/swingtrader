@@ -27,6 +27,7 @@ export type ScheduledScreening = {
   schedule: string;
   timezone: string;
   is_active: boolean;
+  run_requested_at: string | null;
   last_run_at: string | null;
   last_triggered: boolean | null;
   created_at: string;
@@ -40,6 +41,7 @@ export type ScreeningResult = {
   triggered: boolean;
   summary: string | null;
   data_used: Record<string, unknown> | null;
+  is_test: boolean;
   delivered: boolean;
   created_at: string;
 };
@@ -218,4 +220,50 @@ export async function getScreeningLimits(): ActionResult<{
       minSchedule: SCHEDULE_GATES[plan],
     },
   };
+}
+
+export async function testRunScreening(
+  screeningId: string
+): Promise<{ ok: true; data: { requested: true } } | { ok: false; error: string }> {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { ok: false, error: "Not authenticated" };
+
+  const { error } = await supabase
+    .schema(SCHEMA)
+    .from("user_scheduled_screenings")
+    .update({ run_requested_at: new Date().toISOString() })
+    .eq("id", screeningId)
+    .eq("user_id", user.id);
+
+  if (error) return { ok: false, error: error.message };
+  return { ok: true, data: { requested: true } };
+}
+
+export async function pollTestResult(
+  screeningId: string
+): Promise<
+  { ok: true; data: ScreeningResult | null } | { ok: false; error: string }
+> {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { ok: false, error: "Not authenticated" };
+
+  const { data, error } = await supabase
+    .schema(SCHEMA)
+    .from("user_screening_results")
+    .select("*")
+    .eq("screening_id", screeningId)
+    .eq("user_id", user.id)
+    .eq("is_test", true)
+    .order("run_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (error) return { ok: false, error: error.message };
+  return { ok: true, data: (data as ScreeningResult) ?? null };
 }
