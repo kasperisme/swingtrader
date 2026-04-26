@@ -4,8 +4,8 @@ screen_agent.cli — command-line interface for the scheduled screening agent.
 OpenClaw handles scheduling. This CLI runs individual screenings.
 
 Usage:
-    python -m screen_agent.cli run <screening-id> [--dry-run]
-    python -m screen_agent.cli sync
+    python -m services.agent.cli run <screening-id> [--dry-run]
+    python -m services.agent.cli sync
 """
 
 from __future__ import annotations
@@ -23,7 +23,7 @@ logging.basicConfig(
 )
 log = logging.getLogger(__name__)
 
-_ANALYTICS = pathlib.Path(__file__).resolve().parent.parent
+_ANALYTICS = pathlib.Path(__file__).resolve().parent.parent.parent
 
 from dotenv import load_dotenv
 

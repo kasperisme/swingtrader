@@ -20,7 +20,7 @@ from typing import Any
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger(__name__)
 
-_ANALYTICS = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+_ANALYTICS = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 _VENV_PYTHON = os.path.join(_ANALYTICS, ".venv", "bin", "python")
 if not os.path.exists(_VENV_PYTHON):
     _VENV_PYTHON = "python3"
@@ -89,7 +89,7 @@ def _add_job(screening: dict) -> str | None:
             "--no-deliver",
             "--timeout", "180000",
             "--message",
-            f"Run screening {screening_id}: {_VENV_PYTHON} -m screen_agent.cli run {screening_id}",
+            f"Run screening {screening_id}: {_VENV_PYTHON} -m services.agent.cli run {screening_id}",
         ],
         capture_output=True,
         text=True,
