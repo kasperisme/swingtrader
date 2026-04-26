@@ -160,8 +160,8 @@ def send_whatsapp_alert(message: str) -> None:
         return
     try:
         subprocess.run(
-            [cmd, "message", "send", "--target", recipient, "--message", message],
-            timeout=15,
+            [cmd, "message", "send", "--channel", "whatsapp", "--target", recipient, "--message", message],
+            timeout=30,
             check=False,
         )
         logger.info("[health] WhatsApp alert sent to %s", recipient)
