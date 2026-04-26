@@ -25,10 +25,10 @@ load_dotenv(pathlib.Path(__file__).parent.parent / ".env")
 
 os.environ.setdefault("OLLAMA_IMPACT_MODEL", "gemma4:31b-cloud")
 
-from src.db import get_supabase_client, get_schema, save_article_tickers
-from news_impact.news_ingester import _delete_heads_and_vector, _persist, _sha256
-from news_impact.impact_scorer import score_article, aggregate_heads, extract_tickers, top_dimensions
-from news_impact.score_news_cli import (
+from shared.db import get_supabase_client, save_article_tickers
+from services.news.scoring.news_ingester import _delete_heads_and_vector, _persist, _sha256
+from services.news.scoring.impact_scorer import score_article, aggregate_heads, extract_tickers, top_dimensions
+from services.news.scoring.score_cli import (
     _normalize_relationship_and_sentiment_heads,
     _canonicalize_ticker_token,
     _load_identity_alias_maps,
@@ -46,7 +46,7 @@ PAGE_SIZE = 1000  # rows per PostgREST page when scanning the DB
 
 def _paginate(client, table: str, select: str, filters: dict | None = None) -> list[dict]:
     """Paginate through a table and return all rows."""
-    schema = get_schema()
+    schema = "swingtrader"
     result = []
     offset = 0
     while True:
@@ -91,7 +91,7 @@ def fetch_unscored_ids(client) -> list[int]:
 
 def fetch_articles_batch(client, ids: list[int]) -> list[dict]:
     """Fetch article rows for the given IDs."""
-    schema = get_schema()
+    schema = "swingtrader"
     res = (
         client.schema(schema)
         .table("news_articles")
@@ -104,7 +104,7 @@ def fetch_articles_batch(client, ids: list[int]) -> list[dict]:
 
 def has_non_empty_heads(client, article_id: int) -> bool:
     """Return True if the article has at least one head with non-empty scores_json."""
-    schema = get_schema()
+    schema = "swingtrader"
     res = (
         client.schema(schema)
         .table("news_impact_heads")
@@ -180,7 +180,7 @@ async def rescore_article(
     clean_hash = _sha256(body)
 
     # Write cleaned body + updated hash back to news_articles
-    client.schema(get_schema()).table("news_articles").update({
+    client.schema("swingtrader").table("news_articles").update({
         "body": body,
         "article_hash": clean_hash,
     }).eq("id", article_id).execute()

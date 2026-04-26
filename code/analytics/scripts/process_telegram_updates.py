@@ -30,9 +30,10 @@ if str(_ANALYTICS) not in sys.path:
 
 load_dotenv(_ANALYTICS / ".env")
 
-from news_impact.narrative_generator import _DEFAULT_LOOKBACK_HOURS, generate_for_user  # noqa: E402
-from news_impact.semantic_retrieval import search_news_embeddings  # noqa: E402
-from src.db import get_schema, get_supabase_client  # noqa: E402
+from services.news.narrative.narrative_generator import _DEFAULT_LOOKBACK_HOURS, generate_for_user  # noqa: E402
+from services.news.embeddings.semantic_retrieval import search_news_embeddings  # noqa: E402
+from shared.db import get_supabase_client  # noqa: E402
+# FIXME: cross-script import — consider moving shared helpers to a common module
 from scripts.run_daily_narrative import _narrative_to_telegram, _send_telegram_chunks  # noqa: E402
 
 logger = logging.getLogger(__name__)
@@ -45,7 +46,7 @@ def _claim_pending_requests(limit: int) -> list[dict]:
     Returns claimed rows as dicts.
     """
     client = get_supabase_client()
-    schema = get_schema()
+    schema = "swingtrader"
 
     pending = (
         client.schema(schema)
@@ -79,7 +80,7 @@ def _claim_pending_requests(limit: int) -> list[dict]:
 
 def _load_lookback_hours(user_id: str) -> int:
     client = get_supabase_client()
-    schema = get_schema()
+    schema = "swingtrader"
     res = (
         client.schema(schema)
         .table("user_narrative_preferences")
@@ -102,7 +103,7 @@ def _finish_request(
     error_text: str | None = None,
 ) -> None:
     client = get_supabase_client()
-    schema = get_schema()
+    schema = "swingtrader"
     client.schema(schema).table("telegram_update_requests").update({
         "status": status,
         "completed_at": datetime.now().isoformat(),
@@ -229,7 +230,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     try:
-        from src.health import JobHeartbeat, update_job_metadata
+        from shared.health import JobHeartbeat, update_job_metadata
         with JobHeartbeat("telegram_updates", expected_interval=1 / 60):
             _meta = asyncio.run(_run_loop(args.batch_size, args.poll_interval_sec, args.once))
         if _meta:

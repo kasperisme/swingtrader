@@ -64,8 +64,8 @@ load_dotenv(dotenv_path=_REPO_ROOT / ".env")
 
 sys.path.insert(0, str(_REPO_ROOT))
 
-from src.db import get_supabase_client, get_schema, _as_json  # noqa: E402
-from news_impact.semantic_retrieval import search_news_embeddings  # noqa: E402
+from shared.db import get_supabase_client, _as_json  # noqa: E402
+from services.news.embeddings.semantic_retrieval import search_news_embeddings  # noqa: E402
 
 logging.basicConfig(
     level=logging.INFO,
@@ -134,7 +134,7 @@ def _fetch_recent_articles(
       impact_json, top_dimensions
     """
     client = get_supabase_client()
-    schema = get_schema()
+    schema = "swingtrader"
 
     since = datetime.now(timezone.utc) - timedelta(hours=lookback_hours)
     since_iso = since.isoformat()
@@ -191,7 +191,7 @@ def _fetch_tickers_for_articles(article_ids: list[int]) -> dict[int, list[str]]:
     if not article_ids:
         return {}
     client = get_supabase_client()
-    schema = get_schema()
+    schema = "swingtrader"
     res = (
         client.schema(schema)
         .table("news_article_tickers")
@@ -210,7 +210,7 @@ def _fetch_company_metadata(tickers: list[str]) -> dict[str, dict]:
     if not tickers:
         return {}
     client = get_supabase_client()
-    schema = get_schema()
+    schema = "swingtrader"
     meta: dict[str, dict] = {}
     for t in tickers:
         res = (
@@ -1061,7 +1061,7 @@ async def main(args: argparse.Namespace) -> dict:
             log.info("X thread posted. Root tweet ID: %s", root_id)
         elif not args.dry_run and tweets:
             try:
-                from src.health import PartialJobFailure  # noqa: E402
+                from shared.health import PartialJobFailure  # noqa: E402
                 raise PartialJobFailure("X thread was not posted (xdk unavailable or missing credentials)")
             except ImportError:
                 pass
@@ -1078,7 +1078,7 @@ if __name__ == "__main__":
         sys.exit(0 if _check_x_auth() else 1)
     _job_name = f"blog_post_{_args.mode.replace('-', '_')}"
     try:
-        from src.health import JobHeartbeat, update_job_metadata
+        from shared.health import JobHeartbeat, update_job_metadata
         with JobHeartbeat(_job_name, expected_interval=24.0):
             _meta = asyncio.run(main(_args))
         update_job_metadata(_job_name, _meta)

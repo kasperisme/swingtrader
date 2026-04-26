@@ -33,13 +33,13 @@ load_dotenv(dotenv_path=_ROOT / ".env")
 # Must import db before anything that might fail so we can report errors.
 from shared.db import (
     create_scan_job,
-    ensure_schema,
     finish_scan_job,
     update_scan_job_pid,
     update_scan_job_progress,
 )
 from services.screener.api_client import persist_market_wide_scan_via_api
-from src import technical, logging, fundamentals
+from services.screener import technical, fundamentals
+from shared import logging
 
 logger = logging.logger
 
@@ -56,11 +56,6 @@ def _init_job() -> None:
     global _JOB_ID, _OWN_JOB
     if _JOB_ID:
         return  # job_runner already owns the lifecycle
-    # Ensure tables exist for direct runs (requires direct DB creds; skip if unavailable).
-    try:
-        ensure_schema()
-    except Exception as e:
-        logger.debug("ensure_schema skipped: %s", e)
     _JOB_ID = create_scan_job(
         scan_source="ibd_screener",
         script_rel="ibd_screener.py",
@@ -96,6 +91,7 @@ def _finish(exit_code: int, error: str | None = None) -> None:
 # ---------------------------------------------------------------------------
 # Screener logic
 # ---------------------------------------------------------------------------
+
 
 def run() -> None:
     _init_job()
@@ -138,7 +134,9 @@ def run() -> None:
 
     logger.info("Total tickers: %d", len(tickers))
     logger.info("After pre-screen + RS>80: %d", len(ls_symbol))
-    logger.info("Start date: %s  End date: %s", startdate.strftime(strf), today.strftime(strf))
+    logger.info(
+        "Start date: %s  End date: %s", startdate.strftime(strf), today.strftime(strf)
+    )
 
     # ------------------------------------------------------------------
     # Step 3 — deep per-ticker screening
@@ -200,7 +198,9 @@ def run() -> None:
     # Drop ticker-metadata columns that were already added per-row in the loop
     # (sector, subSector) to prevent _x/_y suffix collision on merge.
     tickers_for_merge = df_tickers.drop(
-        columns=[c for c in ("sector", "subSector", "industry") if c in df_tickers.columns],
+        columns=[
+            c for c in ("sector", "subSector", "industry") if c in df_tickers.columns
+        ],
     )
     df_trend_template = df_trend_template.merge(
         tickers_for_merge, left_on="ticker", right_on="symbol", how="left"
@@ -215,33 +215,69 @@ def run() -> None:
         df_rs_out.to_excel(writer, sheet_name="rs_rating")
         df_quote_out.to_excel(writer, sheet_name="quote")
 
-    passed_count = int(df_trend_template["Passed"].sum()) if "Passed" in df_trend_template.columns else 0
+    passed_mask = (
+        df_trend_template["Passed"].fillna(False).astype(bool)
+        if "Passed" in df_trend_template.columns
+        else pd.Series(False, index=df_trend_template.index)
+    )
+    fundamentals_mask = (
+        df_trend_template["PASSED_FUNDAMENTALS"].fillna(False).astype(bool)
+        if "PASSED_FUNDAMENTALS" in df_trend_template.columns
+        else pd.Series(False, index=df_trend_template.index)
+    )
+    eligible_mask = passed_mask & fundamentals_mask
+
+    passed_count = int(passed_mask.sum())
+    eligible_count = int(eligible_mask.sum())
+    eligible_symbols = (
+        set(df_trend_template.loc[eligible_mask, "symbol"].dropna().astype(str).tolist())
+        if "symbol" in df_trend_template.columns
+        else set()
+    )
+
+    df_trend_template_api = df_trend_template.loc[eligible_mask].copy()
+    df_rs_out_api = (
+        df_rs_out[df_rs_out["symbol"].isin(eligible_symbols)].copy()
+        if "symbol" in df_rs_out.columns
+        else df_rs_out.iloc[0:0].copy()
+    )
+    df_quote_out_api = (
+        df_quote_out[df_quote_out["symbol"].isin(eligible_symbols)].copy()
+        if "symbol" in df_quote_out.columns
+        else df_quote_out.iloc[0:0].copy()
+    )
+
     _progress(
-        f"Step 4/4: Saving to Supabase — {passed_count} passed / {total} screened…"
+        "Step 4/4: Saving to Supabase — "
+        f"{eligible_count} passed technical+fundamentals / {total} screened…"
     )
 
     try:
         run_id = persist_market_wide_scan_via_api(
             today.date(),
             "ibd_screener",
-            df_trend_template,
-            df_rs_out,
-            df_quote_out,
+            df_trend_template_api,
+            df_rs_out_api,
+            df_quote_out_api,
         )
         logger.info("Screening results uploaded via API (run_id=%s)", run_id)
     except Exception as e:
         logger.warning("Screening persist via API failed: %s", e)
 
     # Save passed symbols to text file
-    if "Passed" in df_trend_template.columns:
-        df_trend_template[df_trend_template["Passed"] == True].to_csv(
+    if "symbol" in df_trend_template.columns:
+        df_trend_template.loc[eligible_mask].to_csv(
             columns=["symbol"],
             header=False,
             index=False,
             path_or_buf=_ROOT / "output" / "IBD_trend_template.txt",
         )
 
-    _progress(f"Done — {passed_count} stocks passed the Minervini trend template.")
+    _progress(
+        "Done — "
+        f"{eligible_count} stocks passed technical + fundamentals "
+        f"({passed_count} passed technical only)."
+    )
 
 
 # ---------------------------------------------------------------------------

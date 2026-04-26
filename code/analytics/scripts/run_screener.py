@@ -34,8 +34,9 @@ import pandas as pd
 _ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(_ROOT))
 
-from src import fundamentals, logging, technical
-from src.db import persist_screener_json_result, update_scan_job_progress
+from shared import logging
+from services.screener import fundamentals, technical
+from shared.db import persist_screener_json_result, update_scan_job_progress
 
 _JOB_ID = int(os.environ.get("SWINGTRADER_JOB_ID", 0))
 

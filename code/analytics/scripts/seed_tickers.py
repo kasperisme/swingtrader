@@ -19,9 +19,9 @@ import pandas as pd
 _ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(_ROOT))
 
-from src.fmp import fmp
-from src.logging import logger
-from src.db import get_supabase_client
+from services.screener.fmp import fmp
+from shared.logging import logger
+from shared.db import get_supabase_client
 
 EXCHANGES = ["NYSE", "NASDAQ"]
 
