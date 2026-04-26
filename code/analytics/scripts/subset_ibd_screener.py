@@ -28,8 +28,9 @@ from dotenv import load_dotenv
 
 load_dotenv(dotenv_path=_ROOT / ".env")
 
-from src import fundamentals, logging, technical
-from src.db import persist_market_wide_scan
+from shared import logging
+from services.screener import fundamentals, technical
+from shared.db import persist_market_wide_scan
 
 logger = logging.logger
 

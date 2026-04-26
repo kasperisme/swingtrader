@@ -23,9 +23,8 @@ load_dotenv(Path(__file__).resolve().parent.parent / ".env")
 
 from postgrest.exceptions import APIError
 
-from src.db import (
+from shared.db import (
     get_supabase_client,
-    get_schema,
     ensure_schema,
     insert_scan_run,
     append_scan_rows,
@@ -87,7 +86,7 @@ def client():
 def cleanup(client):
     """Delete all rows written by this test module after each test."""
     yield
-    schema = get_schema()
+    schema = "swingtrader"
     # Jobs
     _tbl(client, "user_scan_jobs").delete().eq("scan_source", _TEST_SOURCE).execute()
     # Rows + runs

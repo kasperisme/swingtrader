@@ -48,15 +48,15 @@ if str(_ANALYTICS) not in sys.path:
 
 load_dotenv(_ANALYTICS / ".env")
 
-from news_impact.narrative_generator import (
+from services.news.narrative.narrative_generator import (
     generate_for_user,
     generate_all,
     build_prompt_for_user,
     _DEFAULT_LOOKBACK_HOURS,
     _DEFAULT_NETWORK_LOOKBACK_DAYS,
 )  # noqa: E402
-from src.health import PartialJobFailure  # noqa: E402
-from src.db import get_supabase_client, get_schema  # noqa: E402
+from shared.health import PartialJobFailure  # noqa: E402
+from shared.db import get_supabase_client  # noqa: E402
 
 _EASTERN = ZoneInfo("America/New_York")
 logger = logging.getLogger(__name__)
@@ -270,7 +270,7 @@ def _log_telegram_message(
 
 def _deliver_if_needed(user_id: str, narrative: dict, narrative_date: str) -> None:
     """Check user preferences and deliver via Telegram if configured."""
-    schema = get_schema()
+    schema = "swingtrader"
     client = get_supabase_client()
 
     prefs_res = (
@@ -458,7 +458,7 @@ async def _main(
             for uid in processed:
                 try:
                     res = (
-                        client.schema(get_schema())
+                        client.schema("swingtrader")
                         .table("daily_narratives")
                         .select(
                             "portfolio_section,screening_section,alert_warnings,market_pulse,market_pulse_sources"
@@ -530,7 +530,7 @@ if __name__ == "__main__":
         )
     else:
         try:
-            from src.health import JobHeartbeat, update_job_metadata
+            from shared.health import JobHeartbeat, update_job_metadata
             with JobHeartbeat("daily_narrative", expected_interval=24.0):
                 _meta = asyncio.run(
                     _main(

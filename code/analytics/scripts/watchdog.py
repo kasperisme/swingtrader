@@ -161,10 +161,10 @@ def check_health() -> tuple[list[str], list[str]]:
     Query Supabase job_health for stuck/failed/stale jobs.
     Returns (alerts, ok_lines) where ok_lines are per-job status summaries.
     """
-    from src.db import get_supabase_client, get_schema
+    from shared.db import get_supabase_client
 
     client = get_supabase_client()
-    schema = get_schema()
+    schema = "swingtrader"
     now = datetime.now(timezone.utc)
 
     res = (
@@ -245,7 +245,7 @@ def check_health() -> tuple[list[str], list[str]]:
 
 def main() -> dict:
     """Run all checks and return a summary dict written to job_health metadata."""
-    from src.health import send_whatsapp_alert
+    from shared.health import send_whatsapp_alert
 
     logger.info("━━━ Watchdog started ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
 
@@ -316,7 +316,7 @@ def main() -> dict:
 
 if __name__ == "__main__":
     try:
-        from src.health import JobHeartbeat, update_job_metadata
+        from shared.health import JobHeartbeat, update_job_metadata
     except ImportError:
         main()
     else:

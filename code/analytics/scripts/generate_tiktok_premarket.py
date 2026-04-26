@@ -49,19 +49,19 @@ log = logging.getLogger(__name__)
 
 
 async def run_pipeline(dry_run: bool = False, output_dir: pathlib.Path | None = None, animated: bool = True, no_audio: bool = False) -> dict:
-    from tiktok.config import OUTPUT_DIR as _DEFAULT_OUTPUT, EASTERN as _EASTERN
-    from tiktok.data_fetcher import (
+    from services.video.config import OUTPUT_DIR as _DEFAULT_OUTPUT, EASTERN as _EASTERN
+    from services.video.data_fetcher import (
         fetch_cluster_trends,
         fetch_top_articles,
         fetch_tickers_for_articles,
         compute_cluster_summary,
     )
-    from tiktok.script_generator import generate_script, SCRIPT_BLOCKS
-    from tiktok.voiceover import generate_voiceover, build_captions, generate_silent_audio
-    from tiktok.chart_renderer import render_all_slides
-    from tiktok.video_assembler import assemble_video, compute_block_durations
-    from tiktok.slide_animator import render_all_animated_slides
-    from tiktok.video_assembler import assemble_from_clips
+    from services.video.script_generator import generate_script, SCRIPT_BLOCKS
+    from services.video.voiceover import generate_voiceover, build_captions, generate_silent_audio
+    from services.video.chart_renderer import render_all_slides
+    from services.video.video_assembler import assemble_video, compute_block_durations
+    from services.video.slide_animator import render_all_animated_slides
+    from services.video.video_assembler import assemble_from_clips
 
     output = output_dir or _DEFAULT_OUTPUT
     output.mkdir(parents=True, exist_ok=True)
