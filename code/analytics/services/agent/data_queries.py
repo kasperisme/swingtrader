@@ -42,24 +42,23 @@ def get_cluster_trends(hours: int = 14) -> list[dict[str, Any]]:
     return res.data or []
 
 
-def get_dimension_trends(cluster: str | None = None, hours: int = 14) -> list[dict[str, Any]]:
+def get_dimension_trends(hours: int = 14) -> list[dict[str, Any]]:
     """Dimension-level sentiment scores from news_trends_dimension_daily_v.
 
-    Optionally filter to one cluster (e.g. 'MACRO_SENSITIVITY').
-    Returns rows with: dimension_key, cluster_id, bucket_day, dim_avg,
-                        dim_weighted_avg, article_count.
+    Returns rows with: dimension_key, bucket_day, dimension_avg,
+                       dimension_weighted_avg, article_count, bucket_article_count.
     """
     client, schema = _client()
     since = datetime.now(timezone.utc) - timedelta(hours=hours)
-    q = (
+    res = (
         client.schema(schema)
         .table("news_trends_dimension_daily_v")
         .select("*")
         .gte("bucket_day", since.strftime("%Y-%m-%d"))
+        .order("bucket_day", desc=True)
+        .limit(60)
+        .execute()
     )
-    if cluster:
-        q = q.eq("cluster_id", cluster)
-    res = q.order("bucket_day", desc=True).limit(60).execute()
     return res.data or []
 
 

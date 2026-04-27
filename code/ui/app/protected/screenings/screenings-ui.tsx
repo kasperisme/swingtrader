@@ -645,12 +645,13 @@ function ScreeningsRelationshipNetworkPanel({
   const commentExists = hasComment(symbol);
 
   return (
-    <div className="flex flex-col gap-4">
+    <div className="flex flex-col h-full min-h-0">
       <RelationshipNetworkExplorer
         key={symbol}
         vectors={[]}
         initialSeedTicker={symbol}
         hideSeedControls
+        fillViewport
       />
     </div>
   );
@@ -3246,7 +3247,7 @@ export function ScreeningsUI({
                 />
               </div>
               <div
-                className={`flex-1 min-w-0 min-h-0 flex flex-col gap-4 ${activeView === "charts" ? "overflow-hidden" : "overflow-y-auto"}`}
+                className={`flex-1 min-w-0 min-h-0 flex flex-col ${activeView === "charts" || activeView === "relationship" ? "overflow-hidden" : "overflow-y-auto gap-4"}`}
               >
                 {activeView === "charts" ? (
                   <div className="flex-1 flex flex-col gap-3 w-full min-h-0">
@@ -3463,19 +3464,21 @@ export function ScreeningsUI({
                     </div>
                   </div>
                 ) : activeView === "relationship" ? (
-                  <ScreeningsRelationshipNetworkPanel
-                    symbols={filteredSymbols}
-                    selectedTicker={selectedTicker}
-                    onSelect={setSelectedTicker}
-                    dismissed={dismissedSymbols}
-                    onDismiss={dismissTicker}
-                    onRestore={restoreTicker}
-                    getStatus={getTickerStatus}
-                    onSetStatus={setTickerStatus}
-                    hasComment={tickerHasComment}
-                    onEditComment={editTickerComment}
-                    getTickerMeta={getTickerMeta}
-                  />
+                  <div className="flex-1 min-h-0 flex flex-col">
+                    <ScreeningsRelationshipNetworkPanel
+                      symbols={filteredSymbols}
+                      selectedTicker={selectedTicker}
+                      onSelect={setSelectedTicker}
+                      dismissed={dismissedSymbols}
+                      onDismiss={dismissTicker}
+                      onRestore={restoreTicker}
+                      getStatus={getTickerStatus}
+                      onSetStatus={setTickerStatus}
+                      hasComment={tickerHasComment}
+                      onEditComment={editTickerComment}
+                      getTickerMeta={getTickerMeta}
+                    />
+                  </div>
                 ) : (
                   <StockNewsTrendView
                     symbols={filteredSymbols}

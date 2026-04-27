@@ -162,7 +162,7 @@ def run_sync() -> dict[str, int]:
     res = (
         client.schema(schema)
         .table("user_scheduled_screenings")
-        .select("id, name, schedule, timezone, is_active, run_requested_at, tickers, linked_screening_ids")
+        .select("id, name, schedule, timezone, is_active, run_requested_at, tickers, linked_scan_run_ids")
         .execute()
     )
     screenings = res.data or []

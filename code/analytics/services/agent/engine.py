@@ -59,10 +59,10 @@ get_cluster_trends(hours: int = 14)
   cluster_id (e.g. MACRO_SENSITIVITY), bucket_day, cluster_avg,
   cluster_weighted_avg (-1 to +1), bucket_article_count.
 
-get_dimension_trends(cluster: str | None = None, hours: int = 14)
-  Returns dimension-level scores within clusters. Filter by cluster_id.
-  Each row has: dimension_key, cluster_id, bucket_day, dim_avg,
-  dim_weighted_avg, article_count.
+get_dimension_trends(hours: int = 14)
+  Returns dimension-level sentiment scores.
+  Each row has: dimension_key, bucket_day, dimension_avg,
+  dimension_weighted_avg, article_count, bucket_article_count.
 
 get_ticker_sentiment(tickers: list[str] | None = None, hours: int = 24)
   Returns per-article per-ticker sentiment scores.
@@ -88,6 +88,11 @@ get_ticker_news(tickers: list[str], hours: int = 24, per_ticker_limit: int = 5)
   Per-ticker articles with sentiment scores and relationship annotations. \
   Returns {ticker, article_id, title, url, published_at, sentiment_score, \
   sentiment_reason, relationships}. Resolves ticker aliases automatically.
+
+fetch_url(url: str)
+  Fetch the full text content of a URL. Use to read article body when the \
+  title/snippet is not enough to evaluate a screening condition. \
+  Returns {url, status, content (up to 8000 chars)}.
 
 ### User-specific tools (scoped to this user's portfolio)
 get_user_positions()
@@ -157,6 +162,16 @@ data_used should contain the tool names and a brief summary of what was returned
 _OLLAMA_URL_ENV = "OLLAMA_BASE_URL"
 _OLLAMA_MODEL_ENV = "OLLAMA_TIKTOK_MODEL"
 
+def fetch_url(url: str) -> dict[str, Any]:
+    """Fetch a URL and return its text content (truncated to 8000 chars)."""
+    try:
+        r = httpx.get(url, timeout=15.0, follow_redirects=True, headers={"User-Agent": "Mozilla/5.0"})
+        text = r.text[:8000]
+        return {"url": url, "status": r.status_code, "content": text}
+    except Exception as exc:
+        return {"error": str(exc)}
+
+
 _TOOLS_MARKET = {
     "get_cluster_trends": get_cluster_trends,
     "get_dimension_trends": get_dimension_trends,
@@ -166,6 +181,7 @@ _TOOLS_MARKET = {
     "get_company_vectors": get_company_vectors,
     "get_ticker_news": get_ticker_news,
     "search_news": search_news,
+    "fetch_url": fetch_url,
 }
 
 _TOOLS_USER = {
@@ -192,11 +208,10 @@ _TOOL_SCHEMAS = [
         "type": "function",
         "function": {
             "name": "get_dimension_trends",
-            "description": "Get dimension-level sentiment scores within clusters.",
+            "description": "Get dimension-level sentiment scores.",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "cluster": {"type": "string", "description": "Cluster ID to filter, e.g. MACRO_SENSITIVITY"},
                     "hours": {"type": "integer", "description": "Lookback hours", "default": 14},
                 },
             },
@@ -317,6 +332,20 @@ _TOOL_SCHEMAS = [
             },
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "fetch_url",
+            "description": "Fetch the full text content of a URL. Use to read an article when title/snippet is insufficient.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "url": {"type": "string", "description": "URL to fetch"},
+                },
+                "required": ["url"],
+            },
+        },
+    },
 ]
 
 _MAX_TOOL_ROUNDS = 10
@@ -369,20 +398,17 @@ def _call_tool(name: str, args: dict, user_id: str | None = None) -> Any:
 
 # ── Linked screening context ──────────────────────────────────────────────────
 
-def _get_linked_screening_results(user_id: str | None, screening_ids: list[str]) -> str:
-    if not user_id or not screening_ids:
+def _get_linked_scan_run_context(user_id: str | None, scan_run_ids: list[int]) -> str:
+    if not user_id or not scan_run_ids:
         return ""
     client = get_supabase_client()
     schema = "swingtrader"
     res = (
         client.schema(schema)
-        .table("user_screening_results")
-        .select("screening_id, triggered, summary, run_at")
-        .in_("screening_id", screening_ids)
+        .table("user_scan_runs")
+        .select("id, scan_date, source, scan_row_notes(ticker, note, status)")
+        .in_("id", scan_run_ids)
         .eq("user_id", user_id)
-        .eq("is_test", False)
-        .order("run_at", desc=True)
-        .limit(10)
         .execute()
     )
     rows = res.data or []
@@ -390,17 +416,28 @@ def _get_linked_screening_results(user_id: str | None, screening_ids: list[str])
         return ""
     lines = []
     for r in rows:
-        ts = r.get("run_at", "")[:16]
-        trig = "TRIGGERED" if r.get("triggered") else "not triggered"
-        summary = r.get("summary") or ""
-        sid = r.get("screening_id", "")[:8]
-        lines.append(f"- [{ts}] {trig}: {summary[:200]} (screening {sid})")
+        run_id = r.get("id", "")
+        date = str(r.get("scan_date", ""))[:10]
+        source = r.get("source") or ""
+        notes = r.get("scan_row_notes") or []
+        label = f"Scan {run_id} ({date}"
+        if source:
+            label += f", {source}"
+        label += ")"
+        if notes:
+            active_notes = [n for n in notes if n.get("status") == "active"]
+            for n in active_notes[:10]:
+                ticker = n.get("ticker", "")
+                note = (n.get("note") or "")[:150]
+                lines.append(f"- {label}: {ticker} — {note}")
+        else:
+            lines.append(f"- {label}: (no notes)")
     return "\n".join(lines)
 
 
 # ── Agent loop ──────────────────────────────────────────────────────────────
 
-def run_agent(prompt: str, user_id: str | None = None, tickers: list[str] | None = None, linked_screening_ids: list[str] | None = None) -> dict:
+def run_agent(prompt: str, user_id: str | None = None, tickers: list[str] | None = None, linked_scan_run_ids: list[int] | None = None) -> dict:
     """Run the screening agent loop. Returns {triggered, summary, data_used}."""
     system = _AGENT_SYSTEM
     if user_id:
@@ -416,11 +453,11 @@ def run_agent(prompt: str, user_id: str | None = None, tickers: list[str] | None
             f"\n\n## Focused Tickers\nThe user wants you to focus on: {', '.join(tickers)}.\n"
             "Prioritise these symbols in tool calls where a tickers parameter is available."
         )
-    if linked_screening_ids:
-        linked_results = _get_linked_screening_results(user_id, linked_screening_ids)
-        if linked_results:
+    if linked_scan_run_ids:
+        linked_context = _get_linked_scan_run_context(user_id, linked_scan_run_ids)
+        if linked_context:
             system += (
-                f"\n\n## Linked Screening Context\n{linked_results}\n"
+                f"\n\n## Linked Screening Context\n{linked_context}\n"
                 "Use this context alongside your own tool calls."
             )
     messages = [
@@ -471,36 +508,48 @@ def _summarise_tool_result(name: str, result: Any) -> Any:
 
 # ── Telegram formatting ────────────────────────────────────────────────────
 
-def _format_telegram_alert(name: str, summary: str) -> str:
-    return f"<b>🔔 {name}</b>\n\n{summary}"
+def _format_telegram_message(name: str, triggered: bool, summary: str | None, error: bool = False) -> str:
+    if error:
+        return f"<b>⚠️ {name}</b>\n\n<i>Run failed: {summary}</i>"
+    if triggered:
+        return f"<b>🔔 {name}</b>\n\n{summary}"
+    return f"<b>✅ {name}</b>\n\n<i>No trigger — conditions not met.</i>"
 
 
 # ── Run + persist ───────────────────────────────────────────────────────────
 
 def run_screening(screening: dict, dry_run: bool = False, is_test: bool = False) -> dict:
     """Run a single screening. Returns the result dict (not yet persisted)."""
-    result = run_agent(
-        screening["prompt"],
-        user_id=screening.get("user_id"),
-        tickers=screening.get("tickers") or None,
-        linked_screening_ids=screening.get("linked_screening_ids") or None,
-    )
-    result["screening_id"] = screening["id"]
-    result["user_id"] = screening.get("user_id")
-    result["name"] = screening.get("name", "Screening")
-    result["dry_run"] = dry_run
-    result["is_test"] = is_test
-    return result
+    base = {
+        "screening_id": screening["id"],
+        "user_id": screening.get("user_id"),
+        "name": screening.get("name", "Screening"),
+        "dry_run": dry_run,
+        "is_test": is_test,
+    }
+    try:
+        result = run_agent(
+            screening["prompt"],
+            user_id=screening.get("user_id"),
+            tickers=screening.get("tickers") or None,
+            linked_scan_run_ids=screening.get("linked_scan_run_ids") or None,
+        )
+        result.update(base)
+        return result
+    except Exception as exc:
+        log.exception("run_agent failed for screening %s", screening["id"])
+        return {**base, "triggered": False, "summary": str(exc), "data_used": {}, "error": True}
 
 
 def persist_and_deliver(result: dict) -> None:
-    """Persist screening result to DB and deliver via Telegram if triggered."""
+    """Persist screening result to DB and deliver via Telegram."""
     client = get_supabase_client()
     schema = "swingtrader"
     now = datetime.now(timezone.utc).isoformat()
 
     is_test = bool(result.get("is_test"))
     triggered = bool(result.get("triggered"))
+    error = bool(result.get("error"))
     row = {
         "screening_id": result["screening_id"],
         "user_id": result["user_id"],
@@ -528,21 +577,18 @@ def persist_and_deliver(result: dict) -> None:
         update_fields,
     ).eq("id", result["screening_id"]).execute()
 
-    if not triggered:
-        return
-
     chat_id = get_user_chat_id(result["user_id"])
     if not chat_id:
         log.info("No Telegram chat_id for user %s — in-app only", result["user_id"])
         return
 
-    html = _format_telegram_alert(result["name"], result["summary"] or "")
+    html = _format_telegram_message(result["name"], triggered, result.get("summary"), error=error)
     success, msg_id, err = send_telegram_chunks(chat_id, html)
 
     log_telegram_message(
         user_id=result["user_id"],
         chat_id=chat_id,
-        message_type="screening_alert",
+        message_type="screening_error" if error else "screening_alert" if triggered else "screening_no_trigger",
         message_text=html,
         success=success,
         telegram_message_id=msg_id,

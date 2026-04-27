@@ -1277,7 +1277,7 @@ function AgentCard({ screening, suggestionTickers }: { screening: ScheduledScree
   const [editSchedule, setEditSchedule] = useState(screening.schedule);
   const [editTimezone, setEditTimezone] = useState(screening.timezone);
   const [editTickers, setEditTickers] = useState<string[]>(screening.tickers ?? []);
-  const [editLinkedIds, setEditLinkedIds] = useState<number[]>(screening.linked_scan_run_ids ?? []);
+  const [editLinkedScanRunIds, setEditLinkedScanRunIds] = useState<number[]>(screening.linked_scan_run_ids ?? []);
   const [scanRuns, setScanRuns] = useState<ScanRunSummary[]>([]);
   const [saving, setSaving] = useState(false);
   const [saveErr, setSaveErr] = useState<string | null>(null);
@@ -1311,7 +1311,7 @@ function AgentCard({ screening, suggestionTickers }: { screening: ScheduledScree
       schedule: editSchedule,
       timezone: editTimezone,
       tickers: editTickers,
-      linked_scan_run_ids: editLinkedIds,
+      linked_scan_run_ids: editLinkedScanRunIds,
     });
     if (res.ok) {
       setEditing(false);
@@ -1403,7 +1403,7 @@ function AgentCard({ screening, suggestionTickers }: { screening: ScheduledScree
                 Linked screenings
                 <span className="ml-2 normal-case font-normal text-muted-foreground/60">pull context from a scan run</span>
               </label>
-              <ScanRunPicker linkedIds={editLinkedIds} onChange={setEditLinkedIds} scanRuns={scanRuns} />
+              <ScanRunPicker linkedIds={editLinkedScanRunIds} onChange={setEditLinkedScanRunIds} scanRuns={scanRuns} />
             </div>
           )}
           <div className="flex items-center gap-3 pt-1 border-t border-border">
@@ -1507,7 +1507,7 @@ function AgentCard({ screening, suggestionTickers }: { screening: ScheduledScree
         <div className="flex items-center gap-2 shrink-0">
           <button
             type="button"
-            onClick={() => { setEditing(true); setEditName(screening.name); setEditPrompt(screening.prompt); setEditSchedule(screening.schedule); setEditTimezone(screening.timezone); setEditTickers(screening.tickers ?? []); setEditLinkedIds(screening.linked_scan_run_ids ?? []); setSaveErr(null); }}
+            onClick={() => { setEditing(true); setEditName(screening.name); setEditPrompt(screening.prompt); setEditSchedule(screening.schedule); setEditTimezone(screening.timezone); setEditTickers(screening.tickers ?? []); setEditLinkedScanRunIds(screening.linked_scan_run_ids ?? []); setSaveErr(null); }}
             title="Edit agent"
             className="flex items-center justify-center w-8 h-8 rounded-md border border-border text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
           >
