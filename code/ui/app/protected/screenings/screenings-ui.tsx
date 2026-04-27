@@ -1,6 +1,6 @@
 "use client";
 
-import {
+import React, {
   useState,
   useMemo,
   useEffect,
@@ -95,7 +95,10 @@ import {
   type ChartAiChatMessage,
 } from "@/app/actions/chart-workspace";
 import { ChartAiChat } from "@/components/chart-ai-chat";
-import { ChartDateRangePicker, type ChartGranularity } from "@/components/chart-date-range-picker";
+import {
+  ChartDateRangePicker,
+  type ChartGranularity,
+} from "@/components/chart-date-range-picker";
 
 export interface ScanRun {
   id: number;
@@ -468,7 +471,8 @@ function QuotesView({
                 onClick={() => toggleSort("symbol")}
                 className={`sticky left-0 z-10 bg-muted/40 px-3 py-2 text-xs font-medium text-muted-foreground uppercase tracking-wide whitespace-nowrap cursor-pointer select-none hover:text-foreground text-left ${sortKey === "symbol" ? "text-foreground" : ""}`}
               >
-                Symbol{sortKey === "symbol" ? (sortDir === "asc" ? " ↑" : " ↓") : ""}
+                Symbol
+                {sortKey === "symbol" ? (sortDir === "asc" ? " ↑" : " ↓") : ""}
               </th>
               <th className="px-3 py-2 text-xs font-medium text-muted-foreground uppercase tracking-wide whitespace-nowrap text-left">
                 Name
@@ -524,7 +528,9 @@ function QuotesView({
                   onDoubleClick={() => onOpenWorkflowEditor(sym)}
                   className={`cursor-pointer transition-colors border-l-[3px] ${stripe || "border-l-transparent"} ${isDismissed ? "opacity-40" : ""} ${isHighlighted ? "bg-amber-500/10" : ""} ${isSelected ? "bg-foreground/10 ring-1 ring-inset ring-foreground/20" : "hover:bg-muted/30"}`}
                 >
-                  <td className={`sticky left-0 z-10 px-3 py-2 font-mono font-semibold whitespace-nowrap ${isSelected ? "bg-foreground/10" : isHighlighted ? "bg-amber-500/10" : "bg-background"}`}>
+                  <td
+                    className={`sticky left-0 z-10 px-3 py-2 font-mono font-semibold whitespace-nowrap ${isSelected ? "bg-foreground/10" : isHighlighted ? "bg-amber-500/10" : "bg-background"}`}
+                  >
                     {sym}
                   </td>
                   <td
@@ -1579,7 +1585,7 @@ function TradeMonitoringView({
               <ColHd label="Pivot date" col="pivotDate" />
               <ColHd label="Pivot" col="pivotPrice" align="right" />
               <ColHd label="Latest" col="latest" align="right" />
-              <ColHd label="Vs pivot" col="vsPivotPct" align="right" />
+              <ColHd label="Vs entry" col="vsPivotPct" align="right" />
               <ColHd label="Workflow" col="workflow" align="center" />
               <ColHd label="Results" col="results" align="center" />
               <th
@@ -1840,16 +1846,36 @@ export function ScreeningsUI({
   );
   const [chartAiOpen, setChartAiOpen] = useState(true);
   const [mobileChatOpen, setMobileChatOpen] = useState(false);
+  const [streamingTickers, setStreamingTickers] = useState<Set<string>>(
+    new Set(),
+  );
   const [chartWorkspaceReady, setChartWorkspaceReady] = useState(false);
   const chartSaveSeq = useRef(0);
+  const selectedTickerRef = useRef(selectedTicker);
+  selectedTickerRef.current = selectedTicker;
+  const tickerMessagesCache = useRef(new Map<string, ChartAiChatMessage[]>());
   const [chartDateRange, setChartDateRange] = useState<
     { from: string; to: string } | undefined
   >();
-  const [chartGranularity, setChartGranularity] = useState<ChartGranularity>("1day");
+  const [chartGranularity, setChartGranularity] =
+    useState<ChartGranularity>("1day");
 
   useEffect(() => {
     setChartWorkspaceReady(false);
     setChartAnnotations([]);
+
+    // If there's cached messages for this ticker (e.g. from an in-flight stream
+    // that was running while the user navigated away), restore from cache
+    // instead of reloading from DB.
+    const cached = selectedTicker
+      ? tickerMessagesCache.current.get(selectedTicker)
+      : undefined;
+    if (cached !== undefined) {
+      setChartAiMessages(cached);
+      setChartWorkspaceReady(true);
+      return;
+    }
+
     setChartAiMessages([]);
     if (!selectedTicker) return;
     let cancelled = false;
@@ -1865,6 +1891,25 @@ export function ScreeningsUI({
       cancelled = true;
     };
   }, [selectedTicker]);
+
+  // Scoped setter: writes to the per-ticker cache and only updates the display
+  // state when the owning ticker is still active. This keeps in-flight streams
+  // from clobbering a different ticker's chat, and lets results be restored
+  // when the user navigates back.
+  const scopedSetChartAiMessages = useCallback(
+    (update: React.SetStateAction<ChartAiChatMessage[]>) => {
+      const ticker = selectedTicker;
+      if (!ticker) return;
+      const currentCached = tickerMessagesCache.current.get(ticker) ?? [];
+      const next =
+        typeof update === "function" ? update(currentCached) : update;
+      tickerMessagesCache.current.set(ticker, next);
+      if (selectedTickerRef.current === ticker) {
+        setChartAiMessages(next);
+      }
+    },
+    [selectedTicker],
+  );
 
   useEffect(() => {
     if (!selectedTicker || !chartWorkspaceReady) return;
@@ -2652,7 +2697,9 @@ export function ScreeningsUI({
     [filtered],
   );
 
-  const { quotes, loading: quotesLoading } = useQuotes(filteredSymbols.slice(0, 50));
+  const { quotes, loading: quotesLoading } = useQuotes(
+    filteredSymbols.slice(0, 50),
+  );
 
   /** Chart carousel includes filtered symbols first, then any pivot-marked tickers not in the current filter so pivots always stay on-chart. */
   const chartSymbols = useMemo(() => {
@@ -3137,202 +3184,263 @@ export function ScreeningsUI({
               highlightedSymbols={highlightedSymbols}
             />
             <div className="flex flex-1 min-h-0 gap-0">
-            <div className="hidden sm:flex sm:flex-col w-56 shrink-0 xl:w-64 border-r border-border h-full">
-              <TickerSidebar
-                symbols={filteredSymbols}
-                quotes={quotes}
-                selectedTicker={selectedTicker}
-                onSelect={setSelectedTicker}
-                getTickerMeta={getTickerMeta}
-                getStatus={getTickerStatus}
-                getSymbolNote={getTickerComment}
-                dismissedSymbols={dismissedSymbols}
-                highlightedSymbols={highlightedSymbols}
-                onContextMenu={handleContextMenu}
-              />
-            </div>
-            <div
-              className={`flex-1 min-w-0 min-h-0 flex flex-col gap-4 ${activeView === "charts" ? "overflow-hidden" : "overflow-y-auto"}`}
-            >
-              {activeView === "charts" ? (
-                <div className="flex-1 flex flex-col gap-3 w-full min-h-0">
-                  <div className="flex-1 flex items-stretch w-full min-h-0">
-                    <div className="flex-1 min-w-0">
-                      <ChartDateRangePicker onChange={setChartDateRange} onGranularityChange={setChartGranularity} />
-                      <TickerChartsPanel
-                        symbols={chartSymbols}
-                        selectedTicker={selectedTicker}
-                        onSelect={setSelectedTicker}
-                        dismissed={dismissedSymbols}
-                        onDismiss={dismissTicker}
-                        onRestore={restoreTicker}
-                        getStatus={getTickerStatus}
-                        onSetStatus={setTickerStatus}
-                        hasComment={tickerHasComment}
-                        onEditComment={editTickerComment}
-                        getTickerMeta={getTickerMeta}
-                        getEntryMarker={getTickerEntryMarker}
-                        onSetEntryMarker={setTickerEntryMarker}
-                        onClearEntryMarker={clearTickerEntryMarker}
-                        showChevronSymbolNav={false}
-                        screeningToolbar={false}
-                        showSymbolHeadline={false}
-                        showChartFrame={false}
-                        annotations={chartAnnotations}
-                        onChartData={(rows: OhlcBar[]) => {
-                          ohlcvDataRef.current = rows;
-                        }}
-                        onAnnotationAdd={(ann) =>
-                          setChartAnnotations((prev) => [...prev, ann])
-                        }
-                        onAnnotationDelete={(id) =>
-                          setChartAnnotations((prev) =>
-                            prev.filter((a) => a.id !== id),
-                          )
-                        }
-                        dateRange={chartDateRange}
-                        interval={chartGranularity}
-                      />
-                    </div>
-                    {selectedTicker && (
-                      <>
-                        {/* Desktop: collapsible sidebar toggle + panel */}
-                        <button
-                          type="button"
-                          onClick={() => setChartAiOpen((v) => !v)}
-                          className="hidden sm:flex items-center justify-center w-5 shrink-0 border-l border-border bg-background hover:bg-muted transition-colors"
-                          title={
-                            chartAiOpen ? "Collapse AI chat" : "Expand AI chat"
+              <div className="hidden sm:flex sm:flex-col w-56 shrink-0 xl:w-64 border-r border-border h-full">
+                <TickerSidebar
+                  symbols={filteredSymbols}
+                  quotes={quotes}
+                  selectedTicker={selectedTicker}
+                  onSelect={setSelectedTicker}
+                  getTickerMeta={getTickerMeta}
+                  getStatus={getTickerStatus}
+                  getSymbolNote={getTickerComment}
+                  dismissedSymbols={dismissedSymbols}
+                  highlightedSymbols={highlightedSymbols}
+                  onContextMenu={handleContextMenu}
+                  streamingTickers={streamingTickers}
+                />
+              </div>
+              <div
+                className={`flex-1 min-w-0 min-h-0 flex flex-col gap-4 ${activeView === "charts" ? "overflow-hidden" : "overflow-y-auto"}`}
+              >
+                {activeView === "charts" ? (
+                  <div className="flex-1 flex flex-col gap-3 w-full min-h-0">
+                    <div className="flex-1 flex items-stretch w-full min-h-0">
+                      <div className="flex-1 min-w-0">
+                        <ChartDateRangePicker
+                          onChange={setChartDateRange}
+                          onGranularityChange={setChartGranularity}
+                        />
+                        <TickerChartsPanel
+                          symbols={chartSymbols}
+                          selectedTicker={selectedTicker}
+                          onSelect={setSelectedTicker}
+                          dismissed={dismissedSymbols}
+                          onDismiss={dismissTicker}
+                          onRestore={restoreTicker}
+                          getStatus={getTickerStatus}
+                          onSetStatus={setTickerStatus}
+                          hasComment={tickerHasComment}
+                          onEditComment={editTickerComment}
+                          getTickerMeta={getTickerMeta}
+                          getEntryMarker={getTickerEntryMarker}
+                          onSetEntryMarker={setTickerEntryMarker}
+                          onClearEntryMarker={clearTickerEntryMarker}
+                          showChevronSymbolNav={false}
+                          screeningToolbar={false}
+                          showSymbolHeadline={false}
+                          showChartFrame={false}
+                          annotations={chartAnnotations}
+                          onChartData={(rows: OhlcBar[]) => {
+                            ohlcvDataRef.current = rows;
+                          }}
+                          onAnnotationAdd={(ann) =>
+                            setChartAnnotations((prev) => [...prev, ann])
                           }
-                        >
-                          {chartAiOpen ? (
-                            <ChevronRight className="w-3 h-3 text-muted-foreground" />
-                          ) : (
-                            <ChevronLeft className="w-3 h-3 text-muted-foreground" />
+                          onAnnotationDelete={(id) =>
+                            setChartAnnotations((prev) =>
+                              prev.filter((a) => a.id !== id),
+                            )
+                          }
+                          dateRange={chartDateRange}
+                          interval={chartGranularity}
+                        />
+                      </div>
+                      {selectedTicker && (
+                        <>
+                          {/* Desktop: collapsible sidebar toggle + panel */}
+                          <button
+                            type="button"
+                            onClick={() => setChartAiOpen((v) => !v)}
+                            className="hidden sm:flex items-center justify-center w-5 shrink-0 border-l border-border bg-background hover:bg-muted transition-colors"
+                            title={
+                              chartAiOpen
+                                ? "Collapse AI chat"
+                                : "Expand AI chat"
+                            }
+                          >
+                            {chartAiOpen ? (
+                              <ChevronRight className="w-3 h-3 text-muted-foreground" />
+                            ) : (
+                              <ChevronLeft className="w-3 h-3 text-muted-foreground" />
+                            )}
+                          </button>
+                          {chartAiOpen && (
+                            <div className="hidden sm:flex w-[320px] shrink-0 flex-col border-l border-border">
+                              <ChartAiChat
+                                key={selectedTicker}
+                                symbol={selectedTicker}
+                                ohlcData={ohlcvDataRef.current}
+                                annotations={chartAnnotations}
+                                onAnnotations={handleChartAiAnnotations}
+                                messages={chartAiMessages}
+                                setMessages={scopedSetChartAiMessages}
+                                onLoadingChange={(loading) => {
+                                  if (!selectedTicker) return;
+                                  setStreamingTickers((prev) => {
+                                    const next = new Set(prev);
+                                    if (loading) next.add(selectedTicker);
+                                    else next.delete(selectedTicker);
+                                    return next;
+                                  });
+                                }}
+                                onSaveEntry={(
+                                  price,
+                                  direction,
+                                  takeProfit,
+                                  stopLoss,
+                                ) => {
+                                  const ohlc = ohlcvDataRef.current;
+                                  const lastIdx = ohlc.length - 1;
+                                  const last = ohlc[lastIdx];
+                                  if (!last) return;
+                                  void setTickerEntryMarker(
+                                    selectedTicker,
+                                    {
+                                      barIdx: lastIdx,
+                                      date: last.date,
+                                      price,
+                                      open: last.open,
+                                      high: last.high,
+                                      low: last.low,
+                                      close: last.close,
+                                    },
+                                    direction,
+                                    takeProfit,
+                                    stopLoss,
+                                  );
+                                }}
+                                isStreaming={streamingTickers.has(selectedTicker ?? "")}
+                                side
+                              />
+                            </div>
                           )}
-                        </button>
-                        {chartAiOpen && (
-                          <div className="hidden sm:flex w-[320px] shrink-0 flex-col border-l border-border">
-                            <ChartAiChat
-                              key={selectedTicker}
-                              symbol={selectedTicker}
-                              ohlcData={ohlcvDataRef.current}
-                              annotations={chartAnnotations}
-                              onAnnotations={handleChartAiAnnotations}
-                              messages={chartAiMessages}
-                              setMessages={setChartAiMessages}
-                              onSaveEntry={(price, direction, takeProfit, stopLoss) => {
-                                const ohlc = ohlcvDataRef.current;
-                                const lastIdx = ohlc.length - 1;
-                                const last = ohlc[lastIdx];
-                                if (!last) return;
-                                void setTickerEntryMarker(
-                                  selectedTicker,
-                                  { barIdx: lastIdx, date: last.date, price, open: last.open, high: last.high, low: last.low, close: last.close },
-                                  direction, takeProfit, stopLoss,
-                                );
-                              }}
-                              side
-                            />
-                          </div>
-                        )}
 
-                        {/* Mobile: FAB + bottom sheet */}
-                        <button
-                          type="button"
-                          onClick={() => setMobileChatOpen(true)}
-                          className={`sm:hidden fixed bottom-6 right-4 z-30 flex items-center justify-center w-14 h-14 rounded-full shadow-lg border border-border transition-colors ${chartAiMessages.length > 0 ? "bg-foreground text-background" : "bg-background text-foreground hover:bg-muted"}`}
-                          style={{ bottom: "calc(1.5rem + env(safe-area-inset-bottom, 0px))" }}
-                          aria-label="Open AI chat"
-                        >
-                          <Bot className="w-6 h-6" />
-                          {chartAiMessages.length > 0 && (
-                            <span className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-emerald-500 border-2 border-background" />
-                          )}
-                        </button>
+                          {/* Mobile: FAB + bottom sheet */}
+                          <button
+                            type="button"
+                            onClick={() => setMobileChatOpen(true)}
+                            className={`sm:hidden fixed bottom-6 right-4 z-30 flex items-center justify-center w-14 h-14 rounded-full shadow-lg border border-border transition-colors ${chartAiMessages.length > 0 ? "bg-foreground text-background" : "bg-background text-foreground hover:bg-muted"}`}
+                            style={{
+                              bottom:
+                                "calc(1.5rem + env(safe-area-inset-bottom, 0px))",
+                            }}
+                            aria-label="Open AI chat"
+                          >
+                            <Bot className="w-6 h-6" />
+                            {chartAiMessages.length > 0 && (
+                              <span className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-emerald-500 border-2 border-background" />
+                            )}
+                          </button>
 
-                        {mobileChatOpen && (
-                          <div
-                            className="sm:hidden fixed inset-0 z-40 bg-black/50"
-                            onClick={() => setMobileChatOpen(false)}
-                          />
-                        )}
-                        <div
-                          className={`sm:hidden fixed inset-x-0 bottom-0 z-50 bg-background border-t border-border rounded-t-2xl shadow-2xl flex flex-col transition-transform duration-300 ease-out ${mobileChatOpen ? "translate-y-0" : "translate-y-full"}`}
-                          style={{ height: "88dvh" }}
-                        >
-                          <div className="flex items-center justify-center pt-2.5 pb-1 shrink-0">
-                            <div className="w-10 h-1 rounded-full bg-border" />
-                          </div>
-                          <div className="flex items-center justify-between px-4 py-2 border-b border-border shrink-0">
-                            <span className="font-mono font-bold text-sm">{selectedTicker}</span>
-                            <button
-                              type="button"
+                          {mobileChatOpen && (
+                            <div
+                              className="sm:hidden fixed inset-0 z-40 bg-black/50"
                               onClick={() => setMobileChatOpen(false)}
-                              className="flex items-center justify-center w-8 h-8 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
-                              aria-label="Close chat"
-                            >
-                              <ChevronDown className="w-4 h-4" />
-                            </button>
-                          </div>
-                          <div className="flex-1 min-h-0 overflow-hidden">
-                            <ChartAiChat
-                              key={`mobile-${selectedTicker}`}
-                              symbol={selectedTicker}
-                              ohlcData={ohlcvDataRef.current}
-                              annotations={chartAnnotations}
-                              onAnnotations={handleChartAiAnnotations}
-                              messages={chartAiMessages}
-                              setMessages={setChartAiMessages}
-                              onSaveEntry={(price, direction, takeProfit, stopLoss) => {
-                                const ohlc = ohlcvDataRef.current;
-                                const lastIdx = ohlc.length - 1;
-                                const last = ohlc[lastIdx];
-                                if (!last) return;
-                                void setTickerEntryMarker(
-                                  selectedTicker,
-                                  { barIdx: lastIdx, date: last.date, price, open: last.open, high: last.high, low: last.low, close: last.close },
-                                  direction, takeProfit, stopLoss,
-                                );
-                              }}
                             />
+                          )}
+                          <div
+                            className={`sm:hidden fixed inset-x-0 bottom-0 z-50 bg-background border-t border-border rounded-t-2xl shadow-2xl flex flex-col transition-transform duration-300 ease-out ${mobileChatOpen ? "translate-y-0" : "translate-y-full"}`}
+                            style={{ height: "88dvh" }}
+                          >
+                            <div className="flex items-center justify-center pt-2.5 pb-1 shrink-0">
+                              <div className="w-10 h-1 rounded-full bg-border" />
+                            </div>
+                            <div className="flex items-center justify-between px-4 py-2 border-b border-border shrink-0">
+                              <span className="font-mono font-bold text-sm">
+                                {selectedTicker}
+                              </span>
+                              <button
+                                type="button"
+                                onClick={() => setMobileChatOpen(false)}
+                                className="flex items-center justify-center w-8 h-8 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+                                aria-label="Close chat"
+                              >
+                                <ChevronDown className="w-4 h-4" />
+                              </button>
+                            </div>
+                            <div className="flex-1 min-h-0 overflow-hidden">
+                              <ChartAiChat
+                                key={`mobile-${selectedTicker}`}
+                                symbol={selectedTicker}
+                                ohlcData={ohlcvDataRef.current}
+                                annotations={chartAnnotations}
+                                onAnnotations={handleChartAiAnnotations}
+                                messages={chartAiMessages}
+                                setMessages={scopedSetChartAiMessages}
+                                onLoadingChange={(loading) => {
+                                  if (!selectedTicker) return;
+                                  setStreamingTickers((prev) => {
+                                    const next = new Set(prev);
+                                    if (loading) next.add(selectedTicker);
+                                    else next.delete(selectedTicker);
+                                    return next;
+                                  });
+                                }}
+                                onSaveEntry={(
+                                  price,
+                                  direction,
+                                  takeProfit,
+                                  stopLoss,
+                                ) => {
+                                  const ohlc = ohlcvDataRef.current;
+                                  const lastIdx = ohlc.length - 1;
+                                  const last = ohlc[lastIdx];
+                                  if (!last) return;
+                                  void setTickerEntryMarker(
+                                    selectedTicker,
+                                    {
+                                      barIdx: lastIdx,
+                                      date: last.date,
+                                      price,
+                                      open: last.open,
+                                      high: last.high,
+                                      low: last.low,
+                                      close: last.close,
+                                    },
+                                    direction,
+                                    takeProfit,
+                                    stopLoss,
+                                  );
+                                }}
+                                isStreaming={streamingTickers.has(selectedTicker ?? "")}
+                              />
+                            </div>
                           </div>
-                        </div>
-                      </>
-                    )}
+                        </>
+                      )}
+                    </div>
                   </div>
-                </div>
-              ) : activeView === "relationship" ? (
-                <ScreeningsRelationshipNetworkPanel
-                  symbols={filteredSymbols}
-                  selectedTicker={selectedTicker}
-                  onSelect={setSelectedTicker}
-                  dismissed={dismissedSymbols}
-                  onDismiss={dismissTicker}
-                  onRestore={restoreTicker}
-                  getStatus={getTickerStatus}
-                  onSetStatus={setTickerStatus}
-                  hasComment={tickerHasComment}
-                  onEditComment={editTickerComment}
-                  getTickerMeta={getTickerMeta}
-                />
-              ) : (
-                <StockNewsTrendView
-                  symbols={filteredSymbols}
-                  companyVectorDimensions={companyVectorDimensions}
-                  selectedTicker={selectedTicker}
-                  onSelect={setSelectedTicker}
-                  dismissed={dismissedSymbols}
-                  onDismiss={dismissTicker}
-                  onRestore={restoreTicker}
-                  getStatus={getTickerStatus}
-                  onSetStatus={setTickerStatus}
-                  hasComment={tickerHasComment}
-                  onEditComment={editTickerComment}
-                  getTickerMeta={getTickerMeta}
-                />
-              )}
-            </div>
+                ) : activeView === "relationship" ? (
+                  <ScreeningsRelationshipNetworkPanel
+                    symbols={filteredSymbols}
+                    selectedTicker={selectedTicker}
+                    onSelect={setSelectedTicker}
+                    dismissed={dismissedSymbols}
+                    onDismiss={dismissTicker}
+                    onRestore={restoreTicker}
+                    getStatus={getTickerStatus}
+                    onSetStatus={setTickerStatus}
+                    hasComment={tickerHasComment}
+                    onEditComment={editTickerComment}
+                    getTickerMeta={getTickerMeta}
+                  />
+                ) : (
+                  <StockNewsTrendView
+                    symbols={filteredSymbols}
+                    companyVectorDimensions={companyVectorDimensions}
+                    selectedTicker={selectedTicker}
+                    onSelect={setSelectedTicker}
+                    dismissed={dismissedSymbols}
+                    onDismiss={dismissTicker}
+                    onRestore={restoreTicker}
+                    getStatus={getTickerStatus}
+                    onSetStatus={setTickerStatus}
+                    hasComment={tickerHasComment}
+                    onEditComment={editTickerComment}
+                    getTickerMeta={getTickerMeta}
+                  />
+                )}
+              </div>
             </div>
           </div>
         ) : activeView === "results" ? (
@@ -3350,7 +3458,8 @@ export function ScreeningsUI({
                         className="sticky left-0 z-10 bg-muted/40 px-3 py-2 text-xs font-medium text-muted-foreground uppercase tracking-wide cursor-pointer select-none hover:text-foreground text-left whitespace-nowrap"
                         onClick={() => toggleSort("symbol")}
                       >
-                        Symbol<SortIcon col="symbol" />
+                        Symbol
+                        <SortIcon col="symbol" />
                       </th>
                       {dataColumnKeys.map((k) => {
                         const boolCol = isBooleanColumn(rows, k);
@@ -3415,7 +3524,9 @@ export function ScreeningsUI({
                           }
                           className={`group cursor-pointer transition-colors border-l-[3px] ${stripe || "border-l-transparent"} ${isDismissed ? "opacity-40" : ""} ${isHighlighted ? "bg-amber-500/10" : ""} ${isSelected ? "bg-foreground/10 ring-1 ring-inset ring-foreground/20" : "hover:bg-muted/30"}`}
                         >
-                          <td className={`sticky left-0 z-10 px-3 py-2 font-mono font-semibold whitespace-nowrap ${isSelected ? "bg-foreground/10" : isHighlighted ? "bg-amber-500/10" : "bg-background"}`}>
+                          <td
+                            className={`sticky left-0 z-10 px-3 py-2 font-mono font-semibold whitespace-nowrap ${isSelected ? "bg-foreground/10" : isHighlighted ? "bg-amber-500/10" : "bg-background"}`}
+                          >
                             {row.symbol ?? "—"}
                           </td>
                           {dataColumnKeys.map((k) => {

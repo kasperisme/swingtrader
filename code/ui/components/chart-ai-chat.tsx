@@ -27,8 +27,6 @@ const PERSONA_COLORS: Record<PersonaId, string> = {
   newsTrend: "#a855f7",
 };
 
-const ALL_PERSONA_IDS: PersonaId[] = ["technical", "sentiment", "risk", "fundamentals", "newsTrend"];
-
 const PROMPT_CHIPS = [
   "What is the next entry point?",
   "Where are key support levels?",
@@ -286,6 +284,9 @@ interface ChartAiChatProps {
   messages: ChartAiChatMessage[];
   setMessages: Dispatch<SetStateAction<ChartAiChatMessage[]>>;
   onSaveEntry?: (price: number, direction: "long" | "short", takeProfit: number | null, stopLoss: number | null) => void;
+  onLoadingChange?: (loading: boolean) => void;
+  /** True when a stream for this ticker is running in the background (e.g. user navigated away and back). */
+  isStreaming?: boolean;
   side?: boolean;
 }
 
@@ -297,14 +298,20 @@ export function ChartAiChat({
   messages,
   setMessages,
   onSaveEntry,
+  onLoadingChange,
+  isStreaming = false,
   side = false,
 }: ChartAiChatProps) {
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
+  // True whenever this component is actively streaming OR a background stream
+  // is running for this ticker (user navigated away and came back).
+  const busy = loading || isStreaming;
   const [streamingAnnotations, setStreamingAnnotations] = useState<ChartAnnotation[]>([]);
   const [streamingPersonas, setStreamingPersonas] = useState<PersonaReport[]>([]);
   const [loadingPersonaIds, setLoadingPersonaIds] = useState<Set<string>>(new Set());
   const [savedEntryIndices, setSavedEntryIndices] = useState<Set<number>>(new Set());
+  const [pendingConfirm, setPendingConfirm] = useState<{ personas: PersonaId[]; question: string } | null>(null);
   const abortRef = useRef<AbortController | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
 
@@ -312,24 +319,21 @@ export function ChartAiChat({
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, loading]);
 
-  async function send() {
-    const text = input.trim();
-    if (!text || loading) return;
-
-    const userMsg: ChartAiChatMessage = { role: "user", content: text };
-    const historyAfterUser: ChartAiChatMessage[] = [...messages, userMsg];
-    setMessages([...historyAfterUser, { role: "assistant", content: "" }]);
-    setInput("");
+  // Core streaming function — shared by send() and handleConfirm().
+  // `history` = messages to send to the API (no assistant placeholder).
+  // `overridePersonas` = skip router and use this list ([] = no personas).
+  async function executeStream(history: ChartAiChatMessage[], overridePersonas?: PersonaId[]) {
     setLoading(true);
+    onLoadingChange?.(true);
     setStreamingAnnotations([]);
-    setStreamingPersonas(ALL_PERSONA_IDS.map((id) => ({ id, label: PERSONA_LABELS[id], analysis: "", error: null })));
-    setLoadingPersonaIds(new Set(ALL_PERSONA_IDS));
+    setStreamingPersonas([]);
+    setLoadingPersonaIds(new Set());
+    setPendingConfirm(null);
 
     abortRef.current?.abort();
     const controller = new AbortController();
     abortRef.current = controller;
 
-    const history = historyAfterUser;
     let assistantContent = "";
     let newAnnotations: ChartAnnotation[] = [];
     const collectedPersonas: PersonaReport[] = [];
@@ -339,7 +343,10 @@ export function ChartAiChat({
         method: "POST",
         headers: { "Content-Type": "application/json" },
         signal: controller.signal,
-        body: JSON.stringify({ symbol, ohlcData, annotations, messages: history }),
+        body: JSON.stringify({
+          symbol, ohlcData, annotations, messages: history,
+          ...(overridePersonas !== undefined ? { overridePersonas } : {}),
+        }),
       });
 
       if (!res.ok) {
@@ -366,7 +373,19 @@ export function ChartAiChat({
           try { msg = JSON.parse(line) as Record<string, unknown>; }
           catch { continue; }
 
-          if (msg.type === "persona") {
+          if (msg.type === "confirm_specialists") {
+            const personas = (msg.personas as string[]).filter((p): p is PersonaId =>
+              ["technical", "sentiment", "risk", "fundamentals", "newsTrend"].includes(p)
+            );
+            const question = (msg.question as string | undefined) ?? "Would you like me to run a full specialist analysis?";
+            setPendingConfirm({ personas, question });
+          } else if (msg.type === "specialists_requested") {
+            const ids = (msg.personas as string[]).filter((p): p is PersonaId =>
+              ["technical", "sentiment", "risk", "fundamentals", "newsTrend"].includes(p)
+            );
+            setStreamingPersonas(ids.map((id) => ({ id, label: PERSONA_LABELS[id], analysis: "", error: null })));
+            setLoadingPersonaIds(new Set(ids));
+          } else if (msg.type === "persona") {
             const rawScores = msg.scores as { confidence: number; short_term: number; long_term: number } | null;
             const report: PersonaReport = {
               id: msg.id as string,
@@ -400,6 +419,7 @@ export function ChartAiChat({
       }
     } finally {
       setLoading(false);
+      onLoadingChange?.(false);
       setMessages((prev) => {
         const copy = [...prev];
         const last = copy[copy.length - 1];
@@ -416,6 +436,26 @@ export function ChartAiChat({
       setStreamingPersonas([]);
       setLoadingPersonaIds(new Set());
     }
+  }
+
+  async function send() {
+    const text = input.trim();
+    if (!text || busy) return;
+    const userMsg: ChartAiChatMessage = { role: "user", content: text };
+    const historyAfterUser = [...messages, userMsg];
+    setMessages([...historyAfterUser, { role: "assistant", content: "" }]);
+    setInput("");
+    await executeStream(historyAfterUser);
+  }
+
+  // Called when the user clicks Yes/No on the confirmation widget.
+  async function handleConfirm(approved: boolean) {
+    if (!pendingConfirm) return;
+    const overridePersonas = approved ? pendingConfirm.personas : [];
+    // history = everything except the empty assistant placeholder
+    const history = messages.slice(0, -1);
+    setMessages([...history, { role: "assistant", content: "" }]);
+    await executeStream(history, overridePersonas);
   }
 
   function clear() {
@@ -467,26 +507,56 @@ export function ChartAiChat({
                 </div>
               ) : (
                 <div className="w-full max-w-[92%]">
-                  {/* Streaming persona panels */}
-                  {loading && i === messages.length - 1 && streamingPersonas.length > 0 && (
+                  {/* Routing/background-stream state */}
+                  {busy && i === messages.length - 1 && streamingPersonas.length === 0 && !m.content && (
+                    <div className="flex items-center gap-2 text-[11px] text-muted-foreground/50 mt-2.5 ml-1">
+                      <Loader2 className="w-3 h-3 animate-spin" />
+                      <span className="tracking-tight">Thinking…</span>
+                    </div>
+                  )}
+                  {/* Confirmation widget — router is uncertain, asking user to decide */}
+                  {!busy && i === messages.length - 1 && pendingConfirm && !m.content && (
+                    <div className="mt-2 space-y-2.5">
+                      <p className="text-[12px] text-foreground/70 leading-snug">{pendingConfirm.question}</p>
+                      <div className="flex gap-2">
+                        <button
+                          type="button"
+                          onClick={() => void handleConfirm(true)}
+                          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-medium bg-amber-500/15 text-amber-400 border border-amber-500/30 hover:bg-amber-500/25 transition-colors"
+                        >
+                          <Sparkles className="w-3 h-3" />
+                          Yes, run analysis
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => void handleConfirm(false)}
+                          className="px-3 py-1.5 rounded-lg text-[11px] font-medium text-muted-foreground border border-border hover:bg-muted/40 transition-colors"
+                        >
+                          No, skip
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                  {/* Streaming persona panels (only when this instance owns the stream) */}
+                  {busy && i === messages.length - 1 && streamingPersonas.length > 0 && (
                     <PersonaReports reports={streamingPersonas} loadingIds={loadingPersonaIds} />
                   )}
                   {/* Completed persona panels */}
-                  {!loading && m.personaReports && m.personaReports.length > 0 && (
+                  {!busy && m.personaReports && m.personaReports.length > 0 && (
                     <PersonaReports reports={m.personaReports} />
                   )}
-                  {/* Synthesizing state */}
-                  {loading && i === messages.length - 1 && loadingPersonaIds.size === 0 && !m.content && (
+                  {/* Synthesizing state — all personas done, waiting for orchestrator */}
+                  {busy && i === messages.length - 1 && streamingPersonas.length > 0 && loadingPersonaIds.size === 0 && !m.content && (
                     <div className="flex items-center gap-2 text-[11px] text-muted-foreground/50 mt-2.5 ml-1">
                       <Loader2 className="w-3 h-3 animate-spin" />
                       <span className="tracking-tight">Synthesizing…</span>
                     </div>
                   )}
                   {/* Analysis text */}
-                  {(m.content || (loading && i === messages.length - 1 && loadingPersonaIds.size > 0)) && (
+                  {(m.content || (busy && i === messages.length - 1 && loadingPersonaIds.size > 0)) && (
                     <div className="mt-2.5">
                       <AnalysisMarkdown
-                        content={parsePersonas(m.content || (loading && i === messages.length - 1 ? "…" : "")).text}
+                        content={parsePersonas(m.content || (busy && i === messages.length - 1 ? "…" : "")).text}
                       />
                     </div>
                   )}
@@ -498,11 +568,11 @@ export function ChartAiChat({
                   {m.chartAnnotations && m.chartAnnotations.length > 0 && (
                     <AnnotationPills annotations={m.chartAnnotations} />
                   )}
-                  {loading && i === messages.length - 1 && streamingAnnotations.length > 0 && (
+                  {busy && i === messages.length - 1 && streamingAnnotations.length > 0 && (
                     <AnnotationPills annotations={streamingAnnotations} />
                   )}
                   {/* Save entry button */}
-                  {!loading && onSaveEntry && m.chartAnnotations && m.personaReports && (() => {
+                  {!busy && onSaveEntry && m.chartAnnotations && m.personaReports && (() => {
                     const price = findEntryPrice(m.chartAnnotations!);
                     const direction = parseDirection(m.content);
                     if (price === null || direction === null || !isHighConfidence(m.personaReports!)) return null;
@@ -547,7 +617,7 @@ export function ChartAiChat({
       )}
 
       {/* Empty state — prompt chips */}
-      {messages.length === 0 && !loading && (
+      {messages.length === 0 && !busy && (
         <div className="flex-1 px-4 pt-3 pb-1 flex flex-col gap-2">
           <p className="text-[10px] text-muted-foreground/35 font-medium uppercase tracking-widest">Suggested</p>
           <div className="flex flex-wrap gap-1.5">
@@ -576,15 +646,15 @@ export function ChartAiChat({
           onChange={(e) => setInput(e.target.value)}
           placeholder={`Ask about ${symbol}…`}
           className="flex-1 bg-transparent text-[12px] text-foreground placeholder:text-muted-foreground/35 focus:outline-none"
-          disabled={loading}
+          disabled={busy}
         />
         <button
           type="submit"
-          disabled={loading || !input.trim()}
+          disabled={busy || !input.trim()}
           aria-label="Send message"
           className="w-7 h-7 flex items-center justify-center rounded-lg bg-zinc-800 border border-zinc-700/60 text-foreground/60 hover:text-foreground hover:border-zinc-600 disabled:opacity-30 disabled:cursor-not-allowed transition-colors cursor-pointer"
         >
-          {loading
+          {busy
             ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
             : <Send className="w-3.5 h-3.5" />}
         </button>

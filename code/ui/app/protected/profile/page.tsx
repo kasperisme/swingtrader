@@ -7,6 +7,8 @@ import { LogoutButton } from "@/components/logout-button";
 import { TelegramConnect } from "@/components/telegram-connect";
 import { ManageBillingButton } from "@/components/manage-billing-button";
 import { Badge } from "@/components/ui/badge";
+import { TradingStrategyForm } from "@/components/trading-strategy-form";
+import { getTradingStrategy } from "@/app/actions/trading-strategy";
 
 export const metadata = { title: "Profile" };
 
@@ -40,12 +42,15 @@ async function ProfileContent() {
 
   if (error || !user) redirect("/auth/login");
 
-  const { data: subscription } = await supabase
-    .schema("swingtrader")
-    .from("user_subscriptions")
-    .select("plan, billing_interval, status, grandfathered, current_period_end, stripe_customer_id")
-    .eq("user_id", user.id)
-    .maybeSingle();
+  const [{ data: subscription }, tradingStrategy] = await Promise.all([
+    supabase
+      .schema("swingtrader")
+      .from("user_subscriptions")
+      .select("plan, billing_interval, status, grandfathered, current_period_end, stripe_customer_id")
+      .eq("user_id", user.id)
+      .maybeSingle(),
+    getTradingStrategy(),
+  ]);
 
   const joined = new Date(user.created_at).toLocaleDateString("en-US", {
     year: "numeric",
@@ -166,6 +171,21 @@ async function ProfileContent() {
           </p>
         </div>
         <TelegramConnect />
+      </section>
+
+      {/* Trading strategy */}
+      <section className="rounded-2xl border border-border bg-card overflow-hidden">
+        <div className="border-b border-border px-5 py-3">
+          <p className="text-xs font-semibold uppercase tracking-widest text-amber-500">
+            Trading strategy
+          </p>
+        </div>
+        <div className="px-5 py-4 flex flex-col gap-2">
+          <p className="text-xs text-muted-foreground leading-relaxed">
+            Describe your trading approach. All AI agents — chart analysis, screening, and synthesis — will align their recommendations to your strategy.
+          </p>
+          <TradingStrategyForm initialStrategy={tradingStrategy} />
+        </div>
       </section>
 
       {/* Settings links */}

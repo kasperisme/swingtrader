@@ -14,6 +14,7 @@ interface TickerSidebarProps {
   getSymbolNote?: (ticker: string) => string | null;
   onContextMenu?: (ticker: string, e: React.MouseEvent) => void;
   quotes: Record<string, FmpQuote | null>;
+  streamingTickers?: Set<string>;
 }
 
 export function TickerSidebar({
@@ -27,6 +28,7 @@ export function TickerSidebar({
   getSymbolNote,
   onContextMenu,
   quotes,
+  streamingTickers,
 }: TickerSidebarProps) {
   const listRef = useRef<HTMLDivElement>(null);
 
@@ -64,6 +66,7 @@ export function TickerSidebar({
         {symbols.map(sym => {
           const q = quotes[sym];
           const isSelected = sym === selectedTicker;
+          const isStreaming = streamingTickers?.has(sym) ?? false;
           const status = getStatus(sym);
           const isDismissed = dismissedSymbols.has(sym);
           const isHighlighted = highlightedSymbols.has(sym);
@@ -101,7 +104,16 @@ export function TickerSidebar({
               title={[sym, meta.sector, meta.industry, meta.subSector, note].filter(Boolean).join(" · ")}
             >
               <span className="truncate">
-                <span className="font-mono font-semibold text-sm">{sym}</span>
+                <span className="inline-flex items-center gap-1.5">
+                  <span className="font-mono font-semibold text-sm">{sym}</span>
+                  {isStreaming && (
+                    <span className="inline-flex items-center gap-0.5" title="AI thinking…">
+                      <span className="w-1 h-1 rounded-full bg-amber-400 animate-bounce [animation-delay:-0.3s]" />
+                      <span className="w-1 h-1 rounded-full bg-amber-400 animate-bounce [animation-delay:-0.15s]" />
+                      <span className="w-1 h-1 rounded-full bg-amber-400 animate-bounce" />
+                    </span>
+                  )}
+                </span>
                 {meta.sector && (
                   <span className="text-[10px] text-muted-foreground ml-1.5 hidden xl:inline">{meta.sector}</span>
                 )}

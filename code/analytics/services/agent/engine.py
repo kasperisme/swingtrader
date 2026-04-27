@@ -32,6 +32,7 @@ from .data_queries import (
     get_user_positions,
     get_user_alerts,
     get_user_screening_notes,
+    get_user_trading_strategy,
     search_news,
     get_ticker_news,
 )
@@ -366,12 +367,64 @@ def _call_tool(name: str, args: dict, user_id: str | None = None) -> Any:
     return {"error": f"Unknown tool: {name}"}
 
 
+# ── Linked screening context ──────────────────────────────────────────────────
+
+def _get_linked_screening_results(user_id: str | None, screening_ids: list[str]) -> str:
+    if not user_id or not screening_ids:
+        return ""
+    client = get_supabase_client()
+    schema = "swingtrader"
+    res = (
+        client.schema(schema)
+        .table("user_screening_results")
+        .select("screening_id, triggered, summary, run_at")
+        .in_("screening_id", screening_ids)
+        .eq("user_id", user_id)
+        .eq("is_test", False)
+        .order("run_at", desc=True)
+        .limit(10)
+        .execute()
+    )
+    rows = res.data or []
+    if not rows:
+        return ""
+    lines = []
+    for r in rows:
+        ts = r.get("run_at", "")[:16]
+        trig = "TRIGGERED" if r.get("triggered") else "not triggered"
+        summary = r.get("summary") or ""
+        sid = r.get("screening_id", "")[:8]
+        lines.append(f"- [{ts}] {trig}: {summary[:200]} (screening {sid})")
+    return "\n".join(lines)
+
+
 # ── Agent loop ──────────────────────────────────────────────────────────────
 
-def run_agent(prompt: str, user_id: str | None = None) -> dict:
+def run_agent(prompt: str, user_id: str | None = None, tickers: list[str] | None = None, linked_screening_ids: list[str] | None = None) -> dict:
     """Run the screening agent loop. Returns {triggered, summary, data_used}."""
+    system = _AGENT_SYSTEM
+    if user_id:
+        strategy = get_user_trading_strategy(user_id)
+        if strategy:
+            system = (
+                f"{_AGENT_SYSTEM}\n\n## User's Trading Strategy\n{strategy}\n"
+                "Apply this strategy when evaluating screening conditions and writing summaries. "
+                "Prioritise setups and signals that align with it."
+            )
+    if tickers:
+        system += (
+            f"\n\n## Focused Tickers\nThe user wants you to focus on: {', '.join(tickers)}.\n"
+            "Prioritise these symbols in tool calls where a tickers parameter is available."
+        )
+    if linked_screening_ids:
+        linked_results = _get_linked_screening_results(user_id, linked_screening_ids)
+        if linked_results:
+            system += (
+                f"\n\n## Linked Screening Context\n{linked_results}\n"
+                "Use this context alongside your own tool calls."
+            )
     messages = [
-        {"role": "system", "content": _AGENT_SYSTEM},
+        {"role": "system", "content": system},
         {"role": "user", "content": prompt},
     ]
 
@@ -426,7 +479,12 @@ def _format_telegram_alert(name: str, summary: str) -> str:
 
 def run_screening(screening: dict, dry_run: bool = False, is_test: bool = False) -> dict:
     """Run a single screening. Returns the result dict (not yet persisted)."""
-    result = run_agent(screening["prompt"], user_id=screening.get("user_id"))
+    result = run_agent(
+        screening["prompt"],
+        user_id=screening.get("user_id"),
+        tickers=screening.get("tickers") or None,
+        linked_screening_ids=screening.get("linked_screening_ids") or None,
+    )
     result["screening_id"] = screening["id"]
     result["user_id"] = screening.get("user_id")
     result["name"] = screening.get("name", "Screening")

@@ -7,6 +7,25 @@ import {
   getScreeningLimits,
 } from "@/app/actions/screenings-agent";
 
+async function fetchVectorTickers(): Promise<string[]> {
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .schema("swingtrader")
+    .from("company_vectors")
+    .select("ticker")
+    .order("ticker", { ascending: true });
+
+  if (error) return [];
+
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const row of data ?? []) {
+    const t = String(row.ticker ?? "").trim().toUpperCase();
+    if (t && !seen.has(t)) { seen.add(t); out.push(t); }
+  }
+  return out;
+}
+
 async function AgentsData() {
   const supabase = await createClient();
   const {
@@ -14,9 +33,10 @@ async function AgentsData() {
   } = await supabase.auth.getUser();
   if (!user) redirect("/auth/login");
 
-  const [screeningsRes, limitsRes] = await Promise.all([
+  const [screeningsRes, limitsRes, suggestionTickers] = await Promise.all([
     listScheduledScreenings(),
     getScreeningLimits(),
+    fetchVectorTickers(),
   ]);
 
   return (
@@ -24,6 +44,7 @@ async function AgentsData() {
       screenings={screeningsRes.ok ? screeningsRes.data : []}
       limits={limitsRes.ok ? limitsRes.data : null}
       error={screeningsRes.ok ? null : screeningsRes.error}
+      suggestionTickers={suggestionTickers}
     />
   );
 }

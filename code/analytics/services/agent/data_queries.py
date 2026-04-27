@@ -443,3 +443,14 @@ def get_ticker_news(
         items.sort(key=lambda x: x.get("published_at") or "", reverse=True)
         flat.extend(items[:per_ticker_limit])
     return flat
+
+
+def get_user_trading_strategy(user_id: str) -> str:
+    """Return the user's saved trading strategy text, or empty string if none."""
+    client, schema = _client()
+    res = client.schema(schema).table("user_trading_strategy") \
+        .select("strategy") \
+        .eq("user_id", user_id) \
+        .maybe_single() \
+        .execute()
+    return (res.data or {}).get("strategy") or ""

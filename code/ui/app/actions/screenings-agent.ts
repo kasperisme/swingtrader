@@ -26,6 +26,8 @@ export type ScheduledScreening = {
   prompt: string;
   schedule: string;
   timezone: string;
+  tickers: string[];
+  linked_screening_ids: string[];
   is_active: boolean;
   run_requested_at: string | null;
   last_run_at: string | null;
@@ -71,6 +73,8 @@ export async function createScheduledScreening(input: {
   prompt: string;
   schedule: string;
   timezone: string;
+  tickers?: string[];
+  linked_screening_ids?: string[];
 }): ActionResult<ScheduledScreening> {
   const supabase = await createClient();
   const {
@@ -104,6 +108,8 @@ export async function createScheduledScreening(input: {
       prompt: input.prompt,
       schedule: input.schedule,
       timezone: input.timezone,
+      tickers: input.tickers ?? [],
+      linked_screening_ids: input.linked_screening_ids ?? [],
     })
     .select("*")
     .single();
@@ -119,6 +125,8 @@ export async function updateScheduledScreening(
     prompt?: string;
     schedule?: string;
     timezone?: string;
+    tickers?: string[];
+    linked_screening_ids?: string[];
     is_active?: boolean;
   }
 ): ActionResult<ScheduledScreening> {
