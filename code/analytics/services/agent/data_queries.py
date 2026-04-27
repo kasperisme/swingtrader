@@ -452,4 +452,6 @@ def get_user_trading_strategy(user_id: str) -> str:
         .eq("user_id", user_id) \
         .maybe_single() \
         .execute()
-    return (res.data or {}).get("strategy") or ""
+    if res is None or res.data is None:
+        return ""
+    return res.data.get("strategy") or ""
