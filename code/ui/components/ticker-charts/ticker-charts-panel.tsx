@@ -52,6 +52,8 @@ export type TickerChartsPanelProps = {
   showChevronSymbolNav?: boolean;
   /** When false, hides the large symbol, sector line, and “i / n” counter (e.g. charts page). */
   showSymbolHeadline?: boolean;
+  /** Logged trade executions to show as buy/sell triangles on the chart. */
+  tradeMarkers?: Array<{ date: string; price: number; side: "buy" | "sell"; position_side: "long" | "short" }>;
   /** Annotations to overlay on the chart (AI + user). */
   annotations?: ChartAnnotation[];
   /** Called whenever OHLC data loads or updates for the selected ticker. */
@@ -87,6 +89,7 @@ export function TickerChartsPanel({
   symbolPicker,
   showChevronSymbolNav = true,
   showSymbolHeadline = true,
+  tradeMarkers,
   annotations = [],
   onChartData: onChartDataProp,
   onAnnotationAdd,
@@ -418,6 +421,7 @@ export function TickerChartsPanel({
           symbol={symbol}
           onPointChange={setActivePoint}
           entryMarker={entryMarker}
+          tradeMarkers={tradeMarkers}
           onChartMetrics={onChartMetrics}
           onChartData={onChartData}
           onAutoEntry={(point) => onSetEntryMarker(symbol, point)}

@@ -55,7 +55,9 @@ import {
   screeningsCreateRun,
   screeningsSoftDeleteRun,
   screeningsUpsertDismissNote,
+  screeningsGetUserTrades,
   type ScreeningTickerSentimentHeadRow,
+  type LoggedTrade,
 } from "@/app/actions/screenings";
 import { RelationshipNetworkExplorer } from "@/components/relationship-network/relationship-network-explorer";
 import {
@@ -1388,6 +1390,7 @@ function TradeMonitoringView({
   onGoToCharts,
   onOpenWorkflowEditor,
   getStatus,
+  activePositionSymbols,
   filteredSymbolSet,
 }: {
   entries: { row: ScreeningRow; pivot: EntryMarker }[];
@@ -1398,6 +1401,7 @@ function TradeMonitoringView({
   onGoToCharts: () => void;
   onOpenWorkflowEditor: (ticker: string) => void;
   getStatus: (ticker: string) => NoteStatus;
+  activePositionSymbols: Set<string>;
   /** Symbols currently included in the Results table after filters (pivot names may extend beyond this). */
   filteredSymbolSet: Set<string>;
 }) {
@@ -1623,7 +1627,12 @@ function TradeMonitoringView({
                     className={`cursor-pointer transition-colors ${sel ? "bg-foreground/10 ring-1 ring-inset ring-foreground/20" : "hover:bg-muted/30"}`}
                   >
                     <td className="px-3 py-2 font-mono font-semibold whitespace-nowrap">
-                      {sym}
+                      <span className="flex items-center gap-1.5">
+                        {activePositionSymbols.has(sym) && (
+                          <span className="shrink-0 w-1.5 h-1.5 rounded-full bg-emerald-400" title="Active position" />
+                        )}
+                        {sym}
+                      </span>
                     </td>
                     <td
                       className="px-3 py-2 text-xs text-muted-foreground max-w-[140px] truncate"
@@ -2065,6 +2074,41 @@ export function ScreeningsUI({
       // ignore malformed storage
     }
   }, []);
+
+  // ── Logged trades ─────────────────────────────────────────────────────────
+  const [allTrades, setAllTrades] = useState<LoggedTrade[]>([]);
+
+  useEffect(() => {
+    void screeningsGetUserTrades().then((res) => {
+      if (res.ok) setAllTrades(res.data);
+    });
+  }, []);
+
+  const tradesByTicker = useMemo(() => {
+    const map = new Map<string, LoggedTrade[]>();
+    for (const t of allTrades) {
+      const list = map.get(t.ticker) ?? [];
+      list.push(t);
+      map.set(t.ticker, list);
+    }
+    return map;
+  }, [allTrades]);
+
+  const activePositionSymbols = useMemo(() => {
+    const set = new Set<string>();
+    for (const [ticker, trades] of tradesByTicker) {
+      const netLong = trades.reduce((acc, t) => {
+        if (t.position_side !== "long") return acc;
+        return t.side === "buy" ? acc + t.quantity : acc - t.quantity;
+      }, 0);
+      const netShort = trades.reduce((acc, t) => {
+        if (t.position_side !== "short") return acc;
+        return t.side === "sell" ? acc + t.quantity : acc - t.quantity;
+      }, 0);
+      if (netLong > 0 || netShort > 0) set.add(ticker);
+    }
+    return set;
+  }, [tradesByTicker]);
 
   // ── Row-level workflow annotations ───────────────────────────────────────
   const [rowNotes, setRowNotes] = useState<Map<number, ScanRowNote>>(
@@ -3043,7 +3087,7 @@ export function ScreeningsUI({
 
       {/* View tabs */}
       <div className="border-b border-border pb-px shrink-0">
-        <div className="flex items-stretch">
+        <div className="flex items-stretch relative">
           {/* Collapse toggle — fixed, not scrollable */}
           {!addFilterOpen && (
             <button
@@ -3143,21 +3187,22 @@ export function ScreeningsUI({
                   </button>
                 </>
               )}
-              <AddFilterWidget
-                open={addFilterOpen}
-                onOpen={() => setAddFilterOpen(true)}
-                onClose={() => setAddFilterOpen(false)}
-                filters={filters}
-                setFilters={setFilters}
-                noteStageOptions={noteStageOptions}
-                noteTagOptions={noteTagOptions}
-                boolKeys={boolFilterKeys}
-                numKeys={numFilterKeys}
-                categoricalStringCols={categoricalStringCols}
-                freeStringKeys={freeStringKeys}
-              />
             </div>
           </div>
+          {/* AddFilterWidget lives outside overflow-x-auto so its dropdown can overlap the view */}
+          <AddFilterWidget
+            open={addFilterOpen}
+            onOpen={() => setAddFilterOpen(true)}
+            onClose={() => setAddFilterOpen(false)}
+            filters={filters}
+            setFilters={setFilters}
+            noteStageOptions={noteStageOptions}
+            noteTagOptions={noteTagOptions}
+            boolKeys={boolFilterKeys}
+            numKeys={numFilterKeys}
+            categoricalStringCols={categoricalStringCols}
+            freeStringKeys={freeStringKeys}
+          />
         </div>
       </div>
 
@@ -3195,6 +3240,7 @@ export function ScreeningsUI({
                   getSymbolNote={getTickerComment}
                   dismissedSymbols={dismissedSymbols}
                   highlightedSymbols={highlightedSymbols}
+                  activePositionSymbols={activePositionSymbols}
                   onContextMenu={handleContextMenu}
                   streamingTickers={streamingTickers}
                 />
@@ -3225,6 +3271,12 @@ export function ScreeningsUI({
                           getEntryMarker={getTickerEntryMarker}
                           onSetEntryMarker={setTickerEntryMarker}
                           onClearEntryMarker={clearTickerEntryMarker}
+                          tradeMarkers={(selectedTicker ? (tradesByTicker.get(selectedTicker) ?? []) : []).map((t) => ({
+                            date: t.executed_at.slice(0, 10),
+                            price: t.price_per_unit,
+                            side: t.side,
+                            position_side: t.position_side,
+                          }))}
                           showChevronSymbolNav={false}
                           screeningToolbar={false}
                           showSymbolHeadline={false}
@@ -3498,6 +3550,7 @@ export function ScreeningsUI({
                       const note = rowNotes.get(row.scan_row_id);
                       const isDismissed = note?.status === "dismissed";
                       const isHighlighted = !!note?.highlighted;
+                      const hasPosition = activePositionSymbols.has(row.symbol ?? "");
                       const status = note?.status ?? "active";
                       const statusStripe: Record<string, string> = {
                         dismissed: "border-l-rose-400",
@@ -3527,7 +3580,15 @@ export function ScreeningsUI({
                           <td
                             className={`sticky left-0 z-10 px-3 py-2 font-mono font-semibold whitespace-nowrap ${isSelected ? "bg-foreground/10" : isHighlighted ? "bg-amber-500/10" : "bg-background"}`}
                           >
-                            {row.symbol ?? "—"}
+                            <span className="flex items-center gap-1.5">
+                              {hasPosition && (
+                                <span
+                                  className="shrink-0 w-1.5 h-1.5 rounded-full bg-emerald-400"
+                                  title="Active position"
+                                />
+                              )}
+                              {row.symbol ?? "—"}
+                            </span>
                           </td>
                           {dataColumnKeys.map((k) => {
                             const boolCol = isBooleanColumn(rows, k);
@@ -3632,6 +3693,7 @@ export function ScreeningsUI({
             onGoToCharts={() => setActiveView("charts")}
             onOpenWorkflowEditor={openTickerWorkflowEditor}
             getStatus={getTickerStatus}
+            activePositionSymbols={activePositionSymbols}
             filteredSymbolSet={filteredSymbolSet}
           />
         ) : activeView === "sentiment" ? (

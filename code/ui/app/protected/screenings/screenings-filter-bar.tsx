@@ -840,9 +840,9 @@ export function AddFilterWidget({
         </button>
       </div>
 
-      {/* Dropdown panel */}
-      <div className="relative z-50">
-        <div className="absolute left-0 top-0 w-full max-w-md rounded-lg border border-border bg-popover text-popover-foreground shadow-lg ring-1 ring-black/5 dark:ring-white/10">
+      {/* Dropdown panel — absolute relative to the `relative` flex row in screenings-ui */}
+      <div className="absolute left-0 right-0 top-full z-50 pt-px">
+        <div className="max-w-md rounded-lg border border-border bg-popover text-popover-foreground shadow-lg ring-1 ring-black/5 dark:ring-white/10">
           {step === "fields" && (
             <div className="flex flex-col max-h-80">
               <div className="overflow-y-auto p-1">

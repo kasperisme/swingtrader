@@ -11,6 +11,7 @@ interface TickerSidebarProps {
   getStatus: (ticker: string) => string;
   dismissedSymbols: Set<string>;
   highlightedSymbols: Set<string>;
+  activePositionSymbols?: Set<string>;
   getSymbolNote?: (ticker: string) => string | null;
   onContextMenu?: (ticker: string, e: React.MouseEvent) => void;
   quotes: Record<string, FmpQuote | null>;
@@ -25,6 +26,7 @@ export function TickerSidebar({
   getStatus,
   dismissedSymbols,
   highlightedSymbols,
+  activePositionSymbols,
   getSymbolNote,
   onContextMenu,
   quotes,
@@ -70,6 +72,7 @@ export function TickerSidebar({
           const status = getStatus(sym);
           const isDismissed = dismissedSymbols.has(sym);
           const isHighlighted = highlightedSymbols.has(sym);
+          const hasPosition = activePositionSymbols?.has(sym) ?? false;
           const note = getSymbolNote?.(sym);
           const statusStripe: Record<string, string> = {
             dismissed: "border-l-rose-400",
@@ -105,6 +108,9 @@ export function TickerSidebar({
             >
               <span className="truncate">
                 <span className="inline-flex items-center gap-1.5">
+                  {hasPosition && (
+                    <span className="shrink-0 w-1.5 h-1.5 rounded-full bg-emerald-400" title="Active position" />
+                  )}
                   <span className="font-mono font-semibold text-sm">{sym}</span>
                   {isStreaming && (
                     <span className="inline-flex items-center gap-0.5" title="AI thinking…">

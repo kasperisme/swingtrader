@@ -386,6 +386,57 @@ export async function screeningsCreateRun(
   };
 }
 
+export type LoggedTrade = {
+  id: number;
+  side: "buy" | "sell";
+  position_side: "long" | "short";
+  ticker: string;
+  quantity: number;
+  price_per_unit: number;
+  executed_at: string;
+};
+
+export async function screeningsGetUserTrades(): Promise<
+  ScreeningActionSuccess<LoggedTrade[]> | ScreeningActionError
+> {
+  const supabase = await createClient();
+  const { data: { user }, error: authError } = await supabase.auth.getUser();
+  if (authError || !user) return { ok: false, error: "Unauthorized" };
+
+  const { data, error } = await supabase
+    .schema("swingtrader")
+    .from("user_trades")
+    .select("id, side, position_side, ticker, quantity, price_per_unit, executed_at")
+    .eq("user_id", user.id)
+    .order("executed_at", { ascending: true });
+
+  if (error) return { ok: false, error: error.message };
+
+  return {
+    ok: true,
+    data: (data ?? []).map((r) => {
+      const row = r as {
+        id: number;
+        side: "buy" | "sell";
+        position_side: "long" | "short";
+        ticker: string;
+        quantity: number;
+        price_per_unit: number;
+        executed_at: string;
+      };
+      return {
+        id: Number(row.id),
+        side: row.side,
+        position_side: row.position_side,
+        ticker: String(row.ticker ?? "").toUpperCase(),
+        quantity: Number(row.quantity),
+        price_per_unit: Number(row.price_per_unit),
+        executed_at: String(row.executed_at ?? ""),
+      };
+    }),
+  };
+}
+
 export async function screeningsAddTicker(
   runId: number,
   ticker: string,

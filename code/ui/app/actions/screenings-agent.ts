@@ -27,7 +27,7 @@ export type ScheduledScreening = {
   schedule: string;
   timezone: string;
   tickers: string[];
-  linked_screening_ids: string[];
+  linked_scan_run_ids: number[];
   is_active: boolean;
   run_requested_at: string | null;
   last_run_at: string | null;
@@ -74,7 +74,7 @@ export async function createScheduledScreening(input: {
   schedule: string;
   timezone: string;
   tickers?: string[];
-  linked_screening_ids?: string[];
+  linked_scan_run_ids?: number[];
 }): ActionResult<ScheduledScreening> {
   const supabase = await createClient();
   const {
@@ -109,7 +109,7 @@ export async function createScheduledScreening(input: {
       schedule: input.schedule,
       timezone: input.timezone,
       tickers: input.tickers ?? [],
-      linked_screening_ids: input.linked_screening_ids ?? [],
+      linked_scan_run_ids: input.linked_scan_run_ids ?? [],
     })
     .select("*")
     .single();
@@ -126,7 +126,7 @@ export async function updateScheduledScreening(
     schedule?: string;
     timezone?: string;
     tickers?: string[];
-    linked_screening_ids?: string[];
+    linked_scan_run_ids?: number[];
     is_active?: boolean;
   }
 ): ActionResult<ScheduledScreening> {
@@ -274,4 +274,39 @@ export async function pollTestResult(
 
   if (error) return { ok: false, error: error.message };
   return { ok: true, data: (data as ScreeningResult) ?? null };
+}
+
+export type ScanRunSummary = {
+  id: number;
+  scan_date: string;
+  source: string | null;
+};
+
+export async function listScanRuns(): Promise<
+  { ok: true; data: ScanRunSummary[] } | { ok: false; error: string }
+> {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { ok: false, error: "Not authenticated" };
+
+  const { data, error } = await supabase
+    .schema(SCHEMA)
+    .from("user_scan_runs")
+    .select("id, scan_date, source")
+    .eq("user_id", user.id)
+    .eq("status", "active")
+    .order("scan_date", { ascending: false })
+    .limit(50);
+
+  if (error) return { ok: false, error: error.message };
+  return {
+    ok: true,
+    data: (data ?? []).map((r) => ({
+      id: Number(r.id),
+      scan_date: String(r.scan_date ?? ""),
+      source: r.source != null ? String(r.source) : null,
+    })),
+  };
 }

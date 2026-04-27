@@ -1,16 +1,18 @@
 "use client";
 
-import { useState, useMemo, useCallback } from "react";
+import { useState, useMemo, useCallback, useEffect } from "react";
 import { Bot, Pause, Play, Trash2, Plus, Clock, AlertCircle, Zap, Loader2, CalendarClock, LayoutList, CalendarDays, ChevronLeft, ChevronRight, Pencil, X, Link2 } from "lucide-react";
 import {
   type ScheduledScreening,
   type ScreeningResult,
+  type ScanRunSummary,
   createScheduledScreening,
   toggleScreening,
   deleteScheduledScreening,
   testRunScreening,
   pollTestResult,
   updateScheduledScreening,
+  listScanRuns,
 } from "@/app/actions/screenings-agent";
 import { TickerSearchCombobox } from "@/components/ticker-search-combobox";
 import { relationshipsResolveTicker } from "@/app/actions/relationships";
@@ -97,7 +99,6 @@ export function AgentsUI({ screenings, limits, error, suggestionTickers }: Props
         <CreateForm
           onClose={() => setShowForm(false)}
           atLimit={atLimit}
-          allScreenings={screenings}
           suggestionTickers={suggestionTickers}
         />
       )}
@@ -117,8 +118,8 @@ export function AgentsUI({ screenings, limits, error, suggestionTickers }: Props
               </p>
             </div>
           )}
-          {screenings.map((s) => (
-            <AgentCard key={s.id} screening={s} />
+            {screenings.map((s) => (
+            <AgentCard key={s.id} screening={s} suggestionTickers={suggestionTickers} />
           ))}
         </div>
       )}
@@ -567,22 +568,22 @@ function TickerPicker({
   );
 }
 
-// ── Screening picker (multi-select checkboxes) ──────────────────────────────────
+// ── Scan run picker (multi-select checkboxes) ──────────────────────────────────
 
-function ScreeningPicker({
+function ScanRunPicker({
   linkedIds,
   onChange,
-  allScreenings,
-  excludeId,
+  scanRuns,
 }: {
-  linkedIds: string[];
-  onChange: (ids: string[]) => void;
-  allScreenings: ScheduledScreening[];
-  excludeId?: string;
+  linkedIds: number[];
+  onChange: (ids: number[]) => void;
+  scanRuns: ScanRunSummary[];
 }) {
-  const available = allScreenings.filter((s) => s.id !== excludeId);
+  if (scanRuns.length === 0) {
+    return <p className="text-xs text-muted-foreground">No scan runs yet. Create one on the Screenings page.</p>;
+  }
 
-  function toggle(id: string) {
+  function toggle(id: number) {
     if (linkedIds.includes(id)) {
       onChange(linkedIds.filter((x) => x !== id));
     } else {
@@ -590,29 +591,27 @@ function ScreeningPicker({
     }
   }
 
-  if (available.length === 0) return null;
+  function runLabel(r: ScanRunSummary): string {
+    const date = r.scan_date.slice(0, 10);
+    return r.source ? `${date} · ${r.source}` : date;
+  }
 
   return (
     <div className="flex flex-col gap-1.5 max-h-40 overflow-y-auto">
-      {available.map((s) => {
-        const checked = linkedIds.includes(s.id);
+      {scanRuns.map((r) => {
+        const checked = linkedIds.includes(r.id);
         return (
           <label
-            key={s.id}
+            key={r.id}
             className="flex items-center gap-2 text-xs cursor-pointer hover:bg-muted/50 rounded px-1.5 py-1 transition-colors"
           >
             <input
               type="checkbox"
               checked={checked}
-              onChange={() => toggle(s.id)}
+              onChange={() => toggle(r.id)}
               className="rounded border-border"
             />
-            <span className="truncate text-foreground">{s.name}</span>
-            {s.is_active ? (
-              <span className="shrink-0 text-[10px] text-emerald-600 dark:text-emerald-400">active</span>
-            ) : (
-              <span className="shrink-0 text-[10px] text-muted-foreground">paused</span>
-            )}
+            <span className="truncate text-foreground">{runLabel(r)}</span>
           </label>
         );
       })}
@@ -815,7 +814,6 @@ function WeekCalendar({ screenings, suggestionTickers }: { screenings: Scheduled
                                 screening={run.screening}
                                 colorIdx={run.idx}
                                 onClose={() => setOpenPill(null)}
-                                allScreenings={activeScreenings}
                                 suggestionTickers={suggestionTickers}
                               />
                             )}
@@ -870,13 +868,11 @@ function PillPopover({
   screening,
   colorIdx,
   onClose,
-  allScreenings,
   suggestionTickers,
 }: {
   screening: ScheduledScreening;
   colorIdx: number;
   onClose: () => void;
-  allScreenings: ScheduledScreening[];
   suggestionTickers: string[];
 }) {
   const [mode, setMode] = useState<"menu" | "edit">("menu");
@@ -886,15 +882,21 @@ function PillPopover({
   const [testResult, setTestResult] = useState<ScreeningResult | null>(null);
   const [testError, setTestError] = useState<string | null>(null);
 
-  // Edit form state
   const [editName, setEditName] = useState(screening.name);
   const [editPrompt, setEditPrompt] = useState(screening.prompt);
   const [editSchedule, setEditSchedule] = useState(screening.schedule);
   const [editTimezone, setEditTimezone] = useState(screening.timezone);
   const [editTickers, setEditTickers] = useState<string[]>(screening.tickers ?? []);
-  const [editLinkedIds, setEditLinkedIds] = useState<string[]>(screening.linked_screening_ids ?? []);
+  const [editLinkedScanRunIds, setEditLinkedScanRunIds] = useState<number[]>(screening.linked_scan_run_ids ?? []);
+  const [scanRuns, setScanRuns] = useState<ScanRunSummary[]>([]);
   const [saving, setSaving] = useState(false);
   const [saveErr, setSaveErr] = useState<string | null>(null);
+
+  useEffect(() => {
+    void listScanRuns().then((res) => {
+      if (res.ok) setScanRuns(res.data);
+    });
+  }, []);
 
   async function handleToggle() {
     setToggling(true);
@@ -949,7 +951,7 @@ function PillPopover({
       schedule: editSchedule,
       timezone: editTimezone,
       tickers: editTickers,
-      linked_screening_ids: editLinkedIds,
+      linked_scan_run_ids: editLinkedScanRunIds,
     });
     if (res.ok) {
       onClose();
@@ -1005,14 +1007,13 @@ function PillPopover({
               suggestionTickers={suggestionTickers}
             />
           </div>
-          {allScreenings.filter((s) => s.id !== screening.id).length > 0 && (
+          {scanRuns.length > 0 && (
             <div className="flex flex-col gap-1">
               <label className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide">Linked screenings</label>
-              <ScreeningPicker
-                linkedIds={editLinkedIds}
-                onChange={setEditLinkedIds}
-                allScreenings={allScreenings}
-                excludeId={screening.id}
+              <ScanRunPicker
+                linkedIds={editLinkedScanRunIds}
+                onChange={setEditLinkedScanRunIds}
+                scanRuns={scanRuns}
               />
             </div>
           )}
@@ -1117,15 +1118,22 @@ function PillPopover({
 
 // ── Create form ─────────────────────────────────────────────────────────────
 
-function CreateForm({ onClose, atLimit, allScreenings, suggestionTickers }: { onClose: () => void; atLimit: boolean; allScreenings: ScheduledScreening[]; suggestionTickers: string[] }) {
+function CreateForm({ onClose, atLimit, suggestionTickers }: { onClose: () => void; atLimit: boolean; suggestionTickers: string[] }) {
   const [name, setName] = useState("");
   const [prompt, setPrompt] = useState("");
   const [schedule, setSchedule] = useState("0 7 * * 1-5");
   const [timezone, setTimezone] = useState("America/New_York");
   const [tickers, setTickers] = useState<string[]>([]);
-  const [linkedScreeningIds, setLinkedScreeningIds] = useState<string[]>([]);
+  const [linkedScanRunIds, setLinkedScanRunIds] = useState<number[]>([]);
+  const [scanRuns, setScanRuns] = useState<ScanRunSummary[]>([]);
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+
+  useEffect(() => {
+    void listScanRuns().then((res) => {
+      if (res.ok) setScanRuns(res.data);
+    });
+  }, []);
 
   async function handleSave() {
     if (!prompt.trim()) return;
@@ -1137,7 +1145,7 @@ function CreateForm({ onClose, atLimit, allScreenings, suggestionTickers }: { on
       schedule,
       timezone,
       tickers,
-      linked_screening_ids: linkedScreeningIds,
+      linked_scan_run_ids: linkedScanRunIds,
     });
     if (res.ok) {
       onClose();
@@ -1222,13 +1230,13 @@ function CreateForm({ onClose, atLimit, allScreenings, suggestionTickers }: { on
           <label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
             Linked screenings
             <span className="ml-2 normal-case font-normal text-muted-foreground/60">
-              include context from other agents
+              include context from your scan runs
             </span>
           </label>
-          <ScreeningPicker
-            linkedIds={linkedScreeningIds}
-            onChange={setLinkedScreeningIds}
-            allScreenings={allScreenings}
+          <ScanRunPicker
+            linkedIds={linkedScanRunIds}
+            onChange={setLinkedScanRunIds}
+            scanRuns={scanRuns}
           />
         </div>
         <div className="flex items-center gap-3 pt-1 border-t border-border">
@@ -1256,12 +1264,29 @@ function CreateForm({ onClose, atLimit, allScreenings, suggestionTickers }: { on
   );
 }
 
-function AgentCard({ screening }: { screening: ScheduledScreening }) {
+function AgentCard({ screening, suggestionTickers }: { screening: ScheduledScreening; suggestionTickers: string[] }) {
+  const [editing, setEditing] = useState(false);
   const [toggling, setToggling] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [testing, setTesting] = useState(false);
   const [testResult, setTestResult] = useState<ScreeningResult | null>(null);
   const [testError, setTestError] = useState<string | null>(null);
+
+  const [editName, setEditName] = useState(screening.name);
+  const [editPrompt, setEditPrompt] = useState(screening.prompt);
+  const [editSchedule, setEditSchedule] = useState(screening.schedule);
+  const [editTimezone, setEditTimezone] = useState(screening.timezone);
+  const [editTickers, setEditTickers] = useState<string[]>(screening.tickers ?? []);
+  const [editLinkedIds, setEditLinkedIds] = useState<number[]>(screening.linked_scan_run_ids ?? []);
+  const [scanRuns, setScanRuns] = useState<ScanRunSummary[]>([]);
+  const [saving, setSaving] = useState(false);
+  const [saveErr, setSaveErr] = useState<string | null>(null);
+
+  useEffect(() => {
+    void listScanRuns().then((res) => {
+      if (res.ok) setScanRuns(res.data);
+    });
+  }, []);
 
   async function handleToggle() {
     setToggling(true);
@@ -1274,6 +1299,27 @@ function AgentCard({ screening }: { screening: ScheduledScreening }) {
     setDeleting(true);
     await deleteScheduledScreening(screening.id);
     window.location.reload();
+  }
+
+  async function handleSave() {
+    if (!editPrompt.trim()) return;
+    setSaving(true);
+    setSaveErr(null);
+    const res = await updateScheduledScreening(screening.id, {
+      name: editName.trim() || "Untitled Agent",
+      prompt: editPrompt.trim(),
+      schedule: editSchedule,
+      timezone: editTimezone,
+      tickers: editTickers,
+      linked_scan_run_ids: editLinkedIds,
+    });
+    if (res.ok) {
+      setEditing(false);
+      window.location.reload();
+    } else {
+      setSaveErr(res.error);
+      setSaving(false);
+    }
   }
 
   async function handleTestRun() {
@@ -1308,6 +1354,75 @@ function AgentCard({ screening }: { screening: ScheduledScreening }) {
   }
 
   const scheduleLabel = describeCron(screening.schedule);
+  const inputClass = "w-full rounded-md border border-input bg-background px-3 py-2 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring disabled:opacity-50";
+
+  if (editing) {
+    return (
+      <div className="rounded-2xl border border-border bg-card overflow-hidden">
+        <div className="border-b border-border px-5 py-3 flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <div className={`w-2 h-2 rounded-full ${screening.is_active ? "bg-emerald-500" : "bg-muted-foreground/30"}`} />
+            <span className="text-xs font-semibold uppercase tracking-widest text-amber-500">Edit agent</span>
+          </div>
+          <button type="button" onClick={() => setEditing(false)} className="text-xs text-muted-foreground hover:text-foreground transition-colors">Cancel</button>
+        </div>
+        <div className="px-5 py-5 flex flex-col gap-4">
+          {saveErr && <p className="text-sm text-destructive">{saveErr}</p>}
+          <div className="flex flex-col gap-1.5">
+            <label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Name</label>
+            <input type="text" value={editName} onChange={(e) => setEditName(e.target.value)} className={inputClass} />
+          </div>
+          <div className="flex flex-col gap-1.5">
+            <label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Prompt</label>
+            <textarea value={editPrompt} onChange={(e) => setEditPrompt(e.target.value)} rows={4} className={inputClass} />
+          </div>
+          <div className="flex flex-col gap-1.5">
+            <label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Recurrence</label>
+            <RecurrenceScheduler value={editSchedule} onChange={setEditSchedule} />
+          </div>
+          <div className="flex flex-col gap-1.5">
+            <label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Timezone</label>
+            <select value={editTimezone} onChange={(e) => setEditTimezone(e.target.value)} className={inputClass}>
+              <option value="America/New_York">Eastern (ET)</option>
+              <option value="America/Chicago">Central (CT)</option>
+              <option value="America/Denver">Mountain (MT)</option>
+              <option value="America/Los_Angeles">Pacific (PT)</option>
+              <option value="UTC">UTC</option>
+            </select>
+          </div>
+          <div className="flex flex-col gap-1.5">
+            <label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
+              Tickers
+              <span className="ml-2 normal-case font-normal text-muted-foreground/60">focus the agent on specific symbols</span>
+            </label>
+            <TickerPicker tickers={editTickers} onChange={setEditTickers} suggestionTickers={suggestionTickers} />
+          </div>
+          {scanRuns.length > 0 && (
+            <div className="flex flex-col gap-1.5">
+              <label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
+                Linked screenings
+                <span className="ml-2 normal-case font-normal text-muted-foreground/60">pull context from a scan run</span>
+              </label>
+              <ScanRunPicker linkedIds={editLinkedIds} onChange={setEditLinkedIds} scanRuns={scanRuns} />
+            </div>
+          )}
+          <div className="flex items-center gap-3 pt-1 border-t border-border">
+            <button
+              type="button"
+              onClick={() => void handleSave()}
+              disabled={saving || !editPrompt.trim()}
+              className="inline-flex items-center gap-1.5 rounded-md bg-foreground px-4 py-2 text-sm font-medium text-background transition-opacity hover:opacity-90 disabled:opacity-40 disabled:pointer-events-none"
+            >
+              {saving ? "Saving…" : "Save changes"}
+            </button>
+            <button type="button" onClick={() => setEditing(false)} className="rounded-md border border-border px-4 py-2 text-sm text-muted-foreground transition-colors hover:bg-muted">
+              Cancel
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className={`rounded-2xl border bg-card transition-opacity ${deleting ? "opacity-50 pointer-events-none" : "border-border"}`}>
@@ -1333,17 +1448,17 @@ function AgentCard({ screening }: { screening: ScheduledScreening }) {
 
           <p className="mt-1 text-sm text-muted-foreground line-clamp-2">{screening.prompt}</p>
 
-          {((screening.tickers?.length ?? 0) > 0 || (screening.linked_screening_ids?.length ?? 0) > 0) && (
+          {((screening.tickers?.length ?? 0) > 0 || (screening.linked_scan_run_ids?.length ?? 0) > 0) && (
             <div className="mt-2 flex flex-wrap items-center gap-1.5">
               {(screening.tickers ?? []).map((t) => (
                 <span key={t} className="inline-flex items-center rounded bg-muted px-1.5 py-0.5 text-[11px] font-mono font-medium text-foreground/80">
                   {t}
                 </span>
               ))}
-              {(screening.linked_screening_ids ?? []).length > 0 && (
+              {(screening.linked_scan_run_ids ?? []).length > 0 && (
                 <span className="inline-flex items-center gap-1 rounded bg-muted px-1.5 py-0.5 text-[11px] text-muted-foreground">
                   <Link2 className="w-3 h-3" />
-                  {screening.linked_screening_ids.length} linked
+                  {screening.linked_scan_run_ids.length} linked
                 </span>
               )}
             </div>
@@ -1390,6 +1505,14 @@ function AgentCard({ screening }: { screening: ScheduledScreening }) {
         </div>
 
         <div className="flex items-center gap-2 shrink-0">
+          <button
+            type="button"
+            onClick={() => { setEditing(true); setEditName(screening.name); setEditPrompt(screening.prompt); setEditSchedule(screening.schedule); setEditTimezone(screening.timezone); setEditTickers(screening.tickers ?? []); setEditLinkedIds(screening.linked_scan_run_ids ?? []); setSaveErr(null); }}
+            title="Edit agent"
+            className="flex items-center justify-center w-8 h-8 rounded-md border border-border text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+          >
+            <Pencil className="w-3.5 h-3.5" />
+          </button>
           <button
             type="button"
             onClick={() => void handleTestRun()}

@@ -578,11 +578,15 @@ def _markdown_to_portable_text(md: str) -> list[dict]:
                 blocks.extend(_markdown_to_portable_text(rest))
             continue
 
-        # Normal paragraph — inline bold parsing
-        full_text = " ".join(lines)
-        children = _parse_inline(full_text)
-        if children:
-            blocks.append(_block(children, style="normal"))
+        # Normal paragraph — each line becomes its own block so sections
+        # like "Top Stories" and "Company Exposure Spotlight" aren't cramped.
+        for line in lines:
+            line = line.strip()
+            if not line:
+                continue
+            children = _parse_inline(line)
+            if children:
+                blocks.append(_block(children, style="normal"))
 
     return blocks
 

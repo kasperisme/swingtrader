@@ -117,6 +117,7 @@ export function CandlestickSvg({
   symbol,
   onPointChange,
   entryMarker,
+  tradeMarkers,
   onChartMetrics,
   onChartData,
   onAutoEntry,
@@ -131,6 +132,7 @@ export function CandlestickSvg({
   symbol: string;
   onPointChange?: (point: ChartPoint | null) => void;
   entryMarker?: EntryMarker | null;
+  tradeMarkers?: Array<{ date: string; price: number; side: "buy" | "sell"; position_side: "long" | "short" }>;
   onChartMetrics?: (m: { lastClose: number } | null) => void;
   onChartData?: (rows: OhlcBar[]) => void;
   onAutoEntry?: (point: ChartPoint) => void;
@@ -1024,6 +1026,36 @@ export function CandlestickSvg({
             </g>
           );
         })()}
+
+        {/* Logged trade markers — triangles at execution price */}
+        {(tradeMarkers ?? []).map((trade, tIdx) => {
+          const barIdx = data.findIndex((d) => d.date.slice(0, 10) === trade.date.slice(0, 10));
+          if (barIdx < 0 || barIdx < sliceStart || barIdx > sliceStart + n - 1) return null;
+          const tx = xOf(barIdx - sliceStart);
+          const ty = toY(trade.price);
+          if (ty < PAD_T || ty > H_PRICE - PAD_B) return null;
+          const isBuy = trade.side === "buy";
+          // long buy=green, long sell=red, short sell=orange, short cover=sky
+          const color = isBuy
+            ? (trade.position_side === "long" ? "#22c55e" : "#38bdf8")
+            : (trade.position_side === "long" ? "#ef4444" : "#f97316");
+          const s = 5;
+          // buy: triangle pointing up, anchored above the bar; sell: pointing down, anchored below
+          const pts = isBuy
+            ? `${tx},${ty + s + s} ${tx - s},${ty + s * 3} ${tx + s},${ty + s * 3}`
+            : `${tx},${ty - s - s} ${tx - s},${ty - s * 3} ${tx + s},${ty - s * 3}`;
+          return (
+            <g key={`tm-${tIdx}`} pointerEvents="none">
+              <polygon
+                points={pts}
+                fill={color}
+                opacity={0.9}
+                stroke="hsl(var(--background))"
+                strokeWidth={1.2}
+              />
+            </g>
+          );
+        })}
 
         {/* X-axis labels */}
         {xTickIndices.map((i: number) => (
