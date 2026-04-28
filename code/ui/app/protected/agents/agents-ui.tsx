@@ -152,7 +152,7 @@ function buildCron(
     case "minutely":
       return interval === 1 ? `* * * * *` : `*/${interval} * * * *`;
     case "hourly":
-      return interval === 1 ? `${minute} * * * *` : `${minute} */${interval} * * *`;
+      return `${minute} */${interval} * * *`;
     case "daily":
       return `${minute} ${hour} * * *`;
     case "weekly": {
