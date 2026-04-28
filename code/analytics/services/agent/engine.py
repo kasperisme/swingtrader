@@ -377,7 +377,7 @@ def _ollama_chat(messages: list[dict], tools: list[dict] | None = None, num_pred
     if tools:
         payload["tools"] = tools
 
-    r = httpx.post(f"{base}/api/chat", json=payload, timeout=180.0)
+    r = httpx.post(f"{base}/api/chat", json=payload, timeout=300.0)
     if r.status_code != 200:
         raise RuntimeError(f"Ollama returned {r.status_code}: {r.text[:300]}")
     return r.json()["message"]

@@ -27,6 +27,11 @@ if not os.path.exists(_VENV_PYTHON):
 
 _CRON_PREFIX = "screening-"
 
+# Wall-clock timeout (ms) passed to OpenClaw for each screening job.
+# FMP quote fetches + multiple Ollama rounds can easily exceed 3 min.
+# Override via SCREENING_TIMEOUT_MS env var.
+_SCREENING_TIMEOUT_MS = str(int(os.environ.get("SCREENING_TIMEOUT_MS", 600_000)))
+
 
 def _openclaw(*args: str) -> dict[str, Any]:
     r = subprocess.run(
@@ -87,7 +92,7 @@ def _add_job(screening: dict) -> str | None:
             "--tz", tz,
             "--session", "isolated",
             "--no-deliver",
-            "--timeout", "180000",
+            "--timeout", _SCREENING_TIMEOUT_MS,
             "--message",
             f"Run screening {screening_id}: {_VENV_PYTHON} -m services.agent.cli run {screening_id}",
         ],
@@ -129,8 +134,14 @@ def _sync_job(screening: dict, existing: dict) -> None:
     sched_data = existing.get("schedule", {})
     current_cron = sched_data.get("cron", "")
     current_tz = sched_data.get("tz", "")
+    current_timeout = str(existing.get("timeout", ""))
 
-    if current_cron == schedule and current_tz == tz and existing.get("enabled", True):
+    if (
+        current_cron == schedule
+        and current_tz == tz
+        and existing.get("enabled", True)
+        and current_timeout == _SCREENING_TIMEOUT_MS
+    ):
         return
 
     r = subprocess.run(
@@ -138,6 +149,7 @@ def _sync_job(screening: dict, existing: dict) -> None:
             "openclaw", "cron", "edit", job_id,
             "--cron", schedule,
             "--tz", tz,
+            "--timeout", _SCREENING_TIMEOUT_MS,
         ],
         capture_output=True,
         text=True,
