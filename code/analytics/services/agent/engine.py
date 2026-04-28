@@ -148,6 +148,10 @@ MARKET_BEHAVIOUR: institutional_appeal,
 - A score with |value| < 0.1 is essentially neutral.
 - Call the minimum number of tools needed to evaluate the prompt.
 - Never fabricate data — only use what the tools return.
+- If the prompt is a request for a rundown, summary, or overview (e.g. contains \
+  "rundown", "summary", "overview", "show me", "give me", "what's happening"), \
+  always set triggered=true and provide a comprehensive summary of what was found, \
+  even if individual signals are weak. These are informational queries, not conditional alerts.
 
 ## Output format
 
