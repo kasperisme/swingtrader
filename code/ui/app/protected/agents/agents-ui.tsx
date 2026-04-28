@@ -1,7 +1,7 @@
 "use client";
 
-import { useState, useMemo, useCallback, useEffect } from "react";
-import { Bot, Pause, Play, Trash2, Plus, Clock, AlertCircle, Zap, Loader2, CalendarClock, LayoutList, CalendarDays, ChevronLeft, ChevronRight, Pencil, X, Link2 } from "lucide-react";
+import { useState, useMemo, useCallback, useEffect, useId } from "react";
+import { Bot, Pause, Play, Trash2, Plus, Clock, AlertCircle, Zap, Loader2, LayoutList, CalendarDays, ChevronLeft, ChevronRight, Pencil, X, Link2 } from "lucide-react";
 import {
   type ScheduledScreening,
   type ScreeningResult,
@@ -127,12 +127,19 @@ export function AgentsUI({ screenings, limits, error, suggestionTickers }: Props
   );
 }
 
-// ── Outlook-style recurrence builder ────────────────────────────────────────
+// ── Recurrence builder ──────────────────────────────────────────────────────
 
 type RecurrencePattern = "minutely" | "hourly" | "daily" | "weekly";
 
 const DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"] as const;
 type DayIdx = 0 | 1 | 2 | 3 | 4 | 5 | 6;
+
+// Mon → Sun order matching the image, with single-letter labels
+const DAY_ORDER: { idx: DayIdx; label: string }[] = [
+  { idx: 1, label: "M" }, { idx: 2, label: "T" }, { idx: 3, label: "W" },
+  { idx: 4, label: "T" }, { idx: 5, label: "F" }, { idx: 6, label: "S" },
+  { idx: 0, label: "S" },
+];
 
 function buildCron(
   pattern: RecurrencePattern,
@@ -189,6 +196,7 @@ function RecurrenceScheduler({
   value: string;
   onChange: (cron: string) => void;
 }) {
+  const uid = useId();
   const parsed = useMemo(() => {
     const [m, h, , , dow] = value.split(/\s+/);
     const minute = parseNum(m, 0);
@@ -214,8 +222,12 @@ function RecurrenceScheduler({
     return { pattern, interval, days, hour, minute };
   }, [value]);
 
-  function patch(patch: Partial<typeof parsed>) {
-    const next = { ...parsed, ...patch };
+  const [endsType, setEndsType] = useState<"never" | "after" | "on">("never");
+  const [endsAfter, setEndsAfter] = useState(10);
+  const [endsOn, setEndsOn] = useState("");
+
+  function patch(p: Partial<typeof parsed>) {
+    const next = { ...parsed, ...p };
     onChange(buildCron(next.pattern, next.interval, next.days, next.hour, next.minute));
   }
 
@@ -233,104 +245,188 @@ function RecurrenceScheduler({
     { value: "weekly", label: "Weekly" },
   ];
 
-  const pill = "px-3 py-1.5 text-xs font-medium rounded-md transition-colors cursor-pointer";
-  const pillOn = "bg-foreground text-background";
-  const pillOff = "text-muted-foreground hover:bg-muted";
+  const MINUTE_OPTIONS = [1, 5, 10, 15, 20, 30, 45, 60];
+  const HOUR_OPTIONS = [1, 2, 3, 4, 6, 8, 12, 24];
+  const unitLabel = { minutely: "minutes", hourly: "hours", daily: "days", weekly: "weeks" }[parsed.pattern];
+  const today = new Date().toLocaleDateString("en-US", { month: "numeric", day: "numeric", year: "numeric" });
+
+  const sel = "rounded-md border border-input bg-background px-2 py-1.5 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring";
+  const row = "flex items-start gap-4 px-4 py-2.5";
+  const lbl = "w-28 shrink-0 text-sm text-muted-foreground pt-0.5";
 
   return (
-    <div className="flex flex-col gap-3">
-      {/* Pattern selector */}
-      <div className="flex gap-1 rounded-lg border border-border p-1">
-        {patterns.map((p) => (
-          <button
-            key={p.value}
-            type="button"
-            onClick={() => {
-              const patchVal: Partial<typeof parsed> = { pattern: p.value };
-              if (p.value === "minutely" && parsed.interval < 15) patchVal.interval = 15;
-              if (p.value === "hourly" && parsed.interval > 24) patchVal.interval = 1;
-              patch(patchVal);
-            }}
-            className={`${pill} ${parsed.pattern === p.value ? pillOn : pillOff}`}
-          >
-            {p.label}
-          </button>
-        ))}
+    <div className="rounded-xl border border-border divide-y divide-border text-sm">
+
+      {/* Repeats */}
+      <div className={row}>
+        <span className={lbl}>Repeats:</span>
+        <select
+          value={parsed.pattern}
+          onChange={(e) => {
+            const p = e.target.value as RecurrencePattern;
+            const patch2: Partial<typeof parsed> = { pattern: p };
+            if (p === "minutely" && parsed.interval < 1) patch2.interval = 15;
+            if (p === "hourly" && parsed.interval > 24) patch2.interval = 1;
+            patch(patch2);
+          }}
+          className={sel}
+        >
+          {patterns.map((p) => <option key={p.value} value={p.value}>{p.label}</option>)}
+        </select>
       </div>
 
-      {/* Interval row — only for minutely/hourly */}
-      {(parsed.pattern === "minutely" || parsed.pattern === "hourly") && (
-        <div className="flex items-center gap-2 text-sm text-muted-foreground">
-          <span>Every</span>
-          <input
-            type="number"
-            min={parsed.pattern === "minutely" ? 1 : 1}
-            max={parsed.pattern === "minutely" ? 60 : 24}
-            value={parsed.interval}
-            onChange={(e) => patch({ interval: Math.max(1, parseInt(e.target.value) || 1) })}
-            className="w-16 rounded-md border border-input bg-background px-2 py-1 text-center text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
-          />
-          <span>{parsed.pattern === "minutely" ? "min" : "hour(s)"}</span>
+      {/* Repeat every */}
+      <div className={row}>
+        <span className={lbl}>Repeat every:</span>
+        <div className="flex items-center gap-2">
+          {parsed.pattern === "minutely" ? (
+            <select value={parsed.interval} onChange={(e) => patch({ interval: parseInt(e.target.value) })} className={sel}>
+              {MINUTE_OPTIONS.map((n) => <option key={n} value={n}>{n}</option>)}
+            </select>
+          ) : parsed.pattern === "hourly" ? (
+            <select value={parsed.interval} onChange={(e) => patch({ interval: parseInt(e.target.value) })} className={sel}>
+              {HOUR_OPTIONS.map((n) => <option key={n} value={n}>{n}</option>)}
+            </select>
+          ) : (
+            <span className={`${sel} pointer-events-none opacity-60 select-none`}>1</span>
+          )}
+          <span className="text-muted-foreground">{unitLabel}</span>
         </div>
-      )}
+      </div>
 
-      {/* Time picker — daily/weekly */}
+      {/* At — daily / weekly */}
       {(parsed.pattern === "daily" || parsed.pattern === "weekly") && (
-        <div className="flex items-center gap-2 text-sm text-muted-foreground">
-          <span>At</span>
-          <select
-            value={parsed.hour}
-            onChange={(e) => patch({ hour: parseInt(e.target.value) })}
-            className="rounded-md border border-input bg-background px-2 py-1 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
-          >
-            {Array.from({ length: 24 }, (_, i) => {
-              const ampm = i >= 12 ? "PM" : "AM";
-              const hh = i % 12 || 12;
-              return <option key={i} value={i}>{hh}:00 {ampm}</option>;
-            })}
-          </select>
-          <span>:</span>
-          <select
-            value={parsed.minute}
-            onChange={(e) => patch({ minute: parseInt(e.target.value) })}
-            className="rounded-md border border-input bg-background px-2 py-1 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
-          >
-            {[0, 15, 30, 45].map((m) => (
-              <option key={m} value={m}>{String(m).padStart(2, "0")}</option>
-            ))}
-          </select>
+        <div className={row}>
+          <span className={lbl}>At:</span>
+          <div className="flex items-center gap-1.5">
+            <select value={parsed.hour} onChange={(e) => patch({ hour: parseInt(e.target.value) })} className={sel}>
+              {Array.from({ length: 24 }, (_, i) => {
+                const ap = i >= 12 ? "PM" : "AM";
+                const hh = i % 12 || 12;
+                return <option key={i} value={i}>{hh}:00 {ap}</option>;
+              })}
+            </select>
+            <span className="text-muted-foreground">:</span>
+            <select value={parsed.minute} onChange={(e) => patch({ minute: parseInt(e.target.value) })} className={sel}>
+              {[0, 15, 30, 45].map((m) => (
+                <option key={m} value={m}>{String(m).padStart(2, "0")}</option>
+              ))}
+            </select>
+          </div>
         </div>
       )}
 
-      {/* Day picker — weekly only */}
+      {/* Repeat on — weekly */}
       {parsed.pattern === "weekly" && (
-        <div className="flex items-center gap-1">
-          {DAYS.map((label, idx) => {
-            const active = parsed.days.includes(idx as DayIdx);
-            return (
-              <button
-                key={idx}
-                type="button"
-                onClick={() => toggleDay(idx as DayIdx)}
-                className={`w-9 h-9 rounded-md text-xs font-medium transition-colors ${
-                  active
-                    ? "bg-foreground text-background"
-                    : "border border-border text-muted-foreground hover:bg-muted"
-                }`}
-              >
-                {label}
-              </button>
-            );
-          })}
+        <div className={row}>
+          <span className={lbl}>Repeat on:</span>
+          <div className="flex gap-1">
+            {DAY_ORDER.map(({ idx, label }) => {
+              const active = parsed.days.includes(idx);
+              return (
+                <button
+                  key={idx}
+                  type="button"
+                  onClick={() => toggleDay(idx)}
+                  className={`w-8 h-8 rounded-sm text-xs font-semibold border transition-colors ${
+                    active
+                      ? "bg-foreground text-background border-foreground"
+                      : "border-border text-muted-foreground hover:bg-muted"
+                  }`}
+                >
+                  {label}
+                </button>
+              );
+            })}
+          </div>
         </div>
       )}
 
-      {/* Human-readable summary */}
-      <div className="flex items-center gap-2 text-xs text-muted-foreground/70 pt-1 border-t border-border">
-        <CalendarClock className="w-3.5 h-3.5" />
-        <span>{describeCron(value)}</span>
+      {/* Starts on */}
+      <div className={row}>
+        <span className={lbl}>Starts on:</span>
+        <span className="text-muted-foreground bg-muted/50 px-2 py-1 rounded-md">{today}</span>
+      </div>
+
+      {/* Ends */}
+      <div className={row}>
+        <span className={lbl}>Ends:</span>
+        <div className="flex flex-col gap-2 pt-0.5">
+          <label className="flex items-center gap-2 cursor-pointer">
+            <input type="radio" name={`${uid}-ends`} checked={endsType === "never"} onChange={() => setEndsType("never")} className="accent-foreground" />
+            Never
+          </label>
+          <label className="flex items-center gap-2 cursor-pointer">
+            <input type="radio" name={`${uid}-ends`} checked={endsType === "after"} onChange={() => setEndsType("after")} className="accent-foreground" />
+            After
+            <input
+              type="number" min={1} max={999} value={endsAfter}
+              onChange={(e) => { setEndsAfter(Math.max(1, parseInt(e.target.value) || 1)); setEndsType("after"); }}
+              className="w-16 rounded-md border border-input bg-background px-2 py-0.5 text-center focus:outline-none focus:ring-2 focus:ring-ring"
+            />
+            occurrences
+          </label>
+          <label className="flex items-center gap-2 cursor-pointer">
+            <input type="radio" name={`${uid}-ends`} checked={endsType === "on"} onChange={() => setEndsType("on")} className="accent-foreground" />
+            On
+            <input
+              type="date" value={endsOn}
+              onChange={(e) => { setEndsOn(e.target.value); setEndsType("on"); }}
+              className="rounded-md border border-input bg-background px-2 py-0.5 focus:outline-none focus:ring-2 focus:ring-ring"
+            />
+          </label>
+        </div>
+      </div>
+
+      {/* Summary */}
+      <div className={`${row} bg-muted/30 rounded-b-xl`}>
+        <span className={lbl}>Summary:</span>
+        <span className="font-semibold text-foreground">{describeCron(value)}</span>
       </div>
     </div>
+  );
+}
+
+// ── Timezone select ─────────────────────────────────────────────────────────
+
+const _TZ_COMMON = [
+  "America/New_York", "America/Chicago", "America/Denver", "America/Los_Angeles",
+  "America/Anchorage", "Pacific/Honolulu", "UTC",
+  "Europe/London", "Europe/Paris", "Europe/Berlin", "Europe/Moscow",
+  "Asia/Dubai", "Asia/Kolkata", "Asia/Shanghai", "Asia/Singapore", "Asia/Tokyo",
+  "Australia/Sydney", "Pacific/Auckland",
+];
+
+const _TZ_GROUPED: { group: string; zones: string[] }[] = (() => {
+  let all: string[];
+  try {
+    all = (Intl as unknown as { supportedValuesOf(k: string): string[] }).supportedValuesOf("timeZone");
+  } catch {
+    all = _TZ_COMMON;
+  }
+  const map = new Map<string, string[]>();
+  for (const tz of all) {
+    const region = tz.includes("/") ? tz.split("/")[0] : "Other";
+    if (!map.has(region)) map.set(region, []);
+    map.get(region)!.push(tz);
+  }
+  return [
+    { group: "Common", zones: _TZ_COMMON.filter((z) => all.includes(z)) },
+    ...[...map.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([g, z]) => ({ group: g, zones: z })),
+  ];
+})();
+
+function TimezoneSelect({ value, onChange, className }: { value: string; onChange: (tz: string) => void; className?: string }) {
+  return (
+    <select value={value} onChange={(e) => onChange(e.target.value)} className={className}>
+      {_TZ_GROUPED.map(({ group, zones }) => (
+        <optgroup key={group} label={group}>
+          {zones.map((tz) => (
+            <option key={tz} value={tz}>{tz.replace(/_/g, " ")}</option>
+          ))}
+        </optgroup>
+      ))}
+    </select>
   );
 }
 
@@ -991,13 +1087,7 @@ function PillPopover({
           </div>
           <div className="flex flex-col gap-1">
             <label className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide">Timezone</label>
-            <select value={editTimezone} onChange={(e) => setEditTimezone(e.target.value)} className={inputClass}>
-              <option value="America/New_York">Eastern (ET)</option>
-              <option value="America/Chicago">Central (CT)</option>
-              <option value="America/Denver">Mountain (MT)</option>
-              <option value="America/Los_Angeles">Pacific (PT)</option>
-              <option value="UTC">UTC</option>
-            </select>
+            <TimezoneSelect value={editTimezone} onChange={setEditTimezone} className={inputClass} />
           </div>
           <div className="flex flex-col gap-1">
             <label className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide">Tickers</label>
@@ -1201,17 +1291,7 @@ function CreateForm({ onClose, atLimit, suggestionTickers }: { onClose: () => vo
         </div>
         <div className="flex flex-col gap-1.5">
           <label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Timezone</label>
-          <select
-            value={timezone}
-            onChange={(e) => setTimezone(e.target.value)}
-            className={inputClass}
-          >
-            <option value="America/New_York">Eastern (ET)</option>
-            <option value="America/Chicago">Central (CT)</option>
-            <option value="America/Denver">Mountain (MT)</option>
-            <option value="America/Los_Angeles">Pacific (PT)</option>
-            <option value="UTC">UTC</option>
-          </select>
+          <TimezoneSelect value={timezone} onChange={setTimezone} className={inputClass} />
         </div>
         <div className="flex flex-col gap-1.5">
           <label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
@@ -1382,13 +1462,7 @@ function AgentCard({ screening, suggestionTickers }: { screening: ScheduledScree
           </div>
           <div className="flex flex-col gap-1.5">
             <label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Timezone</label>
-            <select value={editTimezone} onChange={(e) => setEditTimezone(e.target.value)} className={inputClass}>
-              <option value="America/New_York">Eastern (ET)</option>
-              <option value="America/Chicago">Central (CT)</option>
-              <option value="America/Denver">Mountain (MT)</option>
-              <option value="America/Los_Angeles">Pacific (PT)</option>
-              <option value="UTC">UTC</option>
-            </select>
+            <TimezoneSelect value={editTimezone} onChange={setEditTimezone} className={inputClass} />
           </div>
           <div className="flex flex-col gap-1.5">
             <label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
