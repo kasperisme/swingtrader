@@ -17,6 +17,7 @@ from typing import Any
 import httpx
 
 from shared.db import get_supabase_client
+from .fmp_tools import get_fmp_tool_schemas, call_fmp_tool, _FMP_SYSTEM_ADDON
 from shared.telegram import (
     get_user_chat_id,
     log_telegram_message,
@@ -352,6 +353,8 @@ _TOOL_SCHEMAS = [
     },
 ]
 
+_FMP_ENABLED = bool(os.environ.get("FMP_API_KEY"))
+
 _MAX_TOOL_ROUNDS = 10
 
 
@@ -396,6 +399,9 @@ def _call_tool(name: str, args: dict, user_id: str | None = None) -> Any:
             return user_fn(user_id, **args)
         except Exception as exc:
             return {"error": str(exc)}
+
+    if _FMP_ENABLED:
+        return call_fmp_tool(name, args)
 
     return {"error": f"Unknown tool: {name}"}
 
@@ -443,12 +449,13 @@ def _get_linked_scan_run_context(user_id: str | None, scan_run_ids: list[int]) -
 
 def run_agent(prompt: str, user_id: str | None = None, tickers: list[str] | None = None, linked_scan_run_ids: list[int] | None = None) -> dict:
     """Run the screening agent loop. Returns {triggered, summary, data_used}."""
-    system = _AGENT_SYSTEM
+    _base_system = _AGENT_SYSTEM + (_FMP_SYSTEM_ADDON if _FMP_ENABLED else "")
+    system = _base_system
     if user_id:
         strategy = get_user_trading_strategy(user_id)
         if strategy:
             system = (
-                f"{_AGENT_SYSTEM}\n\n## User's Trading Strategy\n{strategy}\n"
+                f"{_base_system}\n\n## User's Trading Strategy\n{strategy}\n"
                 "Apply this strategy when evaluating screening conditions and writing summaries. "
                 "Prioritise setups and signals that align with it."
             )
@@ -472,8 +479,10 @@ def run_agent(prompt: str, user_id: str | None = None, tickers: list[str] | None
     data_used: dict[str, Any] = {}
     resp: dict = {}
 
+    tool_schemas = _TOOL_SCHEMAS + (get_fmp_tool_schemas() if _FMP_ENABLED else [])
+
     for _ in range(_MAX_TOOL_ROUNDS):
-        resp = _ollama_chat(messages, tools=_TOOL_SCHEMAS)
+        resp = _ollama_chat(messages, tools=tool_schemas)
 
         tool_calls = resp.get("tool_calls")
         if not tool_calls:

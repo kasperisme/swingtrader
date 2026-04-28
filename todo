@@ -26,6 +26,7 @@ Prio 1:
 [ ] (Agent) In the agent, allow the user to select tickers and screenings for the agent to monitor
 [ ] (Agent) Have agent activation windows (e.g. it should scan every 15 minutes when intramarket, but otherwise not)
 [ ] (Design) Optimize for mobile
+[ ] (Agent) Setup market wide screenings (start with predefined screenings and let the agent run them, and in the future let the user create their own screenings using the screening)
 
 Prio 2:
 [x] Get embedding searching to work with the ollama model
