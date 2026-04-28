@@ -3,28 +3,38 @@ CLI entry point for the company vector builder.
 
 Usage:
     # Individual tickers
-    python -m news_impact.build_vectors_cli --tickers AAPL MSFT NVDA JPM XOM
+    python -m services.news.company.build_vectors_cli --tickers AAPL MSFT NVDA JPM XOM
 
     # From a file (one ticker per line)
-    python -m news_impact.build_vectors_cli --file tickers.txt
+    python -m services.news.company.build_vectors_cli --file tickers.txt
 
     # Entire exchange — fetches all active, non-ETF/fund tickers via FMP screener
-    python -m news_impact.build_vectors_cli --exchange NASDAQ
-    python -m news_impact.build_vectors_cli --exchange NYSE NASDAQ
+    python -m services.news.company.build_vectors_cli --exchange NASDAQ
+    python -m services.news.company.build_vectors_cli --exchange NYSE NASDAQ
 
     # From scan_rows table (all tickers in table, or filtered)
-    python -m news_impact.build_vectors_cli --from-scan
-    python -m news_impact.build_vectors_cli --from-scan --scan-run-id 42
-    python -m news_impact.build_vectors_cli --from-scan --scan-dataset my_scan --scan-date 2026-04-07
+    python -m services.news.company.build_vectors_cli --from-scan
+    python -m services.news.company.build_vectors_cli --from-scan --scan-run-id 42
+    python -m services.news.company.build_vectors_cli --from-scan --scan-dataset my_scan --scan-date 2026-04-07
+
+    # Refresh all tickers already in Supabase
+    python -m services.news.company.build_vectors_cli --from-db
 
     # Exchange with filters to keep only liquid large-caps
-    python -m news_impact.build_vectors_cli --exchange NASDAQ --min-mktcap 1e9 --min-price 5
+    python -m services.news.company.build_vectors_cli --exchange NASDAQ --min-mktcap 1e9 --min-price 5
+
+    # Only add tickers not yet in Supabase (skip existing)
+    python -m services.news.company.build_vectors_cli --exchange NASDAQ NYSE --new-only
+    python -m services.news.company.build_vectors_cli --from-scan --new-only
+
+    # Re-normalise the full universe from stored raw values (no FMP fetch)
+    python -m services.news.company.build_vectors_cli --normalize-only
 
     # Show compact dimension table for each ticker after building
-    python -m news_impact.build_vectors_cli --tickers AAPL MSFT --show
+    python -m services.news.company.build_vectors_cli --tickers AAPL MSFT --show
 
     # Force fresh data (bypass disk cache)
-    python -m news_impact.build_vectors_cli --tickers AAPL --no-cache
+    python -m services.news.company.build_vectors_cli --tickers AAPL --no-cache
 """
 
 import argparse
@@ -36,9 +46,9 @@ import sys
 import requests
 from dotenv import load_dotenv
 
-load_dotenv(pathlib.Path(__file__).parent.parent / ".env")
+load_dotenv(pathlib.Path(__file__).parents[4] / ".env")
 
-from services.news.company.company_vector import build_vectors, CompanyVector
+from services.news.company.company_vector import build_vectors, normalize_all_vectors, CompanyVector
 
 
 # ---------------------------------------------------------------------------
@@ -257,6 +267,10 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--from-scan", action="store_true",
         help="Use distinct tickers from swingtrader.scan_rows (optionally filtered by --scan-run-id, --scan-dataset, --scan-date)",
     )
+    source.add_argument(
+        "--normalize-only", dest="normalize_only", action="store_true",
+        help="Re-run rank_normalise over the full universe using stored raw_json — no FMP fetching",
+    )
 
     parser.add_argument(
         "--scan-run-id", type=int, default=None, metavar="RUN_ID",
@@ -292,7 +306,25 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--no-cache", dest="no_cache", action="store_true",
         help="Bypass disk/DB cache and fetch fresh data from FMP",
     )
+    parser.add_argument(
+        "--new-only", dest="new_only", action="store_true",
+        help="Skip tickers that already have a vector in Supabase (only add missing ones)",
+    )
     return parser.parse_args(argv)
+
+
+def _filter_new_only(tickers: list[str]) -> list[str]:
+    """Remove tickers that already have a row in company_vectors."""
+    from shared.db import get_supabase_client
+
+    client = get_supabase_client()
+    res = client.schema("swingtrader").table("company_vectors").select("ticker").execute()
+    existing = {row["ticker"] for row in (res.data or []) if row.get("ticker")}
+    filtered = [t for t in tickers if t not in existing]
+    skipped = len(tickers) - len(filtered)
+    if skipped:
+        print(f"  --new-only: skipping {skipped} ticker(s) already in DB → {len(filtered)} remaining")
+    return filtered
 
 
 def _load_tickers_from_file(path: str) -> list[str]:
@@ -313,18 +345,11 @@ def _load_tickers_from_file(path: str) -> list[str]:
 
 def _fetch_tickers_from_db() -> list[str]:
     """Return the distinct set of tickers that already have a vector in Supabase."""
-    import pathlib as _pl
-    _root = _pl.Path(__file__).resolve().parent.parent
-    import importlib.util as _ilu
-    _spec = _ilu.spec_from_file_location("swingtrader_db", _root / "src" / "db.py")
-    _mod = _ilu.module_from_spec(_spec)
-    _spec.loader.exec_module(_mod)
+    from shared.db import get_supabase_client
 
-    client = _mod.get_supabase_client()
-    schema = _mod."swingtrader"
-
+    client = get_supabase_client()
     res = (
-        client.schema(schema).table("company_vectors")
+        client.schema("swingtrader").table("company_vectors")
         .select("ticker")
         .execute()
     )
@@ -342,14 +367,9 @@ def _fetch_tickers_from_scan(
     scan_date: str | None,
 ) -> list[str]:
     """Return distinct non-null tickers from swingtrader.scan_rows with optional filters."""
-    import pathlib as _pl
-    _root = _pl.Path(__file__).resolve().parent.parent
-    import importlib.util as _ilu
-    _spec = _ilu.spec_from_file_location("swingtrader_db", _root / "src" / "db.py")
-    _mod = _ilu.module_from_spec(_spec)
-    _spec.loader.exec_module(_mod)
+    from shared.db import get_supabase_client
 
-    client = _mod.get_supabase_client()
+    client = get_supabase_client()
 
     query = client.schema("swingtrader").table("user_scan_rows").select("symbol")
 
@@ -385,6 +405,10 @@ def _fetch_tickers_from_scan(
 async def _main(argv: list[str] | None = None) -> None:
     args = _parse_args(argv)
 
+    if args.normalize_only:
+        normalize_all_vectors()
+        return
+
     if args.tickers:
         tickers = [t.upper() for t in args.tickers]
     elif args.file:
@@ -403,6 +427,9 @@ async def _main(argv: list[str] | None = None) -> None:
             min_mktcap=args.min_mktcap,
             min_price=args.min_price,
         )
+
+    if args.new_only:
+        tickers = _filter_new_only(tickers)
 
     if not tickers:
         print("No tickers to process.", file=sys.stderr)

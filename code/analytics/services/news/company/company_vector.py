@@ -262,6 +262,53 @@ async def build_vectors(
     return all_vectors
 
 
+def normalize_all_vectors(batch_size: int = 200) -> int:
+    """
+    Re-run rank_normalise over the entire company_vectors universe using
+    the stored raw values, then write updated dimensions back to Supabase.
+
+    Does not re-fetch any data from FMP — purely a normalisation pass.
+    Returns the number of vectors successfully updated.
+    """
+    client = get_supabase_client()
+    rows = load_company_vectors(client)
+
+    if not rows:
+        logger.warning("[normalize_all] No vectors found in DB")
+        return 0
+
+    print(f"Loaded {len(rows)} vectors. Running rank_normalise over full universe…", flush=True)
+    raw_universe = {r["ticker"]: r["raw"] for r in rows}
+    normalised = rank_normalise(raw_universe)
+
+    print(f"Persisting {len(normalised)} updated vectors in batches of {batch_size}…", flush=True)
+    updated = 0
+    batches = [rows[i:i + batch_size] for i in range(0, len(rows), batch_size)]
+
+    for batch_idx, batch in enumerate(batches, 1):
+        print(f"  Batch {batch_idx}/{len(batches)}…", flush=True)
+        for r in batch:
+            ticker = r["ticker"]
+            if ticker not in normalised:
+                continue
+            try:
+                upsert_company_vector(
+                    client,
+                    ticker=ticker,
+                    vector_date=r["vector_date"],
+                    dimensions=normalised[ticker],
+                    raw=r["raw"],
+                    metadata=r["metadata"],
+                    fetched_at=r["fetched_at"],
+                )
+                updated += 1
+            except Exception as exc:
+                logger.warning("[normalize_all] Failed to persist %s: %s", ticker, exc)
+
+    print(f"Done. Updated {updated}/{len(rows)} vectors.", flush=True)
+    return updated
+
+
 if __name__ == "__main__":
     import pathlib
     from dotenv import load_dotenv
