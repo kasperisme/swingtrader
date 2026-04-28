@@ -31,7 +31,7 @@ load_dotenv(_ANALYTICS / ".env")
 sys.path.insert(0, str(_ANALYTICS))
 
 from shared.health import JobHeartbeat
-from .engine import run_screening, persist_and_deliver
+from .engine import run_screening, persist_and_deliver, _FMP_ENABLED
 from shared.db import get_supabase_client
 
 
@@ -71,6 +71,12 @@ def cmd_sync(args):
     print(json.dumps(stats))
 
 
+def cmd_fmp_test(args):
+    from .fmp_tools import test_fmp_connection
+    print(f"FMP enabled: {_FMP_ENABLED}")
+    test_fmp_connection()
+
+
 def main():
     parser = argparse.ArgumentParser(description="Scheduled Screening Agent")
     sub = parser.add_subparsers(dest="command")
@@ -79,13 +85,16 @@ def main():
     p_run.add_argument("screening_id")
     p_run.add_argument("--dry-run", action="store_true")
 
-    p_sync = sub.add_parser("sync", help="Sync screenings to OpenClaw cron jobs")
+    sub.add_parser("sync", help="Sync screenings to OpenClaw cron jobs")
+    sub.add_parser("fmp-test", help="Test FMP MCP connectivity and list available tools")
 
     args = parser.parse_args()
     if args.command == "run":
         cmd_run(args)
     elif args.command == "sync":
         cmd_sync(args)
+    elif args.command == "fmp-test":
+        cmd_fmp_test(args)
     else:
         parser.print_help()
 

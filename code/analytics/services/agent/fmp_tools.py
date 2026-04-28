@@ -50,11 +50,27 @@ def get_fmp_tool_schemas() -> list[dict]:
     global _cached_schemas
     if _cached_schemas is not None:
         return _cached_schemas
+
+    if not os.environ.get("FMP_API_KEY"):
+        log.error("FMP_API_KEY is not set — FMP tools unavailable")
+        return []
+
     try:
         mcp_tools = asyncio.run(_alist_tools())
-    except Exception as exc:
-        log.warning("Could not fetch FMP MCP tools: %s", exc)
+    except RuntimeError as exc:
+        if "already running" in str(exc):
+            log.error("FMP MCP: asyncio event loop conflict — call from async context not supported: %s", exc)
+        else:
+            log.error("FMP MCP: failed to fetch tool list: %s", exc)
         return []
+    except Exception as exc:
+        log.error("FMP MCP: failed to fetch tool list: %s", exc)
+        return []
+
+    if not mcp_tools:
+        log.error("FMP MCP: connected but returned 0 tools — check API key validity")
+        return []
+
     _cached_schemas = [
         {
             "type": "function",
@@ -75,8 +91,26 @@ def call_fmp_tool(name: str, args: dict) -> Any:
     try:
         return asyncio.run(_acall_tool(name, args))
     except Exception as exc:
-        log.warning("FMP tool %s failed: %s", name, exc)
+        log.error("FMP tool %s failed: %s", name, exc)
         return {"error": str(exc)}
+
+
+def test_fmp_connection() -> None:
+    """Print FMP MCP connectivity status. Run via: python -m services.agent.cli fmp-test"""
+    api_key = os.environ.get("FMP_API_KEY", "")
+    if not api_key:
+        print("FAIL  FMP_API_KEY is not set in environment")
+        return
+
+    print(f"  API key: ...{api_key[-4:]}")
+    print(f"  MCP URL: {_FMP_MCP_BASE}?apikey=****")
+    print("  Connecting to FMP MCP server…")
+    try:
+        tools = asyncio.run(_alist_tools())
+        print(f"  OK  {len(tools)} tools available")
+        print("  Sample tools:", ", ".join(t.name for t in tools[:8]))
+    except Exception as exc:
+        print(f"  FAIL  {exc}")
 
 
 _FMP_SYSTEM_ADDON = """\
