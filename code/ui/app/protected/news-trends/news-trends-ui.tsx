@@ -1919,7 +1919,7 @@ export function NewsTrendsUI({
   return (
     <div className={fillHeight ? "flex h-full min-w-0 overflow-x-hidden flex-col gap-3" : "flex flex-col gap-3"}>
       {/* Controls toolbar */}
-      <div className="flex items-stretch rounded-xl border border-border bg-card overflow-x-auto overflow-y-visible">
+      <div className="flex items-stretch rounded-xl border border-border bg-card overflow-x-auto overflow-y-visible min-w-0 shrink-0">
         {/* Date range + granularity first */}
         <div className="flex items-center px-3 py-2 border-r border-border shrink-0">
           <span className="text-[10px] font-medium text-muted-foreground/60 uppercase tracking-wide">
@@ -2130,7 +2130,7 @@ export function NewsTrendsUI({
         </div>
       </div>
 
-      <div className={`flex flex-col gap-3 sm:flex-row${fillHeight ? " flex-1 min-h-0" : ""}`}>
+      <div className={`flex flex-col gap-3 sm:flex-row min-w-0${fillHeight ? " flex-1 min-h-0" : ""}`}>
         {/* Main cluster chart */}
         <div className={`flex-1 min-w-0${fillHeight ? " min-h-0 flex flex-col" : ""}`}>
           <div className={[showMainChartFrame ? "border rounded-xl p-2" : "", fillHeight ? "flex flex-col flex-1 min-h-0" : ""].filter(Boolean).join(" ")}>

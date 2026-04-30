@@ -257,7 +257,7 @@ export function NewsTrendsClient({
   }, []);
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col gap-2">
+    <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-2 overflow-x-hidden">
       {hasMounted && (dailySupplementError ?? hourlySupplementError ?? dimensionFetchError) && (
         <div className="shrink-0 flex flex-col gap-1">
           {dailySupplementError && <p className="text-sm text-destructive">{dailySupplementError}</p>}
