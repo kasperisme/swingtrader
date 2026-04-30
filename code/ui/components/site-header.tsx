@@ -39,13 +39,10 @@ function HeaderShell({ children }: { children: React.ReactNode }) {
 export function SiteHeaderFallback() {
   return (
     <HeaderShell>
-      <div className="flex min-w-0 flex-1 items-center gap-3">
+      <div className="flex min-w-0 flex-1 items-center">
         <Logo />
-        {/* Fallback hamburger placeholder — same size, invisible */}
-        <div className="h-8 w-8 md:hidden" />
       </div>
       <div className="flex shrink-0 items-center gap-2">
-        {/* Desktop-only inline links */}
         <Link href="/pricing" className={`${navLinkClass} hidden md:inline`}>Pricing</Link>
         <Link href="/docs" className={`${navLinkClass} hidden md:inline`}>Docs</Link>
         <Link href="/blog" className={`${navLinkClass} hidden md:inline`}>Blog</Link>
@@ -56,6 +53,8 @@ export function SiteHeaderFallback() {
         <Button asChild size="sm" className="hidden md:inline-flex">
           <Link href="/auth/sign-up">Sign up</Link>
         </Button>
+        {/* Fallback hamburger placeholder — reserves space, invisible */}
+        <div className="h-8 w-8 md:hidden" />
       </div>
     </HeaderShell>
   );
@@ -70,45 +69,43 @@ export async function SiteHeader() {
 
   return (
     <HeaderShell>
+      {/* Left: logo + desktop dropdown nav */}
       <div className="flex min-w-0 flex-1 items-center gap-3 md:gap-6">
         <Logo />
-
-        {/* Hamburger — always visible on mobile, handles both authed + unauthed */}
-        <SiteHeaderMobileNav isAuthed={isAuthed} userEmail={user?.email} />
-
-        {/* Desktop authenticated nav */}
         {isAuthed && <SiteHeaderDesktopAuthedNav />}
       </div>
 
-      {/* Right side — desktop only */}
+      {/* Right: desktop links + hamburger (mobile only, always rightmost) */}
       {isAuthed ? (
-        <div className="hidden shrink-0 items-center gap-3 md:flex">
-          <Link href="/pricing" className={navLinkClass}>Pricing</Link>
-          <Link href="/docs" className={navLinkClass}>Docs</Link>
-          <Link href="/blog" className={navLinkClass}>Blog</Link>
-          <Link href="/changelog" className={navLinkClass}>Changelog</Link>
-          <CavemanToggle />
+        <div className="flex shrink-0 items-center gap-3">
+          <Link href="/pricing" className={`${navLinkClass} hidden md:inline`}>Pricing</Link>
+          <Link href="/docs" className={`${navLinkClass} hidden md:inline`}>Docs</Link>
+          <Link href="/blog" className={`${navLinkClass} hidden md:inline`}>Blog</Link>
+          <Link href="/changelog" className={`${navLinkClass} hidden md:inline`}>Changelog</Link>
+          <CavemanToggle className="hidden md:flex" />
           <Link
             href="/protected/profile"
-            className="inline-flex items-center justify-center h-8 w-8 rounded-lg border border-border bg-background/80 text-muted-foreground transition-colors hover:text-foreground hover:bg-muted"
+            className="hidden md:inline-flex items-center justify-center h-8 w-8 rounded-lg border border-border bg-background/80 text-muted-foreground transition-colors hover:text-foreground hover:bg-muted"
             aria-label="Profile"
           >
             <UserCircle className="h-4 w-4" />
           </Link>
+          <SiteHeaderMobileNav isAuthed={isAuthed} userEmail={user?.email} />
         </div>
       ) : (
-        <div className="hidden shrink-0 items-center gap-2 md:flex">
-          <Link href="/pricing" className={navLinkClass}>Pricing</Link>
-          <Link href="/docs" className={navLinkClass}>Docs</Link>
-          <Link href="/blog" className={navLinkClass}>Blog</Link>
-          <Link href="/changelog" className={navLinkClass}>Changelog</Link>
-          <CavemanToggle />
-          <Button asChild size="sm" variant="outline">
+        <div className="flex shrink-0 items-center gap-2">
+          <Link href="/pricing" className={`${navLinkClass} hidden md:inline`}>Pricing</Link>
+          <Link href="/docs" className={`${navLinkClass} hidden md:inline`}>Docs</Link>
+          <Link href="/blog" className={`${navLinkClass} hidden md:inline`}>Blog</Link>
+          <Link href="/changelog" className={`${navLinkClass} hidden md:inline`}>Changelog</Link>
+          <CavemanToggle className="hidden md:flex" />
+          <Button asChild size="sm" variant="outline" className="hidden md:inline-flex">
             <Link href="/auth/login">Sign in</Link>
           </Button>
-          <Button asChild size="sm">
+          <Button asChild size="sm" className="hidden md:inline-flex">
             <Link href="/auth/sign-up">Sign up</Link>
           </Button>
+          <SiteHeaderMobileNav isAuthed={isAuthed} userEmail={user?.email} />
         </div>
       )}
     </HeaderShell>

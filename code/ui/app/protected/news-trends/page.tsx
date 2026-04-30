@@ -15,16 +15,17 @@ export default async function NewsTrendsPage() {
   const clusterDaily = await loadClusterDailyTrends(supabase, gate.fromGte);
 
   return (
-    <div className="flex-1 w-full flex flex-col gap-6">
-      <div>
-        <p className="text-xs font-semibold uppercase tracking-widest text-amber-500">Narrative momentum</p>
-        <h1 className="mt-1 text-2xl font-bold tracking-tight">News Dimension Trends</h1>
-        <p className="mt-1 text-sm text-muted-foreground">
-          Moving average of news impact scores across dimension clusters — track
-          what narratives are gaining or losing momentum. Series use UTC buckets from
-          aggregate views; the chart labels them in your local timezone.
-        </p>
-      </div>
+    <div
+      className="flex w-full min-w-0 overflow-x-hidden flex-col gap-3"
+      style={{
+        height: "calc(100dvh - 5rem)",
+        marginTop: "-2rem",
+        marginBottom: "-2rem",
+        paddingTop: "1rem",
+        paddingBottom: "1rem",
+      }}
+    >
+      <h1 className="shrink-0 text-sm font-semibold uppercase tracking-widest text-muted-foreground/50">News Trends</h1>
 
       <NewsTrendsClient
         clusterDaily={clusterDaily}

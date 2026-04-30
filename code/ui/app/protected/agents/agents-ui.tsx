@@ -62,7 +62,7 @@ export function AgentsUI({ screenings, limits, error, suggestionTickers }: Props
               <button
                 type="button"
                 onClick={() => setView("list")}
-                className={`p-1.5 rounded-md transition-colors ${
+                className={`min-h-[40px] min-w-[40px] p-2 rounded-md transition-colors ${
                   view === "list" ? "bg-foreground text-background" : "text-muted-foreground hover:bg-muted"
                 }`}
                 title="List view"
@@ -72,7 +72,7 @@ export function AgentsUI({ screenings, limits, error, suggestionTickers }: Props
               <button
                 type="button"
                 onClick={() => setView("calendar")}
-                className={`p-1.5 rounded-md transition-colors ${
+                className={`min-h-[40px] min-w-[40px] p-2 rounded-md transition-colors ${
                   view === "calendar" ? "bg-foreground text-background" : "text-muted-foreground hover:bg-muted"
                 }`}
                 title="Calendar view"
@@ -86,7 +86,7 @@ export function AgentsUI({ screenings, limits, error, suggestionTickers }: Props
               type="button"
               onClick={() => setShowForm(true)}
               disabled={atLimit}
-              className="inline-flex items-center gap-1.5 rounded-md bg-foreground px-3 py-1.5 text-sm font-medium text-background transition-opacity hover:opacity-90 disabled:opacity-40 disabled:pointer-events-none"
+              className="inline-flex items-center gap-1.5 rounded-md bg-foreground px-3 py-2.5 text-sm font-medium text-background transition-opacity hover:opacity-90 disabled:opacity-40 disabled:pointer-events-none"
             >
               <Plus className="w-3.5 h-3.5" />
               New agent
@@ -1069,28 +1069,28 @@ function PillPopover({
             <div className={`w-2 h-2 rounded-full ${AGENT_COLORS[colorIdx % AGENT_COLORS.length]}`} />
             <span className="text-xs font-semibold text-foreground">Edit agent</span>
           </div>
-          <button type="button" onClick={() => setMode("menu")} className="text-[10px] text-muted-foreground/50 hover:text-muted-foreground transition-colors">Back</button>
+          <button type="button" onClick={() => setMode("menu")} className="text-xs text-muted-foreground/50 hover:text-muted-foreground transition-colors">Back</button>
         </div>
         <div className="px-3 py-3 flex flex-col gap-3">
           {saveErr && <p className="text-[11px] text-destructive">{saveErr}</p>}
           <div className="flex flex-col gap-1">
-            <label className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide">Name</label>
+            <label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Name</label>
             <input type="text" value={editName} onChange={(e) => setEditName(e.target.value)} className={inputClass} />
           </div>
           <div className="flex flex-col gap-1">
-            <label className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide">Prompt</label>
+            <label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Prompt</label>
             <textarea value={editPrompt} onChange={(e) => setEditPrompt(e.target.value)} rows={4} className={inputClass} />
           </div>
           <div className="flex flex-col gap-1">
-            <label className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide">Recurrence</label>
+            <label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Recurrence</label>
             <RecurrenceScheduler value={editSchedule} onChange={setEditSchedule} />
           </div>
           <div className="flex flex-col gap-1">
-            <label className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide">Timezone</label>
+            <label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Timezone</label>
             <TimezoneSelect value={editTimezone} onChange={setEditTimezone} className={inputClass} />
           </div>
           <div className="flex flex-col gap-1">
-            <label className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide">Tickers</label>
+            <label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Tickers</label>
             <TickerPicker
               tickers={editTickers}
               onChange={setEditTickers}
@@ -1099,7 +1099,7 @@ function PillPopover({
           </div>
           {scanRuns.length > 0 && (
             <div className="flex flex-col gap-1">
-              <label className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide">Linked screenings</label>
+              <label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Linked screenings</label>
               <ScanRunPicker
                 linkedIds={editLinkedScanRunIds}
                 onChange={setEditLinkedScanRunIds}
@@ -1193,11 +1193,11 @@ function PillPopover({
       )}
 
       {/* Dismiss */}
-      <div className="border-t border-border px-3 py-1.5">
+      <div className="border-t border-border px-3 py-2">
         <button
           type="button"
           onClick={onClose}
-          className="text-[10px] text-muted-foreground/50 hover:text-muted-foreground transition-colors"
+          className="text-xs text-muted-foreground/50 hover:text-muted-foreground transition-colors"
         >
           Close
         </button>

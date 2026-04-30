@@ -60,7 +60,7 @@ export function PricingTierSwitcher({
               key={tier.name}
               type="button"
               onClick={() => setSelected(tier.name)}
-              className={`rounded-full px-4 py-1.5 text-xs font-semibold transition-all ${
+              className={`rounded-full px-4 py-2.5 text-xs font-semibold transition-all ${
                 selected === tier.name
                   ? "bg-violet-600 text-white shadow-sm"
                   : "text-muted-foreground hover:text-foreground"

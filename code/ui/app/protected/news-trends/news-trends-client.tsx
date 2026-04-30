@@ -257,33 +257,31 @@ export function NewsTrendsClient({
   }, []);
 
   return (
-    <div className="flex flex-col gap-2">
-      {hasMounted && dailySupplementError != null && (
-        <p className="text-sm text-destructive">{dailySupplementError}</p>
+    <div className="flex min-h-0 flex-1 flex-col gap-2">
+      {hasMounted && (dailySupplementError ?? hourlySupplementError ?? dimensionFetchError) && (
+        <div className="shrink-0 flex flex-col gap-1">
+          {dailySupplementError && <p className="text-sm text-destructive">{dailySupplementError}</p>}
+          {hourlySupplementError && <p className="text-sm text-destructive">{hourlySupplementError}</p>}
+          {dimensionFetchError && <p className="text-sm text-destructive">{dimensionFetchError}</p>}
+        </div>
       )}
-      {hasMounted &&
-        !dailySupplementDone &&
-        dailySupplementError == null && (
-          <p className="text-xs text-muted-foreground">Loading headlines…</p>
-        )}
-      {hasMounted && hourlySupplementError != null && (
-        <p className="text-sm text-destructive">{hourlySupplementError}</p>
-      )}
-      {hasMounted && dimensionFetchError != null && (
-        <p className="text-sm text-destructive">{dimensionFetchError}</p>
+      {hasMounted && !dailySupplementDone && !dailySupplementError && (
+        <p className="shrink-0 text-xs text-muted-foreground">Loading headlines…</p>
       )}
       {gate.enabled && (
-        <UpgradePrompt
-          requiredPlan={gate.upgradePlan}
-          userPlan={tier}
-          message={
-            tier === "observer"
-              ? `Observer access is limited to the last 24 hours. Upgrade to Investor for 30-day history or Trader for full access.`
-              : tier === "investor"
-                ? `Investor access includes 30-day history. Upgrade to Trader for unlimited trends.`
-                : undefined
-          }
-        />
+        <div className="shrink-0">
+          <UpgradePrompt
+            requiredPlan={gate.upgradePlan}
+            userPlan={tier}
+            message={
+              tier === "observer"
+                ? `Observer: last 24 hours. Upgrade to Investor (30 days) or Trader (full).`
+                : tier === "investor"
+                  ? `Investor: 30-day history. Upgrade to Trader for full access.`
+                  : undefined
+            }
+          />
+        </div>
       )}
       <NewsTrendsUI
         articles={articles}
@@ -295,6 +293,7 @@ export function NewsTrendsClient({
         onSwitchToHourly={requestHourlyTrends}
         onEnsureDimensionAggregates={ensureDimensionAggregates}
         dimensionAggregatesLoading={dimensionFetchLoading}
+        fillHeight
       />
     </div>
   );

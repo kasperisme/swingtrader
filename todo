@@ -17,16 +17,16 @@ Prio 1:
 [x] The narrative generator fails as too much data is being embedded into the prompt
 [x] (Agent) Timezones are not respected in the job
 [x] (AI Chat) When starting a new prompt, navigating to another chart shouldnt reset the prompt, but it should still execute the prompt
-[ ] (UI) Implement pricing gates throughout the application and API
-[ ] (Caching) Caching isnt isnt updating correctly (news trends didnt show the last 24 hours)
-[ ] (AI Chat) Implement small prompt support in AI chat. Currently all personas are engaged in every prompt
+[x] (UI) Implement pricing gates throughout the application and API
+[x] (AI Chat) Implement small prompt support in AI chat. Currently all personas are engaged in every prompt
+[ ] (Caching) Caching isnt isnt updating correctly (news trends didnt show the last 24 hours, it is also flakey on the 30 day horizon)
 [ ] (AI Chat) Add granularity to chart, and make sure the AI applies the granularity to the prompt
 [ ] (AI Chat) Screening agent is slow (find way to make the agent repond faster e.g. limit personas in UI and let it be a background agent, show in UI like in claude code subagent flow)
 [ ] (AI Chat) Screening several stucks is slow (implement a batch process for the agent to run)
 [ ] (Agent) In the agent, allow the user to select tickers and screenings for the agent to monitor
 [ ] (Agent) Have agent activation windows (e.g. it should scan every 15 minutes when intramarket, but otherwise not)
-[ ] (Design) Optimize for mobile
 [ ] (Agent) Setup market wide screenings (start with predefined screenings and let the agent run them, and in the future let the user create their own screenings using the screening)
+[ ] (Design) Optimize for mobile
 
 Prio 2:
 [x] Get embedding searching to work with the ollama model

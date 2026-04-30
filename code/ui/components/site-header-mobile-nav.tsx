@@ -17,7 +17,7 @@ const researchLinks = [
   { href: "/protected/articles", label: "Articles" },
   { href: "/protected/news-trends", label: "News Trends" },
   { href: "/protected/charts", label: "Charts" },
-  { href: "/protected/relationships", label: "Explore" },
+  { href: "/protected/relations", label: "Relations" },
 ] as const;
 
 const operationsLinks = [
@@ -38,7 +38,7 @@ const linkClass =
   "block rounded-xl px-3 py-2.5 text-sm font-medium text-foreground transition-colors hover:bg-muted cursor-pointer";
 
 const sectionLabelClass =
-  "mb-2 px-3 text-[10px] font-semibold uppercase tracking-widest text-amber-500";
+  "mb-2 px-3 text-xs font-semibold uppercase tracking-widest text-amber-500";
 
 function NavLink({ href, label, onClick }: { href: string; label: string; onClick: () => void }) {
   return (

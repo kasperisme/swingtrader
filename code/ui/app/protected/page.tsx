@@ -33,16 +33,12 @@ async function OpsCenterData() {
 
 export default function ProtectedPage() {
   return (
-    <div className="flex-1 w-full flex flex-col gap-6">
-      <div>
-        <p className="text-xs font-semibold uppercase tracking-widest text-amber-500">Ops center</p>
-        <h1 className="mt-1 text-2xl font-bold tracking-tight">Portfolio</h1>
-        <p className="mt-1 text-sm text-muted-foreground">
-          Your positions at a glance. Log and manage trades in{" "}
-          <Link href="/protected/trades" className="text-foreground underline underline-offset-4 hover:text-amber-500 transition-colors">
-            Trades
-          </Link>.
-        </p>
+    <div className="flex-1 w-full flex flex-col gap-4">
+      <div className="flex items-center justify-between">
+        <h1 className="text-sm font-semibold uppercase tracking-widest text-muted-foreground/50">Portfolio</h1>
+        <Link href="/protected/trades" className="text-xs text-muted-foreground hover:text-foreground transition-colors">
+          Manage trades →
+        </Link>
       </div>
 
       <Suspense

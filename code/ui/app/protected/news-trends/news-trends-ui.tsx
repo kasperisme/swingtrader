@@ -365,30 +365,6 @@ function clientXToDataIndex(
   return Math.round(clamped * (dataLen - 1));
 }
 
-/** Non-negative weight from model confidence; missing → 1 (neutral). */
-function impactConfidenceWeight(confidence: number | null | undefined): number {
-  if (confidence == null || !Number.isFinite(confidence)) return 1;
-  return Math.max(0, confidence);
-}
-
-/** sum(value × weight) / sum(weight); if all weights are 0, plain mean of values. */
-function weightedMeanPairs(
-  pairs: { value: number; weight: number }[],
-): number | null {
-  if (pairs.length === 0) return null;
-  let sumW = 0;
-  let sumVW = 0;
-  for (const { value, weight } of pairs) {
-    if (!Number.isFinite(value)) continue;
-    const w = Number.isFinite(weight) && weight > 0 ? weight : 0;
-    sumW += w;
-    sumVW += value * w;
-  }
-  if (sumW > 0) return sumVW / sumW;
-  const vals = pairs.map((p) => p.value).filter((v) => Number.isFinite(v));
-  return vals.length > 0 ? vals.reduce((a, b) => a + b, 0) / vals.length : null;
-}
-
 /** Apply rolling window moving average to cluster data */
 function applyClusterMA(
   daily: TrendsPeriodRow[],
@@ -997,8 +973,9 @@ export function NewsTrendsUI({
   clusterHourly = [],
   dimensionDaily = [],
   dimensionHourly = [],
-  chartHeight = 400,
+  chartHeight = 300,
   showMainChartFrame = true,
+  fillHeight = false,
   onSwitchToHourly,
   hourlyClusterLoading = false,
   onEnsureDimensionAggregates,
@@ -1012,6 +989,8 @@ export function NewsTrendsUI({
   chartHeight?: number;
   /** When false, removes the bordered card around the main trend chart. */
   showMainChartFrame?: boolean;
+  /** Fill the parent container height instead of using fixed chartHeight. */
+  fillHeight?: boolean;
   /** When the user picks hourly granularity; parent can lazy-load hourly aggregates. */
   onSwitchToHourly?: () => void;
   /** True while parent is fetching `news_trends_cluster_hourly_v` after switching to hourly. */
@@ -1938,7 +1917,7 @@ export function NewsTrendsUI({
   }
 
   return (
-    <div className="flex flex-col gap-6">
+    <div className={fillHeight ? "flex h-full min-w-0 overflow-x-hidden flex-col gap-3" : "flex flex-col gap-3"}>
       {/* Controls toolbar */}
       <div className="flex items-stretch rounded-xl border border-border bg-card overflow-x-auto overflow-y-visible">
         {/* Date range + granularity first */}
@@ -2151,47 +2130,29 @@ export function NewsTrendsUI({
         </div>
       </div>
 
-      <div className="flex flex-col gap-4 sm:flex-row">
+      <div className={`flex flex-col gap-3 sm:flex-row${fillHeight ? " flex-1 min-h-0" : ""}`}>
         {/* Main cluster chart */}
-        <div className="flex-1 min-w-0">
-          <div className={showMainChartFrame ? "border rounded-xl p-4" : ""}>
-            <div className="flex items-start justify-between mb-3">
-              <div>
-                <p className="text-sm font-medium text-foreground/90">
-                  {aggregationMode === "cumulative"
-                    ? "Cumulative Impact"
-                    : "Period Impact"}
-                  {maWindow > 0 && (
-                    <span className="ml-2 text-[11px] font-normal text-muted-foreground">
-                      {maWindow}
-                      {isIntradayView(viewMode) ? "h" : "d"} MA
-                    </span>
-                  )}
-                  {maWindow === 0 && (
-                    <span className="ml-2 text-[11px] font-normal text-muted-foreground">
-                      no smoothing
-                    </span>
-                  )}
-                </p>
-                <p className="text-[11px] text-muted-foreground/70 mt-0.5">
-                  −1 bearish → +1 bullish · drag to pan · dbl-click drag to
-                  select range · dbl-click for articles
-                  {benchmark !== "none" ? " · OHLC ticks = benchmark" : ""}
-                </p>
-              </div>
+        <div className={`flex-1 min-w-0${fillHeight ? " min-h-0 flex flex-col" : ""}`}>
+          <div className={[showMainChartFrame ? "border rounded-xl p-2" : "", fillHeight ? "flex flex-col flex-1 min-h-0" : ""].filter(Boolean).join(" ")}>
+            <div className="flex items-center justify-between mb-1 px-1 shrink-0">
+              <p className="text-xs text-muted-foreground/60">
+                {aggregationMode === "cumulative" ? "Cumulative" : "Period"} impact
+                {maWindow > 0 && (
+                  <span className="ml-1.5">
+                    · {maWindow}{isIntradayView(viewMode) ? "h" : "d"} MA
+                  </span>
+                )}
+              </p>
             </div>
             <div
               ref={chartSelectAreaRef}
-              className={`relative select-none ${
-                isPanning
-                  ? "[&_.recharts-wrapper]:cursor-grabbing"
-                  : "[&_.recharts-wrapper]:cursor-grab"
-              }`}
+              className={`relative select-none${fillHeight ? " flex-1 min-h-0" : ""}${isPanning ? " [&_.recharts-wrapper]:cursor-grabbing" : " [&_.recharts-wrapper]:cursor-grab"}`}
+              style={fillHeight ? { height: "100%" } : undefined}
             >
               {awaitingHourlyCluster ? (
                 <div
                   className="flex flex-col items-center justify-center gap-2 rounded-lg border border-dashed border-border bg-muted/20 text-sm text-muted-foreground animate-pulse"
-                  style={{ minHeight: chartHeight }}
+                  style={{ minHeight: fillHeight ? undefined : chartHeight, height: fillHeight ? "100%" : undefined }}
                 >
                   <span>Loading hourly cluster series…</span>
                 </div>
@@ -2253,7 +2214,7 @@ export function NewsTrendsUI({
                         </div>
                       </div>
                     )}
-                  <ResponsiveContainer width="100%" height={chartHeight}>
+                  <ResponsiveContainer width="100%" height={fillHeight ? "100%" : chartHeight}>
                 <ComposedChart
                   data={visibleChartData}
                   margin={{ top: 5, right: 10, left: 0, bottom: 8 }}
