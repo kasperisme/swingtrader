@@ -31,6 +31,10 @@ import { CLUSTERS } from "../vectors/dimensions";
 import { fmpGetOhlc } from "@/app/actions/fmp";
 import { ArticlesGrid } from "@/components/articles-grid";
 import {
+  ChartDateRangePicker,
+  type ChartGranularity,
+} from "@/components/chart-date-range-picker";
+import {
   benchmarkDateToLocalChartBucket,
   articleLocalBucket,
   buildPeriodDataFromArticlesLocal,
@@ -480,10 +484,10 @@ function Leaderboard({
 
   return (
     <div className="flex flex-col gap-0.5">
-      <p className="text-[10px] font-semibold text-muted-foreground/70 uppercase tracking-widest mb-2 px-2">
+      <p className="text-[9px] font-mono font-medium text-muted-foreground/40 uppercase tracking-[0.1em] mb-1.5 px-2">
         {cumulative ? "Cumulative" : maOff ? "Latest" : "MA Score"}
       </p>
-      <div className="grid grid-cols-2 gap-0.5 sm:grid-cols-1">
+      <div className="flex flex-col gap-0.5">
       {sorted.map(({ cluster, score }) => {
         const color = CLUSTER_COLORS[cluster.id];
         const isSelected = selected.has(cluster.id);
@@ -494,58 +498,49 @@ function Leaderboard({
         return (
           <div
             key={cluster.id}
-            className={`group flex items-center gap-1 px-2 py-1.5 rounded-lg transition-colors cursor-pointer ${
-              isDrilled ? "bg-muted ring-1 ring-border" : "hover:bg-muted/50"
+            className={`group relative flex items-center min-h-[44px] sm:min-h-0 rounded-lg transition-colors cursor-pointer overflow-hidden ${
+              isDrilled ? "bg-muted" : ""
             }`}
+            style={{ borderLeft: `3px solid ${isSelected ? color : 'transparent'}` }}
           >
-            {/* Toggle visibility */}
             <button
               onClick={() => onToggle(cluster.id)}
               onDoubleClick={(e) => {
                 e.preventDefault();
                 onFocus(cluster.id);
               }}
-              className={`flex items-center gap-2 flex-1 text-left min-w-0 ${!isSelected ? "opacity-50" : ""}`}
-              title="Click to toggle · Double-click to focus"
+              className={`flex items-center gap-2 flex-1 text-left min-w-0 px-2.5 py-1.5 sm:py-1 ${!isSelected ? "opacity-40" : ""}`}
+              title="Tap to toggle · Double-tap to focus"
             >
               <span
-                className="w-2.5 h-2.5 rounded-full shrink-0"
+                className="w-2 h-2 rounded-full shrink-0"
                 style={{ backgroundColor: color }}
               />
               <span className="flex-1 text-xs font-medium truncate">
                 {cluster.label}
               </span>
-              <span className="flex items-center gap-0.5 text-xs font-mono tabular-nums shrink-0">
+              <span className={`flex items-center gap-0.5 text-xs font-mono tabular-nums shrink-0 ${
+                isPos ? "text-emerald-500" : isNeg ? "text-rose-500" : "text-muted-foreground/60"
+              }`}>
                 {isPos ? (
                   <TrendingUp size={10} className="text-emerald-500" />
                 ) : isNeg ? (
                   <TrendingDown size={10} className="text-rose-500" />
                 ) : (
-                  <Minus size={10} className="text-muted-foreground" />
+                  <Minus size={10} className="text-muted-foreground/40" />
                 )}
-                <span
-                  className={
-                    isPos
-                      ? "text-emerald-500"
-                      : isNeg
-                        ? "text-rose-500"
-                        : "text-muted-foreground"
-                  }
-                >
-                  {score != null
-                    ? (score >= 0 ? "+" : "") + score.toFixed(2)
-                    : "—"}
-                </span>
+                {score != null
+                  ? (score >= 0 ? "+" : "") + score.toFixed(2)
+                  : "—"}
               </span>
             </button>
 
-            {/* Drill-down toggle */}
             <button
               onClick={() => onDrilldown(cluster.id)}
               title={isDrilled ? "Close drill-down" : "Drill into dimensions"}
-              className={`shrink-0 p-0.5 rounded transition-all cursor-pointer ${
+              className={`shrink-0 p-2 sm:p-0.5 rounded transition-all cursor-pointer min-w-[44px] sm:min-w-0 sm:mr-1 ${
                 isDrilled
-                  ? "text-foreground bg-background opacity-100"
+                  ? "text-foreground bg-muted"
                   : "text-muted-foreground opacity-0 group-hover:opacity-100 hover:text-foreground"
               }`}
             >
@@ -555,7 +550,7 @@ function Leaderboard({
         );
       })}
       </div>
-      <p className="text-[10px] text-muted-foreground/40 mt-2 px-2 leading-snug hidden sm:block">
+      <p className="text-[9px] font-mono text-muted-foreground/30 mt-1.5 px-2 leading-snug hidden sm:block">
         Click to toggle · hover <ChevronRight size={8} className="inline" /> to
         drill
       </p>
@@ -752,14 +747,14 @@ function DimensionDrilldown({
 
   return (
     <div
-      className="border border-border rounded-xl p-4 flex flex-col gap-4"
+      className="border border-border rounded-xl overflow-hidden"
       style={{ borderLeftColor: clusterColor, borderLeftWidth: 3 }}
     >
-      <div className="flex items-center justify-between">
+      <div className="px-3 py-2.5 sm:px-4 sm:py-3 flex items-baseline justify-between gap-2 border-b border-border">
         <div>
           <p className="text-sm font-semibold">{cluster.label}</p>
-          <p className="text-[11px] text-muted-foreground mt-0.5">
-            {dims.length} dimensions ·{" "}
+          <p className="text-[11px] font-mono text-muted-foreground/60 mt-0.5">
+            {dims.length} dims ·{" "}
             {maWindow === 0
               ? "no smoothing"
               : `${maWindow}${isHourly ? "h" : "d"} MA`}
@@ -769,16 +764,16 @@ function DimensionDrilldown({
 
       {aggregatesLoading ? (
         <div
-          className="flex flex-col items-center justify-center gap-2 rounded-lg border border-dashed border-border bg-muted/20 py-16 text-sm text-muted-foreground animate-pulse"
+          className="flex flex-col items-center justify-center gap-2 bg-muted/10 py-16 text-sm text-muted-foreground animate-pulse"
           style={{ minHeight: chartHeight }}
         >
-          <span>Loading dimension series…</span>
+          <span className="font-mono text-[11px]">Loading dimension series…</span>
         </div>
       ) : (
-        <div className="flex flex-col gap-4 sm:flex-row sm:gap-6">
+        <div className="flex flex-col sm:flex-row">
         {/* Dimension chart */}
-        <div className="flex-1 min-w-0">
-          <ResponsiveContainer width="100%" height={chartHeight}>
+        <div className="flex-1 min-w-0 px-2 pt-2 sm:px-3">
+          <ResponsiveContainer width="100%" height={chartHeight} minWidth={0}>
             <LineChart
               data={chartData}
               margin={{ top: 5, right: 10, left: 0, bottom: 5 }}
@@ -841,16 +836,17 @@ function DimensionDrilldown({
         </div>
 
         {/* Dimension scores */}
-        <div className="w-full sm:w-52 sm:shrink-0 flex flex-col gap-1">
-          <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground mb-1">
-            Latest Score
+        <div className="border-t sm:border-t-0 sm:border-l border-border px-3 py-2 sm:w-48 sm:shrink-0">
+          <p className="text-[9px] font-mono font-medium uppercase tracking-[0.1em] text-muted-foreground/40 mb-1.5">
+            Latest
           </p>
-          <div className="grid grid-cols-2 gap-0.5 sm:grid-cols-1">
+          <div className="flex flex-col gap-px">
           {sortedDims.map((dim) => {
             const score = latestDimScores[dim.key];
             const isPos = score != null && score > 0.05;
             const isNeg = score != null && score < -0.05;
             const isSelected = selectedDims.has(dim.key);
+            const dimColor = DIM_PALETTE[dims.indexOf(dim) % DIM_PALETTE.length];
             return (
               <button
                 key={dim.key}
@@ -859,21 +855,19 @@ function DimensionDrilldown({
                   e.preventDefault();
                   focusDim(dim.key);
                 }}
-                className={`flex items-center gap-2 px-2 py-1 rounded text-xs w-full text-left transition-opacity hover:bg-muted/50 ${!isSelected ? "opacity-40" : ""}`}
-                title={`${dim.description} · Click to toggle · Double-click to focus`}
+                className={`relative flex items-center gap-2 px-2 py-2 sm:py-1 rounded text-xs w-full text-left transition-opacity hover:bg-muted/50 min-h-[44px] sm:min-h-0 ${!isSelected ? "opacity-40" : ""}`}
+                style={{ borderLeft: `3px solid ${isSelected ? dimColor : 'transparent'}` }}
+                title={`${dim.description} · Tap to toggle · Double-tap to focus`}
               >
                 <span
                   className="w-2 h-2 rounded-full shrink-0"
-                  style={{
-                    backgroundColor:
-                      DIM_PALETTE[dims.indexOf(dim) % DIM_PALETTE.length],
-                  }}
+                  style={{ backgroundColor: dimColor }}
                 />
                 <span className="flex-1 truncate text-foreground/80">
                   {dim.label}
                 </span>
                 <span
-                  className={`font-mono tabular-nums shrink-0 ${isPos ? "text-emerald-500" : isNeg ? "text-rose-500" : "text-muted-foreground"}`}
+                  className={`font-mono tabular-nums shrink-0 text-[11px] ${isPos ? "text-emerald-500" : isNeg ? "text-rose-500" : "text-muted-foreground/60"}`}
                 >
                   {score != null
                     ? (score >= 0 ? "+" : "") + score.toFixed(2)
@@ -924,43 +918,6 @@ const MA_OPTIONS: Record<string, { label: string; value: number }[]> = {
 };
 
 const DEFAULT_MA: Record<string, number> = { "1week": 4, "1day": 7, "4hour": 6, "1hour": 6 };
-
-type QuickRange = "7d" | "30d" | "90d" | "180d" | "1y" | "3y" | "5y" | "custom";
-
-const RANGE_BY_VIEW: Record<string, { ranges: QuickRange[]; default: QuickRange }> = {
-  "1hour": { ranges: ["7d", "30d", "90d", "180d"], default: "30d" },
-  "4hour": { ranges: ["7d", "30d", "90d", "180d", "1y"], default: "90d" },
-  "1day": { ranges: ["7d", "30d", "90d", "1y", "3y"], default: "1y" },
-  "1week": { ranges: ["30d", "90d", "1y", "3y", "5y"], default: "3y" },
-};
-
-const RANGE_DAYS: Record<string, number> = {
-  "7d": 7,
-  "30d": 30,
-  "90d": 90,
-  "180d": 180,
-  "1y": 365,
-  "3y": 365 * 3,
-  "5y": 365 * 5,
-};
-
-const RANGE_LABELS: Record<QuickRange, string> = {
-  "7d": "7d",
-  "30d": "30d",
-  "90d": "90d",
-  "180d": "6m",
-  "1y": "1y",
-  "3y": "3y",
-  "5y": "5y",
-  custom: "custom",
-};
-
-const VIEW_MODE_OPTIONS: { value: ViewMode; label: string }[] = [
-  { value: "1week", label: "1W" },
-  { value: "1day", label: "1D" },
-  { value: "4hour", label: "4H" },
-  { value: "1hour", label: "1H" },
-];
 
 function toDateInputValue(iso: string): string {
   const d = new Date(iso);
@@ -1039,7 +996,6 @@ export function NewsTrendsUI({
 
   const [dateFrom, setDateFrom] = useState<string>("");
   const [dateTo, setDateTo] = useState<string>("");
-  const [quickRange, setQuickRange] = useState<QuickRange>("1y");
   const [benchmark, setBenchmark] = useState<BenchmarkId>("none");
   const [benchmarkData, setBenchmarkData] = useState<OhlcPoint[]>([]);
   const [showClusterMean, setShowClusterMean] = useState(true);
@@ -1094,20 +1050,6 @@ export function NewsTrendsUI({
     };
   }, [advancedOpen]);
 
-  function applyQuickRange(range: QuickRange) {
-    setQuickRange(range);
-    if (range === "custom") return;
-    const days = RANGE_DAYS[range] ?? 365;
-    const [ey, em, ed] = (maxDate || localDateStr(new Date()))
-      .split("-")
-      .map(Number);
-    const end = new Date(ey, em - 1, ed); // local midnight
-    const start = new Date(end);
-    start.setDate(start.getDate() - days);
-    setDateFrom(localDateStr(start));
-    setDateTo(localDateStr(end));
-  }
-
   const filteredArticles = useMemo(() => {
     if (!dateFrom && !dateTo) return articles;
     return articles.filter((a) => {
@@ -1123,10 +1065,6 @@ export function NewsTrendsUI({
     setMaWindow((prev) => (prev === 0 ? 0 : DEFAULT_MA[mode] ?? 7));
     if (mode === "1hour" || mode === "4hour") {
       onSwitchToHourly?.();
-    }
-    const config = RANGE_BY_VIEW[mode];
-    if (quickRange !== "custom" && !config.ranges.includes(quickRange)) {
-      applyQuickRange(config.default);
     }
   }
 
@@ -1677,7 +1615,6 @@ export function NewsTrendsUI({
               nextFrom.setDate(nextFrom.getDate() - adjust);
               nextTo.setDate(nextTo.getDate() - adjust);
             }
-            setQuickRange("custom");
             setDateFrom(localDateStr(nextFrom));
             setDateTo(localDateStr(nextTo));
             setBrushRange(null);
@@ -1911,263 +1848,213 @@ export function NewsTrendsUI({
   ) {
     return (
       <div className="text-center py-16 text-muted-foreground">
-        <p className="text-sm">No news impact data found.</p>
+        <p className="text-[11px] font-mono text-muted-foreground/60">No news impact data found.</p>
       </div>
     );
   }
 
   return (
-    <div className={fillHeight ? "flex h-full min-w-0 overflow-x-hidden flex-col gap-3" : "flex flex-col gap-3"}>
-      {/* Controls toolbar */}
-      <div className="flex items-stretch rounded-xl border border-border bg-card overflow-x-auto overflow-y-visible min-w-0 shrink-0">
-        {/* Date range + granularity first */}
-        <div className="flex items-center px-3 py-2 border-r border-border shrink-0">
-          <span className="text-[10px] font-medium text-muted-foreground/60 uppercase tracking-wide">
-            Range
-          </span>
-        </div>
-        {RANGE_BY_VIEW[viewMode].ranges.map((r) => (
-          <button
-            key={r}
-            onClick={() => applyQuickRange(r)}
-            className={`text-[11px] px-3 py-2 transition-colors cursor-pointer border-r border-border ${
-              quickRange === r
-                ? "bg-foreground text-background"
-                : "text-muted-foreground hover:text-foreground"
-            }`}
-          >
-            {RANGE_LABELS[r]}
-          </button>
-        ))}
-        <div className="flex items-center gap-1.5 px-3 py-2 border-r border-border shrink-0">
-          <input
-            type="date"
-            value={dateFrom}
-            min={minDate}
-            max={dateTo || maxDate}
-            onChange={(e) => {
-              setDateFrom(e.target.value);
-              setQuickRange("custom");
-            }}
-            className="text-[11px] bg-transparent text-foreground focus:outline-none cursor-pointer"
-          />
-          <span className="text-[10px] text-muted-foreground/40">—</span>
-          <input
-            type="date"
-            value={dateTo}
-            min={dateFrom || minDate}
-            max={maxDate}
-            onChange={(e) => {
-              setDateTo(e.target.value);
-              setQuickRange("custom");
-            }}
-            className="text-[11px] bg-transparent text-foreground focus:outline-none cursor-pointer"
-          />
-        </div>
-        <div className="flex items-center gap-2 px-3 py-2 border-r border-border shrink-0">
-          <span className="text-[10px] font-medium text-muted-foreground/60 uppercase tracking-wide">
-            View
-          </span>
-          <div className="flex rounded border border-border overflow-hidden">
-            {VIEW_MODE_OPTIONS.map(({ value, label }) => (
-              <button
-                key={value}
-                onClick={() => switchMode(value)}
-                className={`text-[11px] px-3 py-1 transition-colors cursor-pointer ${
-                  viewMode === value
-                    ? "bg-foreground text-background"
-                    : "text-muted-foreground hover:text-foreground"
-                }`}
-              >
-                {label}
-              </button>
-            ))}
-          </div>
-        </div>
-
-        {/* MA smoothing */}
-        <div className="flex items-center gap-2 px-3 py-2 border-r border-border shrink-0">
-          <span className="text-[10px] font-medium text-muted-foreground/60 shrink-0">
-            MA
-          </span>
-          <div className="flex items-center gap-0.5">
-            {MA_OPTIONS[viewMode].map((opt) => (
-              <button
-                key={opt.value}
-                onClick={() => setMaWindow(opt.value)}
-                className={`text-[11px] px-2 py-1 rounded transition-colors cursor-pointer ${
-                  maWindow === opt.value
-                    ? "bg-foreground text-background"
-                    : "text-muted-foreground hover:text-foreground"
-                }`}
-              >
-                {opt.label}
-              </button>
-            ))}
-          </div>
-        </div>
-
-        {/* Toggle overlays */}
-        <div className="flex items-center px-3 py-2 shrink-0">
-          <div className="relative">
-            <button
-              ref={advancedButtonRef}
-              type="button"
-              onClick={() => setAdvancedOpen((v) => !v)}
-              className="inline-flex items-center rounded border border-border px-2.5 py-1 text-[11px] text-muted-foreground transition-colors hover:text-foreground cursor-pointer"
-            >
-              Advanced
-              <ChevronRight
-                className={`ml-1 h-3 w-3 transition-transform ${advancedOpen ? "rotate-90" : ""}`}
-              />
-            </button>
-            {advancedOpen && advancedMenuPos
-              ? createPortal(
-                  <div
-                    ref={advancedMenuRef}
-                    className="fixed z-[60] min-w-[200px] rounded-md border border-border bg-background p-1.5 shadow-lg"
-                    style={{
-                      top: advancedMenuPos.top,
-                      left: advancedMenuPos.left,
-                    }}
-                  >
-                    <div className="px-2.5 py-1">
-                      <p className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground/60">
-                        Series
-                      </p>
-                      <div className="mt-1.5 flex rounded border border-border overflow-hidden">
+    <div className={fillHeight ? "flex w-full min-w-0 flex-col gap-3" : "flex flex-col gap-3"}>
+      {/* Controls toolbar — shared date/granularity picker + trend controls */}
+      <div className="shrink-0 rounded-xl border border-border bg-card overflow-hidden">
+        <div className="flex items-center gap-2 border-b border-border p-2">
+          <div className="min-w-0 flex-1">
+            <ChartDateRangePicker
+              onChange={({ from, to }) => {
+                setDateFrom(from);
+                setDateTo(to);
+              }}
+              onGranularityChange={(mode: ChartGranularity) =>
+                switchMode(mode as ViewMode)
+              }
+              defaultRange="1y"
+              defaultGranularity={viewMode}
+              minDate={minDate || undefined}
+              maxDate={maxDate || undefined}
+              autoApplyDefaultRange={false}
+              settingsContent={
+                <div className="flex items-center flex-wrap gap-x-1 gap-y-1">
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-[9px] font-mono font-medium text-muted-foreground/40 uppercase tracking-[0.08em]">
+                      MA
+                    </span>
+                    <div className="flex items-center gap-0.5">
+                      {MA_OPTIONS[viewMode].map((opt, i) => (
                         <button
-                          onClick={() => setAggregationMode("period")}
-                          className={`text-[11px] px-2.5 py-1 transition-colors cursor-pointer ${
-                            aggregationMode === "period"
+                          key={opt.value}
+                          onClick={() => setMaWindow(opt.value)}
+                          className={`text-[11px] font-mono px-2 py-2 sm:py-1.5 rounded transition-colors cursor-pointer min-h-[44px] sm:min-h-0 ${
+                            maWindow === opt.value
                               ? "bg-foreground text-background"
-                              : "text-muted-foreground hover:text-foreground"
+                              : i === 0
+                                ? "text-muted-foreground/50 hover:text-muted-foreground"
+                                : "text-muted-foreground hover:text-foreground"
                           }`}
                         >
-                          Period
+                          {opt.label}
                         </button>
-                        <button
-                          onClick={() => setAggregationMode("cumulative")}
-                          className={`text-[11px] px-2.5 py-1 transition-colors cursor-pointer ${
-                            aggregationMode === "cumulative"
-                              ? "bg-foreground text-background"
-                              : "text-muted-foreground hover:text-foreground"
-                          }`}
-                        >
-                          Cumul.
-                        </button>
-                      </div>
+                      ))}
                     </div>
-                    <div className="px-2.5 py-1">
-                      <p className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground/60">
-                        Index
-                      </p>
-                      <select
-                        value={benchmark}
-                        onChange={(e) =>
-                          setBenchmark(e.target.value as BenchmarkId)
-                        }
-                        className="mt-1.5 w-full text-[11px] border border-border rounded px-1.5 py-1 bg-background cursor-pointer focus:outline-none focus:ring-1 focus:ring-ring"
-                      >
-                        {BENCHMARK_OPTIONS.map((b) => (
-                          <option key={b.id} value={b.id}>
-                            {b.label}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-                    <button
-                      onClick={() => setShowClusterMean((v) => !v)}
-                      className={`w-full text-left text-[11px] px-2.5 py-1.5 rounded transition-colors cursor-pointer ${
-                        showClusterMean
-                          ? "bg-foreground/10 text-foreground"
-                          : "text-muted-foreground hover:bg-muted hover:text-foreground"
-                      }`}
-                    >
-                      Mean
-                    </button>
-                    <button
-                      onClick={() => setShowArticleCount((v) => !v)}
-                      className={`w-full text-left text-[11px] px-2.5 py-1.5 rounded transition-colors cursor-pointer ${
-                        showArticleCount
-                          ? "bg-foreground/10 text-foreground"
-                          : "text-muted-foreground hover:bg-muted hover:text-foreground"
-                      }`}
-                    >
-                      Volume
-                    </button>
-                    <button
-                      onClick={() =>
-                        isIntradayView(viewMode) &&
-                        setShowUsSessionMarkers((v) => !v)
-                      }
-                      disabled={!isIntradayView(viewMode)}
-                      className={`w-full text-left text-[11px] px-2.5 py-1.5 rounded transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed ${
-                        showUsSessionMarkers && isIntradayView(viewMode)
-                          ? "bg-foreground/10 text-foreground"
-                          : "text-muted-foreground hover:bg-muted hover:text-foreground"
-                      }`}
-                    >
-                      Sessions
-                    </button>
-                  </div>,
-                  document.body,
-                )
-              : null}
-          </div>
-        </div>
+                  </div>
 
-        {/* Article count */}
-        <div className="ml-auto flex items-center px-4 py-2 border-l border-border shrink-0 bg-muted/20">
-          <div className="text-right">
-            <p className="text-[9px] font-medium uppercase tracking-wide text-muted-foreground/50 leading-none">
-              Articles
-            </p>
-            <p className="text-sm font-semibold tabular-nums leading-tight">
+                  <div className="hidden sm:block w-px h-6 bg-border" />
+
+                  <div className="relative">
+                    <button
+                      ref={advancedButtonRef}
+                      type="button"
+                      onClick={() => setAdvancedOpen((v) => !v)}
+                      className="inline-flex items-center rounded border border-border px-2.5 py-2 sm:py-1.5 text-[11px] font-mono text-muted-foreground transition-colors hover:text-foreground cursor-pointer min-h-[44px] sm:min-h-0"
+                    >
+                      Advanced
+                      <ChevronRight
+                        className={`ml-1 h-3 w-3 transition-transform ${advancedOpen ? "rotate-90" : ""}`}
+                      />
+                    </button>
+                    {advancedOpen && advancedMenuPos
+                      ? createPortal(
+                          <div
+                            ref={advancedMenuRef}
+                            className="fixed z-[60] min-w-[220px] rounded-md border border-border bg-background p-2 shadow-lg"
+                            style={{
+                              top: advancedMenuPos.top,
+                              left: Math.max(8, advancedMenuPos.left),
+                            }}
+                          >
+                            <div className="px-2.5 py-1.5">
+                              <p className="text-[9px] font-mono font-medium uppercase tracking-[0.08em] text-muted-foreground/40">
+                                Series
+                              </p>
+                              <div className="mt-1.5 flex rounded border border-border overflow-hidden">
+                                <button
+                                  onClick={() => setAggregationMode("period")}
+                                  className={`text-[11px] font-mono px-2.5 py-2 transition-colors cursor-pointer min-h-[44px] sm:min-h-0 flex-1 ${
+                                    aggregationMode === "period"
+                                      ? "bg-foreground text-background"
+                                      : "text-muted-foreground hover:text-foreground"
+                                  }`}
+                                >
+                                  Period
+                                </button>
+                                <button
+                                  onClick={() => setAggregationMode("cumulative")}
+                                  className={`text-[11px] font-mono px-2.5 py-2 transition-colors cursor-pointer min-h-[44px] sm:min-h-0 flex-1 ${
+                                    aggregationMode === "cumulative"
+                                      ? "bg-foreground text-background"
+                                      : "text-muted-foreground hover:text-foreground"
+                                  }`}
+                                >
+                                  Cumul.
+                                </button>
+                              </div>
+                            </div>
+                            <div className="px-2.5 py-1.5">
+                              <p className="text-[9px] font-mono font-medium uppercase tracking-[0.08em] text-muted-foreground/40">
+                                Index
+                              </p>
+                              <select
+                                value={benchmark}
+                                onChange={(e) =>
+                                  setBenchmark(e.target.value as BenchmarkId)
+                                }
+                                className="mt-1.5 w-full text-[11px] font-mono border border-border rounded px-1.5 py-2 sm:py-1 bg-background cursor-pointer focus:outline-none focus:ring-1 focus:ring-ring min-h-[44px] sm:min-h-0"
+                              >
+                                {BENCHMARK_OPTIONS.map((b) => (
+                                  <option key={b.id} value={b.id}>
+                                    {b.label}
+                                  </option>
+                                ))}
+                              </select>
+                            </div>
+                            <div className="mt-1 flex flex-col">
+                              <button
+                                onClick={() => setShowClusterMean((v) => !v)}
+                                className={`w-full text-left text-[11px] font-mono px-2.5 py-2 sm:py-1.5 rounded transition-colors cursor-pointer min-h-[44px] sm:min-h-0 ${
+                                  showClusterMean
+                                    ? "bg-foreground/10 text-foreground"
+                                    : "text-muted-foreground hover:bg-muted hover:text-foreground"
+                                }`}
+                              >
+                                Mean
+                              </button>
+                              <button
+                                onClick={() => setShowArticleCount((v) => !v)}
+                                className={`w-full text-left text-[11px] font-mono px-2.5 py-2 sm:py-1.5 rounded transition-colors cursor-pointer min-h-[44px] sm:min-h-0 ${
+                                  showArticleCount
+                                    ? "bg-foreground/10 text-foreground"
+                                    : "text-muted-foreground hover:bg-muted hover:text-foreground"
+                                }`}
+                              >
+                                Volume
+                              </button>
+                              <button
+                                onClick={() =>
+                                  isIntradayView(viewMode) &&
+                                  setShowUsSessionMarkers((v) => !v)
+                                }
+                                disabled={!isIntradayView(viewMode)}
+                                className={`w-full text-left text-[11px] font-mono px-2.5 py-2 sm:py-1.5 rounded transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed min-h-[44px] sm:min-h-0 ${
+                                  showUsSessionMarkers && isIntradayView(viewMode)
+                                    ? "bg-foreground/10 text-foreground"
+                                    : "text-muted-foreground hover:bg-muted hover:text-foreground"
+                                }`}
+                              >
+                                Sessions
+                              </button>
+                            </div>
+                          </div>,
+                          document.body,
+                        )
+                      : null}
+                  </div>
+                </div>
+              }
+            />
+          </div>
+          <div className="ml-auto hidden sm:flex items-center px-2 shrink-0">
+            <p className="text-[11px] font-mono tabular-nums text-muted-foreground/60">
               {totalArticles.toLocaleString()}
+              <span className="ml-1 text-[9px] font-mono uppercase tracking-[0.06em] text-muted-foreground/30">
+                arts
+              </span>
             </p>
           </div>
         </div>
+
       </div>
 
       <div className={`flex flex-col gap-3 sm:flex-row min-w-0${fillHeight ? " flex-1 min-h-0" : ""}`}>
         {/* Main cluster chart */}
-        <div className={`flex-1 min-w-0${fillHeight ? " min-h-0 flex flex-col" : ""}`}>
-          <div className={[showMainChartFrame ? "border rounded-xl p-2" : "", fillHeight ? "flex flex-col flex-1 min-h-0" : ""].filter(Boolean).join(" ")}>
-            <div className="flex items-center justify-between mb-1 px-1 shrink-0">
-              <p className="text-xs text-muted-foreground/60">
-                {aggregationMode === "cumulative" ? "Cumulative" : "Period"} impact
-                {maWindow > 0 && (
-                  <span className="ml-1.5">
-                    · {maWindow}{isIntradayView(viewMode) ? "h" : "d"} MA
-                  </span>
-                )}
+        <div className={`flex-1 min-w-0${fillHeight ? " flex flex-col min-h-[320px] sm:min-h-0" : ""}`}>
+          <div className={[showMainChartFrame ? "border rounded-xl overflow-hidden" : "", fillHeight ? "flex flex-col flex-1 min-h-0" : ""].filter(Boolean).join(" ")}>
+            <div className="flex items-center justify-between px-2.5 py-2 sm:px-2 shrink-0 border-b border-border">
+              <p className="text-[11px] font-mono text-muted-foreground/50">
+                {aggregationMode === "cumulative" ? "Cumul." : "Period"} impact
               </p>
             </div>
             <div
               ref={chartSelectAreaRef}
-              className={`relative select-none${fillHeight ? " flex-1 min-h-0" : ""}${isPanning ? " [&_.recharts-wrapper]:cursor-grabbing" : " [&_.recharts-wrapper]:cursor-grab"}`}
-              style={fillHeight ? { height: "100%" } : undefined}
+              className={`relative select-none min-w-0 overflow-hidden${fillHeight ? " flex-1 h-[46dvh] min-h-[260px] sm:h-full sm:min-h-0" : ""}${isPanning ? " [&_.recharts-wrapper]:cursor-grabbing" : " [&_.recharts-wrapper]:cursor-grab"}`}
             >
               {awaitingHourlyCluster ? (
                 <div
-                  className="flex flex-col items-center justify-center gap-2 rounded-lg border border-dashed border-border bg-muted/20 text-sm text-muted-foreground animate-pulse"
-                  style={{ minHeight: fillHeight ? undefined : chartHeight, height: fillHeight ? "100%" : undefined }}
+                  className="flex flex-col items-center justify-center gap-2 bg-muted/10 text-sm text-muted-foreground animate-pulse"
+                  style={{ minHeight: fillHeight ? 200 : chartHeight, height: fillHeight ? "100%" : undefined }}
                 >
-                  <span>Loading hourly cluster series…</span>
+                  <span className="font-mono text-[11px]">Loading hourly cluster series…</span>
                 </div>
               ) : (
                 <>
                   {isIntradayView(viewMode) && showUsSessionMarkers ? (
-                    <div className="pointer-events-none absolute left-2 top-2 z-10 rounded-md border border-border bg-background/90 px-2 py-1 text-[10px] text-muted-foreground shadow-sm">
+                    <div className="pointer-events-none absolute left-2 top-2 z-10 rounded border border-border bg-background/90 px-1.5 py-0.5 text-[9px] font-mono text-muted-foreground/60 shadow-sm">
                       <span className="inline-flex items-center gap-1">
-                        <span className="inline-block h-2 w-2 rounded-full bg-[hsl(var(--chart-2))]" />
-                        Open 09:30 ET
+                        <span className="inline-block h-1.5 w-1.5 rounded-full bg-[hsl(var(--chart-2))]" />
+                        09:30
                       </span>
-                      <span className="mx-1.5 opacity-50">|</span>
+                      <span className="mx-1 text-muted-foreground/30">|</span>
                       <span className="inline-flex items-center gap-1">
-                        <span className="inline-block h-2 w-2 rounded-full bg-[hsl(var(--chart-5))]" />
-                        Close 16:00 ET
+                        <span className="inline-block h-1.5 w-1.5 rounded-full bg-[hsl(var(--chart-5))]" />
+                        16:00 ET
                       </span>
                     </div>
                   ) : null}
@@ -2214,7 +2101,7 @@ export function NewsTrendsUI({
                         </div>
                       </div>
                     )}
-                  <ResponsiveContainer width="100%" height={fillHeight ? "100%" : chartHeight}>
+                  <ResponsiveContainer width="100%" height={fillHeight ? "100%" : chartHeight} minWidth={0}>
                 <ComposedChart
                   data={visibleChartData}
                   margin={{ top: 5, right: 10, left: 0, bottom: 8 }}
@@ -2488,16 +2375,16 @@ export function NewsTrendsUI({
                 Articles ·{" "}
                 {formatChartAxisTick(articleModalDate, dbMode, useDbAggregates)}
               </h2>
-              <span className="text-xs text-muted-foreground mr-auto ml-3">
+              <span className="text-xs font-mono tabular-nums text-muted-foreground mr-auto ml-3">
                 {modalArticles.length} article
                 {modalArticles.length !== 1 ? "s" : ""}
               </span>
               <button
                 onClick={() => setArticleModalDate(null)}
-                className="text-muted-foreground hover:text-foreground transition-colors"
+                className="flex items-center justify-center w-10 h-10 -mr-2 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted transition-colors sm:w-8 sm:h-8 sm:-mr-1"
                 aria-label="Close"
               >
-                <X size={16} />
+                <X size={18} />
               </button>
             </div>
             <div className="overflow-y-auto p-4">
@@ -2571,10 +2458,10 @@ export function NewsTrendsUI({
                 </div>
                 <button
                   onClick={() => setPeriodZeitgeistOpen(false)}
-                  className="text-muted-foreground hover:text-foreground transition-colors shrink-0"
+                  className="flex items-center justify-center w-10 h-10 -mr-2 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted transition-colors shrink-0 sm:w-8 sm:h-8 sm:-mr-1"
                   aria-label="Close"
                 >
-                  <X size={16} />
+                  <X size={18} />
                 </button>
               </div>
               {periodArticles.length > 0 && (

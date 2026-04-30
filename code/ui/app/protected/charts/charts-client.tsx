@@ -20,6 +20,7 @@ import {
 import { ChartAiChat } from "@/components/chart-ai-chat";
 import { AddToScreening } from "@/components/add-to-screening";
 import { ChartDateRangePicker, type ChartGranularity } from "@/components/chart-date-range-picker";
+import { MobileAiChatSheet } from "@/components/mobile-ai-chat-sheet";
 
 const DEFAULT_TICKERS = ["SPY", "QQQ", "IWM"] as const;
 
@@ -58,6 +59,7 @@ export function ChartsPageClient({ tickersParam, suggestionTickers }: Props) {
   );
   const [workspaceReady, setWorkspaceReady] = useState(false);
   const [aiChatOpen, setAiChatOpen] = useState(true);
+  const [mobileChatOpen, setMobileChatOpen] = useState(false);
   const saveSeq = useRef(0);
 
   const [dateRange, setDateRange] = useState<
@@ -277,7 +279,7 @@ export function ChartsPageClient({ tickersParam, suggestionTickers }: Props) {
         <button
           type="button"
           onClick={() => setAiChatOpen((v) => !v)}
-          className="flex items-center justify-center w-5 shrink-0 border-l border-border bg-background hover:bg-muted transition-colors"
+          className="hidden sm:flex items-center justify-center w-5 shrink-0 border-l border-border bg-background hover:bg-muted transition-colors"
           title={aiChatOpen ? "Collapse AI chat" : "Expand AI chat"}
         >
           {aiChatOpen ? (
@@ -289,7 +291,7 @@ export function ChartsPageClient({ tickersParam, suggestionTickers }: Props) {
 
         {/* AI chat side panel */}
         {aiChatOpen && selectedTicker && (
-          <div className="w-[340px] shrink-0 flex flex-col border-l border-border min-h-0">
+          <div className="hidden sm:flex w-[340px] shrink-0 flex-col border-l border-border min-h-0">
             <ChartAiChat
               key={selectedTicker}
               symbol={selectedTicker}
@@ -301,6 +303,28 @@ export function ChartsPageClient({ tickersParam, suggestionTickers }: Props) {
               side
             />
           </div>
+        )}
+
+        {selectedTicker && (
+          <>
+            <MobileAiChatSheet
+              open={mobileChatOpen}
+              onOpen={() => setMobileChatOpen(true)}
+              onClose={() => setMobileChatOpen(false)}
+              title={selectedTicker}
+              hasIndicator={aiChatMessages.length > 0}
+            >
+              <ChartAiChat
+                key={`mobile-${selectedTicker}`}
+                symbol={selectedTicker}
+                ohlcData={chartData}
+                annotations={annotations}
+                onAnnotations={handleAiAnnotations}
+                messages={aiChatMessages}
+                setMessages={setAiChatMessages}
+              />
+            </MobileAiChatSheet>
+          </>
         )}
       </div>
     </div>

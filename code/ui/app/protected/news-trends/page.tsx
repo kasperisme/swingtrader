@@ -15,17 +15,11 @@ export default async function NewsTrendsPage() {
   const clusterDaily = await loadClusterDailyTrends(supabase, gate.fromGte);
 
   return (
-    <div
-      className="flex w-full min-w-0 overflow-x-hidden flex-col gap-3"
-      style={{
-        height: "calc(100dvh - 5rem)",
-        marginTop: "-2rem",
-        marginBottom: "-2rem",
-        paddingTop: "1rem",
-        paddingBottom: "1rem",
-      }}
-    >
-      <h1 className="shrink-0 text-sm font-semibold uppercase tracking-widest text-muted-foreground/50">News Trends</h1>
+    <div className="flex w-full min-w-0 flex-col gap-3 py-1">
+      <div className="shrink-0 flex items-baseline justify-between gap-2 px-1">
+        <h1 className="text-[10px] font-medium font-mono uppercase tracking-[0.1em] text-muted-foreground/50">News Trends</h1>
+        <span className="text-[10px] font-mono tabular-nums text-muted-foreground/30">IMPACT · CLUSTERS</span>
+      </div>
 
       <NewsTrendsClient
         clusterDaily={clusterDaily}

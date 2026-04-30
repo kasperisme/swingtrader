@@ -97,6 +97,7 @@ import {
   type ChartAiChatMessage,
 } from "@/app/actions/chart-workspace";
 import { ChartAiChat } from "@/components/chart-ai-chat";
+import { MobileAiChatSheet } from "@/components/mobile-ai-chat-sheet";
 import {
   ChartDateRangePicker,
   type ChartGranularity,
@@ -3369,96 +3370,59 @@ export function ScreeningsUI({
                           )}
 
                           {/* Mobile: FAB + bottom sheet */}
-                          <button
-                            type="button"
-                            onClick={() => setMobileChatOpen(true)}
-                            className={`sm:hidden fixed bottom-6 right-4 z-30 flex items-center justify-center w-14 h-14 rounded-full shadow-lg border border-border transition-colors ${chartAiMessages.length > 0 ? "bg-foreground text-background" : "bg-background text-foreground hover:bg-muted"}`}
-                            style={{
-                              bottom:
-                                "calc(1.5rem + env(safe-area-inset-bottom, 0px))",
-                            }}
-                            aria-label="Open AI chat"
+                          <MobileAiChatSheet
+                            open={mobileChatOpen}
+                            onOpen={() => setMobileChatOpen(true)}
+                            onClose={() => setMobileChatOpen(false)}
+                            title={selectedTicker}
+                            hasIndicator={chartAiMessages.length > 0}
                           >
-                            <Bot className="w-6 h-6" />
-                            {chartAiMessages.length > 0 && (
-                              <span className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-emerald-500 border-2 border-background" />
-                            )}
-                          </button>
-
-                          {mobileChatOpen && (
-                            <div
-                              className="sm:hidden fixed inset-0 z-40 bg-black/50"
-                              onClick={() => setMobileChatOpen(false)}
-                            />
-                          )}
-                          <div
-                            className={`sm:hidden fixed inset-x-0 bottom-0 z-50 bg-background border-t border-border rounded-t-2xl shadow-2xl flex flex-col transition-transform duration-300 ease-out ${mobileChatOpen ? "translate-y-0" : "translate-y-full"}`}
-                            style={{ height: "88dvh" }}
-                          >
-                            <div className="flex items-center justify-center pt-2.5 pb-1 shrink-0">
-                              <div className="w-10 h-1 rounded-full bg-border" />
-                            </div>
-                            <div className="flex items-center justify-between px-4 py-2 border-b border-border shrink-0">
-                              <span className="font-mono font-bold text-sm">
-                                {selectedTicker}
-                              </span>
-                              <button
-                                type="button"
-                                onClick={() => setMobileChatOpen(false)}
-                                className="flex items-center justify-center w-8 h-8 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
-                                aria-label="Close chat"
-                              >
-                                <ChevronDown className="w-4 h-4" />
-                              </button>
-                            </div>
-                            <div className="flex-1 min-h-0 overflow-hidden">
-                              <ChartAiChat
-                                key={`mobile-${selectedTicker}`}
-                                symbol={selectedTicker}
-                                ohlcData={ohlcvDataRef.current}
-                                annotations={chartAnnotations}
-                                onAnnotations={handleChartAiAnnotations}
-                                messages={chartAiMessages}
-                                setMessages={scopedSetChartAiMessages}
-                                onLoadingChange={(loading) => {
-                                  if (!selectedTicker) return;
-                                  setStreamingTickers((prev) => {
-                                    const next = new Set(prev);
-                                    if (loading) next.add(selectedTicker);
-                                    else next.delete(selectedTicker);
-                                    return next;
-                                  });
-                                }}
-                                onSaveEntry={(
-                                  price,
+                            <ChartAiChat
+                              key={`mobile-${selectedTicker}`}
+                              symbol={selectedTicker}
+                              ohlcData={ohlcvDataRef.current}
+                              annotations={chartAnnotations}
+                              onAnnotations={handleChartAiAnnotations}
+                              messages={chartAiMessages}
+                              setMessages={scopedSetChartAiMessages}
+                              onLoadingChange={(loading) => {
+                                if (!selectedTicker) return;
+                                setStreamingTickers((prev) => {
+                                  const next = new Set(prev);
+                                  if (loading) next.add(selectedTicker);
+                                  else next.delete(selectedTicker);
+                                  return next;
+                                });
+                              }}
+                              onSaveEntry={(
+                                price,
+                                direction,
+                                takeProfit,
+                                stopLoss,
+                              ) => {
+                                const ohlc = ohlcvDataRef.current;
+                                const lastIdx = ohlc.length - 1;
+                                const last = ohlc[lastIdx];
+                                if (!last) return;
+                                void setTickerEntryMarker(
+                                  selectedTicker,
+                                  {
+                                    barIdx: lastIdx,
+                                    date: last.date,
+                                    price,
+                                    open: last.open,
+                                    high: last.high,
+                                    low: last.low,
+                                    close: last.close,
+                                  },
                                   direction,
                                   takeProfit,
                                   stopLoss,
-                                ) => {
-                                  const ohlc = ohlcvDataRef.current;
-                                  const lastIdx = ohlc.length - 1;
-                                  const last = ohlc[lastIdx];
-                                  if (!last) return;
-                                  void setTickerEntryMarker(
-                                    selectedTicker,
-                                    {
-                                      barIdx: lastIdx,
-                                      date: last.date,
-                                      price,
-                                      open: last.open,
-                                      high: last.high,
-                                      low: last.low,
-                                      close: last.close,
-                                    },
-                                    direction,
-                                    takeProfit,
-                                    stopLoss,
-                                  );
-                                }}
-                                isStreaming={streamingTickers.has(selectedTicker ?? "")}
-                              />
-                            </div>
-                          </div>
+                                );
+                              }}
+                              isStreaming={streamingTickers.has(selectedTicker ?? "")}
+                            />
+                          </MobileAiChatSheet>
                         </>
                       )}
                     </div>
