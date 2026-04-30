@@ -1,11 +1,12 @@
 """
-sync_crons.py — Reconcile Supabase scheduled screenings with OpenClaw cron jobs.
+sync_crons.py — Register the single scheduler tick cron in OpenClaw.
 
-Creates, updates, and removes OpenClaw cron jobs to match the current state of
-user_scheduled_screenings. Run this periodically (every minute via a single
-OpenClaw cron) to keep cron jobs in sync.
+The old model (one OpenClaw cron per screening) caused rate-limit issues.
+The new model is a single cron that fires every minute and calls `cli tick`,
+which evaluates due screenings internally using croniter.
 
-OpenClaw handles the actual scheduling, retries, and execution per screening.
+Run once to set up:
+    python -m services.agent.cli setup-cron
 """
 
 from __future__ import annotations
@@ -14,31 +15,21 @@ import json
 import logging
 import os
 import subprocess
-import sys
-from typing import Any
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger(__name__)
 
+_TICK_JOB_NAME = "screening-tick"
 _ANALYTICS = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 _VENV_PYTHON = os.path.join(_ANALYTICS, ".venv", "bin", "python")
 if not os.path.exists(_VENV_PYTHON):
     _VENV_PYTHON = "python3"
 
-_CRON_PREFIX = "screening-"
 
-# Wall-clock timeout (ms) passed to OpenClaw for each screening job.
-# FMP quote fetches + multiple Ollama rounds can easily exceed 3 min.
-# Override via SCREENING_TIMEOUT_MS env var.
-_SCREENING_TIMEOUT_MS = str(int(os.environ.get("SCREENING_TIMEOUT_MS", 600_000)))
-
-
-def _openclaw(*args: str) -> dict[str, Any]:
+def _openclaw(*args: str) -> dict:
     r = subprocess.run(
         ["openclaw", *args, "--json"],
-        capture_output=True,
-        text=True,
-        timeout=30,
+        capture_output=True, text=True, timeout=30,
     )
     if r.returncode != 0:
         log.warning("openclaw %s failed: %s", args[0], r.stderr[:200])
@@ -49,179 +40,72 @@ def _openclaw(*args: str) -> dict[str, Any]:
         return {}
 
 
-def _get_existing_jobs() -> dict[str, dict]:
-    data = _openclaw("cron", "list")
-    jobs = data if isinstance(data, list) else data.get("jobs", [])
-    out = {}
-    for j in jobs:
-        name = j.get("name", "")
-        if name.startswith(_CRON_PREFIX):
-            screening_id = name.removeprefix(_CRON_PREFIX)
-            out[screening_id] = j
-    return out
-
-
-def _cron_id_for(screening_id: str) -> str | None:
-    name = f"{_CRON_PREFIX}{screening_id}"
+def _get_tick_job() -> dict | None:
     data = _openclaw("cron", "list")
     jobs = data if isinstance(data, list) else data.get("jobs", [])
     for j in jobs:
-        if j.get("name") == name:
-            return j.get("id")
+        if j.get("name") == _TICK_JOB_NAME:
+            return j
     return None
 
 
-def _parse_cron_expr(schedule: str) -> str:
-    parts = schedule.strip().split()
-    if len(parts) == 5:
-        return schedule.strip()
-    return "0 7 * * 1-5"
+def _remove_old_per_screening_crons() -> int:
+    """Remove any leftover per-screening cron jobs (screening-<uuid> pattern)."""
+    data = _openclaw("cron", "list")
+    jobs = data if isinstance(data, list) else data.get("jobs", [])
+    removed = 0
+    for j in jobs:
+        name = j.get("name", "")
+        # Old jobs were named "screening-<uuid>"; the new tick job is "screening-tick".
+        if name.startswith("screening-") and name != _TICK_JOB_NAME:
+            job_id = j.get("id")
+            if job_id:
+                subprocess.run(
+                    ["openclaw", "cron", "rm", job_id],
+                    capture_output=True, text=True, timeout=15,
+                )
+                log.info("Removed old per-screening cron: %s (%s)", name, job_id)
+                removed += 1
+    return removed
 
 
-def _add_job(screening: dict) -> str | None:
-    screening_id = screening["id"]
-    schedule = _parse_cron_expr(screening.get("schedule", "0 7 * * 1-5"))
-    tz = screening.get("timezone", "UTC")
-    name = screening["name"] if len(screening["name"]) <= 60 else screening["name"][:57] + "..."
+def setup_tick_cron() -> dict:
+    """Ensure exactly one 'screening-tick' cron exists, firing every minute."""
+    existing = _get_tick_job()
+    removed = _remove_old_per_screening_crons()
+
+    tick_command = f"{_VENV_PYTHON} -m services.agent.cli tick"
+
+    if existing:
+        log.info("Tick cron already registered (id=%s)", existing.get("id"))
+        return {"status": "already_exists", "job": existing, "old_crons_removed": removed}
 
     r = subprocess.run(
         [
             "openclaw", "cron", "add",
-            "--name", f"{_CRON_PREFIX}{screening_id}",
-            "--cron", schedule,
-            "--tz", tz,
+            "--name", _TICK_JOB_NAME,
+            "--cron", "* * * * *",
+            "--tz", "UTC",
             "--session", "isolated",
             "--no-deliver",
-            "--timeout", _SCREENING_TIMEOUT_MS,
-            "--message",
-            f"Run screening {screening_id}: {_VENV_PYTHON} -m services.agent.cli run {screening_id}",
+            "--timeout", str(int(os.environ.get("SCREENING_TIMEOUT_MS", 600_000))),
+            "--message", tick_command,
         ],
-        capture_output=True,
-        text=True,
-        timeout=30,
+        capture_output=True, text=True, timeout=30,
     )
     if r.returncode != 0:
-        log.error("Failed to add cron for %s: %s", screening_id, r.stderr[:300])
-        return None
+        log.error("Failed to register tick cron: %s", r.stderr[:300])
+        return {"status": "error", "detail": r.stderr[:300], "old_crons_removed": removed}
+
     try:
         result = json.loads(r.stdout)
-        job_id = result.get("id")
-        log.info("Added cron job %s for screening %s (%s)", job_id, screening_id, name)
-        return job_id
     except json.JSONDecodeError:
-        log.info("Added cron job for screening %s (%s)", screening_id, name)
-        return None
+        result = {}
 
-
-def _remove_job(screening_id: str) -> None:
-    job_id = _cron_id_for(screening_id)
-    if not job_id:
-        return
-    subprocess.run(
-        ["openclaw", "cron", "rm", job_id],
-        capture_output=True,
-        text=True,
-        timeout=15,
-    )
-    log.info("Removed cron job %s for screening %s", job_id, screening_id)
-
-
-def _sync_job(screening: dict, existing: dict) -> None:
-    schedule = _parse_cron_expr(screening.get("schedule", "0 7 * * 1-5"))
-    tz = screening.get("timezone", "UTC")
-    job_id = existing.get("id")
-
-    sched_data = existing.get("schedule", {})
-    current_cron = sched_data.get("cron", "")
-    current_tz = sched_data.get("tz", "")
-    current_timeout = str(existing.get("timeout", ""))
-
-    if (
-        current_cron == schedule
-        and current_tz == tz
-        and existing.get("enabled", True)
-        and current_timeout == _SCREENING_TIMEOUT_MS
-    ):
-        return
-
-    r = subprocess.run(
-        [
-            "openclaw", "cron", "edit", job_id,
-            "--cron", schedule,
-            "--tz", tz,
-            "--timeout", _SCREENING_TIMEOUT_MS,
-        ],
-        capture_output=True,
-        text=True,
-        timeout=15,
-    )
-    if r.returncode == 0:
-        log.info("Updated cron job %s for screening %s", job_id, screening["id"])
-    else:
-        log.warning("Failed to update cron %s: %s", job_id, r.stderr[:200])
-
-
-def run_sync() -> dict[str, int]:
-    sys.path.insert(0, _ANALYTICS)
-    from dotenv import load_dotenv
-    load_dotenv(os.path.join(_ANALYTICS, ".env"))
-
-    from shared.db import get_supabase_client
-
-    client = get_supabase_client()
-    schema = "swingtrader"
-
-    res = (
-        client.schema(schema)
-        .table("user_scheduled_screenings")
-        .select("id, name, schedule, timezone, is_active, run_requested_at, tickers, linked_scan_run_ids")
-        .execute()
-    )
-    screenings = res.data or []
-
-    existing = _get_existing_jobs()
-
-    db_ids = set()
-    added = 0
-    updated = 0
-    removed = 0
-    tested = 0
-
-    for s in screenings:
-        sid = s["id"]
-        db_ids.add(sid)
-
-        if s.get("is_active"):
-            if sid in existing:
-                _sync_job(s, existing[sid])
-                updated += 1
-            else:
-                _add_job(s)
-                added += 1
-
-            if s.get("run_requested_at"):
-                job_id = _cron_id_for(sid)
-                if job_id:
-                    subprocess.run(
-                        ["openclaw", "cron", "run", job_id],
-                        capture_output=True,
-                        text=True,
-                        timeout=15,
-                    )
-                    log.info("Force-ran screening %s (test request)", sid)
-                    tested += 1
-        else:
-            if sid in existing:
-                _remove_job(sid)
-                removed += 1
-
-    for sid in set(existing.keys()) - db_ids:
-        _remove_job(sid)
-        removed += 1
-
-    log.info("Sync complete: %d added, %d updated, %d removed, %d tested", added, updated, removed, tested)
-    return {"added": added, "updated": updated, "removed": removed, "tested": tested}
+    log.info("Registered tick cron (id=%s), removed %d old crons", result.get("id"), removed)
+    return {"status": "created", "job": result, "old_crons_removed": removed}
 
 
 if __name__ == "__main__":
-    run_sync()
+    import pprint
+    pprint.pprint(setup_tick_cron())

@@ -554,8 +554,12 @@ def run_screening(screening: dict, dry_run: bool = False, is_test: bool = False)
         return {**base, "triggered": False, "summary": str(exc), "data_used": {}, "error": True}
 
 
-def persist_and_deliver(result: dict) -> None:
-    """Persist screening result to DB and deliver via Telegram."""
+def persist_and_deliver(result: dict, result_id: str | None = None) -> None:
+    """Persist screening result to DB and deliver via Telegram.
+
+    If result_id is given, updates the pre-inserted 'running' row created by
+    the scheduler tick. Otherwise inserts a new row (legacy / dry-run path).
+    """
     client = get_supabase_client()
     schema = "swingtrader"
     now = datetime.now(timezone.utc).isoformat()
@@ -563,21 +567,38 @@ def persist_and_deliver(result: dict) -> None:
     is_test = bool(result.get("is_test"))
     triggered = bool(result.get("triggered"))
     error = bool(result.get("error"))
-    row = {
-        "screening_id": result["screening_id"],
-        "user_id": result["user_id"],
-        "run_at": now,
-        "triggered": triggered,
-        "summary": result.get("summary"),
-        "data_used": result.get("data_used", {}),
-        "is_test": is_test,
-        "delivered": False,
-    }
-    try:
-        client.schema(schema).table("user_screening_results").insert(row).execute()
-    except Exception as exc:
-        log.error("Failed to persist screening result: %s", exc)
-        return
+    status = "error" if error else "done"
+
+    if result_id:
+        try:
+            client.schema(schema).table("user_screening_results").update({
+                "triggered": triggered,
+                "summary": result.get("summary"),
+                "data_used": result.get("data_used", {}),
+                "status": status,
+            }).eq("id", result_id).execute()
+        except Exception as exc:
+            log.error("Failed to update screening result %s: %s", result_id, exc)
+            return
+    else:
+        row = {
+            "screening_id": result["screening_id"],
+            "user_id": result["user_id"],
+            "run_at": now,
+            "started_at": now,
+            "triggered": triggered,
+            "summary": result.get("summary"),
+            "data_used": result.get("data_used", {}),
+            "is_test": is_test,
+            "delivered": False,
+            "status": status,
+        }
+        try:
+            ins = client.schema(schema).table("user_screening_results").insert(row).execute()
+            result_id = (ins.data or [{}])[0].get("id")
+        except Exception as exc:
+            log.error("Failed to persist screening result: %s", exc)
+            return
 
     update_fields: dict[str, Any] = {
         "last_run_at": now,
@@ -608,7 +629,7 @@ def persist_and_deliver(result: dict) -> None:
         error_text=err,
     )
 
-    if success:
+    if success and result_id:
         client.schema(schema).table("user_screening_results").update(
             {"delivered": True},
-        ).eq("screening_id", result["screening_id"]).eq("run_at", now).execute()
+        ).eq("id", result_id).execute()
