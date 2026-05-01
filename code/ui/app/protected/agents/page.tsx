@@ -51,7 +51,7 @@ async function AgentsData() {
 
 export default function AgentsPage() {
   return (
-    <div className="mx-auto max-w-4xl px-4 py-8">
+    <div className="mx-auto w-full min-w-0 max-w-4xl px-4 py-8">
       <div className="mb-8">
         <p className="text-xs font-semibold uppercase tracking-widest text-amber-500 mb-1">Agents</p>
         <h1 className="text-2xl font-bold text-foreground">Scheduled Agents</h1>

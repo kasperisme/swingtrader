@@ -35,19 +35,19 @@ export function AgentsUI({ screenings, limits, error, suggestionTickers }: Props
   const atLimit = limits ? limits.used >= limits.limit : true;
 
   return (
-    <div className="flex flex-col gap-6 w-full">
+    <div className="flex min-w-0 w-full flex-col gap-6">
       {error && (
-        <div className="flex items-start gap-3 rounded-xl border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm text-destructive">
+        <div className="flex min-w-0 items-start gap-3 rounded-xl border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm text-destructive">
           <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
-          {error}
+          <span className="min-w-0 break-words">{error}</span>
         </div>
       )}
 
       {/* Usage + controls */}
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-3">
+      <div className="flex min-w-0 flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="min-w-0 flex-1">
           {limits && (
-            <p className="text-sm text-muted-foreground">
+            <p className="text-sm text-muted-foreground break-words">
               <span className="font-semibold text-foreground">{limits.used}</span>
               <span className="text-muted-foreground/60"> / {limits.limit}</span>
               {" "}active agents
@@ -55,7 +55,7 @@ export function AgentsUI({ screenings, limits, error, suggestionTickers }: Props
             </p>
           )}
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex shrink-0 flex-wrap items-center gap-2">
           {/* View toggle */}
           {screenings.length > 0 && (
             <div className="flex gap-0.5 rounded-lg border border-border p-0.5">
@@ -250,16 +250,19 @@ function RecurrenceScheduler({
   const unitLabel = { minutely: "minutes", hourly: "hours", daily: "days", weekly: "weeks" }[parsed.pattern];
   const today = new Date().toLocaleDateString("en-US", { month: "numeric", day: "numeric", year: "numeric" });
 
-  const sel = "rounded-md border border-input bg-background px-2 py-1.5 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring";
-  const row = "flex items-start gap-4 px-4 py-2.5";
-  const lbl = "w-28 shrink-0 text-sm text-muted-foreground pt-0.5";
+  const sel =
+    "max-w-full min-w-0 rounded-md border border-input bg-background px-2 py-1.5 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring sm:max-w-none";
+  const row =
+    "flex min-w-0 flex-col gap-1.5 px-3 py-2.5 sm:flex-row sm:items-start sm:gap-4 sm:px-4";
+  const lbl = "shrink-0 text-sm text-muted-foreground pt-0.5 sm:w-28";
 
   return (
-    <div className="rounded-xl border border-border divide-y divide-border text-sm">
+    <div className="w-full min-w-0 divide-y divide-border rounded-xl border border-border text-sm">
 
       {/* Repeats */}
       <div className={row}>
         <span className={lbl}>Repeats:</span>
+        <div className="min-w-0 w-full sm:w-auto">
         <select
           value={parsed.pattern}
           onChange={(e) => {
@@ -273,12 +276,13 @@ function RecurrenceScheduler({
         >
           {patterns.map((p) => <option key={p.value} value={p.value}>{p.label}</option>)}
         </select>
+        </div>
       </div>
 
       {/* Repeat every */}
       <div className={row}>
         <span className={lbl}>Repeat every:</span>
-        <div className="flex items-center gap-2">
+        <div className="flex min-w-0 flex-wrap items-center gap-2">
           {parsed.pattern === "minutely" ? (
             <select value={parsed.interval} onChange={(e) => patch({ interval: parseInt(e.target.value) })} className={sel}>
               {MINUTE_OPTIONS.map((n) => <option key={n} value={n}>{n}</option>)}
@@ -298,7 +302,7 @@ function RecurrenceScheduler({
       {(parsed.pattern === "daily" || parsed.pattern === "weekly") && (
         <div className={row}>
           <span className={lbl}>At:</span>
-          <div className="flex items-center gap-1.5">
+          <div className="flex min-w-0 flex-wrap items-center gap-1.5">
             <select value={parsed.hour} onChange={(e) => patch({ hour: parseInt(e.target.value) })} className={sel}>
               {Array.from({ length: 24 }, (_, i) => {
                 const ap = i >= 12 ? "PM" : "AM";
@@ -320,7 +324,7 @@ function RecurrenceScheduler({
       {parsed.pattern === "weekly" && (
         <div className={row}>
           <span className={lbl}>Repeat on:</span>
-          <div className="flex gap-1">
+          <div className="flex flex-wrap gap-1">
             {DAY_ORDER.map(({ idx, label }) => {
               const active = parsed.days.includes(idx);
               return (
@@ -381,7 +385,7 @@ function RecurrenceScheduler({
       {/* Summary */}
       <div className={`${row} bg-muted/30 rounded-b-xl`}>
         <span className={lbl}>Summary:</span>
-        <span className="font-semibold text-foreground">{describeCron(value)}</span>
+        <span className="min-w-0 break-words font-semibold text-foreground">{describeCron(value)}</span>
       </div>
     </div>
   );
@@ -807,13 +811,13 @@ function WeekCalendar({ screenings, suggestionTickers }: { screenings: Scheduled
   }
 
   return (
-    <div className="rounded-2xl border border-border bg-card overflow-hidden">
+    <div className="min-w-0 overflow-hidden rounded-2xl border border-border bg-card">
       {/* Header with nav */}
-      <div className="border-b border-border px-5 py-3 flex items-center justify-between">
-        <p className="text-xs font-semibold uppercase tracking-widest text-foreground/60">
+      <div className="flex flex-col gap-2 border-b border-border px-3 py-3 sm:flex-row sm:items-center sm:justify-between sm:px-5">
+        <p className="min-w-0 shrink-0 text-xs font-semibold uppercase tracking-widest text-foreground/60">
           Execution calendar
         </p>
-        <div className="flex items-center gap-2">
+        <div className="flex min-w-0 flex-wrap items-center gap-2">
           <button
             type="button"
             onClick={() => setWeekOffset((w) => w - 1)}
@@ -842,7 +846,7 @@ function WeekCalendar({ screenings, suggestionTickers }: { screenings: Scheduled
           >
             <ChevronRight className="w-3.5 h-3.5" />
           </button>
-          <span className="text-xs text-muted-foreground/60 ml-1">
+          <span className="text-xs text-muted-foreground/60 sm:ml-1 break-words">
             {weekStart.toLocaleDateString(undefined, { month: "short", day: "numeric" })}
             {" – "}
             {days[6].toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })}
@@ -850,22 +854,24 @@ function WeekCalendar({ screenings, suggestionTickers }: { screenings: Scheduled
         </div>
       </div>
 
-      <div className="overflow-x-auto">
-        <div className="min-w-[700px]">
-          {/* Day headers */}
-          <div className="flex border-b border-border">
-            <div className="w-14 shrink-0" />
+      <div className="min-w-0 overflow-x-auto">
+        <div className="w-full min-w-0">
+          {/* Day headers — fluid columns so the grid fits the viewport */}
+          <div className="grid grid-cols-[3.5rem_repeat(7,minmax(0,1fr))] border-b border-border">
+            <div className="shrink-0" aria-hidden />
             {days.map((d, i) => (
               <div
                 key={i}
-                className={`flex-1 text-center py-2 text-xs font-medium ${
+                className={`min-w-0 px-0.5 py-2 text-center text-[10px] font-medium leading-tight sm:text-xs ${
                   isToday(d) ? "text-foreground bg-foreground/[0.03]" : "text-muted-foreground"
                 }`}
               >
-                <span>{DAY_LABELS[i]}</span>
-                <span className={`ml-1 inline-flex items-center justify-center w-5 h-5 rounded-full text-[10px] ${
-                  isToday(d) ? "bg-foreground text-background" : ""
-                }`}>
+                <span className="block max-w-full truncate">{DAY_LABELS[i]}</span>
+                <span
+                  className={`mt-0.5 inline-flex min-h-[1.25rem] min-w-[1.25rem] items-center justify-center rounded-full text-[9px] sm:text-[10px] ${
+                    isToday(d) ? "bg-foreground text-background" : ""
+                  }`}
+                >
                   {d.getDate()}
                 </span>
               </div>
@@ -873,46 +879,69 @@ function WeekCalendar({ screenings, suggestionTickers }: { screenings: Scheduled
           </div>
 
           {/* Time grid */}
-          <div className="relative">
+          <div className="relative min-w-0">
             {HOURS_SHOW.map((hour) => (
-              <div key={hour} className="flex border-b border-border/50 last:border-b-0">
-                <div className="w-14 shrink-0 text-right pr-2 text-[10px] text-muted-foreground/50 leading-none" style={{ height: ROW_H, paddingTop: 2 }}>
+              <div
+                key={hour}
+                className="grid grid-cols-[3.5rem_repeat(7,minmax(0,1fr))] border-b border-border/50 last:border-b-0"
+              >
+                <div className="shrink-0 pr-2 text-right text-[10px] leading-none text-muted-foreground/50" style={{ height: ROW_H, paddingTop: 2 }}>
                   {hour % 12 || 12}{hour >= 12 ? "p" : "a"}
                 </div>
                 {days.map((d, colIdx) => {
                   const dayRuns = runsByDay[d.toDateString()] ?? [];
-                  const inSlot = dayRuns.filter(
-                    (r) => r.time.getHours() === hour,
-                  );
+                  const inHour = dayRuns.filter((r) => r.time.getHours() === hour);
+                  const byMinute = new Map<number, typeof inHour>();
+                  for (const r of inHour) {
+                    const m = r.time.getMinutes();
+                    const list = byMinute.get(m);
+                    if (list) list.push(r);
+                    else byMinute.set(m, [r]);
+                  }
+                  const minuteGroups = Array.from(byMinute.entries()).sort(([a], [b]) => a - b);
+
                   return (
                     <div
                       key={colIdx}
-                      className={`flex-1 relative ${isToday(d) ? "bg-foreground/[0.02]" : ""}`}
+                      className={`relative min-w-0 ${isToday(d) ? "bg-foreground/[0.02]" : ""}`}
                       style={{ height: ROW_H }}
                     >
-                      {inSlot.map((run) => {
-                        const isOpen = openPill === run.key;
+                      {minuteGroups.map(([minute, runsInMinute]) => {
+                        const sorted = [...runsInMinute].sort((a, b) =>
+                          a.screening.id.localeCompare(b.screening.id),
+                        );
                         return (
-                          <div key={run.key} className="absolute z-10" style={{ left: 1, right: 1, top: (run.time.getMinutes() / 60) * ROW_H }}>
-                            <div
-                              onDoubleClick={() => setOpenPill(isOpen ? null : run.key)}
-                              className={`rounded cursor-pointer border overflow-hidden select-none ${AGENT_BORDER[run.idx % AGENT_BORDER.length]} ${AGENT_COLORS[run.idx % AGENT_COLORS.length]}/20 hover:brightness-110 transition-all`}
-                              style={{ height: 20 }}
-                            >
-                              <span className={`block px-1.5 truncate text-[11px] font-semibold leading-[20px] ${AGENT_TEXT[run.idx % AGENT_TEXT.length]}`}>
-                                {fmtTime(run.time)}
-                                <span className="font-normal opacity-70 ml-1">{run.screening.name}</span>
-                              </span>
-                            </div>
+                          <div
+                            key={minute}
+                            className="absolute left-0.5 right-0.5 z-10 flex min-w-0 gap-px"
+                            style={{ top: (minute / 60) * ROW_H }}
+                          >
+                            {sorted.map((run) => {
+                              const isOpen = openPill === run.key;
+                              return (
+                                <div key={run.key} className="min-w-0 flex-1 basis-0">
+                                  <div
+                                    onDoubleClick={() => setOpenPill(isOpen ? null : run.key)}
+                                    className={`cursor-pointer select-none overflow-hidden rounded border ${AGENT_BORDER[run.idx % AGENT_BORDER.length]} ${AGENT_COLORS[run.idx % AGENT_COLORS.length]}/20 transition-all hover:brightness-110`}
+                                    style={{ height: 20 }}
+                                  >
+                                    <span className={`block truncate px-1 text-[10px] font-semibold leading-[20px] sm:px-1.5 sm:text-[11px] ${AGENT_TEXT[run.idx % AGENT_TEXT.length]}`}>
+                                      {fmtTime(run.time)}
+                                      <span className="ml-0.5 font-normal opacity-70 sm:ml-1">{run.screening.name}</span>
+                                    </span>
+                                  </div>
 
-                            {isOpen && (
-                              <PillPopover
-                                screening={run.screening}
-                                colorIdx={run.idx}
-                                onClose={() => setOpenPill(null)}
-                                suggestionTickers={suggestionTickers}
-                              />
-                            )}
+                                  {isOpen && (
+                                    <PillPopover
+                                      screening={run.screening}
+                                      colorIdx={run.idx}
+                                      onClose={() => setOpenPill(null)}
+                                      suggestionTickers={suggestionTickers}
+                                    />
+                                  )}
+                                </div>
+                              );
+                            })}
                           </div>
                         );
                       })}
@@ -930,8 +959,8 @@ function WeekCalendar({ screenings, suggestionTickers }: { screenings: Scheduled
                 <div
                   className="absolute pointer-events-none"
                   style={{
-                    left: `calc(${todayIdx} * (100% - 56px) / 7 + 56px)`,
-                    width: `calc((100% - 56px) / 7)`,
+                    left: `calc(${todayIdx} * (100% - 3.5rem) / 7 + 3.5rem)`,
+                    width: `calc((100% - 3.5rem) / 7)`,
                     top: nowLine,
                     height: 2,
                   }}
@@ -946,7 +975,7 @@ function WeekCalendar({ screenings, suggestionTickers }: { screenings: Scheduled
       </div>
 
       {/* Legend */}
-      <div className="border-t border-border px-5 py-3 flex flex-wrap items-center gap-3">
+      <div className="flex flex-wrap items-center gap-3 border-t border-border px-3 py-3 sm:px-5">
         {activeScreenings.map((s, i) => (
           <div key={s.id} className="flex items-center gap-1.5">
             <div className={`w-2.5 h-2.5 rounded-sm ${AGENT_COLORS[i % AGENT_COLORS.length]}`} />
@@ -1063,7 +1092,7 @@ function PillPopover({
 
   if (mode === "edit") {
     return (
-      <div className="absolute left-0 top-[22px] z-50 w-72 rounded-xl border border-border bg-card shadow-lg shadow-black/10 overflow-hidden">
+      <div className="absolute left-0 top-[22px] z-50 w-[min(18rem,calc(100vw-2rem))] max-w-[calc(100vw-2rem)] rounded-xl border border-border bg-card shadow-lg shadow-black/10 overflow-hidden">
         <div className="px-3 pt-3 pb-2 border-b border-border flex items-center justify-between">
           <div className="flex items-center gap-2">
             <div className={`w-2 h-2 rounded-full ${AGENT_COLORS[colorIdx % AGENT_COLORS.length]}`} />
@@ -1126,14 +1155,14 @@ function PillPopover({
   }
 
   return (
-    <div className="absolute left-0 top-[22px] z-50 w-56 rounded-xl border border-border bg-card shadow-lg shadow-black/10 overflow-hidden">
+    <div className="absolute left-0 top-[22px] z-50 w-[min(14rem,calc(100vw-2rem))] max-w-[calc(100vw-2rem)] rounded-xl border border-border bg-card shadow-lg shadow-black/10 overflow-hidden">
       {/* Agent header */}
       <div className="px-3 pt-3 pb-2 border-b border-border">
         <div className="flex items-center gap-2">
           <div className={`w-2 h-2 rounded-full ${AGENT_COLORS[colorIdx % AGENT_COLORS.length]}`} />
           <span className="text-xs font-semibold text-foreground truncate">{screening.name}</span>
         </div>
-        <p className="mt-1 text-[11px] text-muted-foreground">{describeCron(screening.schedule)} &middot; {screening.timezone}</p>
+        <p className="mt-1 break-words text-[11px] text-muted-foreground">{describeCron(screening.schedule)} &middot; {screening.timezone}</p>
       </div>
 
       {/* Actions */}
@@ -1250,11 +1279,11 @@ function CreateForm({ onClose, atLimit, suggestionTickers }: { onClose: () => vo
     "w-full rounded-md border border-input bg-background px-3 py-2 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring disabled:opacity-50";
 
   return (
-    <div className="rounded-2xl border border-border bg-card overflow-hidden">
-      <div className="border-b border-border px-5 py-3">
+    <div className="min-w-0 overflow-hidden rounded-2xl border border-border bg-card">
+      <div className="border-b border-border px-4 py-3 sm:px-5">
         <p className="text-xs font-semibold uppercase tracking-widest text-amber-500">New agent</p>
       </div>
-      <div className="px-5 py-5 flex flex-col gap-4">
+      <div className="flex min-w-0 flex-col gap-4 px-4 py-5 sm:px-5">
         {err && (
           <p className="text-sm text-destructive">{err}</p>
         )}
@@ -1319,23 +1348,25 @@ function CreateForm({ onClose, atLimit, suggestionTickers }: { onClose: () => vo
             scanRuns={scanRuns}
           />
         </div>
-        <div className="flex items-center gap-3 pt-1 border-t border-border">
-          <button
-            type="button"
-            onClick={() => void handleSave()}
-            disabled={saving || atLimit || !prompt.trim()}
-            className="inline-flex items-center gap-1.5 rounded-md bg-foreground px-4 py-2 text-sm font-medium text-background transition-opacity hover:opacity-90 disabled:opacity-40 disabled:pointer-events-none"
-          >
-            {saving ? "Saving…" : "Save & activate"}
-          </button>
-          <button
-            type="button"
-            onClick={onClose}
-            className="rounded-md border border-border px-4 py-2 text-sm text-muted-foreground transition-colors hover:bg-muted"
-          >
-            Cancel
-          </button>
-          <p className="ml-auto text-xs text-muted-foreground/60 hidden sm:block">
+        <div className="flex min-w-0 flex-col gap-3 border-t border-border pt-3 sm:flex-row sm:flex-wrap sm:items-center sm:gap-3 sm:pt-1">
+          <div className="flex min-w-0 flex-wrap items-center gap-2 sm:gap-3">
+            <button
+              type="button"
+              onClick={() => void handleSave()}
+              disabled={saving || atLimit || !prompt.trim()}
+              className="inline-flex items-center gap-1.5 rounded-md bg-foreground px-4 py-2 text-sm font-medium text-background transition-opacity hover:opacity-90 disabled:opacity-40 disabled:pointer-events-none"
+            >
+              {saving ? "Saving…" : "Save & activate"}
+            </button>
+            <button
+              type="button"
+              onClick={onClose}
+              className="rounded-md border border-border px-4 py-2 text-sm text-muted-foreground transition-colors hover:bg-muted"
+            >
+              Cancel
+            </button>
+          </div>
+          <p className="min-w-0 text-xs text-muted-foreground/60 sm:ml-auto">
             Alerts delivered to Telegram (if connected) and shown here
           </p>
         </div>
@@ -1438,15 +1469,15 @@ function AgentCard({ screening, suggestionTickers }: { screening: ScheduledScree
 
   if (editing) {
     return (
-      <div className="rounded-2xl border border-border bg-card overflow-hidden">
-        <div className="border-b border-border px-5 py-3 flex items-center justify-between">
+      <div className="min-w-0 overflow-hidden rounded-2xl border border-border bg-card">
+        <div className="flex items-center justify-between border-b border-border px-4 py-3 sm:px-5">
           <div className="flex items-center gap-2">
             <div className={`w-2 h-2 rounded-full ${screening.is_active ? "bg-emerald-500" : "bg-muted-foreground/30"}`} />
             <span className="text-xs font-semibold uppercase tracking-widest text-amber-500">Edit agent</span>
           </div>
           <button type="button" onClick={() => setEditing(false)} className="text-xs text-muted-foreground hover:text-foreground transition-colors">Cancel</button>
         </div>
-        <div className="px-5 py-5 flex flex-col gap-4">
+        <div className="flex min-w-0 flex-col gap-4 px-4 py-5 sm:px-5">
           {saveErr && <p className="text-sm text-destructive">{saveErr}</p>}
           <div className="flex flex-col gap-1.5">
             <label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Name</label>
@@ -1480,7 +1511,7 @@ function AgentCard({ screening, suggestionTickers }: { screening: ScheduledScree
               <ScanRunPicker linkedIds={editLinkedScanRunIds} onChange={setEditLinkedScanRunIds} scanRuns={scanRuns} />
             </div>
           )}
-          <div className="flex items-center gap-3 pt-1 border-t border-border">
+          <div className="flex min-w-0 flex-wrap items-center gap-2 border-t border-border pt-3 sm:gap-3 sm:pt-1">
             <button
               type="button"
               onClick={() => void handleSave()}
@@ -1500,11 +1531,12 @@ function AgentCard({ screening, suggestionTickers }: { screening: ScheduledScree
 
   return (
     <div className={`rounded-2xl border bg-card transition-opacity ${deleting ? "opacity-50 pointer-events-none" : "border-border"}`}>
-      <div className="flex items-start gap-3 px-5 py-4">
-        <div className={`mt-1 w-2 h-2 rounded-full shrink-0 ${screening.is_active ? "bg-emerald-500" : "bg-muted-foreground/30"}`} />
+      <div className="flex min-w-0 flex-col gap-3 px-4 py-4 sm:flex-row sm:items-start sm:gap-3 sm:px-5">
+        <div className="flex min-w-0 flex-1 items-start gap-3">
+          <div className={`mt-1 h-2 w-2 shrink-0 rounded-full ${screening.is_active ? "bg-emerald-500" : "bg-muted-foreground/30"}`} />
 
-        <div className="flex-1 min-w-0">
-          <div className="flex flex-wrap items-center gap-2">
+          <div className="min-w-0 flex-1">
+            <div className="flex flex-wrap items-center gap-2">
             <span className="font-semibold text-sm text-foreground truncate">{screening.name}</span>
             <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium ${
               screening.is_active
@@ -1518,11 +1550,11 @@ function AgentCard({ screening, suggestionTickers }: { screening: ScheduledScree
                 Triggered
               </span>
             )}
-          </div>
+            </div>
 
-          <p className="mt-1 text-sm text-muted-foreground line-clamp-2">{screening.prompt}</p>
+            <p className="mt-1 text-sm text-muted-foreground line-clamp-2">{screening.prompt}</p>
 
-          {((screening.tickers?.length ?? 0) > 0 || (screening.linked_scan_run_ids?.length ?? 0) > 0) && (
+            {((screening.tickers?.length ?? 0) > 0 || (screening.linked_scan_run_ids?.length ?? 0) > 0) && (
             <div className="mt-2 flex flex-wrap items-center gap-1.5">
               {(screening.tickers ?? []).map((t) => (
                 <span key={t} className="inline-flex items-center rounded bg-muted px-1.5 py-0.5 text-[11px] font-mono font-medium text-foreground/80">
@@ -1536,31 +1568,33 @@ function AgentCard({ screening, suggestionTickers }: { screening: ScheduledScree
                 </span>
               )}
             </div>
-          )}
-
-          <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground/60">
-            <span className="inline-flex items-center gap-1">
-              <Clock className="w-3 h-3" />
-              {scheduleLabel}
-            </span>
-            <span>{screening.timezone}</span>
-            {screening.last_run_at && (
-              <span>Last run {new Date(screening.last_run_at).toISOString().replace("T", " ").slice(0, 16)} UTC</span>
             )}
-          </div>
 
-          {testing && (
+            <div className="mt-2 flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground/60">
+            <span className="inline-flex min-w-0 items-center gap-1 break-words">
+              <Clock className="h-3 w-3 shrink-0" />
+              <span className="min-w-0">{scheduleLabel}</span>
+            </span>
+            <span className="min-w-0 break-all">{screening.timezone}</span>
+            {screening.last_run_at && (
+              <span className="min-w-0 break-words">
+                Last run {new Date(screening.last_run_at).toISOString().replace("T", " ").slice(0, 16)} UTC
+              </span>
+            )}
+            </div>
+
+            {testing && (
             <div className="mt-3 flex items-center gap-2 text-sm text-muted-foreground">
               <Loader2 className="w-3.5 h-3.5 animate-spin" />
               Queued — waiting for Mac Mini to pick up…
             </div>
-          )}
-          {testError && (
+            )}
+            {testError && (
             <div className="mt-3 rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs text-destructive">
               {testError}
             </div>
-          )}
-          {testResult && (
+            )}
+            {testResult && (
             <div className={`mt-3 rounded-lg border px-3 py-2.5 text-xs ${
               testResult.triggered
                 ? "border-amber-500/30 bg-amber-500/5"
@@ -1575,15 +1609,16 @@ function AgentCard({ screening, suggestionTickers }: { screening: ScheduledScree
                 <p className="text-foreground/80 leading-relaxed">{testResult.summary}</p>
               )}
             </div>
-          )}
+            )}
+          </div>
         </div>
 
-        <div className="flex items-center gap-2 shrink-0">
+        <div className="flex shrink-0 items-center justify-end gap-2 sm:pt-1">
           <button
             type="button"
             onClick={() => { setEditing(true); setEditName(screening.name); setEditPrompt(screening.prompt); setEditSchedule(screening.schedule); setEditTimezone(screening.timezone); setEditTickers(screening.tickers ?? []); setEditLinkedScanRunIds(screening.linked_scan_run_ids ?? []); setSaveErr(null); }}
             title="Edit agent"
-            className="flex items-center justify-center w-8 h-8 rounded-md border border-border text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+            className="flex h-8 w-8 items-center justify-center rounded-md border border-border text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
           >
             <Pencil className="w-3.5 h-3.5" />
           </button>
@@ -1592,7 +1627,7 @@ function AgentCard({ screening, suggestionTickers }: { screening: ScheduledScree
             onClick={() => void handleTestRun()}
             disabled={testing}
             title="Test run now"
-            className="flex items-center justify-center w-8 h-8 rounded-md border border-border text-muted-foreground transition-colors hover:bg-amber-500/10 hover:text-amber-600 hover:border-amber-500/30 disabled:opacity-40"
+            className="flex h-8 w-8 items-center justify-center rounded-md border border-border text-muted-foreground transition-colors hover:border-amber-500/30 hover:bg-amber-500/10 hover:text-amber-600 disabled:opacity-40"
           >
             {testing
               ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
@@ -1603,7 +1638,7 @@ function AgentCard({ screening, suggestionTickers }: { screening: ScheduledScree
             onClick={() => void handleToggle()}
             disabled={toggling}
             title={screening.is_active ? "Pause agent" : "Resume agent"}
-            className="flex items-center justify-center w-8 h-8 rounded-md border border-border text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:opacity-40"
+            className="flex h-8 w-8 items-center justify-center rounded-md border border-border text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:opacity-40"
           >
             {screening.is_active
               ? <Pause className="w-3.5 h-3.5" />
@@ -1614,7 +1649,7 @@ function AgentCard({ screening, suggestionTickers }: { screening: ScheduledScree
             onClick={() => void handleDelete()}
             disabled={deleting}
             title="Delete agent"
-            className="flex items-center justify-center w-8 h-8 rounded-md border border-border text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive hover:border-destructive/30 disabled:opacity-40"
+            className="flex h-8 w-8 items-center justify-center rounded-md border border-border text-muted-foreground transition-colors hover:border-destructive/30 hover:bg-destructive/10 hover:text-destructive disabled:opacity-40"
           >
             <Trash2 className="w-3.5 h-3.5" />
           </button>
