@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { MoreHorizontal } from "lucide-react";
 import type { FmpQuote } from "@/lib/use-quotes";
 import type { EntryMarker } from "@/components/ticker-charts/types";
 
@@ -11,13 +12,18 @@ interface TickerSidebarProps {
   symbols: string[];
   selectedTicker: string | null;
   onSelect: (ticker: string) => void;
-  getTickerMeta: (ticker: string) => { sector: string; industry: string; subSector: string };
+  getTickerMeta: (ticker: string) => {
+    sector: string;
+    industry: string;
+    subSector: string;
+  };
   getStatus: (ticker: string) => string;
   dismissedSymbols: Set<string>;
   highlightedSymbols: Set<string>;
   activePositionSymbols?: Set<string>;
   getSymbolNote?: (ticker: string) => string | null;
   onContextMenu?: (ticker: string, e: React.MouseEvent) => void;
+  onOpenActions?: (ticker: string, anchorEl: HTMLElement) => void;
   quotes: Record<string, FmpQuote | null>;
   streamingTickers?: Set<string>;
   getEntryMarker?: (ticker: string) => EntryMarker | null;
@@ -39,6 +45,7 @@ export function TickerSidebar({
   activePositionSymbols,
   getSymbolNote,
   onContextMenu,
+  onOpenActions,
   quotes,
   streamingTickers,
   getEntryMarker,
@@ -96,47 +103,82 @@ export function TickerSidebar({
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
-      const currentIdx = selectedTicker ? sortedSymbols.indexOf(selectedTicker) : -1;
+      const currentIdx = selectedTicker
+        ? sortedSymbols.indexOf(selectedTicker)
+        : -1;
       if (e.key === "ArrowDown" || e.key === "ArrowUp") {
         e.preventDefault();
-        const nextIdx = e.key === "ArrowDown"
-          ? (currentIdx < sortedSymbols.length - 1 ? currentIdx + 1 : 0)
-          : (currentIdx > 0 ? currentIdx - 1 : sortedSymbols.length - 1);
+        const nextIdx =
+          e.key === "ArrowDown"
+            ? currentIdx < sortedSymbols.length - 1
+              ? currentIdx + 1
+              : 0
+            : currentIdx > 0
+              ? currentIdx - 1
+              : sortedSymbols.length - 1;
         if (sortedSymbols[nextIdx]) onSelect(sortedSymbols[nextIdx]);
       }
     },
-    [sortedSymbols, selectedTicker, onSelect]
+    [sortedSymbols, selectedTicker, onSelect],
   );
 
   useEffect(() => {
     if (!selectedTicker || !listRef.current) return;
-    const el = listRef.current.querySelector(`[data-ticker="${selectedTicker}"]`);
+    const safe = CSS.escape(selectedTicker);
+    const el = listRef.current.querySelector(`[data-ticker="${safe}"]`);
     if (el) el.scrollIntoView({ block: "nearest", behavior: "smooth" });
   }, [selectedTicker]);
 
-  const headerBtn = "text-right cursor-pointer select-none hover:text-foreground transition-colors inline-flex items-center gap-0.5 justify-end";
+  const headerBtn =
+    "text-right cursor-pointer select-none hover:text-foreground transition-colors inline-flex items-center gap-0.5 justify-end";
 
   return (
-    <div className="flex flex-col h-full bg-background" onKeyDown={handleKeyDown}>
-      <div className="shrink-0 px-3 grid grid-cols-[1fr_auto_auto_auto] gap-x-2 items-center bg-muted/40 border-b border-border py-2 text-xs font-medium text-muted-foreground uppercase tracking-wide">
-        <button type="button" className={`text-left cursor-pointer select-none hover:text-foreground transition-colors inline-flex items-center gap-0.5`} onClick={() => toggleSort("symbol")}>
+    <div
+      className="flex min-h-0 flex-1 flex-col bg-background"
+      onKeyDown={handleKeyDown}
+    >
+      <div className="shrink-0 px-2 grid grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)_1.25rem] gap-x-1.5 items-center bg-muted/40 border-b border-border py-2 text-xs font-medium text-muted-foreground uppercase tracking-wide">
+        <button
+          type="button"
+          className={`text-left cursor-pointer select-none hover:text-foreground transition-colors inline-flex items-center gap-0.5`}
+          onClick={() => toggleSort("symbol")}
+        >
           Symbol <SortArrow active={sortKey === "symbol"} dir={sortDir} />
         </button>
-        <button type="button" className={headerBtn} onClick={() => toggleSort("price")}>
+        <button
+          type="button"
+          className={headerBtn}
+          onClick={() => toggleSort("price")}
+        >
           <SortArrow active={sortKey === "price"} dir={sortDir} /> Last
         </button>
-        <button type="button" className={headerBtn} onClick={() => toggleSort("change")}>
+        <button
+          type="button"
+          className={headerBtn}
+          onClick={() => toggleSort("change")}
+        >
           <SortArrow active={sortKey === "change"} dir={sortDir} /> Chg%
         </button>
-        <button type="button" className={headerBtn} onClick={() => toggleSort("dist")} title="Distance to entry marker (% from current price)">
+        <button
+          type="button"
+          className={headerBtn}
+          onClick={() => toggleSort("dist")}
+          title="Distance to entry marker (% from current price)"
+        >
           <SortArrow active={sortKey === "dist"} dir={sortDir} /> Dist
         </button>
+        <span className="w-6" aria-hidden />
       </div>
-      <div ref={listRef} className="flex-1 min-h-0 overflow-y-auto divide-y divide-border">
+      <div
+        ref={listRef}
+        className="max-h-full min-h-0 flex-1 overflow-y-auto divide-y divide-border"
+      >
         {sortedSymbols.length === 0 && (
-          <p className="text-xs text-muted-foreground py-4 text-center">No tickers match.</p>
+          <p className="text-xs text-muted-foreground py-4 text-center">
+            No tickers match.
+          </p>
         )}
-        {sortedSymbols.map(sym => {
+        {sortedSymbols.map((sym) => {
           const q = quotes[sym];
           const entry = getEntryMarker?.(sym) ?? null;
           const isSelected = sym === selectedTicker;
@@ -147,14 +189,12 @@ export function TickerSidebar({
           const hasPosition = activePositionSymbols?.has(sym) ?? false;
           const note = getSymbolNote?.(sym);
           const statusStripe: Record<string, string> = {
-            dismissed: "border-l-rose-400",
-            watchlist: "border-l-amber-400",
-            pipeline: "border-l-sky-400",
-            active: "border-l-emerald-400",
+            dismissed: "#fb7185",
+            watchlist: "#fbbf24",
+            pipeline: "#38bdf8",
+            active: "#34d399",
           };
-          const stripe = isDismissed || isHighlighted || isSelected
-            ? statusStripe[status] ?? "border-l-transparent"
-            : "";
+          const stripe = statusStripe[status] ?? "transparent";
           const chgColor = q
             ? q.changePercentage >= 0
               ? "text-emerald-600 dark:text-emerald-400"
@@ -168,60 +208,97 @@ export function TickerSidebar({
             const dist = ((close - entry.price) / entry.price) * 100;
             const sign = dist >= 0 ? "+" : "";
             distDisplay = `${sign}${dist.toFixed(1)}%`;
-            distColor = dist >= 0
-              ? "text-emerald-600 dark:text-emerald-400"
-              : "text-rose-500";
+            distColor =
+              dist >= 0
+                ? "text-emerald-600 dark:text-emerald-400"
+                : "text-rose-500";
           }
 
           const meta = getTickerMeta(sym);
 
+
           return (
-            <button
+            <div
               key={sym}
               data-ticker={sym}
-              type="button"
               onClick={() => onSelect(sym)}
               onContextMenu={(e) => onContextMenu?.(sym, e)}
-              className={`group w-full text-left px-3 py-2 grid grid-cols-[1fr_auto_auto_auto] gap-x-2 items-center transition-colors border-l-[3px] ${stripe || "border-l-transparent"} ${isDismissed ? "opacity-40" : ""} ${
+              style={{ borderLeftColor: stripe }}
+              className={`group w-full border-l-[3px] border-l-transparent ${isDismissed ? "opacity-40" : ""} ${
                 isSelected
                   ? "bg-foreground/10 ring-1 ring-inset ring-foreground/20"
                   : isHighlighted
                     ? "bg-amber-500/10 hover:bg-amber-500/15"
                     : "hover:bg-muted/30"
               }`}
-              title={[sym, meta.sector, meta.industry, meta.subSector, note].filter(Boolean).join(" · ")}
+              title={[sym, meta.sector, meta.industry, meta.subSector, note]
+                .filter(Boolean)
+                .join(" · ")}
             >
-              <span className="truncate">
-                <span className="inline-flex items-center gap-1.5">
-                  {hasPosition && (
-                    <span className="shrink-0 w-1.5 h-1.5 rounded-full bg-emerald-400" title="Active position" />
-                  )}
-                  <span className="font-mono font-semibold text-sm">{sym}</span>
-                  {isStreaming && (
-                    <span className="inline-flex items-center gap-0.5" title="AI thinking…">
-                      <span className="w-1 h-1 rounded-full bg-amber-400 animate-bounce [animation-delay:-0.3s]" />
-                      <span className="w-1 h-1 rounded-full bg-amber-400 animate-bounce [animation-delay:-0.15s]" />
-                      <span className="w-1 h-1 rounded-full bg-amber-400 animate-bounce" />
+              <div className="grid grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)_1.25rem] items-start gap-x-1.5 px-2 py-2">
+                <div className="min-w-0 text-left">
+                  <span className="flex min-w-0 items-center gap-1.5">
+                    {hasPosition && (
+                      <span
+                        className="h-1.5 w-1.5 shrink-0 rounded-full bg-emerald-400"
+                        title="Active position"
+                      />
+                    )}
+                    <span className="min-w-0 truncate font-mono text-sm font-semibold">
+                      {sym}
+                    </span>
+                    {isStreaming && (
+                      <span
+                        className="inline-flex shrink-0 items-center gap-0.5"
+                        title="AI thinking…"
+                      >
+                        <span className="w-1 h-1 rounded-full bg-amber-400 animate-bounce [animation-delay:-0.3s]" />
+                        <span className="w-1 h-1 rounded-full bg-amber-400 animate-bounce [animation-delay:-0.15s]" />
+                        <span className="w-1 h-1 rounded-full bg-amber-400 animate-bounce" />
+                      </span>
+                    )}
+                  </span>
+                  {meta.sector && (
+                    <span className="block min-w-0 truncate text-[10px] leading-tight text-muted-foreground">
+                      {meta.sector}
                     </span>
                   )}
+                  {meta.subSector && (
+                    <span className="block min-w-0 truncate text-[10px] leading-tight text-muted-foreground">
+                      {meta.subSector}
+                    </span>
+                  )}
+                </div>
+                <span
+                  className={`self-start truncate pt-0.5 text-xs tabular-nums text-right ${isSelected ? "font-medium" : "text-muted-foreground"}`}
+                >
+                  {q ? `$${q.price.toFixed(2)}` : "—"}
                 </span>
-                {meta.sector && (
-                  <span className="text-[10px] text-muted-foreground ml-1.5 hidden xl:inline">{meta.sector}</span>
-                )}
-                {meta.subSector && (
-                  <span className="block text-[10px] text-muted-foreground leading-tight truncate">{meta.subSector}</span>
-                )}
-              </span>
-              <span className={`text-xs tabular-nums text-right ${isSelected ? "font-medium" : "text-muted-foreground"}`}>
-                {q ? `$${q.price.toFixed(2)}` : "—"}
-              </span>
-              <span className={`text-xs tabular-nums font-medium text-right ${chgColor}`}>
-                {q ? `${q.changePercentage >= 0 ? "+" : ""}${q.changePercentage.toFixed(2)}%` : "—"}
-              </span>
-              <span className={`text-xs tabular-nums font-medium text-right ${distColor}`}>
-                {distDisplay}
-              </span>
-            </button>
+                <span
+                  className={`self-start truncate pt-0.5 text-xs tabular-nums font-medium text-right ${chgColor}`}
+                >
+                  {q
+                    ? `${q.changePercentage >= 0 ? "+" : ""}${q.changePercentage.toFixed(2)}%`
+                    : "—"}
+                </span>
+                <span
+                  className={`self-start truncate pt-0.5 text-xs tabular-nums font-medium text-right ${distColor}`}
+                >
+                  {distDisplay}
+                </span>
+                <button
+                  type="button"
+                  className="h-6 w-6 shrink-0 self-start rounded-sm text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                  title={`Actions for ${sym}`}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onOpenActions?.(sym, e.currentTarget);
+                  }}
+                >
+                  <MoreHorizontal className="mx-auto h-3.5 w-3.5" />
+                </button>
+              </div>
+            </div>
           );
         })}
       </div>

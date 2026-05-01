@@ -627,9 +627,12 @@ function ScreeningsRelationshipNetworkPanel({
     subSector: string;
   };
 }) {
-  const idx = useMemo(() => {
-    const i = selectedTicker ? symbols.indexOf(selectedTicker) : -1;
-    return i >= 0 ? i : 0;
+  const symbol = useMemo(() => {
+    if (symbols.length === 0) return "";
+    if (selectedTicker && symbols.includes(selectedTicker)) {
+      return selectedTicker;
+    }
+    return symbols[0] ?? "";
   }, [symbols, selectedTicker]);
 
   if (symbols.length === 0) {
@@ -639,8 +642,6 @@ function ScreeningsRelationshipNetworkPanel({
       </p>
     );
   }
-
-  const symbol = symbols[idx]!;
   const meta = getTickerMeta(symbol);
   const status = getStatus(symbol);
   const commentExists = hasComment(symbol);
@@ -1038,10 +1039,13 @@ function StockNewsTrendView({
     [symbols, companyVectorDimensions],
   );
 
-  const idx = useMemo(() => {
-    const i = selectedTicker ? eligible.indexOf(selectedTicker) : -1;
-    return i >= 0 ? i : 0;
-  }, [eligible, selectedTicker]);
+  const symbol = useMemo(() => {
+    if (eligible.length === 0) return null;
+    if (selectedTicker == null) return eligible[0] ?? null;
+    if (eligible.includes(selectedTicker)) return selectedTicker;
+    if (symbols.includes(selectedTicker)) return null;
+    return eligible[0] ?? null;
+  }, [eligible, symbols, selectedTicker]);
 
   useEffect(() => {
     setLoading(true);
@@ -1057,11 +1061,6 @@ function StockNewsTrendView({
       .catch(() => setError("Failed to load news data"))
       .finally(() => setLoading(false));
   }, []);
-
-  const symbol = eligible[idx] ?? null;
-  const meta = symbol ? getTickerMeta(symbol) : { sector: "", industry: "" };
-  const status = symbol ? getStatus(symbol) : "active";
-  const commentExists = symbol ? hasComment(symbol) : false;
 
   // Pre-multiply articles by the current stock's company vector
   const weightedArticles = useMemo(() => {
@@ -1084,6 +1083,19 @@ function StockNewsTrendView({
       <p className="text-sm text-muted-foreground py-8 text-center">
         None of the filtered stocks have a company vector. Run the vector
         builder first.
+      </p>
+    );
+  }
+
+  if (
+    symbol == null &&
+    selectedTicker != null &&
+    symbols.includes(selectedTicker)
+  ) {
+    return (
+      <p className="text-sm text-muted-foreground py-8 text-center">
+        No company vector for {selectedTicker}. News trend weighting is
+        unavailable for this symbol.
       </p>
     );
   }
@@ -1841,12 +1853,15 @@ export function ScreeningsUI({
     y: number;
   } | null>(null);
   const ohlcvDataRef = useRef<OhlcBar[]>([]);
+  const openTickerActionsMenu = useCallback((ticker: string, x: number, y: number) => {
+    setContextMenu({ ticker, x, y });
+  }, []);
   const handleContextMenu = useCallback(
     (ticker: string, e: React.MouseEvent) => {
       e.preventDefault();
-      setContextMenu({ ticker, x: e.clientX, y: e.clientY });
+      openTickerActionsMenu(ticker, e.clientX, e.clientY);
     },
-    [],
+    [openTickerActionsMenu],
   );
   const [selectedTicker, setSelectedTicker] = useState<string | null>(null);
   const [chartAnnotations, setChartAnnotations] = useState<ChartAnnotation[]>(
@@ -1974,7 +1989,12 @@ export function ScreeningsUI({
         setFiltersState({
           ...DEFAULT_FILTERS,
           ...(typeof statusRaw === "string"
-            ? { status: statusRaw as Filters["status"] }
+            ? {
+                status:
+                  statusRaw === "active"
+                    ? "all"
+                    : (statusRaw as Filters["status"]),
+              }
             : {}),
           ...(hrn === "any" || hrn === "yes" || hrn === "no"
             ? { hasRowNote: hrn }
@@ -3237,9 +3257,13 @@ export function ScreeningsUI({
               getStatus={getTickerStatus}
               dismissedSymbols={dismissedSymbols}
               highlightedSymbols={highlightedSymbols}
+              onOpenActions={(ticker, anchorEl) => {
+                const rect = anchorEl.getBoundingClientRect();
+                openTickerActionsMenu(ticker, rect.left + rect.width / 2, rect.bottom + 4);
+              }}
             />
-            <div className="flex flex-1 min-h-0 gap-0">
-              <div className="hidden sm:flex sm:flex-col w-56 shrink-0 xl:w-64 border-r border-border h-full">
+            <div className="flex min-h-0 flex-1 items-stretch gap-0">
+              <div className="hidden min-h-0 w-56 shrink-0 self-stretch border-r border-border sm:flex sm:flex-col sm:overflow-hidden xl:w-64">
                 <TickerSidebar
                   symbols={filteredSymbols}
                   quotes={quotes}
@@ -3252,6 +3276,10 @@ export function ScreeningsUI({
                   highlightedSymbols={highlightedSymbols}
                   activePositionSymbols={activePositionSymbols}
                   onContextMenu={handleContextMenu}
+                  onOpenActions={(ticker, anchorEl) => {
+                    const rect = anchorEl.getBoundingClientRect();
+                    openTickerActionsMenu(ticker, rect.left + rect.width / 2, rect.bottom + 4);
+                  }}
                   streamingTickers={streamingTickers}
                   getEntryMarker={getTickerEntryMarker}
                 />
@@ -3306,6 +3334,11 @@ export function ScreeningsUI({
                           }
                           dateRange={chartDateRange}
                           interval={chartGranularity}
+                          getReferenceClose={(ticker) => {
+                            const q = quotes[ticker];
+                            if (!q) return null;
+                            return q.previousClose ?? q.price ?? null;
+                          }}
                         />
                       </div>
                       {selectedTicker && (

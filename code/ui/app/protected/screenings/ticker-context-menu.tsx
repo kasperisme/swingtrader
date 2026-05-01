@@ -57,16 +57,16 @@ export function TickerContextMenu({
   }, [x, y]);
 
   useEffect(() => {
-    const down = (e: MouseEvent) => {
+    const down = (e: PointerEvent) => {
       if (!ref.current?.contains(e.target as Node)) onClose();
     };
     const key = (e: KeyboardEvent) => {
       if (e.key === "Escape") onClose();
     };
-    document.addEventListener("mousedown", down);
+    document.addEventListener("pointerdown", down);
     document.addEventListener("keydown", key);
     return () => {
-      document.removeEventListener("mousedown", down);
+      document.removeEventListener("pointerdown", down);
       document.removeEventListener("keydown", key);
     };
   }, [onClose]);

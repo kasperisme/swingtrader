@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { ChevronLeft, ChevronRight, AlignJustify, X } from "lucide-react";
+import { ChevronLeft, ChevronRight, AlignJustify, X, MoreHorizontal } from "lucide-react";
 import type { FmpQuote } from "@/lib/use-quotes";
 
 interface MobileTickerBarProps {
@@ -12,6 +12,7 @@ interface MobileTickerBarProps {
   getStatus: (ticker: string) => string;
   dismissedSymbols: Set<string>;
   highlightedSymbols: Set<string>;
+  onOpenActions?: (ticker: string, anchorEl: HTMLElement) => void;
 }
 
 export function MobileTickerBar({
@@ -22,6 +23,7 @@ export function MobileTickerBar({
   getStatus,
   dismissedSymbols,
   highlightedSymbols,
+  onOpenActions,
 }: MobileTickerBarProps) {
   const [sheetOpen, setSheetOpen] = useState(false);
 
@@ -159,14 +161,9 @@ export function MobileTickerBar({
               : "";
 
             return (
-              <button
+              <div
                 key={sym}
-                type="button"
-                onClick={() => {
-                  onSelect(sym);
-                  setSheetOpen(false);
-                }}
-                className={`w-full text-left flex items-center justify-between px-4 py-3 border-l-[3px] border-b border-border/50 transition-colors min-h-[48px] ${stripe || "border-l-transparent"} ${isDismissed ? "opacity-40" : ""} ${
+                className={`w-full border-l-[3px] border-b border-border/50 transition-colors min-h-[48px] ${stripe || "border-l-transparent"} ${isDismissed ? "opacity-40" : ""} ${
                   isSelected
                     ? "bg-foreground/10"
                     : isHighlighted
@@ -174,21 +171,40 @@ export function MobileTickerBar({
                       : "hover:bg-muted/30"
                 }`}
               >
-                <div className="flex items-center gap-3">
-                  <span className="text-xs text-muted-foreground w-6 tabular-nums text-right">{idx + 1}</span>
-                  <span className="font-mono font-semibold text-sm">{sym}</span>
+                <div className="flex items-center gap-1 px-2 py-1">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      onSelect(sym);
+                      setSheetOpen(false);
+                    }}
+                    className="flex min-w-0 flex-1 items-center justify-between px-2 py-2 text-left"
+                  >
+                    <div className="flex min-w-0 items-center gap-3">
+                      <span className="text-xs text-muted-foreground w-6 tabular-nums text-right">{idx + 1}</span>
+                      <span className="font-mono font-semibold text-sm truncate">{sym}</span>
+                    </div>
+                    <div className="flex items-center gap-2 text-xs tabular-nums">
+                      <span className="text-muted-foreground">
+                        {sq ? `$${sq.price.toFixed(2)}` : "—"}
+                      </span>
+                      {sq && (
+                        <span className={`font-medium ${sqColor}`}>
+                          {sq.changePercentage >= 0 ? "+" : ""}{sq.changePercentage.toFixed(2)}%
+                        </span>
+                      )}
+                    </div>
+                  </button>
+                  <button
+                    type="button"
+                    className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                    title={`Actions for ${sym}`}
+                    onClick={(e) => onOpenActions?.(sym, e.currentTarget)}
+                  >
+                    <MoreHorizontal className="h-4 w-4" />
+                  </button>
                 </div>
-                <div className="flex items-center gap-2 text-xs tabular-nums">
-                  <span className="text-muted-foreground">
-                    {sq ? `$${sq.price.toFixed(2)}` : "—"}
-                  </span>
-                  {sq && (
-                    <span className={`font-medium ${sqColor}`}>
-                      {sq.changePercentage >= 0 ? "+" : ""}{sq.changePercentage.toFixed(2)}%
-                    </span>
-                  )}
-                </div>
-              </button>
+              </div>
             );
           })}
         </div>

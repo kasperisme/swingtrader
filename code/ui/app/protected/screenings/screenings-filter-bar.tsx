@@ -176,11 +176,11 @@ function buildPills(filters: ScreeningsFilters, setFilters: SetFilters) {
       remove: () => patch((p) => ({ ...p, symbolContains: "" })),
     });
   }
-  if (filters.status !== "active") {
+  if (filters.status !== "all") {
     pills.push({
       id: "st",
       text: `status = ${filters.status}`,
-      remove: () => patch((p) => ({ ...p, status: "active" })),
+      remove: () => patch((p) => ({ ...p, status: "all" })),
     });
   }
   if (filters.hasRowNote === "yes") {

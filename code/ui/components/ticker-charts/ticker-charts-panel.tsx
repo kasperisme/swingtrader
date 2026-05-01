@@ -68,6 +68,8 @@ export type TickerChartsPanelProps = {
   dateRange?: { from: string; to: string };
   /** OHLC granularity: "1hour" | "4hour" | "1day" | "1week". */
   interval?: string;
+  /** Optional external close reference (e.g. quote previousClose) for "vs entry". */
+  getReferenceClose?: (ticker: string) => number | null;
 };
 
 export function TickerChartsPanel({
@@ -97,11 +99,22 @@ export function TickerChartsPanel({
   showChartFrame = true,
   dateRange,
   interval,
+  getReferenceClose,
 }: TickerChartsPanelProps) {
-  const idx = useMemo(() => {
-    const i = selectedTicker ? symbols.indexOf(selectedTicker) : -1;
-    return i >= 0 ? i : 0;
+  const symbol = useMemo(() => {
+    if (symbols.length === 0) return "";
+    if (selectedTicker != null && symbols.includes(selectedTicker)) {
+      return selectedTicker;
+    }
+    return symbols[0] ?? "";
   }, [symbols, selectedTicker]);
+
+  /** Index in `symbols` for prev/next stepping — derived from the charted symbol. */
+  const idx = useMemo(() => {
+    if (symbols.length === 0) return 0;
+    const i = symbols.indexOf(symbol);
+    return i >= 0 ? i : 0;
+  }, [symbols, symbol]);
 
   useEffect(() => {
     if (!showChevronSymbolNav) return;
@@ -114,19 +127,6 @@ export function TickerChartsPanel({
     return () => window.removeEventListener("keydown", onKey);
   }, [idx, symbols, onSelect, showChevronSymbolNav]);
 
-  if (symbols.length === 0) {
-    return (
-      <p className="text-sm text-muted-foreground py-8 text-center">
-        No symbols to show.
-      </p>
-    );
-  }
-
-  const symbol = symbols[idx];
-  const meta = getTickerMeta(symbol);
-  const status = getStatus(symbol);
-  const commentExists = hasComment(symbol);
-  const entryMarker = getEntryMarker(symbol);
   const [activePoint, setActivePoint] = useState<ChartPoint | null>(null);
   const activePointRef = useRef<ChartPoint | null>(null);
   activePointRef.current = activePoint;
@@ -156,16 +156,19 @@ export function TickerChartsPanel({
     setCopyState("idle");
   }, [symbol]);
 
+  const entryMarker = getEntryMarker(symbol);
+
   const entryVsHeader = useMemo(() => {
     if (!entryMarker) return null;
-    const refPrice = activePoint?.price ?? chartLastClose;
+    const quoteRefClose = getReferenceClose?.(symbol) ?? null;
+    const refPrice = quoteRefClose ?? chartLastClose;
     if (refPrice == null) return null;
     const entryPrice = entryMarker.price;
     const d = refPrice - entryPrice;
     const dp = Math.abs(entryPrice) > 1e-9 ? (d / entryPrice) * 100 : 0;
-    const source = activePoint ? "Crosshair" : "Last close";
+    const source = quoteRefClose != null ? "Prev close" : "Last close";
     return { source, d, dp };
-  }, [entryMarker, activePoint, chartLastClose]);
+  }, [entryMarker, getReferenceClose, symbol, chartLastClose]);
 
   async function copyOhlcvToClipboard() {
     if (chartData.length === 0) return;
@@ -200,6 +203,18 @@ export function TickerChartsPanel({
       document.removeEventListener("keydown", onKey);
     };
   }, [entryMenu]);
+
+  if (symbols.length === 0) {
+    return (
+      <p className="text-sm text-muted-foreground py-8 text-center">
+        No symbols to show.
+      </p>
+    );
+  }
+
+  const meta = getTickerMeta(symbol);
+  const status = getStatus(symbol);
+  const commentExists = hasComment(symbol);
 
   const footerTail = screeningToolbar
     ? `${symbols.length} stocks in current filter`
