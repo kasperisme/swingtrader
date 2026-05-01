@@ -1969,6 +1969,7 @@ export function ScreeningsUI({
         const hrn = parsed.hasRowNote;
         const nh = parsed.noteHighlighted;
         const nc = parsed.noteComment;
+        const ap = parsed.activePosition;
         const tagsRaw = parsed.noteTagsAny;
         setFiltersState({
           ...DEFAULT_FILTERS,
@@ -1983,6 +1984,9 @@ export function ScreeningsUI({
             : {}),
           ...(nc === "any" || nc === "with" || nc === "without"
             ? { noteComment: nc }
+            : {}),
+          ...(ap === "any" || ap === "yes" || ap === "no"
+            ? { activePosition: ap }
             : {}),
           ...(typeof parsed.noteStage === "string"
             ? { noteStage: parsed.noteStage }
@@ -2571,6 +2575,10 @@ export function ScreeningsUI({
       if (filters.noteHighlighted === "yes" && !highlighted) return false;
       if (filters.noteHighlighted === "no" && highlighted) return false;
 
+      const hasPosition = activePositionSymbols.has(r.symbol ?? "");
+      if (filters.activePosition === "yes" && !hasPosition) return false;
+      if (filters.activePosition === "no" && hasPosition) return false;
+
       const commentTrim = note?.comment?.trim() ?? "";
       if (filters.noteComment === "with" && !commentTrim) return false;
       if (filters.noteComment === "without" && commentTrim) return false;
@@ -2723,7 +2731,7 @@ export function ScreeningsUI({
     });
 
     return result;
-  }, [rows, rowNotes, filters, search, sortKey, sortDir]);
+  }, [rows, rowNotes, filters, search, sortKey, sortDir, activePositionSymbols]);
 
   /** No visible rows for this search; query looks like a ticker and is not already in the screening. */
   const searchAddTickerOffer = useMemo(() => {
@@ -3245,6 +3253,7 @@ export function ScreeningsUI({
                   activePositionSymbols={activePositionSymbols}
                   onContextMenu={handleContextMenu}
                   streamingTickers={streamingTickers}
+                  getEntryMarker={getTickerEntryMarker}
                 />
               </div>
               <div

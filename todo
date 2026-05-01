@@ -19,10 +19,10 @@ Prio 1:
 [x] (AI Chat) When starting a new prompt, navigating to another chart shouldnt reset the prompt, but it should still execute the prompt
 [x] (UI) Implement pricing gates throughout the application and API
 [x] (AI Chat) Implement small prompt support in AI chat. Currently all personas are engaged in every prompt
+[x] (AI Chat) Screening agent is slow (find way to make the agent repond faster e.g. limit personas in UI and let it be a background agent, show in UI like in claude code subagent flow)
+[x] (AI Chat) Screening several stocks is slow (implement a batch process for the agent to run)
 [ ] (Caching) Caching isnt isnt updating correctly (news trends didnt show the last 24 hours, it is also flakey on the 30 day horizon)
 [ ] (AI Chat) Add granularity to chart, and make sure the AI applies the granularity to the prompt
-[ ] (AI Chat) Screening agent is slow (find way to make the agent repond faster e.g. limit personas in UI and let it be a background agent, show in UI like in claude code subagent flow)
-[ ] (AI Chat) Screening several stucks is slow (implement a batch process for the agent to run)
 [ ] (Agent) In the agent, allow the user to select tickers and screenings for the agent to monitor
 [ ] (Agent) Have agent activation windows (e.g. it should scan every 15 minutes when intramarket, but otherwise not)
 [ ] (Agent) Setup market wide screenings (start with predefined screenings and let the agent run them, and in the future let the user create their own screenings using the screening)
@@ -32,9 +32,9 @@ Prio 2:
 [x] Get embedding searching to work with the ollama model
 [x] Make sure IBD screener script runs through API
 [x] Implement anlytical agent in screening sites as well (copy from chart)
+[x] Set up company vector updating
 [ ] In the daily narrative graph, add an AI feature to summerize the narrative in the selected period
 [ ] Refactor analytics scripts to reduce redundancy
-[ ] Set up company vector updating
 [ ] Seperate newsimpactscreener FMP integration with personal API key
 [ ] Ensure robustness of telegram bots
 [ ] Make sure network graph doesnt update when user selects something in current scope

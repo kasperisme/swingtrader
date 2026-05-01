@@ -8,6 +8,7 @@ import {
   type ScreeningStatusFilter,
   type ScreeningsFilters,
   countScreeningsFilterRules,
+  type ActivePositionFilter,
 } from "./screenings-filters-model";
 import { MAX_CATEGORICAL_STRING_OPTIONS } from "./screenings-row-data";
 
@@ -22,6 +23,7 @@ type FieldKind =
   | { kind: "wf_stage" }
   | { kind: "wf_priority" }
   | { kind: "wf_tags"; options: string[] }
+  | { kind: "wf_active_position" }
   | { kind: "row_bool"; key: string }
   | { kind: "row_num"; key: string }
   | { kind: "row_str_cat"; key: string; options: string[] }
@@ -51,6 +53,7 @@ function catalogEntries(
     field: { kind: "wf_has_row_note" },
   });
   out.push({ group: wf, id: "wf.highlighted", label: "highlighted", sub: "bool", field: { kind: "wf_highlighted" } });
+  out.push({ group: wf, id: "wf.activePosition", label: "active position", sub: "bool", field: { kind: "wf_active_position" } });
   out.push({ group: wf, id: "wf.comment", label: "comment", sub: "text", field: { kind: "wf_comment" } });
   out.push({ group: wf, id: "wf.stage", label: "stage", sub: "varchar", field: { kind: "wf_stage" } });
   out.push({ group: wf, id: "wf.priority", label: "priority", sub: "number", field: { kind: "wf_priority" } });
@@ -101,6 +104,11 @@ function opsForField(f: FieldKind): OpDef[] {
       return [
         { id: "true", label: "Is true", sym: "=" },
         { id: "false", label: "Is false", sym: "=" },
+      ];
+    case "wf_active_position":
+      return [
+        { id: "true", label: "Has active position", sym: "=" },
+        { id: "false", label: "No active position", sym: "=" },
       ];
     case "wf_highlighted":
       return [
@@ -201,6 +209,19 @@ function buildPills(filters: ScreeningsFilters, setFilters: SetFilters) {
       id: "hl-n",
       text: "highlighted = false",
       remove: () => patch((p) => ({ ...p, noteHighlighted: "any" })),
+    });
+  }
+  if (filters.activePosition === "yes") {
+    pills.push({
+      id: "ap-y",
+      text: "active position = true",
+      remove: () => patch((p) => ({ ...p, activePosition: "any" })),
+    });
+  } else if (filters.activePosition === "no") {
+    pills.push({
+      id: "ap-n",
+      text: "active position = false",
+      remove: () => patch((p) => ({ ...p, activePosition: "any" })),
     });
   }
   if (filters.noteComment === "with") {
@@ -610,6 +631,11 @@ export function AddFilterWidget({
       else applyFilter((p) => ({ ...p, hasRowNote: "no" }));
       return;
     }
+    if (f.kind === "wf_active_position") {
+      const v: ActivePositionFilter = op === "true" ? "yes" : "no";
+      applyFilter((p) => ({ ...p, activePosition: v }));
+      return;
+    }
     if (f.kind === "wf_highlighted") {
       if (op === "true") applyFilter((p) => ({ ...p, noteHighlighted: "yes" }));
       else applyFilter((p) => ({ ...p, noteHighlighted: "no" }));
@@ -1009,6 +1035,7 @@ export function AddFilterWidget({
                 )}
                 {(selectedEntry.field.kind === "wf_has_row_note" ||
                   selectedEntry.field.kind === "wf_highlighted" ||
+                  selectedEntry.field.kind === "wf_active_position" ||
                   selectedEntry.field.kind === "wf_comment" ||
                   selectedEntry.field.kind === "row_bool") && (
                   <p className="text-xs text-muted-foreground">Apply this constraint with the button below.</p>
