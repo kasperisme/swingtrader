@@ -3,6 +3,7 @@
 import { createClient } from "@/lib/supabase/server";
 import { getUserPlanTier } from "./plan-gate";
 import { hasPlan, type PlanTier } from "@/lib/plans";
+import type { ScreeningsFilters } from "@/app/protected/screenings/screenings-filters-model";
 
 type ActionResult<T> = Promise<{ ok: true; data: T } | { ok: false; error: string }>;
 
@@ -20,6 +21,8 @@ const SCHEDULE_GATES: Record<PlanTier, string> = {
   trader: "*/15 * * * *",
 };
 
+export type TradingSession = "none" | "nyse";
+
 export type ScheduledScreening = {
   id: string;
   name: string;
@@ -28,6 +31,8 @@ export type ScheduledScreening = {
   timezone: string;
   tickers: string[];
   linked_scan_run_ids: number[];
+  scan_filters: ScreeningsFilters | null;
+  trading_session: TradingSession | null;
   is_active: boolean;
   run_requested_at: string | null;
   last_run_at: string | null;
@@ -75,6 +80,8 @@ export async function createScheduledScreening(input: {
   timezone: string;
   tickers?: string[];
   linked_scan_run_ids?: number[];
+  scan_filters?: ScreeningsFilters | null;
+  trading_session?: TradingSession | null;
 }): ActionResult<ScheduledScreening> {
   const supabase = await createClient();
   const {
@@ -110,6 +117,8 @@ export async function createScheduledScreening(input: {
       timezone: input.timezone,
       tickers: input.tickers ?? [],
       linked_scan_run_ids: input.linked_scan_run_ids ?? [],
+      scan_filters: input.scan_filters ?? null,
+      trading_session: input.trading_session ?? "none",
     })
     .select("*")
     .single();
@@ -127,6 +136,8 @@ export async function updateScheduledScreening(
     timezone?: string;
     tickers?: string[];
     linked_scan_run_ids?: number[];
+    scan_filters?: ScreeningsFilters | null;
+    trading_session?: TradingSession | null;
     is_active?: boolean;
   }
 ): ActionResult<ScheduledScreening> {
@@ -308,5 +319,78 @@ export async function listScanRuns(): Promise<
       scan_date: String(r.scan_date ?? ""),
       source: r.source != null ? String(r.source) : null,
     })),
+  };
+}
+
+export type AgentScanRow = {
+  symbol: string;
+  rowData: Record<string, unknown>;
+};
+
+export async function listScanRowsForRuns(
+  runIds: number[]
+): Promise<{ ok: true; data: AgentScanRow[] } | { ok: false; error: string }> {
+  if (runIds.length === 0) return { ok: true, data: [] };
+
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { ok: false, error: "Not authenticated" };
+
+  const [rowsResult, notesResult] = await Promise.all([
+    supabase
+      .schema(SCHEMA)
+      .from("user_scan_rows")
+      .select("id, symbol, row_data")
+      .in("run_id", runIds)
+      .eq("user_id", user.id),
+    supabase
+      .schema(SCHEMA)
+      .from("user_scan_row_notes")
+      .select("scan_row_id, status, highlighted, comment, stage, priority, tags, metadata_json")
+      .in("run_id", runIds)
+      .eq("user_id", user.id),
+  ]);
+
+  if (rowsResult.error) return { ok: false, error: rowsResult.error.message };
+
+  const notesMap = new Map<number, NonNullable<typeof notesResult.data>[number]>();
+  for (const n of notesResult.data ?? []) {
+    notesMap.set(n.scan_row_id, n);
+  }
+
+  return {
+    ok: true,
+    data: (rowsResult.data ?? []).map((r) => {
+      const note = notesMap.get(r.id as number);
+      const rd: Record<string, unknown> = {
+        ...((r.row_data as Record<string, unknown>) ?? {}),
+      };
+      if (note) {
+        rd.__note_status = note.status ?? null;
+        rd.__note_highlighted = !!note.highlighted;
+        rd.__note_hasRowNote = !!note;
+        rd.__note_comment = note.comment ?? null;
+        rd.__note_stage = note.stage ?? null;
+        rd.__note_priority = note.priority ?? null;
+        rd.__note_tags = note.tags ?? [];
+        const meta = note.metadata_json as Record<string, unknown> | null;
+        rd.__note_activePosition = !!(meta?.activePosition);
+      } else {
+        rd.__note_status = null;
+        rd.__note_highlighted = false;
+        rd.__note_hasRowNote = false;
+        rd.__note_comment = null;
+        rd.__note_stage = null;
+        rd.__note_priority = null;
+        rd.__note_tags = [];
+        rd.__note_activePosition = false;
+      }
+      return {
+        symbol: String(r.symbol ?? ""),
+        rowData: rd,
+      };
+    }),
   };
 }

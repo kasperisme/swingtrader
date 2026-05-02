@@ -1,11 +1,13 @@
 "use client";
 
 import { useState, useMemo, useCallback, useEffect, useId } from "react";
-import { Bot, Pause, Play, Trash2, Plus, Clock, AlertCircle, Zap, Loader2, LayoutList, CalendarDays, ChevronLeft, ChevronRight, Pencil, X, Link2 } from "lucide-react";
+import { Bot, Pause, Play, Trash2, Plus, Clock, AlertCircle, Zap, Loader2, LayoutList, CalendarDays, ChevronLeft, ChevronRight, Pencil, X, Link2, Filter } from "lucide-react";
 import {
   type ScheduledScreening,
   type ScreeningResult,
   type ScanRunSummary,
+  type AgentScanRow,
+  type TradingSession,
   createScheduledScreening,
   toggleScreening,
   deleteScheduledScreening,
@@ -13,9 +15,25 @@ import {
   pollTestResult,
   updateScheduledScreening,
   listScanRuns,
+  listScanRowsForRuns,
 } from "@/app/actions/screenings-agent";
 import { TickerSearchCombobox } from "@/components/ticker-search-combobox";
 import { relationshipsResolveTicker } from "@/app/actions/relationships";
+import {
+  type ScreeningsFilters,
+  DEFAULT_SCREENINGS_FILTERS,
+  countScreeningsFilterRules,
+} from "@/app/protected/screenings/screenings-filters-model";
+import { ScreeningsFilterBar, AddFilterWidget } from "@/app/protected/screenings/screenings-filter-bar";
+import {
+  collectAllRowDataKeys,
+  orderedDataColumnKeys,
+  inferBooleanFilterKeys,
+  inferNumericFilterKeys,
+  uniqueStringValuesForKey,
+  MAX_CATEGORICAL_STRING_OPTIONS,
+} from "@/app/protected/screenings/screenings-row-data";
+import { applyRowDataFilters } from "@/app/protected/screenings/apply-row-data-filters";
 
 type Props = {
   screenings: ScheduledScreening[];
@@ -192,9 +210,13 @@ function formatTime(h: number, m: number): string {
 function RecurrenceScheduler({
   value,
   onChange,
+  tradingSession,
+  onTradingSessionChange,
 }: {
   value: string;
   onChange: (cron: string) => void;
+  tradingSession?: string | null;
+  onTradingSessionChange?: (v: string | null) => void;
 }) {
   const uid = useId();
   const parsed = useMemo(() => {
@@ -382,10 +404,37 @@ function RecurrenceScheduler({
         </div>
       </div>
 
+      {/* Trading session gate */}
+      {onTradingSessionChange && (
+        <div className={row}>
+          <span className={lbl}>Trading hours:</span>
+          <div className="flex flex-col gap-1.5">
+            <select
+              value={tradingSession ?? "none"}
+              onChange={(e) => onTradingSessionChange(e.target.value === "none" ? null : e.target.value)}
+              className={sel}
+            >
+              <option value="none">Any time</option>
+              <option value="nyse">NYSE session (9:30 AM – 4:00 PM ET)</option>
+            </select>
+            {tradingSession && tradingSession !== "none" && (
+              <p className="text-xs text-muted-foreground">
+                Agent only runs when the market is open. Scheduled runs outside trading hours are skipped.
+              </p>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* Summary */}
       <div className={`${row} bg-muted/30 rounded-b-xl`}>
         <span className={lbl}>Summary:</span>
-        <span className="min-w-0 break-words font-semibold text-foreground">{describeCron(value)}</span>
+        <span className="min-w-0 break-words font-semibold text-foreground">
+          {describeCron(value)}
+          {tradingSession && tradingSession !== "none" && (
+            <span className="ml-2 font-normal text-muted-foreground">· market hours only</span>
+          )}
+        </span>
       </div>
     </div>
   );
@@ -1011,8 +1060,10 @@ function PillPopover({
   const [editPrompt, setEditPrompt] = useState(screening.prompt);
   const [editSchedule, setEditSchedule] = useState(screening.schedule);
   const [editTimezone, setEditTimezone] = useState(screening.timezone);
+  const [editTradingSession, setEditTradingSession] = useState<string | null>(screening.trading_session ?? null);
   const [editTickers, setEditTickers] = useState<string[]>(screening.tickers ?? []);
   const [editLinkedScanRunIds, setEditLinkedScanRunIds] = useState<number[]>(screening.linked_scan_run_ids ?? []);
+  const [editScanFilters, setEditScanFilters] = useState<ScreeningsFilters>((screening.scan_filters as ScreeningsFilters | null) ?? DEFAULT_SCREENINGS_FILTERS);
   const [scanRuns, setScanRuns] = useState<ScanRunSummary[]>([]);
   const [saving, setSaving] = useState(false);
   const [saveErr, setSaveErr] = useState<string | null>(null);
@@ -1077,6 +1128,8 @@ function PillPopover({
       timezone: editTimezone,
       tickers: editTickers,
       linked_scan_run_ids: editLinkedScanRunIds,
+      scan_filters: countScreeningsFilterRules(editScanFilters) > 0 ? editScanFilters : null,
+      trading_session: (editTradingSession as TradingSession) ?? "none",
     });
     if (res.ok) {
       onClose();
@@ -1112,7 +1165,7 @@ function PillPopover({
           </div>
           <div className="flex flex-col gap-1">
             <label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Recurrence</label>
-            <RecurrenceScheduler value={editSchedule} onChange={setEditSchedule} />
+            <RecurrenceScheduler value={editSchedule} onChange={setEditSchedule} tradingSession={editTradingSession} onTradingSessionChange={setEditTradingSession} />
           </div>
           <div className="flex flex-col gap-1">
             <label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Timezone</label>
@@ -1133,6 +1186,18 @@ function PillPopover({
                 linkedIds={editLinkedScanRunIds}
                 onChange={setEditLinkedScanRunIds}
                 scanRuns={scanRuns}
+              />
+            </div>
+          )}
+          {editLinkedScanRunIds.length > 0 && (
+            <div className="flex flex-col gap-1">
+              <label className="text-xs font-medium text-muted-foreground uppercase tracking-wide flex items-center gap-1">
+                <Filter className="w-3 h-3" /> Filter tickers
+              </label>
+              <AgentFilterSection
+                linkedScanRunIds={editLinkedScanRunIds}
+                filters={editScanFilters}
+                setFilters={setEditScanFilters}
               />
             </div>
           )}
@@ -1162,7 +1227,12 @@ function PillPopover({
           <div className={`w-2 h-2 rounded-full ${AGENT_COLORS[colorIdx % AGENT_COLORS.length]}`} />
           <span className="text-xs font-semibold text-foreground truncate">{screening.name}</span>
         </div>
-        <p className="mt-1 break-words text-[11px] text-muted-foreground">{describeCron(screening.schedule)} &middot; {screening.timezone}</p>
+        <p className="mt-1 break-words text-[11px] text-muted-foreground">
+          {describeCron(screening.schedule)} &middot; {screening.timezone}
+          {screening.trading_session && screening.trading_session !== "none" && screening.trading_session !== null && (
+            <span className="ml-1.5 inline-flex items-center rounded bg-foreground/10 px-1 py-px font-medium text-foreground/70">market hours</span>
+          )}
+        </p>
       </div>
 
       {/* Actions */}
@@ -1235,6 +1305,109 @@ function PillPopover({
   );
 }
 
+// ── Agent filter section ─────────────────────────────────────────────────────
+
+type SetFilters = (f: ScreeningsFilters | ((prev: ScreeningsFilters) => ScreeningsFilters)) => void;
+
+function AgentFilterSection({
+  linkedScanRunIds,
+  filters,
+  setFilters,
+}: {
+  linkedScanRunIds: number[];
+  filters: ScreeningsFilters;
+  setFilters: SetFilters;
+}) {
+  const [rows, setRows] = useState<AgentScanRow[]>([]);
+  const [loadingRows, setLoadingRows] = useState(false);
+  const [filterOpen, setFilterOpen] = useState(false);
+
+  const runIdsKey = linkedScanRunIds.join(",");
+  useEffect(() => {
+    if (linkedScanRunIds.length === 0) { setRows([]); return; }
+    setLoadingRows(true);
+    void listScanRowsForRuns(linkedScanRunIds).then((res) => {
+      setLoadingRows(false);
+      if (res.ok) setRows(res.data);
+    });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [runIdsKey]);
+
+  const allKeys = useMemo(() => collectAllRowDataKeys(rows), [rows]);
+  const orderedKeys = useMemo(() => orderedDataColumnKeys(allKeys), [allKeys]);
+  const boolKeys = useMemo(() => inferBooleanFilterKeys(rows, orderedKeys), [rows, orderedKeys]);
+  const numKeys = useMemo(() => inferNumericFilterKeys(rows, orderedKeys), [rows, orderedKeys]);
+  const categoricalStringCols = useMemo(() => {
+    return orderedKeys
+      .filter((k) => !boolKeys.includes(k) && !numKeys.includes(k))
+      .map((k) => ({ key: k, options: uniqueStringValuesForKey(rows, k) }))
+      .filter((c) => c.options.length > 0 && c.options.length <= MAX_CATEGORICAL_STRING_OPTIONS);
+  }, [rows, orderedKeys, boolKeys, numKeys]);
+  const freeStringKeys = useMemo(() => {
+    const catKeys = new Set(categoricalStringCols.map((c) => c.key));
+    return orderedKeys.filter((k) => !boolKeys.includes(k) && !numKeys.includes(k) && !catKeys.has(k));
+  }, [orderedKeys, boolKeys, numKeys, categoricalStringCols]);
+
+  const filteredSymbols = useMemo(() => {
+    const filtered = applyRowDataFilters(rows, filters);
+    const seen = new Set<string>();
+    const out: string[] = [];
+    for (const r of filtered) {
+      if (r.symbol && !seen.has(r.symbol)) { seen.add(r.symbol); out.push(r.symbol); }
+    }
+    return out;
+  }, [rows, filters]);
+
+  const totalSymbols = useMemo(() => {
+    const seen = new Set(rows.map((r) => r.symbol).filter(Boolean));
+    return seen.size;
+  }, [rows]);
+
+  if (linkedScanRunIds.length === 0) return null;
+
+  return (
+    <div className="flex flex-col gap-2">
+      {loadingRows ? (
+        <p className="text-xs text-muted-foreground flex items-center gap-1.5">
+          <Loader2 className="w-3 h-3 animate-spin" /> Loading screening rows…
+        </p>
+      ) : (
+        <>
+          <AddFilterWidget
+            open={filterOpen}
+            onOpen={() => setFilterOpen(true)}
+            onClose={() => setFilterOpen(false)}
+            filters={filters}
+            setFilters={setFilters}
+            noteStageOptions={[]}
+            noteTagOptions={[]}
+            boolKeys={boolKeys}
+            numKeys={numKeys}
+            categoricalStringCols={categoricalStringCols}
+            freeStringKeys={freeStringKeys}
+          />
+          <ScreeningsFilterBar filters={filters} setFilters={setFilters} />
+          <div className="flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
+            <span className="font-semibold text-foreground tabular-nums">{filteredSymbols.length}</span>
+            <span>of {totalSymbols} tickers match</span>
+            {filteredSymbols.length > 0 && (
+              <>
+                <span className="text-border mx-0.5">·</span>
+                {filteredSymbols.slice(0, 10).map((s) => (
+                  <span key={s} className="rounded bg-muted px-1.5 py-0.5 font-mono text-[11px] text-foreground/80">{s}</span>
+                ))}
+                {filteredSymbols.length > 10 && (
+                  <span>+{filteredSymbols.length - 10} more</span>
+                )}
+              </>
+            )}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
 // ── Create form ─────────────────────────────────────────────────────────────
 
 function CreateForm({ onClose, atLimit, suggestionTickers }: { onClose: () => void; atLimit: boolean; suggestionTickers: string[] }) {
@@ -1242,8 +1415,10 @@ function CreateForm({ onClose, atLimit, suggestionTickers }: { onClose: () => vo
   const [prompt, setPrompt] = useState("");
   const [schedule, setSchedule] = useState("0 7 * * 1-5");
   const [timezone, setTimezone] = useState("America/New_York");
+  const [tradingSession, setTradingSession] = useState<string | null>(null);
   const [tickers, setTickers] = useState<string[]>([]);
   const [linkedScanRunIds, setLinkedScanRunIds] = useState<number[]>([]);
+  const [scanFilters, setScanFilters] = useState<ScreeningsFilters>(DEFAULT_SCREENINGS_FILTERS);
   const [scanRuns, setScanRuns] = useState<ScanRunSummary[]>([]);
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -1265,6 +1440,8 @@ function CreateForm({ onClose, atLimit, suggestionTickers }: { onClose: () => vo
       timezone,
       tickers,
       linked_scan_run_ids: linkedScanRunIds,
+      scan_filters: countScreeningsFilterRules(scanFilters) > 0 ? scanFilters : null,
+      trading_session: (tradingSession as TradingSession) ?? "none",
     });
     if (res.ok) {
       onClose();
@@ -1316,7 +1493,7 @@ function CreateForm({ onClose, atLimit, suggestionTickers }: { onClose: () => vo
           <label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
             Recurrence
           </label>
-          <RecurrenceScheduler value={schedule} onChange={setSchedule} />
+          <RecurrenceScheduler value={schedule} onChange={setSchedule} tradingSession={tradingSession} onTradingSessionChange={setTradingSession} />
         </div>
         <div className="flex flex-col gap-1.5">
           <label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Timezone</label>
@@ -1348,6 +1525,20 @@ function CreateForm({ onClose, atLimit, suggestionTickers }: { onClose: () => vo
             scanRuns={scanRuns}
           />
         </div>
+        {linkedScanRunIds.length > 0 && (
+          <div className="flex flex-col gap-1.5">
+            <label className="text-xs font-medium text-muted-foreground uppercase tracking-wide flex items-center gap-1.5">
+              <Filter className="w-3 h-3" />
+              Filter tickers
+              <span className="normal-case font-normal text-muted-foreground/60">narrow which tickers the agent focuses on</span>
+            </label>
+            <AgentFilterSection
+              linkedScanRunIds={linkedScanRunIds}
+              filters={scanFilters}
+              setFilters={setScanFilters}
+            />
+          </div>
+        )}
         <div className="flex min-w-0 flex-col gap-3 border-t border-border pt-3 sm:flex-row sm:flex-wrap sm:items-center sm:gap-3 sm:pt-1">
           <div className="flex min-w-0 flex-wrap items-center gap-2 sm:gap-3">
             <button
@@ -1387,8 +1578,10 @@ function AgentCard({ screening, suggestionTickers }: { screening: ScheduledScree
   const [editPrompt, setEditPrompt] = useState(screening.prompt);
   const [editSchedule, setEditSchedule] = useState(screening.schedule);
   const [editTimezone, setEditTimezone] = useState(screening.timezone);
+  const [editTradingSession, setEditTradingSession] = useState<string | null>(screening.trading_session ?? null);
   const [editTickers, setEditTickers] = useState<string[]>(screening.tickers ?? []);
   const [editLinkedScanRunIds, setEditLinkedScanRunIds] = useState<number[]>(screening.linked_scan_run_ids ?? []);
+  const [editScanFilters, setEditScanFilters] = useState<ScreeningsFilters>((screening.scan_filters as ScreeningsFilters | null) ?? DEFAULT_SCREENINGS_FILTERS);
   const [scanRuns, setScanRuns] = useState<ScanRunSummary[]>([]);
   const [saving, setSaving] = useState(false);
   const [saveErr, setSaveErr] = useState<string | null>(null);
@@ -1423,6 +1616,8 @@ function AgentCard({ screening, suggestionTickers }: { screening: ScheduledScree
       timezone: editTimezone,
       tickers: editTickers,
       linked_scan_run_ids: editLinkedScanRunIds,
+      scan_filters: countScreeningsFilterRules(editScanFilters) > 0 ? editScanFilters : null,
+      trading_session: (editTradingSession as TradingSession) ?? "none",
     });
     if (res.ok) {
       setEditing(false);
@@ -1489,13 +1684,13 @@ function AgentCard({ screening, suggestionTickers }: { screening: ScheduledScree
           </div>
           <div className="flex flex-col gap-1.5">
             <label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Recurrence</label>
-            <RecurrenceScheduler value={editSchedule} onChange={setEditSchedule} />
-          </div>
-          <div className="flex flex-col gap-1.5">
+            <RecurrenceScheduler value={editSchedule} onChange={setEditSchedule} tradingSession={editTradingSession} onTradingSessionChange={setEditTradingSession} />
+            </div>
+          <div className="flex flex-col gap-1">
             <label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Timezone</label>
             <TimezoneSelect value={editTimezone} onChange={setEditTimezone} className={inputClass} />
           </div>
-          <div className="flex flex-col gap-1.5">
+          <div className="flex flex-col gap-1">
             <label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
               Tickers
               <span className="ml-2 normal-case font-normal text-muted-foreground/60">focus the agent on specific symbols</span>
@@ -1509,6 +1704,20 @@ function AgentCard({ screening, suggestionTickers }: { screening: ScheduledScree
                 <span className="ml-2 normal-case font-normal text-muted-foreground/60">pull context from a scan run</span>
               </label>
               <ScanRunPicker linkedIds={editLinkedScanRunIds} onChange={setEditLinkedScanRunIds} scanRuns={scanRuns} />
+            </div>
+          )}
+          {editLinkedScanRunIds.length > 0 && (
+            <div className="flex flex-col gap-1.5">
+              <label className="text-xs font-medium text-muted-foreground uppercase tracking-wide flex items-center gap-1.5">
+                <Filter className="w-3 h-3" />
+                Filter tickers
+                <span className="normal-case font-normal text-muted-foreground/60">narrow which tickers the agent focuses on</span>
+              </label>
+              <AgentFilterSection
+                linkedScanRunIds={editLinkedScanRunIds}
+                filters={editScanFilters}
+                setFilters={setEditScanFilters}
+              />
             </div>
           )}
           <div className="flex min-w-0 flex-wrap items-center gap-2 border-t border-border pt-3 sm:gap-3 sm:pt-1">
@@ -1567,6 +1776,16 @@ function AgentCard({ screening, suggestionTickers }: { screening: ScheduledScree
                   {screening.linked_scan_run_ids.length} linked
                 </span>
               )}
+              {screening.scan_filters &&
+                countScreeningsFilterRules(screening.scan_filters) > 0 && (
+                <span className="inline-flex items-center gap-1 rounded bg-muted px-1.5 py-0.5 text-[11px] text-muted-foreground">
+                  <Filter className="w-3 h-3" />
+                  {countScreeningsFilterRules(screening.scan_filters)} filter
+                  {countScreeningsFilterRules(screening.scan_filters) !== 1
+                    ? "s"
+                    : ""}
+                </span>
+              )}
             </div>
             )}
 
@@ -1575,6 +1794,11 @@ function AgentCard({ screening, suggestionTickers }: { screening: ScheduledScree
               <Clock className="h-3 w-3 shrink-0" />
               <span className="min-w-0">{scheduleLabel}</span>
             </span>
+            {screening.trading_session && screening.trading_session !== "none" && screening.trading_session !== null && (
+              <span className="inline-flex items-center gap-1 rounded bg-foreground/10 px-1.5 py-0.5 font-medium text-foreground/70">
+                Market hours
+              </span>
+            )}
             <span className="min-w-0 break-all">{screening.timezone}</span>
             {screening.last_run_at && (
               <span className="min-w-0 break-words">
@@ -1616,7 +1840,7 @@ function AgentCard({ screening, suggestionTickers }: { screening: ScheduledScree
         <div className="flex shrink-0 items-center justify-end gap-2 sm:pt-1">
           <button
             type="button"
-            onClick={() => { setEditing(true); setEditName(screening.name); setEditPrompt(screening.prompt); setEditSchedule(screening.schedule); setEditTimezone(screening.timezone); setEditTickers(screening.tickers ?? []); setEditLinkedScanRunIds(screening.linked_scan_run_ids ?? []); setSaveErr(null); }}
+            onClick={() => { setEditing(true); setEditName(screening.name); setEditPrompt(screening.prompt); setEditSchedule(screening.schedule); setEditTimezone(screening.timezone); setEditTradingSession(screening.trading_session ?? null); setEditTickers(screening.tickers ?? []); setEditLinkedScanRunIds(screening.linked_scan_run_ids ?? []); setSaveErr(null); }}
             title="Edit agent"
             className="flex h-8 w-8 items-center justify-center rounded-md border border-border text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
           >

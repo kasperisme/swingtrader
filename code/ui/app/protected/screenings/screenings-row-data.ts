@@ -22,6 +22,12 @@ export function normalizeRowData(raw: unknown): Record<string, unknown> {
 /** Shown in Symbol column — omit from dynamic data columns to avoid duplication */
 export const ROW_DATA_SYMBOL_KEYS = new Set(["symbol", "ticker", "Symbol"]);
 
+/** Internal note fields merged by the agent scan-row loader — not user-facing columns */
+const ROW_DATA_NOTE_INTERNAL_KEYS = new Set([
+  "__note_status", "__note_highlighted", "__note_hasRowNote", "__note_comment",
+  "__note_stage", "__note_priority", "__note_tags", "__note_activePosition",
+]);
+
 /** Preferred column order (first keys that exist in the run appear in this order; rest alphabetical) */
 export const ROW_DATA_COLUMN_PRIORITY: string[] = [
   "sector",
@@ -61,7 +67,7 @@ export function collectAllRowDataKeys(rows: { rowData: Record<string, unknown> }
   const set = new Set<string>();
   for (const r of rows) {
     for (const k of Object.keys(r.rowData)) {
-      if (!ROW_DATA_SYMBOL_KEYS.has(k)) set.add(k);
+      if (!ROW_DATA_SYMBOL_KEYS.has(k) && !ROW_DATA_NOTE_INTERNAL_KEYS.has(k)) set.add(k);
     }
   }
   return set;

@@ -1,0 +1,196 @@
+import {
+  compareRowDataValues,
+  getRowDataValue,
+  stringifyRowDataValueForFilter,
+} from "./screenings-row-data";
+import { NOTE_STAGE_NONE, type ScreeningsFilters } from "./screenings-filters-model";
+import type { ScreeningRow, ScanRowNote } from "./screenings-types";
+
+/**
+ * Apply screenings filters, optional text search, then sort.
+ * Mirrors the Results table pipeline in `ScreeningsUI`.
+ */
+export function filterAndSortScreeningRows(
+  rows: ScreeningRow[],
+  rowNotes: Map<number, ScanRowNote>,
+  filters: ScreeningsFilters,
+  search: string,
+  sortKey: string,
+  sortDir: "asc" | "desc",
+  activePositionSymbols: Set<string>,
+): ScreeningRow[] {
+  let result = rows.filter((r) => {
+    if (filters.symbolContains?.trim()) {
+      const q = filters.symbolContains.trim().toUpperCase();
+      if (!r.symbol?.toUpperCase().includes(q)) return false;
+    }
+
+    const note = rowNotes.get(r.scan_row_id);
+    const hasSavedNote = note !== undefined;
+    if (filters.hasRowNote === "yes" && !hasSavedNote) return false;
+    if (filters.hasRowNote === "no" && hasSavedNote) return false;
+
+    const status = note?.status ?? "active";
+    if (filters.status !== "all" && status !== filters.status) return false;
+
+    const highlighted = note?.highlighted ?? false;
+    if (filters.noteHighlighted === "yes" && !highlighted) return false;
+    if (filters.noteHighlighted === "no" && highlighted) return false;
+
+    const hasPosition = activePositionSymbols.has(r.symbol ?? "");
+    if (filters.activePosition === "yes" && !hasPosition) return false;
+    if (filters.activePosition === "no" && hasPosition) return false;
+
+    const commentTrim = note?.comment?.trim() ?? "";
+    if (filters.noteComment === "with" && !commentTrim) return false;
+    if (filters.noteComment === "without" && commentTrim) return false;
+
+    if (filters.noteStage) {
+      const st = note?.stage?.trim() ?? "";
+      if (filters.noteStage === NOTE_STAGE_NONE) {
+        if (st) return false;
+      } else if (st !== filters.noteStage) {
+        return false;
+      }
+    }
+
+    const pminStr = filters.notePriorityMin.trim();
+    if (pminStr) {
+      const pmin = parseFloat(pminStr);
+      if (Number.isFinite(pmin)) {
+        const p = note?.priority;
+        if (p == null || !Number.isFinite(p) || p < pmin) return false;
+      }
+    }
+    const pmaxStr = filters.notePriorityMax.trim();
+    if (pmaxStr) {
+      const pmax = parseFloat(pmaxStr);
+      if (Number.isFinite(pmax)) {
+        const p = note?.priority;
+        if (p == null || !Number.isFinite(p) || p > pmax) return false;
+      }
+    }
+    const pgtNote = filters.notePriorityGt.trim();
+    if (pgtNote) {
+      const bound = parseFloat(pgtNote);
+      if (Number.isFinite(bound)) {
+        const p = note?.priority;
+        if (p == null || !Number.isFinite(p) || p <= bound) return false;
+      }
+    }
+    const pltNote = filters.notePriorityLt.trim();
+    if (pltNote) {
+      const bound = parseFloat(pltNote);
+      if (Number.isFinite(bound)) {
+        const p = note?.priority;
+        if (p == null || !Number.isFinite(p) || p >= bound) return false;
+      }
+    }
+
+    if (filters.noteTagsAny.length > 0) {
+      const rowTags = new Set(
+        (note?.tags ?? []).map((t) => String(t).trim()).filter(Boolean),
+      );
+      const any = filters.noteTagsAny.some((t) => rowTags.has(t));
+      if (!any) return false;
+    }
+
+    for (const [k, on] of Object.entries(filters.boolRequire)) {
+      if (on && !getRowDataValue(r, k)) return false;
+    }
+    for (const [k, on] of Object.entries(filters.boolReject)) {
+      if (on && getRowDataValue(r, k)) return false;
+    }
+
+    for (const [k, minStr] of Object.entries(filters.numMin)) {
+      const t = minStr?.trim();
+      if (!t) continue;
+      const min = parseFloat(t);
+      if (!Number.isFinite(min)) continue;
+      const v = getRowDataValue(r, k);
+      const n = typeof v === "number" ? v : parseFloat(String(v));
+      if (!Number.isFinite(n) || n < min) return false;
+    }
+    for (const [k, maxStr] of Object.entries(filters.numMax)) {
+      const t = maxStr?.trim();
+      if (!t) continue;
+      const max = parseFloat(t);
+      if (!Number.isFinite(max)) continue;
+      const v = getRowDataValue(r, k);
+      const n = typeof v === "number" ? v : parseFloat(String(v));
+      if (!Number.isFinite(n) || n > max) return false;
+    }
+    for (const [k, gtStr] of Object.entries(filters.numGt)) {
+      const t = gtStr?.trim();
+      if (!t) continue;
+      const gt = parseFloat(t);
+      if (!Number.isFinite(gt)) continue;
+      const v = getRowDataValue(r, k);
+      const n = typeof v === "number" ? v : parseFloat(String(v));
+      if (!Number.isFinite(n) || n <= gt) return false;
+    }
+    for (const [k, ltStr] of Object.entries(filters.numLt)) {
+      const t = ltStr?.trim();
+      if (!t) continue;
+      const lt = parseFloat(t);
+      if (!Number.isFinite(lt)) continue;
+      const v = getRowDataValue(r, k);
+      const n = typeof v === "number" ? v : parseFloat(String(v));
+      if (!Number.isFinite(n) || n >= lt) return false;
+    }
+
+    for (const [k, allowed] of Object.entries(filters.stringOneOf)) {
+      if (!allowed.length) continue;
+      const s = stringifyRowDataValueForFilter(getRowDataValue(r, k));
+      if (!allowed.includes(s)) return false;
+    }
+    for (const [k, sub] of Object.entries(filters.stringContains)) {
+      const needle = sub.trim().toLowerCase();
+      if (!needle) continue;
+      const hay = stringifyRowDataValueForFilter(
+        getRowDataValue(r, k),
+      ).toLowerCase();
+      if (!hay.includes(needle)) return false;
+    }
+    for (const [k, exact] of Object.entries(filters.stringEquals)) {
+      const want = exact.trim();
+      if (!want) continue;
+      const s = stringifyRowDataValueForFilter(getRowDataValue(r, k));
+      if (s !== want) return false;
+    }
+
+    return true;
+  });
+
+  if (search.trim()) {
+    const q = search.trim().toLowerCase();
+    result = result.filter((r) => {
+      if (r.symbol?.toLowerCase().includes(q)) return true;
+      for (const v of Object.values(r.rowData)) {
+        if (v == null) continue;
+        if (typeof v === "object") {
+          try {
+            if (JSON.stringify(v).toLowerCase().includes(q)) return true;
+          } catch {
+            /* ignore */
+          }
+        } else if (String(v).toLowerCase().includes(q)) return true;
+      }
+      return false;
+    });
+  }
+
+  result = [...result].sort((a, b) => {
+    let cmp = 0;
+    if (sortKey === "symbol")
+      cmp = (a.symbol ?? "").localeCompare(b.symbol ?? "");
+    else
+      cmp = compareRowDataValues(
+        getRowDataValue(a, sortKey),
+        getRowDataValue(b, sortKey),
+      );
+    return sortDir === "asc" ? cmp : -cmp;
+  });
+
+  return result;
+}

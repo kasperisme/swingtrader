@@ -11,7 +11,7 @@ from __future__ import annotations
 import json
 import logging
 import os
-from datetime import datetime, timezone
+from datetime import datetime, timezone, time
 from typing import Any
 
 import httpx
@@ -406,48 +406,403 @@ def _call_tool(name: str, args: dict, user_id: str | None = None) -> Any:
     return {"error": f"Unknown tool: {name}"}
 
 
+# ── Scan filter helpers ───────────────────────────────────────────────────────
+
+def _stringify_value(v: Any) -> str:
+    """Mirror stringifyRowDataValueForFilter from screenings-row-data.ts."""
+    if v is None:
+        return ""
+    if isinstance(v, str):
+        return v.strip()
+    if isinstance(v, bool):
+        return "true" if v else "false"
+    if isinstance(v, (int, float)):
+        return str(v)
+    try:
+        return json.dumps(v)
+    except Exception:
+        return str(v)
+
+
+def _apply_scan_filters(rows: list[dict], filters: dict) -> list[str]:
+    """Apply ScreeningsFilters (row-data + workflow note portions) to a list of
+    scan rows. Returns the ordered, deduplicated list of matching ticker symbols.
+
+    Workflow-note keys (__note_*) are merged in by _get_filtered_tickers_from_scan
+    before this function runs.
+    """
+    symbol_contains = (filters.get("symbolContains") or "").strip().lower()
+    bool_require: dict[str, bool] = filters.get("boolRequire") or {}
+    bool_reject: dict[str, bool] = filters.get("boolReject") or {}
+    num_min: dict[str, str] = filters.get("numMin") or {}
+    num_max: dict[str, str] = filters.get("numMax") or {}
+    num_gt: dict[str, str] = filters.get("numGt") or {}
+    num_lt: dict[str, str] = filters.get("numLt") or {}
+    str_one_of: dict[str, list[str]] = filters.get("stringOneOf") or {}
+    str_contains: dict[str, str] = filters.get("stringContains") or {}
+    str_equals: dict[str, str] = filters.get("stringEquals") or {}
+
+    # Workflow-note filters
+    wf_status = filters.get("status") or "all"
+    wf_has_row_note = filters.get("hasRowNote") or "any"
+    wf_highlighted = filters.get("noteHighlighted") or "any"
+    wf_active_position = filters.get("activePosition") or "any"
+    wf_comment = filters.get("noteComment") or "any"
+    wf_stage = filters.get("noteStage") or ""
+    wf_priority_eq = (filters.get("notePriorityEq") or "").strip()
+    wf_priority_gt = (filters.get("notePriorityGt") or "").strip()
+    wf_priority_lt = (filters.get("notePriorityLt") or "").strip()
+    wf_priority_min = (filters.get("notePriorityMin") or "").strip()
+    wf_priority_max = (filters.get("notePriorityMax") or "").strip()
+    wf_tags_any: list[str] = filters.get("noteTagsAny") or []
+
+    seen: set[str] = set()
+    out: list[str] = []
+
+    for row in rows:
+        symbol = str(row.get("symbol") or "")
+        rd: dict[str, Any] = row.get("row_data") or {}
+
+        if symbol_contains and symbol_contains not in symbol.lower():
+            continue
+
+        skip = False
+
+        # ── Workflow: status ──
+        if wf_status != "all":
+            if str(rd.get("__note_status")) != wf_status:
+                continue
+
+        # ── Workflow: hasRowNote ──
+        if wf_has_row_note == "yes" and not rd.get("__note_hasRowNote"):
+            continue
+        elif wf_has_row_note == "no" and rd.get("__note_hasRowNote"):
+            continue
+
+        # ── Workflow: highlighted ──
+        if wf_highlighted == "yes" and not rd.get("__note_highlighted"):
+            continue
+        elif wf_highlighted == "no" and rd.get("__note_highlighted"):
+            continue
+
+        # ── Workflow: activePosition ──
+        if wf_active_position == "yes" and not rd.get("__note_activePosition"):
+            continue
+        elif wf_active_position == "no" and rd.get("__note_activePosition"):
+            continue
+
+        # ── Workflow: comment ──
+        if wf_comment == "with" and not rd.get("__note_comment"):
+            continue
+        elif wf_comment == "without" and rd.get("__note_comment"):
+            continue
+
+        # ── Workflow: stage ──
+        if wf_stage == "__none__":
+            if rd.get("__note_stage"):
+                continue
+        elif wf_stage:
+            if str(rd.get("__note_stage") or "") != wf_stage:
+                continue
+
+        # ── Workflow: priority ──
+        def _num(v: Any) -> float | None:
+            if v is None:
+                return None
+            try:
+                return float(v)
+            except (TypeError, ValueError):
+                return None
+
+        if wf_priority_eq:
+            peq = float(wf_priority_eq)
+            pv = _num(rd.get("__note_priority"))
+            if pv is None or pv != peq:
+                continue
+        else:
+            if wf_priority_gt:
+                b = float(wf_priority_gt)
+                pv = _num(rd.get("__note_priority"))
+                if pv is None or not (pv > b):
+                    continue
+            if wf_priority_lt:
+                b = float(wf_priority_lt)
+                pv = _num(rd.get("__note_priority"))
+                if pv is None or not (pv < b):
+                    continue
+            if wf_priority_min:
+                b = float(wf_priority_min)
+                pv = _num(rd.get("__note_priority"))
+                if pv is None or pv < b:
+                    continue
+            if wf_priority_max:
+                b = float(wf_priority_max)
+                pv = _num(rd.get("__note_priority"))
+                if pv is None or pv > b:
+                    continue
+
+        # ── Workflow: tags ──
+        if wf_tags_any:
+            note_tags: list[str] = rd.get("__note_tags") or []
+            if not any(t in note_tags for t in wf_tags_any):
+                continue
+
+        # ── Row data filters (existing) ──
+
+        for key, on in bool_require.items():
+            if not on:
+                continue
+            if not rd.get(key):
+                skip = True
+                break
+        if skip:
+            continue
+
+        for key, on in bool_reject.items():
+            if not on:
+                continue
+            if rd.get(key):
+                skip = True
+                break
+        if skip:
+            continue
+
+        for key, bound_s in num_min.items():
+            if not (bound_s or "").strip():
+                continue
+            try:
+                b = float(bound_s)
+                v = rd.get(key)
+                vf = v if isinstance(v, (int, float)) else float(str(v))
+                if not (vf >= b):
+                    skip = True
+                    break
+            except (TypeError, ValueError):
+                skip = True
+                break
+        if skip:
+            continue
+
+        for key, bound_s in num_max.items():
+            if not (bound_s or "").strip():
+                continue
+            try:
+                b = float(bound_s)
+                v = rd.get(key)
+                vf = v if isinstance(v, (int, float)) else float(str(v))
+                if not (vf <= b):
+                    skip = True
+                    break
+            except (TypeError, ValueError):
+                skip = True
+                break
+        if skip:
+            continue
+
+        for key, bound_s in num_gt.items():
+            if not (bound_s or "").strip():
+                continue
+            try:
+                b = float(bound_s)
+                v = rd.get(key)
+                vf = v if isinstance(v, (int, float)) else float(str(v))
+                if not (vf > b):
+                    skip = True
+                    break
+            except (TypeError, ValueError):
+                skip = True
+                break
+        if skip:
+            continue
+
+        for key, bound_s in num_lt.items():
+            if not (bound_s or "").strip():
+                continue
+            try:
+                b = float(bound_s)
+                v = rd.get(key)
+                vf = v if isinstance(v, (int, float)) else float(str(v))
+                if not (vf < b):
+                    skip = True
+                    break
+            except (TypeError, ValueError):
+                skip = True
+                break
+        if skip:
+            continue
+
+        for key, allowed in str_one_of.items():
+            if not allowed:
+                continue
+            s = _stringify_value(rd.get(key))
+            if s not in allowed:
+                skip = True
+                break
+        if skip:
+            continue
+
+        for key, needle in str_contains.items():
+            if not (needle or "").strip():
+                continue
+            s = _stringify_value(rd.get(key)).lower()
+            if needle.strip().lower() not in s:
+                skip = True
+                break
+        if skip:
+            continue
+
+        for key, expected in str_equals.items():
+            if not (expected or "").strip():
+                continue
+            s = _stringify_value(rd.get(key))
+            if s != expected.strip():
+                skip = True
+                break
+        if skip:
+            continue
+
+        if symbol and symbol not in seen:
+            seen.add(symbol)
+            out.append(symbol)
+
+    return out
+
+
+def _get_filtered_tickers_from_scan(
+    user_id: str | None, scan_run_ids: list[int], scan_filters: dict
+) -> list[str]:
+    """Fetch scan rows + user notes for the given run IDs, merge notes into
+    row_data as __note_* keys, apply scan_filters, and return filtered symbols."""
+    if not user_id or not scan_run_ids:
+        return []
+    client = get_supabase_client()
+    schema = "swingtrader"
+
+    rows_res = (
+        client.schema(schema)
+        .table("user_scan_rows")
+        .select("id, symbol, row_data")
+        .in_("run_id", scan_run_ids)
+        .eq("user_id", user_id)
+        .execute()
+    )
+    rows = rows_res.data or []
+
+    notes_res = (
+        client.schema(schema)
+        .table("user_scan_row_notes")
+        .select("scan_row_id, status, highlighted, comment, stage, priority, tags, metadata_json")
+        .in_("run_id", scan_run_ids)
+        .eq("user_id", user_id)
+        .execute()
+    )
+    notes_by_row_id: dict[int, dict] = {}
+    for n in (notes_res.data or []):
+        notes_by_row_id[n["scan_row_id"]] = n
+
+    for row in rows:
+        rd: dict[str, Any] = row.get("row_data") or {}
+        note = notes_by_row_id.get(row.get("id"))
+        if note:
+            rd["__note_status"] = note.get("status") or None
+            rd["__note_highlighted"] = bool(note.get("highlighted"))
+            rd["__note_hasRowNote"] = True
+            rd["__note_comment"] = note.get("comment") or None
+            rd["__note_stage"] = note.get("stage") or None
+            rd["__note_priority"] = note.get("priority") if note.get("priority") is not None else None
+            rd["__note_tags"] = note.get("tags") or []
+            meta = note.get("metadata_json") or {}
+            rd["__note_activePosition"] = bool(meta.get("activePosition"))
+        else:
+            rd["__note_status"] = None
+            rd["__note_highlighted"] = False
+            rd["__note_hasRowNote"] = False
+            rd["__note_comment"] = None
+            rd["__note_stage"] = None
+            rd["__note_priority"] = None
+            rd["__note_tags"] = []
+            rd["__note_activePosition"] = False
+        row["row_data"] = rd
+
+    return _apply_scan_filters(rows, scan_filters)
+
+
 # ── Linked screening context ──────────────────────────────────────────────────
 
-def _get_linked_scan_run_context(user_id: str | None, scan_run_ids: list[int]) -> str:
+def _get_linked_scan_run_context(
+    user_id: str | None,
+    scan_run_ids: list[int],
+    filtered_tickers: list[str] | None = None,
+) -> str:
     if not user_id or not scan_run_ids:
         return ""
     client = get_supabase_client()
     schema = "swingtrader"
-    res = (
+
+    # Fetch runs
+    runs_res = (
         client.schema(schema)
         .table("user_scan_runs")
-        .select("id, scan_date, source, scan_row_notes(ticker, note, status)")
+        .select("id, scan_date, source")
         .in_("id", scan_run_ids)
         .eq("user_id", user_id)
         .execute()
     )
-    rows = res.data or []
-    if not rows:
+    runs = runs_res.data or []
+    if not runs:
         return ""
-    lines = []
-    for r in rows:
+
+    # Fetch notes for all linked runs
+    notes_res = (
+        client.schema(schema)
+        .table("user_scan_row_notes")
+        .select("run_id, ticker, status, highlighted, comment, stage, priority, tags")
+        .in_("run_id", scan_run_ids)
+        .eq("user_id", user_id)
+        .execute()
+    )
+    notes_by_run: dict[int, list[dict]] = {}
+    for n in notes_res.data or []:
+        notes_by_run.setdefault(n["run_id"], []).append(n)
+
+    lines: list[str] = []
+    for r in runs:
         run_id = r.get("id", "")
         date = str(r.get("scan_date", ""))[:10]
         source = r.get("source") or ""
-        notes = r.get("scan_row_notes") or []
         label = f"Scan {run_id} ({date}"
         if source:
             label += f", {source}"
         label += ")"
-        if notes:
-            active_notes = [n for n in notes if n.get("status") == "active"]
-            for n in active_notes[:10]:
+
+        run_notes = notes_by_run.get(run_id, [])
+        if run_notes:
+            for n in run_notes[:20]:
                 ticker = n.get("ticker", "")
-                note = (n.get("note") or "")[:150]
-                lines.append(f"- {label}: {ticker} — {note}")
+                status = n.get("status", "")
+                comment = (n.get("comment") or "")[:120]
+                stage = n.get("stage") or ""
+                highlighted = "★" if n.get("highlighted") else ""
+                parts = [p for p in [highlighted, status, stage, comment] if p]
+                note_str = f"{ticker} — {' '.join(parts)}" if parts else ticker
+                lines.append(f"- {label}: {note_str}")
         else:
             lines.append(f"- {label}: (no notes)")
+
+    if filtered_tickers:
+        sample = filtered_tickers[:30]
+        lines.append(
+            f"\nFiltered tickers ({len(filtered_tickers)} total): "
+            + ", ".join(sample)
+            + (f" +{len(filtered_tickers) - 30} more" if len(filtered_tickers) > 30 else "")
+        )
+
     return "\n".join(lines)
 
 
 # ── Agent loop ──────────────────────────────────────────────────────────────
 
-def run_agent(prompt: str, user_id: str | None = None, tickers: list[str] | None = None, linked_scan_run_ids: list[int] | None = None) -> dict:
+def run_agent(prompt: str, user_id: str | None = None, tickers: list[str] | None = None, linked_scan_run_ids: list[int] | None = None, filtered_tickers: list[str] | None = None) -> dict:
     """Run the screening agent loop. Returns {triggered, summary, data_used}."""
     _base_system = _AGENT_SYSTEM + (_FMP_SYSTEM_ADDON if _FMP_ENABLED else "")
     system = _base_system
@@ -465,7 +820,7 @@ def run_agent(prompt: str, user_id: str | None = None, tickers: list[str] | None
             "Prioritise these symbols in tool calls where a tickers parameter is available."
         )
     if linked_scan_run_ids:
-        linked_context = _get_linked_scan_run_context(user_id, linked_scan_run_ids)
+        linked_context = _get_linked_scan_run_context(user_id, linked_scan_run_ids, filtered_tickers=filtered_tickers)
         if linked_context:
             system += (
                 f"\n\n## Linked Screening Context\n{linked_context}\n"
@@ -529,7 +884,33 @@ def _format_telegram_message(name: str, triggered: bool, summary: str | None, er
     return f"<b>✅ {name}</b>\n\n<i>No trigger — conditions not met.</i>"
 
 
-# ── Run + persist ───────────────────────────────────────────────────────────
+# ── Trading session helpers ─────────────────────────────────────────────────
+
+_SESSION_LABELS: dict[str, str] = {
+    "nyse": "NYSE 9:30 AM – 4:00 PM ET",
+}
+
+_NYSE_OPEN = time(9, 30)
+_NYSE_CLOSE = time(16, 0)
+
+
+def _is_market_open(session: str) -> bool:
+    """Check whether the current time falls within the given trading session."""
+    if session == "nyse":
+        # Use US Eastern time for NYSE
+        try:
+            from zoneinfo import ZoneInfo
+            now_et = datetime.now(ZoneInfo("America/New_York"))
+        except Exception:
+            now_et = datetime.now(timezone.utc)
+        t = now_et.timetz()
+        # NYSE is also closed on weekdays
+        if t.weekday() >= 5:
+            return False
+        return _NYSE_OPEN <= t < _NYSE_CLOSE
+    return True
+
+
 
 def run_screening(screening: dict, dry_run: bool = False, is_test: bool = False) -> dict:
     """Run a single screening. Returns the result dict (not yet persisted)."""
@@ -540,12 +921,54 @@ def run_screening(screening: dict, dry_run: bool = False, is_test: bool = False)
         "dry_run": dry_run,
         "is_test": is_test,
     }
+
+    # ── Trading session gate ──
+    # If the agent is configured to only run during a specific trading session,
+    # check whether the market is currently open and skip if not.
+    trading_session = (screening.get("trading_session") or "none")
+    if trading_session != "none" and not is_test:
+        if not _is_market_open(trading_session):
+            log.info(
+                "Skipping screening %s — market not open (session=%s)",
+                screening["id"], trading_session,
+            )
+            return {
+                **base,
+                "triggered": False,
+                "summary": f"Skipped: market not open ({_SESSION_LABELS.get(trading_session, trading_session)})",
+                "data_used": {},
+            }
+
     try:
+        explicit_tickers: list[str] = screening.get("tickers") or []
+        linked_ids: list[int] = screening.get("linked_scan_run_ids") or []
+        scan_filters: dict | None = screening.get("scan_filters")
+
+        # If scan_filters are set, resolve the filtered ticker list from linked runs
+        # and merge with any explicitly pinned tickers.
+        filtered_tickers: list[str] | None = None
+        if scan_filters and linked_ids:
+            filtered = _get_filtered_tickers_from_scan(
+                screening.get("user_id"), linked_ids, scan_filters
+            )
+            filtered_tickers = filtered
+            # Explicit tickers take priority; filtered symbols follow (deduped)
+            seen: set[str] = set(explicit_tickers)
+            merged = list(explicit_tickers)
+            for t in filtered:
+                if t not in seen:
+                    seen.add(t)
+                    merged.append(t)
+            resolved_tickers: list[str] | None = merged or None
+        else:
+            resolved_tickers = explicit_tickers or None
+
         result = run_agent(
             screening["prompt"],
             user_id=screening.get("user_id"),
-            tickers=screening.get("tickers") or None,
-            linked_scan_run_ids=screening.get("linked_scan_run_ids") or None,
+            tickers=resolved_tickers,
+            linked_scan_run_ids=linked_ids or None,
+            filtered_tickers=filtered_tickers,
         )
         result.update(base)
         return result

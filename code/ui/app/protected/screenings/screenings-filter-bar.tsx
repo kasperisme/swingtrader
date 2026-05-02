@@ -1,6 +1,7 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { ChevronLeft, Plus, Search, X } from "lucide-react";
 import {
   DEFAULT_SCREENINGS_FILTERS,
@@ -522,6 +523,8 @@ export function AddFilterWidget({
   const [valueDraft, setValueDraft] = useState("");
   const [catDraft, setCatDraft] = useState<Set<string>>(() => new Set());
   const rootRef = useRef<HTMLDivElement>(null);
+  const portalRef = useRef<HTMLDivElement>(null);
+  const [portalStyle, setPortalStyle] = useState<React.CSSProperties>({});
 
   const catalog = useMemo(
     () => catalogEntries(noteStageOptions, noteTagOptions, boolKeys, numKeys, categoricalStringCols, freeStringKeys),
@@ -552,7 +555,10 @@ export function AddFilterWidget({
   useEffect(() => {
     if (!open) return;
     function onDoc(e: MouseEvent) {
-      if (rootRef.current && !rootRef.current.contains(e.target as Node)) {
+      const t = e.target as Node;
+      const insideRoot = rootRef.current?.contains(t);
+      const insidePortal = portalRef.current?.contains(t);
+      if (!insideRoot && !insidePortal) {
         onClose();
         resetWizard();
       }
@@ -560,6 +566,30 @@ export function AddFilterWidget({
     document.addEventListener("mousedown", onDoc);
     return () => document.removeEventListener("mousedown", onDoc);
   }, [open, onClose]);
+
+  useLayoutEffect(() => {
+    if (!open) return;
+    const el = rootRef.current;
+    if (!el) return;
+    function measure() {
+      if (!el) return;
+      const r = el.getBoundingClientRect();
+      setPortalStyle({
+        position: "fixed",
+        left: r.left,
+        top: r.bottom + 1,
+        width: Math.min(r.width, 448),
+        zIndex: 50,
+      });
+    }
+    measure();
+    window.addEventListener("scroll", measure, true);
+    window.addEventListener("resize", measure);
+    return () => {
+      window.removeEventListener("scroll", measure, true);
+      window.removeEventListener("resize", measure);
+    };
+  }, [open, step]);
 
   const resetWizard = useCallback(() => {
     setStep("fields");
@@ -796,7 +826,7 @@ export function AddFilterWidget({
 
   // Expanded inline wizard — fills the entire tabs row
   return (
-    <div ref={rootRef} className="flex-1 min-w-0 flex flex-col pb-px">
+    <div ref={rootRef} className="relative flex-1 min-w-0 flex flex-col pb-px">
       {/* Inline header row — same height as tab buttons */}
       <div className="flex items-center gap-1.5 px-1 py-1 min-w-0">
         {step !== "fields" && (
@@ -866,9 +896,9 @@ export function AddFilterWidget({
         </button>
       </div>
 
-      {/* Dropdown panel — absolute relative to the `relative` flex row in screenings-ui */}
-      <div className="absolute left-0 right-0 top-full z-50 pt-px">
-        <div className="max-w-md rounded-lg border border-border bg-popover text-popover-foreground shadow-lg ring-1 ring-black/5 dark:ring-white/10">
+      {typeof document !== "undefined" && createPortal(
+        <div ref={portalRef} style={portalStyle}>
+          <div className="rounded-lg border border-border bg-popover text-popover-foreground shadow-lg ring-1 ring-black/5 dark:ring-white/10">
           {step === "fields" && (
             <div className="flex flex-col max-h-80">
               <div className="overflow-y-auto p-1">
@@ -1060,8 +1090,10 @@ export function AddFilterWidget({
               </div>
             </div>
           )}
-        </div>
-      </div>
+          </div>
+        </div>,
+        document.body,
+      )}
     </div>
   );
 }

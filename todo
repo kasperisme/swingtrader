@@ -27,6 +27,8 @@ Prio 1:
 [ ] (Agent) Have agent activation windows (e.g. it should scan every 15 minutes when intramarket, but otherwise not)
 [ ] (Agent) Setup market wide screenings (start with predefined screenings and let the agent run them, and in the future let the user create their own screenings using the screening)
 [ ] (Design) Optimize for mobile
+[ ] (UI) Searching is too slow
+[ ] (UI) Screenings should be generic and not linked to my setup
 
 Prio 2:
 [x] Get embedding searching to work with the ollama model
