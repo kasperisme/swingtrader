@@ -1,0 +1,10 @@
+    <item>
+      <title>{{ title | e }}</title>
+      <description><![CDATA[{{ description }}]]></description>
+      <enclosure url="{{ audio_url }}" length="{{ file_size_bytes }}" type="audio/mpeg"/>
+      <pubDate>{{ pub_date }}</pubDate>
+      <itunes:duration>{{ duration_seconds }}</itunes:duration>
+      <itunes:image href="{{ cover_url }}"/>
+      <itunes:explicit>no</itunes:explicit>
+      <guid isPermaLink="false">{{ guid }}</guid>
+    </item>

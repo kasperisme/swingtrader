@@ -33,15 +33,14 @@ load_dotenv(dotenv_path=_ROOT / ".env")
 # Must import db before anything that might fail so we can report errors.
 from shared.db import (
     create_scan_job,
-    ensure_schema,
     finish_scan_job,
     update_scan_job_pid,
     update_scan_job_progress,
 )
 from services.screener.api_client import persist_market_wide_scan_via_api
-from src import technical, logging, fundamentals
+from services.screener import technical, fundamentals
+from shared.logging import logger
 
-logger = logging.logger
 
 # ---------------------------------------------------------------------------
 # Job lifecycle helpers
@@ -56,11 +55,7 @@ def _init_job() -> None:
     global _JOB_ID, _OWN_JOB
     if _JOB_ID:
         return  # job_runner already owns the lifecycle
-    # Ensure tables exist for direct runs (requires direct DB creds; skip if unavailable).
-    try:
-        ensure_schema()
-    except Exception as e:
-        logger.debug("ensure_schema skipped: %s", e)
+
     _JOB_ID = create_scan_job(
         scan_source="ibd_screener",
         script_rel="ibd_screener.py",
@@ -96,6 +91,7 @@ def _finish(exit_code: int, error: str | None = None) -> None:
 # ---------------------------------------------------------------------------
 # Screener logic
 # ---------------------------------------------------------------------------
+
 
 def run() -> None:
     _init_job()
@@ -138,7 +134,9 @@ def run() -> None:
 
     logger.info("Total tickers: %d", len(tickers))
     logger.info("After pre-screen + RS>80: %d", len(ls_symbol))
-    logger.info("Start date: %s  End date: %s", startdate.strftime(strf), today.strftime(strf))
+    logger.info(
+        "Start date: %s  End date: %s", startdate.strftime(strf), today.strftime(strf)
+    )
 
     # ------------------------------------------------------------------
     # Step 3 — deep per-ticker screening
@@ -200,7 +198,9 @@ def run() -> None:
     # Drop ticker-metadata columns that were already added per-row in the loop
     # (sector, subSector) to prevent _x/_y suffix collision on merge.
     tickers_for_merge = df_tickers.drop(
-        columns=[c for c in ("sector", "subSector", "industry") if c in df_tickers.columns],
+        columns=[
+            c for c in ("sector", "subSector", "industry") if c in df_tickers.columns
+        ],
     )
     df_trend_template = df_trend_template.merge(
         tickers_for_merge, left_on="ticker", right_on="symbol", how="left"
@@ -215,7 +215,16 @@ def run() -> None:
         df_rs_out.to_excel(writer, sheet_name="rs_rating")
         df_quote_out.to_excel(writer, sheet_name="quote")
 
-    passed_count = int(df_trend_template["Passed"].sum()) if "Passed" in df_trend_template.columns else 0
+    passed_mask = (
+        df_trend_template.get("Passed", False) == True
+    ) & (df_trend_template.get("PASSED_FUNDAMENTALS", False) == True)
+    df_trend_template_passed = df_trend_template[passed_mask]
+    passed_symbols = set(df_trend_template_passed["symbol"].dropna().tolist())
+    passed_count = len(df_trend_template_passed)
+
+    df_rs_passed = df_rs_out[df_rs_out["symbol"].isin(passed_symbols)]
+    df_quote_passed = df_quote_out[df_quote_out["symbol"].isin(passed_symbols)]
+
     _progress(
         f"Step 4/4: Saving to Supabase — {passed_count} passed / {total} screened…"
     )
@@ -224,9 +233,9 @@ def run() -> None:
         run_id = persist_market_wide_scan_via_api(
             today.date(),
             "ibd_screener",
-            df_trend_template,
-            df_rs_out,
-            df_quote_out,
+            df_trend_template_passed,
+            df_rs_passed,
+            df_quote_passed,
         )
         logger.info("Screening results uploaded via API (run_id=%s)", run_id)
     except Exception as e:

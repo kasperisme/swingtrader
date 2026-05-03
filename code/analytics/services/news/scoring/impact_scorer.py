@@ -14,24 +14,11 @@ from dataclasses import dataclass
 from typing import Optional, Union
 
 from services.news.scoring.dimensions import CLUSTERS, DIMENSION_MAP
-from services.news.llm.ollama_client import chat as _ollama_chat, OllamaError
-from services.news.llm.anthropic_client import chat as _anthropic_chat, AnthropicError
-from services.news.llm.do_agent_client import chat as _do_agent_chat, GenAIAgentError
+from shared.llm import chat as _chat, LLMError
 
 # NEWS_IMPACT_BACKEND=ollama (default) | anthropic | do_agent
 _raw_backend = os.environ.get("NEWS_IMPACT_BACKEND", "ollama").lower()
 _BACKEND = _raw_backend if _raw_backend in ("ollama", "anthropic", "do_agent") else "ollama"
-
-
-def _llm_error_class() -> type[Exception]:
-    if _BACKEND == "anthropic":
-        return AnthropicError
-    if _BACKEND == "do_agent":
-        return GenAIAgentError
-    return OllamaError
-
-
-LLMError = _llm_error_class()
 
 
 def _sync_concurrency_from_backend() -> None:
@@ -52,10 +39,10 @@ def set_news_impact_backend(backend: str) -> None:
     """
     Override the LLM backend for this process (``ollama``, ``anthropic``, or ``do_agent``).
 
-    Updates ``os.environ[\"NEWS_IMPACT_BACKEND\"]`` so downstream code agrees.
-    Used by ``score_news_cli --news-impact-backend``.
+    Updates ``os.environ[\"NEWS_IMPACT_BACKEND\"]`` so shared.llm.chat picks the
+    new backend on the next call. Used by ``score_news_cli --news-impact-backend``.
     """
-    global _BACKEND, LLMError
+    global _BACKEND
     b = backend.strip().lower()
     if b not in ("ollama", "anthropic", "do_agent"):
         raise ValueError(
@@ -63,17 +50,7 @@ def set_news_impact_backend(backend: str) -> None:
         )
     os.environ["NEWS_IMPACT_BACKEND"] = b
     _BACKEND = b
-    LLMError = _llm_error_class()
     _sync_concurrency_from_backend()
-
-
-async def _chat(prompt: str, system: str, model: Optional[str], timeout: float) -> tuple[str, int]:
-    """Dispatch a chat request to the active LLM backend (ollama / anthropic / do_agent)."""
-    if _BACKEND == "anthropic":
-        return await _anthropic_chat(prompt=prompt, system=system, model=model, timeout=timeout)
-    if _BACKEND == "do_agent":
-        return await _do_agent_chat(prompt=prompt, system=system, model=model, timeout=timeout)
-    return await _ollama_chat(prompt=prompt, system=system, model=model, timeout=timeout)
 
 
 def _default_model() -> str:

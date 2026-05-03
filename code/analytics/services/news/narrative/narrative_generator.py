@@ -33,7 +33,7 @@ import asyncio
 import json
 import logging
 import os
-from collections import defaultdict, deque
+from collections import defaultdict
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
 from typing import Any, Optional
@@ -42,6 +42,15 @@ from zoneinfo import ZoneInfo
 from shared.db import get_pg_connection, get_supabase_client, _tbl
 from services.news.llm.ollama_client import chat as ollama_chat, OllamaError
 from services.news.embeddings.semantic_retrieval import search_news_embeddings
+from services.rag import (
+    RelationshipEdge,
+    fetch_relationship_edges as _rag_fetch_relationship_edges,
+    expand_related_tickers as _rag_expand_related_tickers,
+    build_neighborhood_from_seed as _rag_build_neighborhood_from_seed,
+    get_user_positions as _rag_get_user_positions,
+    get_user_screening_notes as _rag_get_user_screening_notes,
+    get_ticker_news as _rag_get_ticker_news,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -63,7 +72,6 @@ _REL_MIN_STRENGTH = max(0.0, min(1.0, float(os.environ.get("NARRATIVE_REL_MIN_ST
 _REL_MIN_MENTIONS = max(1, int(os.environ.get("NARRATIVE_REL_MIN_MENTIONS", "1")))
 _REL_LIMIT_NODES = max(20, int(os.environ.get("NARRATIVE_REL_LIMIT_NODES", "140")))
 _REL_LIMIT_EDGES = max(50, int(os.environ.get("NARRATIVE_REL_LIMIT_EDGES", "360")))
-_BLOCKED_NODE_LABELS = {"N/A"}
 _MAX_NEWS_PER_TICKER_DB = max(1, int(os.environ.get("NARRATIVE_MAX_NEWS_PER_TICKER_DB", "5")))
 _MAX_NEWS_BLOCK_ITEMS = max(1, int(os.environ.get("NARRATIVE_MAX_NEWS_BLOCK_ITEMS", "30")))
 _MAX_RELATED_BLOCK_ITEMS = max(1, int(os.environ.get("NARRATIVE_MAX_RELATED_BLOCK_ITEMS", "20")))
@@ -121,15 +129,6 @@ class UserContext:
 
 # ── DB queries ────────────────────────────────────────────────────────────────
 
-@dataclass
-class RelationshipEdge:
-    from_ticker: str
-    to_ticker: str
-    rel_type: str
-    strength: float
-    mention_count: int = 0
-
-
 def _normalize_ticker(ticker: Any) -> str:
     """Coerce a raw ticker value to an uppercase stripped string (handles None and mixed case)."""
     return str(ticker or "").upper().strip()
@@ -151,74 +150,15 @@ def _score_tier(score: float) -> str:
 
 
 def _fetch_relationship_edges(conn, lookback_days: int) -> list[RelationshipEdge]:
+    """Thin wrapper over services.rag.fetch_relationship_edges (kept for backward compat).
+
+    The conn parameter is unused — RAG uses the supabase singleton client.
     """
-    Load canonicalized graph edges from ticker_relationship_network_resolved_v.
-    Mirrors UI relationshipsGetNeighborhood() data source + filters.
-    """
-    schema = "swingtrader"
-    since = datetime.now(_EASTERN) - timedelta(days=max(1, lookback_days))
-    sql = f"""
-        SELECT
-            from_ticker,
-            to_ticker,
-            rel_type,
-            strength_avg,
-            mention_count
-        FROM {schema}.ticker_relationship_network_resolved_v
-        WHERE strength_avg >= %s
-          AND mention_count >= %s
-          AND last_seen_at >= %s
-        ORDER BY strength_avg DESC
-        LIMIT 2000
-    """
-    cur = conn.cursor()
-    cur.execute(sql, (_REL_MIN_STRENGTH, _REL_MIN_MENTIONS, since))
-    rows = cur.fetchall() or []
-    merged_by_key: dict[tuple[str, str, str], RelationshipEdge] = {}
-    for from_raw, to_raw, rel_raw, strength_raw, mention_raw in rows:
-        from_ticker = _normalize_ticker(from_raw)
-        to_ticker = _normalize_ticker(to_raw)
-        rel_type = str(rel_raw or "").lower().strip()
-        if (
-            not from_ticker
-            or not to_ticker
-            or not rel_type
-            or from_ticker == to_ticker
-            or from_ticker in _BLOCKED_NODE_LABELS
-            or to_ticker in _BLOCKED_NODE_LABELS
-        ):
-            continue
-        try:
-            strength = max(0.0, min(1.0, float(strength_raw)))
-        except (TypeError, ValueError):
-            continue
-        try:
-            mention_count = max(0, int(mention_raw or 0))
-        except (TypeError, ValueError):
-            mention_count = 0
-        edge = RelationshipEdge(
-            from_ticker=from_ticker,
-            to_ticker=to_ticker,
-            rel_type=rel_type,
-            strength=strength,
-            mention_count=mention_count,
-        )
-        key = (from_ticker, to_ticker, rel_type)
-        prev = merged_by_key.get(key)
-        if prev is None:
-            merged_by_key[key] = edge
-            continue
-        prev_weight = max(1, prev.mention_count)
-        next_weight = max(1, edge.mention_count)
-        merged_by_key[key] = RelationshipEdge(
-            from_ticker=from_ticker,
-            to_ticker=to_ticker,
-            rel_type=rel_type,
-            strength=((prev.strength * prev_weight) + (edge.strength * next_weight))
-            / (prev_weight + next_weight),
-            mention_count=prev.mention_count + edge.mention_count,
-        )
-    return list(merged_by_key.values())
+    return _rag_fetch_relationship_edges(
+        lookback_days=lookback_days,
+        min_strength=_REL_MIN_STRENGTH,
+        min_mentions=_REL_MIN_MENTIONS,
+    )
 
 
 def _resolve_canonical_tickers(conn, tickers: list[str]) -> list[str]:
@@ -245,6 +185,8 @@ def _resolve_canonical_tickers(conn, tickers: list[str]) -> list[str]:
     return [best.get(t.lower(), t) for t in normalized]
 
 
+# BFS / multi-hop expansion live in services.rag.graph; thin wrappers preserve
+# the legacy private names used elsewhere in this module.
 def _expand_related_tickers(
     seed_tickers: list[str],
     edges: list[RelationshipEdge],
@@ -253,79 +195,7 @@ def _expand_related_tickers(
     min_score: float = _REL_MIN_SCORE,
     max_tickers: int = _REL_MAX_TICKERS,
 ) -> tuple[dict[str, float], dict[str, list[str]]]:
-    """
-    Multi-hop traversal (up to K steps) with per-hop decay.
-    Returns (ticker_score_map, ticker_paths_map).
-    """
-    if not seed_tickers or not edges:
-        return {}, {}
-
-    adjacency: dict[str, list[RelationshipEdge]] = defaultdict(list)
-    for edge in edges:
-        adjacency[edge.from_ticker].append(edge)
-
-    seeds = {_normalize_ticker(t) for t in seed_tickers if _normalize_ticker(t)}
-    best_score: dict[str, float] = {}
-    best_path: dict[str, list[str]] = {}
-    path_rel_types: dict[str, list[str]] = {}
-
-    queue: deque[tuple[str, int, float, list[str], list[str]]] = deque()
-    for seed in seeds:
-        queue.append((seed, 0, 1.0, [seed], []))
-
-    while queue:
-        ticker, depth, score, path_nodes, rel_types = queue.popleft()
-        if depth >= hops:
-            continue
-        for edge in adjacency.get(ticker, []):
-            next_ticker = edge.to_ticker
-            if next_ticker in path_nodes:
-                continue
-            next_depth = depth + 1
-            next_score = score * edge.strength * (decay if next_depth > 1 else 1.0)
-            if next_score <= 0:
-                continue
-            next_path = path_nodes + [next_ticker]
-            next_rel_types = rel_types + [edge.rel_type]
-
-            if next_ticker not in seeds:
-                should_update = (
-                    next_ticker not in best_score
-                    or next_score > best_score[next_ticker]
-                    or (
-                        abs(next_score - best_score[next_ticker]) < 1e-9
-                        and len(next_path) < len(best_path.get(next_ticker, next_path))
-                    )
-                )
-                if should_update:
-                    best_score[next_ticker] = next_score
-                    best_path[next_ticker] = next_path
-                    path_rel_types[next_ticker] = next_rel_types
-
-            queue.append((next_ticker, next_depth, next_score, next_path, next_rel_types))
-
-    ranked = sorted(
-        (
-            (ticker, score)
-            for ticker, score in best_score.items()
-            if score >= min_score and ticker not in seeds
-        ),
-        key=lambda x: x[1],
-        reverse=True,
-    )[:max_tickers]
-
-    final_scores = {ticker: score for ticker, score in ranked}
-    final_paths: dict[str, list[str]] = {}
-    for ticker in final_scores:
-        nodes = best_path.get(ticker, [ticker])
-        rel_types = path_rel_types.get(ticker, [])
-        segments: list[str] = []
-        for idx, src in enumerate(nodes[:-1]):
-            rel = rel_types[idx] if idx < len(rel_types) else "related"
-            dst = nodes[idx + 1]
-            segments.append(f"{src} -{rel}-> {dst}")
-        final_paths[ticker] = segments or [ticker]
-    return final_scores, final_paths
+    return _rag_expand_related_tickers(seed_tickers, edges, hops, decay, min_score, max_tickers)
 
 
 def _build_neighborhood_from_seed(
@@ -335,144 +205,23 @@ def _build_neighborhood_from_seed(
     limit_nodes: int = _REL_LIMIT_NODES,
     limit_edges: int = _REL_LIMIT_EDGES,
 ) -> tuple[set[str], list[RelationshipEdge], dict[str, int], dict[str, str]]:
-    """
-    Match UI neighborhood traversal:
-    - BFS from seed
-    - hop cap (UI enforces <=2)
-    - global caps for node and edge count
-    """
-    bounded_hops = max(1, min(2, int(hops)))
-    visited: set[str] = {seed_ticker}
-    depth_by: dict[str, int] = {seed_ticker: 0}
-    parent_by: dict[str, str] = {}
-    queue: deque[str] = deque([seed_ticker])
-    kept_edges: list[RelationshipEdge] = []
-
-    while queue and len(visited) < limit_nodes and len(kept_edges) < limit_edges:
-        current = queue.popleft()
-        current_depth = depth_by.get(current, 0)
-        if current_depth >= bounded_hops:
-            continue
-        neighbors = [e for e in all_edges if e.from_ticker == current or e.to_ticker == current]
-        for edge in neighbors:
-            if len(kept_edges) >= limit_edges:
-                break
-            kept_edges.append(edge)
-            next_ticker = edge.to_ticker if edge.from_ticker == current else edge.from_ticker
-            if next_ticker not in visited and len(visited) < limit_nodes:
-                visited.add(next_ticker)
-                depth_by[next_ticker] = current_depth + 1
-                parent_by[next_ticker] = current
-                queue.append(next_ticker)
-
-    return visited, kept_edges, depth_by, parent_by
+    return _rag_build_neighborhood_from_seed(seed_ticker, all_edges, hops, limit_nodes, limit_edges)
 
 def _fetch_open_positions(conn, user_id: str) -> list[OpenPosition]:
-    """
-    Compute net open position per ticker from user_trades.
-    Net long  = SUM(buy×long qty) - SUM(sell×long qty)  > 0
-    Net short = SUM(sell×short qty) - SUM(buy×short qty) > 0 (returned as negative)
-    """
-    schema = "swingtrader"
-    sql = f"""
-        SELECT
-            ticker,
-            SUM(
-                CASE
-                    WHEN side = 'buy'  AND position_side = 'long'  THEN  quantity
-                    WHEN side = 'sell' AND position_side = 'long'  THEN -quantity
-                    WHEN side = 'sell' AND position_side = 'short' THEN  quantity
-                    WHEN side = 'buy'  AND position_side = 'short' THEN -quantity
-                    ELSE 0
-                END
-            ) AS net_qty,
-            SUM(
-                CASE WHEN side = 'buy' THEN quantity * price_per_unit ELSE 0 END
-            ) / NULLIF(SUM(CASE WHEN side = 'buy' THEN quantity ELSE 0 END), 0)
-                AS avg_cost
-        FROM {schema}.user_trades
-        WHERE user_id = %s
-        GROUP BY ticker
-        HAVING SUM(
-            CASE
-                WHEN side = 'buy'  AND position_side = 'long'  THEN  quantity
-                WHEN side = 'sell' AND position_side = 'long'  THEN -quantity
-                WHEN side = 'sell' AND position_side = 'short' THEN  quantity
-                WHEN side = 'buy'  AND position_side = 'short' THEN -quantity
-                ELSE 0
-            END
-        ) != 0
-        ORDER BY ticker
-    """
-    cur = conn.cursor()
-    cur.execute(sql, (user_id,))
-    rows = cur.fetchall() or []
+    """Adapter over services.rag.get_user_positions; conn is unused (kept for signature)."""
     return [
-        OpenPosition(ticker=r[0], net_qty=float(r[1]), avg_cost=float(r[2]) if r[2] else None)
-        for r in rows
+        OpenPosition(
+            ticker=p["ticker"],
+            net_qty=float(p["net_qty"]),
+            avg_cost=float(p["avg_cost"]) if p.get("avg_cost") is not None else None,
+        )
+        for p in _rag_get_user_positions(user_id)
     ]
 
 
 def _fetch_active_screen_tickers(conn, user_id: str) -> list[str]:
-    """
-    Return active screening tickers from the user's latest screening run only.
-
-    This avoids mixing stale active notes from older runs into today's narrative.
-    """
-    schema = "swingtrader"
-    sql = f"""
-        WITH latest_run AS (
-            SELECT id
-            FROM {schema}.user_scan_runs
-            WHERE user_id = %s
-              AND COALESCE(status, 'active') = 'active'
-            ORDER BY scan_date DESC, id DESC
-            LIMIT 1
-        )
-        SELECT DISTINCT n.ticker
-        FROM {schema}.user_scan_row_notes n
-        JOIN latest_run lr ON lr.id = n.run_id
-        WHERE n.user_id = %s
-          AND n.status = 'active'
-          AND n.ticker IS NOT NULL
-          AND btrim(n.ticker) <> ''
-        ORDER BY n.ticker
-    """
-    cur = conn.cursor()
-    cur.execute(sql, (user_id, user_id))
-    return [r[0] for r in (cur.fetchall() or [])]
-
-
-def _fetch_ticker_aliases(conn, canonical_tickers: list[str]) -> dict[str, str]:
-    """
-    Return a map of {alias_norm → canonical_ticker} for all known aliases of the
-    given canonical tickers, using the same security_identity_map table as
-    _resolve_canonical_tickers (i.e. the same method the UI uses).
-    The canonical tickers themselves are included so the query covers everything.
-    """
-    if not canonical_tickers:
-        return {}
-    schema = "swingtrader"
-    sql = f"""
-        SELECT alias_value_norm, canonical_ticker
-        FROM {schema}.security_identity_map
-        WHERE alias_kind = 'ticker'
-          AND canonical_ticker = ANY(%s)
-        ORDER BY verified DESC, confidence DESC, id ASC
-    """
-    cur = conn.cursor()
-    cur.execute(sql, ([t.upper() for t in canonical_tickers],))
-    rows = cur.fetchall() or []
-    alias_to_canonical: dict[str, str] = {}
-    for alias_norm, canonical in rows:
-        norm = _normalize_ticker(str(alias_norm))
-        canon = _normalize_ticker(str(canonical))
-        if norm and canon and norm not in alias_to_canonical:
-            alias_to_canonical[norm] = canon
-    # Always include the canonical tickers themselves as identity mappings
-    for t in canonical_tickers:
-        alias_to_canonical.setdefault(t, t)
-    return alias_to_canonical
+    """Adapter over services.rag.get_user_screening_notes; conn is unused (kept for signature)."""
+    return _rag_get_user_screening_notes(user_id)
 
 
 def _fetch_ticker_news(
@@ -480,138 +229,44 @@ def _fetch_ticker_news(
     tickers: list[str],
     lookback_hours: int,
 ) -> dict[str, list[TickerNewsItem]]:
-    """
-    For each ticker, find recent articles and the TICKER_SENTIMENT score.
-    Also pulls TICKER_RELATIONSHIPS data for relationship insights.
-    Articles tagged under any known alias of a ticker are included and mapped
-    back to the canonical ticker (same alias table the UI uses).
-    Returns {ticker: [TickerNewsItem, ...]}
+    """Adapter over services.rag.get_ticker_news; reshapes the flat list into a
+    {canonical_ticker: [TickerNewsItem, ...]} mapping. The conn parameter is
+    unused (RAG uses the supabase singleton client and resolves aliases via RPC).
     """
     if not tickers:
         return {}
-    normalized_tickers = list(dict.fromkeys(_normalize_ticker(t) for t in tickers if _normalize_ticker(t)))
-    if not normalized_tickers:
+    normalized = list(dict.fromkeys(_normalize_ticker(t) for t in tickers if _normalize_ticker(t)))
+    if not normalized:
         return {}
 
-    # Build full alias → canonical map and the expanded query set
-    alias_to_canonical = _fetch_ticker_aliases(conn, normalized_tickers)
-    all_query_tickers = list(alias_to_canonical.keys())  # canonical + all aliases
+    flat = _rag_get_ticker_news(
+        normalized,
+        hours=lookback_hours,
+        per_ticker_limit=_MAX_NEWS_PER_TICKER_DB,
+    )
 
-    schema = "swingtrader"
-    since = datetime.now(_EASTERN) - timedelta(hours=lookback_hours)
-
-    # Fetch articles mentioning these tickers (or any of their aliases)
-    sql_articles = f"""
-        SELECT
-            nat.ticker,
-            na.id            AS article_id,
-            na.title,
-            na.url,
-            na.published_at
-        FROM {schema}.news_article_tickers nat
-        JOIN {schema}.news_articles na ON na.id = nat.article_id
-        WHERE nat.ticker = ANY(%s)
-          AND COALESCE(na.published_at, na.created_at) >= %s
-        ORDER BY nat.ticker, COALESCE(na.published_at, na.created_at) DESC
-        LIMIT %s
-    """
-    cur = conn.cursor()
-    max_articles = _MAX_NEWS_PER_TICKER_DB * len(normalized_tickers)
-    cur.execute(sql_articles, (all_query_tickers, since, max_articles))
-    article_rows = cur.fetchall() or []
-
-    # Collect unique article IDs to fetch heads in one query
-    article_ids = list({r[1] for r in article_rows})
-    if not article_ids:
-        return {}
-
-    # Fetch TICKER_SENTIMENT heads
-    sql_sentiment = f"""
-        SELECT article_id, scores_json, reasoning_json
-        FROM {schema}.news_impact_heads
-        WHERE article_id = ANY(%s)
-          AND cluster = 'TICKER_SENTIMENT'
-    """
-    cur.execute(sql_sentiment, (article_ids,))
-    sentiment_by_article: dict[int, tuple[dict, dict]] = {}
-    for row in (cur.fetchall() or []):
-        sentiment_by_article[row[0]] = (row[1] or {}, row[2] or {})
-
-    # Fetch TICKER_RELATIONSHIPS heads
-    sql_rel = f"""
-        SELECT article_id, scores_json, reasoning_json
-        FROM {schema}.news_impact_heads
-        WHERE article_id = ANY(%s)
-          AND cluster = 'TICKER_RELATIONSHIPS'
-    """
-    cur.execute(sql_rel, (article_ids,))
-    relationships_by_article: dict[int, list[dict]] = {}
-    for row in (cur.fetchall() or []):
-        rel_scores = row[1] or {}
-        rel_reasoning = row[2] or {}
-        parsed = []
-        for key, strength in rel_scores.items():
-            parts = key.split("__")
-            if len(parts) == 3:
-                parsed.append({
-                    "from": parts[0],
-                    "to": parts[1],
-                    "type": parts[2],
-                    "strength": strength,
-                    "notes": rel_reasoning.get(key, ""),
-                })
-        relationships_by_article[row[0]] = parsed
-
-    # Build output grouped by canonical ticker
-    result: dict[str, list[TickerNewsItem]] = {t: [] for t in normalized_tickers}
-    seen: set[tuple[str, int]] = set()
-
-    for raw_ticker, article_id, title, url, published_at in article_rows:
-        # Map alias back to the canonical ticker we were asked about
-        norm = _normalize_ticker(raw_ticker)
-        canonical = alias_to_canonical.get(norm, norm)
-        if canonical not in result:
+    result: dict[str, list[TickerNewsItem]] = {t: [] for t in normalized}
+    for row in flat:
+        ticker = row.get("ticker")
+        if ticker not in result:
             continue
-
-        key = (canonical, article_id)
-        if key in seen:
-            continue
-        seen.add(key)
-
-        scores, reasons = sentiment_by_article.get(article_id, ({}, {}))
-        # Sentiment scores may be keyed by either the alias or the canonical ticker;
-        # try canonical first, then the alias that matched.
-        canonical_upper = canonical.upper()
-        alias_upper = norm.upper()
-        sentiment_score = float(
-            scores.get(canonical_upper) or scores.get(alias_upper) or 0.0
-        )
-        sentiment_reason = reasons.get(canonical_upper) or reasons.get(alias_upper) or ""
-
-        # Filter relationships to ones involving this ticker (canonical or alias)
-        all_rels = relationships_by_article.get(article_id, [])
-        relevant_rels = [
-            r for r in all_rels
-            if r["from"] in (canonical_upper, alias_upper)
-            or r["to"] in (canonical_upper, alias_upper)
-        ]
-
-        result[canonical].append(TickerNewsItem(
-            article_id=article_id,
-            title=title or "",
-            url=url or "",
+        published_raw = row.get("published_at")
+        if isinstance(published_raw, str):
+            try:
+                published_at = datetime.fromisoformat(published_raw.replace("Z", "+00:00"))
+            except ValueError:
+                published_at = None
+        else:
+            published_at = published_raw
+        result[ticker].append(TickerNewsItem(
+            article_id=int(row["article_id"]),
+            title=row.get("title") or "",
+            url=row.get("url") or "",
             published_at=published_at,
-            sentiment_score=sentiment_score,
-            sentiment_reason=sentiment_reason,
-            relationships=relevant_rels,
+            sentiment_score=float(row.get("sentiment_score") or 0.0),
+            sentiment_reason=row.get("sentiment_reason") or "",
+            relationships=row.get("relationships") or [],
         ))
-
-    for ticker in result:
-        result[ticker] = sorted(
-            result[ticker],
-            key=lambda item: item.published_at or datetime.min,
-            reverse=True,
-        )[:_MAX_NEWS_PER_TICKER_DB]
     return result
 
 

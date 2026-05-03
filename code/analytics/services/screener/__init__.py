@@ -1,1 +1,1 @@
-from services.screener.engine import run_screener, main  # noqa: F401
+from services.screener.engine import run  # noqa: F401
