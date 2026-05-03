@@ -3,13 +3,18 @@
 Entry point for the daily podcast pipeline.
 
 Usage:
-    python scripts/run_podcast.py                # run with live data fetcher
-    python scripts/run_podcast.py --mock         # run with mock data (testing)
+    python scripts/run_podcast.py                  # full pipeline, live data
+    python scripts/run_podcast.py --mock           # full pipeline, mock data
+    python scripts/run_podcast.py --welcome-only   # render JUST the welcome scene
+    python scripts/run_podcast.py --mock --script-only   # generate script JSON, no TTS
+    python scripts/run_podcast.py --mock --no-publish    # full local render, skip RSS/R2/Telegram
+    python scripts/run_podcast.py --mock --no-telegram   # skip Telegram approval gate
 """
 from __future__ import annotations
 
 import argparse
 import asyncio
+import logging
 import sys
 from pathlib import Path
 
@@ -18,6 +23,16 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from dotenv import load_dotenv
 
 load_dotenv(Path(__file__).resolve().parents[1] / ".env")
+
+
+def _configure_logging(verbose: bool) -> None:
+    logging.basicConfig(
+        level=logging.DEBUG if verbose else logging.INFO,
+        format="%(asctime)s %(levelname)-7s %(name)s — %(message)s",
+        datefmt="%H:%M:%S",
+    )
+    logging.getLogger("httpx").setLevel(logging.WARNING)
+    logging.getLogger("httpcore").setLevel(logging.WARNING)
 
 
 MOCK_DATA = {
@@ -44,25 +59,59 @@ MOCK_DATA = {
 
 
 async def _live_data_fetcher() -> dict:
-    """Placeholder — wire up to your actual data pipeline."""
-    raise NotImplementedError(
-        "Live data fetcher not implemented. "
-        "Pass --mock for testing or implement this function."
-    )
+    """Assemble live podcast data via services.podcast.data_fetcher.
+
+    Pulls top_news + watchlist from RAG / Supabase, VIX + earnings from FMP,
+    and regime/breadth from the latest screener run. Each section falls back
+    independently — never raises on partial source failures.
+    """
+    from services.podcast.data_fetcher import fetch_live_data
+    return await fetch_live_data()
 
 
 async def main() -> None:
     parser = argparse.ArgumentParser(description="Run the daily podcast pipeline")
     parser.add_argument("--mock", action="store_true", help="Use mock market data")
-    args = parser.parse_args()
+    parser.add_argument("-v", "--verbose", action="store_true", help="Enable DEBUG logging")
 
-    from services.podcast.scheduler_hook import run_daily_podcast
+    test_modes = parser.add_argument_group("test modes (mutually exclusive with full run)")
+    test_modes.add_argument(
+        "--welcome-only", action="store_true",
+        help="Render only the deterministic welcome scene (no LLM, no data, no publish)",
+    )
+    test_modes.add_argument(
+        "--script-only", action="store_true",
+        help="Generate script JSON and stop (no TTS, no publish, no API spend on ElevenLabs)",
+    )
+
+    skips = parser.add_argument_group("skip flags")
+    skips.add_argument("--no-publish", action="store_true", help="Skip RSS / R2 upload / Telegram notification")
+    skips.add_argument("--no-telegram", action="store_true", help="Skip the Telegram approval gate")
+
+    args = parser.parse_args()
+    _configure_logging(args.verbose)
+    log = logging.getLogger(__name__)
+
+    from services.podcast.scheduler_hook import run_daily_podcast, run_welcome_only
+
+    if args.welcome_only:
+        log.info("Test mode: welcome-only")
+        path = await run_welcome_only()
+        log.info("Welcome render complete: %s", path)
+        return
 
     if args.mock:
-        print("Running with mock data...")
-        await run_daily_podcast(lambda: MOCK_DATA)
+        log.info("Running with mock data")
+        fetcher = lambda: MOCK_DATA  # noqa: E731
     else:
-        await run_daily_podcast(_live_data_fetcher)
+        fetcher = _live_data_fetcher
+
+    await run_daily_podcast(
+        fetcher,
+        script_only=args.script_only,
+        skip_approval=args.no_telegram,
+        skip_publish=args.no_publish,
+    )
 
 
 if __name__ == "__main__":

@@ -43,6 +43,63 @@ from shared import logging
 
 logger = logging.logger
 
+
+# ---------------------------------------------------------------------------
+# Market-wide aggregates → market_json on each scan run.
+# Consumed by the podcast pipeline (services/podcast/data_fetcher.py) and any
+# other downstream that needs regime + breadth without re-running the screener.
+# ---------------------------------------------------------------------------
+
+def _build_market_json(df_trend_template, eligible_count: int) -> dict:
+    """Aggregate the per-stock SMA flags into market-wide regime + breadth.
+
+    Inputs are the merged trend-template dataframe (one row per screened stock),
+    with boolean columns 'price_above_sma50', 'price_above_sma200',
+    'sma_aligned', 'sma50_rising'. Stocks missing those flags fall out of the
+    breadth denominator.
+
+    Regime classification (mirrors per-stock logic in technical.py):
+      Bull Confirmed     — >55% above 200MA AND >50% above 50MA
+      Bull Uptrend       — >50% above 200MA
+      Distribution       — <30% above 50MA
+      Bear               — <30% above 200MA
+      Mixed              — anything else
+    """
+    pct_50 = _pct_true(df_trend_template, "price_above_sma50")
+    pct_200 = _pct_true(df_trend_template, "price_above_sma200")
+    pct_aligned = _pct_true(df_trend_template, "sma_aligned")
+
+    if pct_200 >= 55 and pct_50 >= 50:
+        regime = "Bull Confirmed"
+    elif pct_200 >= 50:
+        regime = "Bull Uptrend"
+    elif pct_200 < 30:
+        regime = "Bear"
+    elif pct_50 < 30:
+        regime = "Distribution"
+    else:
+        regime = "Mixed"
+
+    return {
+        "regime_status": regime,
+        "days_in_regime": 0,  # filled in by the persistence layer if it has prior runs
+        "pct_above_50ma": round(pct_50, 1),
+        "pct_above_200ma": round(pct_200, 1),
+        "pct_sma_aligned": round(pct_aligned, 1),
+        "eligible_count": int(eligible_count),
+        "screened_count": int(len(df_trend_template)),
+    }
+
+
+def _pct_true(df, column: str) -> float:
+    if column not in df.columns or len(df) == 0:
+        return 0.0
+    series = df[column].dropna()
+    if len(series) == 0:
+        return 0.0
+    return float(series.astype(bool).sum()) / float(len(series)) * 100.0
+
+
 # ---------------------------------------------------------------------------
 # Job lifecycle helpers
 # ---------------------------------------------------------------------------
@@ -252,6 +309,8 @@ def run() -> None:
         f"{eligible_count} passed technical+fundamentals / {total} screened…"
     )
 
+    market_json = _build_market_json(df_trend_template, eligible_count)
+
     try:
         run_id = persist_market_wide_scan_via_api(
             today.date(),
@@ -259,8 +318,15 @@ def run() -> None:
             df_trend_template_api,
             df_rs_out_api,
             df_quote_out_api,
+            market_json=market_json,
         )
-        logger.info("Screening results uploaded via API (run_id=%s)", run_id)
+        logger.info(
+            "Screening results uploaded via API (run_id=%s, regime=%s, breadth_50=%.1f%%, breadth_200=%.1f%%)",
+            run_id,
+            market_json["regime_status"],
+            market_json["pct_above_50ma"],
+            market_json["pct_above_200ma"],
+        )
     except Exception as e:
         logger.warning("Screening persist via API failed: %s", e)
 

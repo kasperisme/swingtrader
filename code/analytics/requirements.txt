@@ -18,4 +18,6 @@ Pillow
 croniter
 jinja2>=3.1.0
 pydub>=0.25.1
+audioop-lts>=0.2.2; python_version >= "3.13"
+openai>=1.50.0
 boto3>=1.35.0

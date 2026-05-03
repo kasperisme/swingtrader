@@ -24,52 +24,15 @@ def _load_or_create_silent(path: Path, duration_ms: int = 2000) -> "AudioSegment
     return AudioSegment.silent(duration=duration_ms)
 
 
-def _generate_cover_art(date_str: str, title: str, output_path: Path) -> Path:
-    from PIL import Image, ImageDraw, ImageFont
+def _generate_cover_art(date_str: str, title: str, script: dict, output_path: Path) -> Path:
+    """Delegate to services.podcast.cover_art.
 
-    img = Image.new("RGB", (1400, 1400), color=(0, 0, 0))
-    draw = ImageDraw.Draw(img)
-
-    try:
-        font_large = ImageFont.truetype("/System/Library/Fonts/Helvetica.ttc", 72)
-        font_medium = ImageFont.truetype("/System/Library/Fonts/Helvetica.ttc", 48)
-        font_small = ImageFont.truetype("/System/Library/Fonts/Helvetica.ttc", 36)
-    except OSError:
-        font_large = ImageFont.load_default()
-        font_medium = font_large
-        font_small = font_large
-
-    # Branding
-    draw.text((700, 200), "NewsImpact Daily", font=font_large, fill=(255, 215, 0), anchor="mm")
-    draw.text((700, 300), "Market Intelligence Digest", font=font_small, fill=(180, 180, 180), anchor="mm")
-
-    # Date
-    draw.text((700, 450), date_str, font=font_medium, fill=(255, 255, 255), anchor="mm")
-
-    # Episode title (wrap at ~40 chars per line)
-    words = title.split()
-    lines, current = [], []
-    for word in words:
-        if sum(len(w) + 1 for w in current) + len(word) > 38:
-            lines.append(" ".join(current))
-            current = [word]
-        else:
-            current.append(word)
-    if current:
-        lines.append(" ".join(current))
-
-    y_start = 650
-    for i, line in enumerate(lines[:4]):
-        draw.text((700, y_start + i * 80), line, font=font_medium, fill=(255, 255, 255), anchor="mm")
-
-    # Bottom branding strip
-    draw.rectangle([(0, 1300), (1400, 1400)], fill=(255, 215, 0))
-    draw.text((700, 1350), "newsimpactscreener.com", font=font_small, fill=(0, 0, 0), anchor="mm")
-
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    img.save(str(output_path), "PNG")
-    log.info("Cover art saved: %s", output_path.name)
-    return output_path
+    Kept as a thin shim so existing callers don't need to change. The cover_art
+    module owns the AI image generation + typographic overlay pipeline and
+    falls back to pure-Pillow when OPENAI_API_KEY isn't set.
+    """
+    from .cover_art import generate_cover_art
+    return generate_cover_art(date_str, title, script, output_path)
 
 
 def package_episode(
@@ -100,7 +63,12 @@ def package_episode(
     log.info("Episode exported: %s (%.1fs)", audio_path.name, len(combined) / 1000)
 
     cover_path = output_dir / f"{date_str}_cover.png"
-    _generate_cover_art(date_str, script.get("episode_title", "NewsImpact Daily"), cover_path)
+    _generate_cover_art(
+        date_str,
+        script.get("episode_title", "NewsImpact Daily"),
+        script,
+        cover_path,
+    )
 
     return {
         "audio_path": audio_path,

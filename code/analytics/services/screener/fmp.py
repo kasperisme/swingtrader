@@ -377,3 +377,39 @@ class fmp:
         if not data:
             return pd.DataFrame()
         return pd.DataFrame(data)
+
+    def insider_trading_latest(self, page: int = 0, limit: int = 100) -> pd.DataFrame:
+        """
+        Most recent insider transactions across all tickers (Form 4 filings).
+
+        Returns columns include: symbol, filingDate, transactionDate,
+        reportingName, typeOfOwner, transactionType (P=purchase, S=sale, etc.),
+        securitiesTransacted, price, securitiesOwned, link.
+        """
+        url = "https://financialmodelingprep.com/stable/insider-trading/latest"
+        r = requests.get(url, params={
+            "apikey": self.APIKEY,
+            "page": page,
+            "limit": limit,
+        })
+        if r.status_code != 200:
+            raise RequestError(r.content)
+        data = r.json()
+        if not data:
+            return pd.DataFrame()
+        return pd.DataFrame(data)
+
+    def insider_trading_symbol(self, ticker: str, limit: int = 50) -> pd.DataFrame:
+        """Recent insider transactions for a single ticker."""
+        url = "https://financialmodelingprep.com/stable/insider-trading"
+        r = requests.get(url, params={
+            "apikey": self.APIKEY,
+            "symbol": ticker,
+            "limit": limit,
+        })
+        if r.status_code != 200:
+            raise RequestError(r.content)
+        data = r.json()
+        if not data:
+            return pd.DataFrame()
+        return pd.DataFrame(data)

@@ -14,12 +14,25 @@ ASSETS_DIR = _ANALYTICS_ROOT / "scripts" / "assets" / "audio"
 TEMPLATES_DIR = Path(__file__).resolve().parent / "templates"
 
 ELEVENLABS_API_KEY = os.environ.get("ELEVENLABS_API_KEY", "")
-ELEVENLABS_MARCUS_VOICE_ID = os.environ.get("ELEVENLABS_MARCUS_VOICE_ID", "")
-ELEVENLABS_KAI_VOICE_ID = os.environ.get("ELEVENLABS_KAI_VOICE_ID", "")
+ELEVENLABS_PRIMARY_VOICE_ID = os.environ.get("ELEVENLABS_PRIMARY_VOICE_ID", "")
+ELEVENLABS_SECONDARY_VOICE_ID = os.environ.get("ELEVENLABS_SECONDARY_VOICE_ID", "")
+ELEVENLABS_PRIMARY_VOICE_NAME = os.environ.get("ELEVENLABS_PRIMARY_VOICE_NAME", "")
+ELEVENLABS_SECONDARY_VOICE_NAME = os.environ.get("ELEVENLABS_SECONDARY_VOICE_NAME", "")
 
-HANS_SCRIPT_MODEL = os.environ.get("HANS_SCRIPT_MODEL", "glm-4.6")
-HANS_EXTRACT_MODEL = os.environ.get("HANS_EXTRACT_MODEL", "glm-5.1")
-OLLAMA_BASE_URL = os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434").rstrip("/")
+OLLAMA_PODCAST_SCRIPT_MODEL = os.environ.get(
+    "OLLAMA_PODCAST_SCRIPT_MODEL", "glm-5.1:cloud"
+)
+OLLAMA_PODCAST_EXTRACT_MODEL = os.environ.get(
+    "OLLAMA_PODCAST_EXTRACT_MODEL", "glm-5.1:cloud"
+)
+OLLAMA_BASE_URL = os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434").rstrip(
+    "/"
+)
+
+# OpenAI image generation (cover art)
+OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "")
+OPENAI_IMAGE_MODEL = os.environ.get("OPENAI_IMAGE_MODEL", "gpt-image-1")
+OPENAI_IMAGE_QUALITY = os.environ.get("OPENAI_IMAGE_QUALITY", "medium")  # low | medium | high
 
 R2_ENDPOINT_URL = os.environ.get("R2_ENDPOINT_URL", "")
 R2_ACCESS_KEY_ID = os.environ.get("R2_ACCESS_KEY_ID", "")

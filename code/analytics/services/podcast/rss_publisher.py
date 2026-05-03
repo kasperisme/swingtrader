@@ -38,7 +38,7 @@ _RSS_TEMPLATE = """\
     <itunes:category text="Business">
       <itunes:category text="Investing"/>
     </itunes:category>
-    <itunes:image href="https://newsimpactscreener.com/podcast/cover.jpg"/>
+    <itunes:image href="https://newsimpactscreener.com/podcast/cover.png"/>
     <language>en-us</language>
     <itunes:explicit>no</itunes:explicit>
   </channel>
@@ -96,7 +96,7 @@ async def publish_episode(metadata: dict, date_str: str) -> str:
     if audio_url is None:
         audio_url = str(audio_path.resolve())
     if cover_url is None:
-        cover_url = f"https://newsimpactscreener.com/podcast/cover.jpg"
+        cover_url = f"https://newsimpactscreener.com/podcast/cover.png"
 
     pub_date = format_datetime(datetime.now(timezone.utc))
     episode_guid = str(uuid.uuid5(uuid.NAMESPACE_URL, audio_url))
