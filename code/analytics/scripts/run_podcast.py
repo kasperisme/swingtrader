@@ -55,6 +55,8 @@ MOCK_DATA = {
     ],
     "earnings": {"ticker": "AMZN", "surprise_pct": 12.4},
     "insider": {"ticker": "TSLA", "description": "CEO purchased 500,000 shares at $248"},
+    "articles_24h": 4237,
+    "sources_24h": 142,
 }
 
 

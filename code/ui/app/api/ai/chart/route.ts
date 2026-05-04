@@ -1,9 +1,14 @@
 import { createClient } from "@/lib/supabase/server";
 import type { ChartAnnotation, AnnotationRole } from "@/components/ticker-charts/types";
 import type { OhlcBar } from "@/components/ticker-charts/types";
-import { OLLAMA_HOST, DEFAULT_MODEL, ROUTER_MODEL } from "@/lib/ollama";
+import type Anthropic from "@anthropic-ai/sdk";
+import { getAnthropicClient, DEFAULT_MODEL, ROUTER_MODEL } from "@/lib/anthropic";
 import { PERSONA_PROMPTS, ORCHESTRATOR_PROMPT, ROUTER_PROMPT, PERSONA_LABELS, withTradingStrategy, type PersonaId } from "@/lib/chart-ai/personas";
 import type { PersonaScores } from "@/app/actions/chart-workspace";
+import { screeningsUpsertDismissNote } from "@/app/actions/screenings";
+
+type TickerStatus = "active" | "dismissed" | "watchlist" | "pipeline";
+const TICKER_STATUSES: readonly TickerStatus[] = ["active", "dismissed", "watchlist", "pipeline"];
 import {
   fetchSentimentContext,
   fetchRiskContext,
@@ -14,8 +19,6 @@ import {
   formatFundamentalsContext,
   formatNewsTrendContext,
 } from "@/lib/chart-ai/persona-context";
-
-type OllamaMessage = { role: "system" | "user" | "assistant"; content: string };
 
 type RawAnnotation = {
   type?: string;
@@ -64,46 +67,67 @@ function ohlcSummary(bars: OhlcBar[]): string {
   return lines.join("\n");
 }
 
-const DRAW_CHART_TOOL = {
-  type: "function",
-  function: {
-    name: "draw_on_chart",
-    description: "Draw technical analysis annotations on the price chart and provide your analysis. You MUST call this tool for every response.",
-    parameters: {
-      type: "object",
-      required: ["annotations", "analysis"],
-      properties: {
-        annotations: {
-          type: "array",
-          description: "Annotations to draw on the chart. Must include every price level mentioned in the analysis (entries, stops, targets, support, resistance). Never empty.",
-          items: {
-            type: "object",
-            required: ["type", "role"],
-            properties: {
-              type: {
-                type: "string",
-                enum: ["horizontal", "zone", "trend_line"],
-                description: "horizontal = single price level; zone = price band; trend_line = line between two date/price points",
-              },
-              role: {
-                type: "string",
-                enum: ["support", "resistance", "entry", "stop", "target", "info"],
-              },
-              label: { type: "string", description: "Short label shown on chart" },
-              price: { type: "number", description: "Required for type=horizontal" },
-              price_top: { type: "number", description: "Required for type=zone" },
-              price_bottom: { type: "number", description: "Required for type=zone" },
-              from_date: { type: "string", description: "ISO date, required for type=trend_line" },
-              from_price: { type: "number", description: "Required for type=trend_line" },
-              to_date: { type: "string", description: "ISO date, required for type=trend_line" },
-              to_price: { type: "number", description: "Required for type=trend_line" },
+const UPDATE_STATUS_TOOL: Anthropic.Tool = {
+  name: "update_ticker_status",
+  description: "Change the workflow status for the current ticker in the user's screening. Use when the user asks to dismiss, watchlist, mark as active, or move to pipeline.",
+  input_schema: {
+    type: "object",
+    required: ["status"],
+    properties: {
+      status: {
+        type: "string",
+        enum: ["active", "dismissed", "watchlist", "pipeline"],
+        description: "active = default research target; dismissed = no longer interested; watchlist = monitoring; pipeline = active candidate to trade.",
+      },
+      comment: {
+        type: "string",
+        description: "Optional short note explaining the status change (e.g. \"setup invalidated\", \"earnings beat\"). Keep under 200 chars.",
+      },
+      highlighted: {
+        type: "boolean",
+        description: "Optional: pin/star this ticker so it stands out in the user's list.",
+      },
+    },
+  },
+};
+
+const DRAW_CHART_TOOL: Anthropic.Tool = {
+  name: "draw_on_chart",
+  description: "Draw technical analysis annotations on the price chart and provide your analysis. You MUST call this tool for every response.",
+  input_schema: {
+    type: "object",
+    required: ["annotations", "analysis"],
+    properties: {
+      annotations: {
+        type: "array",
+        description: "Annotations to draw on the chart. Must include every price level mentioned in the analysis (entries, stops, targets, support, resistance). Never empty.",
+        items: {
+          type: "object",
+          required: ["type", "role"],
+          properties: {
+            type: {
+              type: "string",
+              enum: ["horizontal", "zone", "trend_line"],
+              description: "horizontal = single price level; zone = price band; trend_line = line between two date/price points",
             },
+            role: {
+              type: "string",
+              enum: ["support", "resistance", "entry", "stop", "target", "info"],
+            },
+            label: { type: "string", description: "Short label shown on chart" },
+            price: { type: "number", description: "Required for type=horizontal" },
+            price_top: { type: "number", description: "Required for type=zone" },
+            price_bottom: { type: "number", description: "Required for type=zone" },
+            from_date: { type: "string", description: "ISO date, required for type=trend_line" },
+            from_price: { type: "number", description: "Required for type=trend_line" },
+            to_date: { type: "string", description: "ISO date, required for type=trend_line" },
+            to_price: { type: "number", description: "Required for type=trend_line" },
           },
         },
-        analysis: {
-          type: "string",
-          description: "Your technical analysis explanation in markdown (supports **bold**, bullet lists, etc.)",
-        },
+      },
+      analysis: {
+        type: "string",
+        description: "Your technical analysis explanation in markdown (supports **bold**, bullet lists, etc.)",
       },
     },
   },
@@ -123,6 +147,51 @@ function parsePersonaScores(raw: string): { analysis: string; scores: PersonaSco
     }
   } catch { /* fall through */ }
   return { analysis: raw.trim(), scores: undefined };
+}
+
+type ClaudeOptions = {
+  model?: string;
+  system: string;
+  tools?: Anthropic.Tool[];
+  toolChoice?: Anthropic.ToolChoice;
+  maxTokens?: number;
+};
+
+type ClaudeResult = {
+  text: string;
+  toolUses: { name: string; input: unknown }[];
+};
+
+async function callClaude(
+  messages: Anthropic.MessageParam[],
+  opts: ClaudeOptions,
+): Promise<ClaudeResult> {
+  const client = getAnthropicClient();
+  const response = await client.messages.create({
+    model: opts.model ?? DEFAULT_MODEL,
+    max_tokens: opts.maxTokens ?? 4096,
+    system: opts.system,
+    messages,
+    ...(opts.tools ? { tools: opts.tools } : {}),
+    ...(opts.toolChoice ? { tool_choice: opts.toolChoice } : {}),
+  });
+
+  let text = "";
+  const toolUses: { name: string; input: unknown }[] = [];
+  for (const block of response.content) {
+    if (block.type === "text") text += block.text;
+    else if (block.type === "tool_use") toolUses.push({ name: block.name, input: block.input });
+  }
+  return { text, toolUses };
+}
+
+function formatAnnotationList(annotations: ChartAnnotation[]): string {
+  return annotations.map((a) => {
+    if (a.type === "horizontal") return `- horizontal ${a.role} at $${a.price}${a.label ? ` "${a.label}"` : ""}`;
+    if (a.type === "zone") return `- zone ${a.role} $${a.priceBottom}–$${a.priceTop}${a.label ? ` "${a.label}"` : ""}`;
+    if (a.type === "trend_line") return `- trend_line ${a.role} from ${a.fromDate} $${a.fromPrice} to ${a.toDate} $${a.toPrice}${a.label ? ` "${a.label}"` : ""}`;
+    return "";
+  }).filter(Boolean).join("\n");
 }
 
 async function callPersona(
@@ -147,54 +216,16 @@ async function callPersona(
       }).join("\n")
     : "";
 
-  const messages: OllamaMessage[] = [
-    { role: "system", content: systemPrompt },
-    { role: "user", content: `${dataBlock}${annotationContext}\n\n${personaContext}` },
-  ];
-
   try {
-    const res = await fetch(`${OLLAMA_HOST}/api/chat`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${process.env.OLLAMA_API_KEY ?? ""}`,
-      },
-      body: JSON.stringify({ model: DEFAULT_MODEL, messages, stream: false }),
-    });
-
-    if (!res.ok) {
-      const t = await res.text().catch(() => res.statusText);
-      return { analysis: "", error: `${PERSONA_LABELS[personaId]} persona failed: ${res.status} ${t}`, ms: performance.now() - t0 };
-    }
-
-    const result = await res.json() as { message?: { content?: string } };
-    const { analysis, scores } = parsePersonaScores(result.message?.content?.trim() ?? "");
+    const { text } = await callClaude(
+      [{ role: "user", content: `${dataBlock}${annotationContext}\n\n${personaContext}` }],
+      { system: systemPrompt, maxTokens: 2048 },
+    );
+    const { analysis, scores } = parsePersonaScores(text.trim());
     return { analysis, scores, ms: performance.now() - t0 };
   } catch (err) {
     return { analysis: "", error: `${PERSONA_LABELS[personaId]} persona error: ${err instanceof Error ? err.message : String(err)}`, ms: performance.now() - t0 };
   }
-}
-
-function formatAnnotationList(annotations: ChartAnnotation[]): string {
-  return annotations.map((a) => {
-    if (a.type === "horizontal") return `- horizontal ${a.role} at $${a.price}${a.label ? ` "${a.label}"` : ""}`;
-    if (a.type === "zone") return `- zone ${a.role} $${a.priceBottom}–$${a.priceTop}${a.label ? ` "${a.label}"` : ""}`;
-    if (a.type === "trend_line") return `- trend_line ${a.role} from ${a.fromDate} $${a.fromPrice} to ${a.toDate} $${a.toPrice}${a.label ? ` "${a.label}"` : ""}`;
-    return "";
-  }).filter(Boolean).join("\n");
-}
-
-async function callOllama(
-  messages: OllamaMessage[],
-  options: { model?: string; tools?: unknown[] } = {},
-): Promise<{ message?: { content?: string; tool_calls?: { function: { name: string; arguments: unknown } }[] } }> {
-  const res = await fetch(`${OLLAMA_HOST}/api/chat`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json", Authorization: `Bearer ${process.env.OLLAMA_API_KEY ?? ""}` },
-    body: JSON.stringify({ model: options.model ?? DEFAULT_MODEL, messages, tools: options.tools, stream: false }),
-  });
-  if (!res.ok) throw new Error(`Ollama ${res.status}: ${await res.text().catch(() => res.statusText)}`);
-  return res.json() as Promise<{ message?: { content?: string; tool_calls?: { function: { name: string; arguments: unknown } }[] } }>;
 }
 
 export async function POST(req: Request) {
@@ -203,7 +234,6 @@ export async function POST(req: Request) {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return new Response("Unauthorized", { status: 401 });
 
-  // Fetch user's trading strategy to inject into agent prompts
   const { data: strategyRow } = await supabase
     .schema("swingtrader")
     .from("user_trading_strategy")
@@ -215,14 +245,13 @@ export async function POST(req: Request) {
   const rawText = await req.text();
   if (!rawText) return new Response("Empty body", { status: 400 });
 
-  let body: { symbol: string; ohlcData: OhlcBar[]; annotations?: ChartAnnotation[]; messages: { role: string; content: string }[]; overridePersonas?: string[] };
+  let body: { symbol: string; ohlcData: OhlcBar[]; annotations?: ChartAnnotation[]; messages: { role: string; content: string }[]; overridePersonas?: string[]; scanRowId?: number; runId?: number };
   try { body = JSON.parse(rawText); }
   catch { return new Response("Invalid JSON", { status: 400 }); }
 
-  const { symbol, ohlcData, annotations: existingAnnotations = [], messages: history, overridePersonas } = body;
+  const { symbol, ohlcData, annotations: existingAnnotations = [], messages: history, overridePersonas, scanRowId, runId } = body;
+  const canUpdateStatus = typeof scanRowId === "number" && typeof runId === "number";
 
-  // Start data fetches speculatively — they run in parallel with the router call
-  // so they're often ready by the time personas are needed.
   const tData = performance.now();
   const dataFetchPromise = Promise.all([
     fetchSentimentContext(symbol).catch(() => null),
@@ -233,7 +262,6 @@ export async function POST(req: Request) {
 
   const ALL_PERSONA_IDS: PersonaId[] = ["technical", "sentiment", "risk", "fundamentals", "newsTrend"];
 
-  // If the client explicitly overrides personas (after a confirmation dialog), skip the router.
   let requestedPersonas: PersonaId[] = ALL_PERSONA_IDS;
   let needsPersonas: boolean | "confirm" = true;
   let confirmQuestion = "";
@@ -244,14 +272,13 @@ export async function POST(req: Request) {
     requestedPersonas = valid;
     console.log(`[chart-ai] override: personas=[${requestedPersonas.join(",")}]`);
   } else {
-    // Router call: fast JSON-only decision on which personas (if any) to engage
     const lastUserMessage = [...history].reverse().find((m) => m.role === "user")?.content ?? "";
     try {
-      const routerResult = await callOllama(
-        [{ role: "system", content: ROUTER_PROMPT }, { role: "user", content: lastUserMessage }],
-        { model: ROUTER_MODEL },
+      const { text } = await callClaude(
+        [{ role: "user", content: lastUserMessage }],
+        { system: ROUTER_PROMPT, model: ROUTER_MODEL, maxTokens: 512 },
       );
-      const parsed = JSON.parse(routerResult.message?.content?.trim() ?? "{}") as {
+      const parsed = JSON.parse(text.trim() || "{}") as {
         needs_personas?: boolean | "confirm";
         personas?: string[];
         question?: string;
@@ -282,8 +309,6 @@ export async function POST(req: Request) {
   const stream = new ReadableStream({
     async start(controller) {
       try {
-        // Router asked user to confirm — emit the question and exit.
-        // The client will show Yes/No buttons and re-send with overridePersonas.
         if (needsPersonas === "confirm") {
           emit(controller, { type: "confirm_specialists", personas: requestedPersonas, question: confirmQuestion });
           return;
@@ -292,7 +317,6 @@ export async function POST(req: Request) {
         const engagedPersonas: { id: PersonaId; label: string }[] = [];
 
         if (needsPersonas && requestedPersonas.length > 0) {
-          // Tell the client which personas are being engaged so it can show loading state
           emit(controller, { type: "specialists_requested", personas: requestedPersonas });
 
           const [sentimentCtx, riskCtx, fundamentalsCtx, newsTrendCtx] = await dataFetchPromise;
@@ -325,34 +349,62 @@ export async function POST(req: Request) {
           specialistReports.length > 0 ? `\n## Specialist Reports\n\n${specialistReports.join("\n\n")}` : "",
         ].filter(Boolean).join("\n");
 
-        const orchestratorMessages: OllamaMessage[] = [
-          { role: "system", content: withTradingStrategy(ORCHESTRATOR_PROMPT(symbol), tradingStrategy ?? "") },
-          ...history.map((m) => ({ role: m.role as OllamaMessage["role"], content: m.content })),
+        const orchestratorMessages: Anthropic.MessageParam[] = [
+          ...history.map((m) => ({ role: (m.role === "assistant" ? "assistant" : "user") as "user" | "assistant", content: m.content })),
           { role: "user", content: orchestratorInput },
         ];
 
+        const tools: Anthropic.Tool[] = canUpdateStatus
+          ? [DRAW_CHART_TOOL, UPDATE_STATUS_TOOL]
+          : [DRAW_CHART_TOOL];
+
         const tOrchestrator = performance.now();
-        let result: { message?: { content?: string; tool_calls?: { function: { name: string; arguments: unknown } }[] } };
-        try { result = await callOllama(orchestratorMessages, { tools: [DRAW_CHART_TOOL] }); }
-        catch (err) { emit(controller, { type: "error", message: String(err) }); return; }
+        let result: ClaudeResult;
+        try {
+          result = await callClaude(orchestratorMessages, {
+            system: withTradingStrategy(ORCHESTRATOR_PROMPT(symbol), tradingStrategy ?? ""),
+            tools,
+            toolChoice: { type: "auto" },
+            maxTokens: 4096,
+          });
+        } catch (err) { emit(controller, { type: "error", message: String(err) }); return; }
         console.log(`[chart-ai] orchestrator: ${Math.round(performance.now() - tOrchestrator)}ms  total: ${Math.round(performance.now() - tTotal)}ms`);
 
-        const message = result.message ?? {};
-        const toolCalls = message.tool_calls ?? [];
         let annotations: ChartAnnotation[] = [];
-        let analysisText = message.content ?? "";
+        let analysisText = result.text;
 
-        for (const tc of toolCalls) {
-          if (tc.function.name === "draw_on_chart") {
-            const args = (typeof tc.function.arguments === "string"
-              ? JSON.parse(tc.function.arguments)
-              : tc.function.arguments) as { annotations?: RawAnnotation[]; analysis?: string };
+        for (const tu of result.toolUses) {
+          if (tu.name === "draw_on_chart") {
+            const args = tu.input as { annotations?: RawAnnotation[]; analysis?: string };
             annotations = parseAnnotations(args.annotations ?? []);
             if (args.analysis) analysisText = args.analysis;
+          } else if (tu.name === "update_ticker_status" && canUpdateStatus) {
+            const args = tu.input as { status?: string; comment?: string; highlighted?: boolean };
+            const status = TICKER_STATUSES.includes(args.status as TickerStatus)
+              ? (args.status as TickerStatus)
+              : null;
+            if (status) {
+              const res = await screeningsUpsertDismissNote({
+                scanRowId: scanRowId!,
+                runId: runId!,
+                ticker: symbol,
+                status,
+                ...(typeof args.highlighted === "boolean" ? { highlighted: args.highlighted } : {}),
+                ...(typeof args.comment === "string" ? { comment: args.comment } : {}),
+              });
+              emit(controller, {
+                type: "status_change",
+                status,
+                highlighted: args.highlighted ?? null,
+                comment: args.comment ?? null,
+                ok: res.ok,
+                error: res.ok ? null : res.error,
+              });
+            }
           }
         }
 
-        console.log(`[chart-ai] tool_calls: ${toolCalls.length}, annotations: ${annotations.length}, has_content: ${!!message.content}`);
+        console.log(`[chart-ai] tool_calls: ${result.toolUses.length}, annotations: ${annotations.length}, has_text: ${!!result.text}`);
         const personaLine = engagedPersonas.map((p) => p.label).join("|");
         emit(controller, { type: "annotations", data: annotations });
         emit(controller, { type: "analysis", content: personaLine ? `<!-- personas:${personaLine} -->\n${analysisText}` : analysisText });

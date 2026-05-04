@@ -361,11 +361,15 @@ class fmp:
 
     def earnings_calendar_range(self, from_date: str, to_date: str) -> pd.DataFrame:
         """
-        Confirmed upcoming earnings calendar for a date range (all tickers).
+        Earnings calendar for a date range (all tickers).
         from_date, to_date: 'YYYY-MM-DD' strings.
-        Returns: symbol, date, time (bmo/amc), epsEstimated, revenueEstimated.
+        Returns: symbol, date, epsActual, epsEstimated, revenueActual,
+        revenueEstimated, lastUpdated.
+
+        Uses /stable/earnings-calendar — the previous "earnings-calendar-confirmed"
+        variant 404s on the current FMP plan.
         """
-        url = "https://financialmodelingprep.com/stable/earnings-calendar-confirmed"
+        url = "https://financialmodelingprep.com/stable/earnings-calendar"
         r = requests.get(url, params={
             "apikey": self.APIKEY,
             "from": from_date,

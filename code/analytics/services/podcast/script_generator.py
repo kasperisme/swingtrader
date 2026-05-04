@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import re
@@ -23,12 +24,112 @@ from .config import (
 log = logging.getLogger(__name__)
 
 _HEARTBEAT_SECONDS = 5.0  # progress log interval during streaming
+_RETRY_MAX_ATTEMPTS = 3
+_RETRY_INITIAL_BACKOFF_S = 2.0
+
+
+def _is_transient_ollama_error(exc: BaseException) -> bool:
+    """True for errors a retry can plausibly recover from.
+
+    Covers Ollama Cloud's flapping 502/503/504/"unexpected EOF" responses,
+    plus low-level transport failures (connection drops, read timeouts).
+    """
+    if isinstance(
+        exc,
+        (
+            httpx.RemoteProtocolError,
+            httpx.ReadTimeout,
+            httpx.ConnectTimeout,
+            httpx.ConnectError,
+            httpx.NetworkError,
+            httpx.PoolTimeout,
+        ),
+    ):
+        return True
+    msg = str(exc)
+    return any(s in msg for s in ("502", "503", "504", "unexpected EOF"))
 
 _jinja_env = Environment(loader=FileSystemLoader(str(TEMPLATES_DIR)), autoescape=False)
 
 
 class PodcastScriptError(Exception):
     pass
+
+
+def _hook_act(
+    article_count: int | None = None,
+    source_count: int | None = None,
+) -> dict:
+    """Pre-welcome attention grabber, played under a soft music bed.
+
+    Marked with bg_music=True so the episode packager mixes a low-volume
+    background track (ASSETS_DIR/hook_music.mp3) under the voice. Sits at
+    act -1 so it plays before the act 0 welcome. The "I have read N
+    articles from M sources" clause is dropped when article_count is
+    missing or zero so the line never reads "I have read 0 articles". The
+    "from M sources" sub-clause is dropped independently when source_count
+    is missing or zero.
+    """
+    if article_count and article_count > 0:
+        articles_phrase = (
+            f"{article_count:,} article" + ("" if article_count == 1 else "s")
+        )
+        if source_count and source_count > 0:
+            sources_phrase = (
+                f"{source_count:,} source" + ("" if source_count == 1 else "s")
+            )
+            article_clause = (
+                f" I have read {articles_phrase} from {sources_phrase} "
+                "in the last 24 hours. [PAUSE]"
+            )
+        else:
+            article_clause = (
+                f" I have read {articles_phrase} in the last 24 hours. [PAUSE]"
+            )
+    else:
+        article_clause = ""
+
+    return {
+        "act": -1,
+        "name": "HOOK",
+        "bg_music": True,
+        "lines": [
+            {
+                "voice": "hook",
+                "text": (
+                    "This is Hans — the orchestrator behind News Impact Screener. "
+                    "[PAUSE] I don't sleep, I don't have a P and L, "
+                    "and I read every 8-K filed between yesterday's close "
+                    "and this morning's coffee. [PAUSE] Three of them matter."
+                    f"{article_clause} Let's go."
+                ),
+            },
+        ],
+    }
+
+
+def _signoff_act() -> dict:
+    """Deterministic show-close in the hook voice, bookending the cold-open hook.
+
+    Sits at act 6 so it sorts after the LLM-generated CLOSE + THESIS (act 5)
+    in the renderer's filename scheme. Uses voice="hook" so the same Hans
+    orchestrator persona that opens the show also closes it.
+    """
+    return {
+        "act": 6,
+        "name": "SIGN_OFF",
+        "lines": [
+            {
+                "voice": "hook",
+                "text": (
+                    "This was Hans. [PAUSE] "
+                    "Markets close — I don't. [PAUSE] "
+                    "I'll be back tomorrow with whatever moves overnight. "
+                    "[PAUSE] Trade well."
+                ),
+            },
+        ],
+    }
 
 
 def _welcome_act() -> dict | None:
@@ -67,9 +168,10 @@ def _welcome_act() -> dict | None:
 async def _validate_data(client: httpx.AsyncClient, data: dict) -> dict:
     """Use extraction model to validate and clean input data.
 
-    Local models can take 30-90s on a cold load, so the timeout matches the
-    script-generation step. On any error (timeout, 404, malformed response)
-    fall back to the unmodified input — validation is best-effort.
+    Streams from Ollama /api/generate so the connection stays alive past
+    the cloud proxy's ~60s idle timeout (the same reason the script step
+    streams). Best-effort: on any error or unparseable response, falls
+    back to the unmodified input.
     """
     prompt = (
         "Validate and clean this market data dict. "
@@ -80,30 +182,68 @@ async def _validate_data(client: httpx.AsyncClient, data: dict) -> dict:
     )
     started = time.monotonic()
     log.info(
-        "Validation: model=%s prompt=%d chars",
+        "Validation: model=%s prompt=%d chars (streaming)",
         OLLAMA_PODCAST_EXTRACT_MODEL,
         len(prompt),
     )
     try:
-        r = await client.post(
+        chunks: list[str] = []
+        last_beat = started
+        first_token_logged = False
+        async with client.stream(
+            "POST",
             f"{OLLAMA_BASE_URL}/api/generate",
             json={
                 "model": OLLAMA_PODCAST_EXTRACT_MODEL,
                 "prompt": prompt,
-                "stream": False,
+                "stream": True,
             },
-            timeout=300,
-        )
+            timeout=600,
+        ) as r:
+            if r.status_code >= 400:
+                body = await r.aread()
+                log.warning(
+                    "Validation skipped after %.1fs — Ollama %s: %s",
+                    time.monotonic() - started,
+                    r.status_code,
+                    body.decode(errors="replace")[:300],
+                )
+                return data
+            async for line in r.aiter_lines():
+                if not line.strip():
+                    continue
+                try:
+                    payload = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if payload.get("error"):
+                    log.warning(
+                        "Validation skipped — Ollama stream error: %s",
+                        payload["error"],
+                    )
+                    return data
+                token = payload.get("response", "")
+                if token:
+                    chunks.append(token)
+                    if not first_token_logged:
+                        log.info(
+                            "Validation: first token at %.1fs",
+                            time.monotonic() - started,
+                        )
+                        first_token_logged = True
+                now = time.monotonic()
+                if now - last_beat >= _HEARTBEAT_SECONDS and not payload.get("done"):
+                    log.info(
+                        "Validation: streaming… %d chars (%.0fs elapsed)",
+                        sum(len(c) for c in chunks),
+                        now - started,
+                    )
+                    last_beat = now
+                if payload.get("done"):
+                    break
+
         elapsed = time.monotonic() - started
-        if r.status_code >= 400:
-            log.warning(
-                "Validation skipped after %.1fs — Ollama %s: %s",
-                elapsed,
-                r.status_code,
-                r.text[:300],
-            )
-            return data
-        raw = r.json().get("response", "")
+        raw = "".join(chunks)
         cleaned = _parse_json(raw)
         if cleaned is None:
             log.warning(
@@ -127,33 +267,17 @@ async def _validate_data(client: httpx.AsyncClient, data: dict) -> dict:
         return data
 
 
-async def _call_script_model(
-    client: httpx.AsyncClient, messages: list[dict], retry_error: str | None = None
+async def _stream_chat_once(
+    client: httpx.AsyncClient,
+    messages: list[dict],
+    attempt: int,
 ) -> str:
-    """Call the script model via the streaming chat endpoint.
+    """One streaming chat attempt. Returns joined response, or raises.
 
-    Streaming keeps the connection alive token-by-token, sidestepping the
-    ~60s internal timeout on Ollama's local-daemon → cloud proxy when long
-    generations would otherwise stall waiting for a single buffered response.
-    Emits a heartbeat log every few seconds so long generations don't look hung.
+    Status-4xx and stream-level error payloads raise PodcastScriptError;
+    network drops bubble up as httpx exceptions. The caller decides whether
+    those are transient (retry) or permanent.
     """
-    if retry_error:
-        messages = messages + [
-            {"role": "assistant", "content": messages[-1].get("content", "")},
-            {
-                "role": "user",
-                "content": f"JSON parse error: {retry_error}\nReturn only valid JSON, no other text.",
-            },
-        ]
-
-    prompt_chars = sum(len(m.get("content", "")) for m in messages)
-    log.info(
-        "Script model: %s — streaming chat (prompt=%d chars across %d msgs)%s",
-        OLLAMA_PODCAST_SCRIPT_MODEL,
-        prompt_chars,
-        len(messages),
-        " [retry]" if retry_error else "",
-    )
     started = time.monotonic()
     last_beat = started
     chunk_count = 0
@@ -195,7 +319,9 @@ async def _call_script_model(
                 chunk_count += 1
                 if not first_token_logged:
                     log.info(
-                        "Script model: first token at %.1fs", time.monotonic() - started
+                        "Script model: first token at %.1fs (attempt %d)",
+                        time.monotonic() - started,
+                        attempt,
                     )
                     first_token_logged = True
 
@@ -221,6 +347,59 @@ async def _call_script_model(
                 )
                 break
     return "".join(chunks)
+
+
+async def _call_script_model(
+    client: httpx.AsyncClient, messages: list[dict], retry_error: str | None = None
+) -> str:
+    """Call the script model via the streaming chat endpoint with retry.
+
+    Streaming keeps the connection alive token-by-token, sidestepping the
+    ~60s internal timeout on Ollama's local-daemon → cloud proxy. On top of
+    that, retries up to _RETRY_MAX_ATTEMPTS on transient backend errors
+    (502/503/504/EOF/network drops) with exponential backoff. Permanent
+    errors (4xx auth, parse, etc.) raise on the first failure.
+    """
+    if retry_error:
+        messages = messages + [
+            {"role": "assistant", "content": messages[-1].get("content", "")},
+            {
+                "role": "user",
+                "content": f"JSON parse error: {retry_error}\nReturn only valid JSON, no other text.",
+            },
+        ]
+
+    prompt_chars = sum(len(m.get("content", "")) for m in messages)
+    log.info(
+        "Script model: %s — streaming chat (prompt=%d chars across %d msgs)%s",
+        OLLAMA_PODCAST_SCRIPT_MODEL,
+        prompt_chars,
+        len(messages),
+        " [retry]" if retry_error else "",
+    )
+
+    backoff = _RETRY_INITIAL_BACKOFF_S
+    last_exc: BaseException | None = None
+    for attempt in range(1, _RETRY_MAX_ATTEMPTS + 1):
+        try:
+            return await _stream_chat_once(client, messages, attempt)
+        except Exception as exc:
+            last_exc = exc
+            if not _is_transient_ollama_error(exc) or attempt == _RETRY_MAX_ATTEMPTS:
+                raise
+            log.warning(
+                "Script model: attempt %d/%d failed (%s: %s) — retrying in %.0fs",
+                attempt,
+                _RETRY_MAX_ATTEMPTS,
+                type(exc).__name__,
+                str(exc)[:200],
+                backoff,
+            )
+            await asyncio.sleep(backoff)
+            backoff *= 2
+
+    assert last_exc is not None  # unreachable
+    raise last_exc
 
 
 def _parse_json(raw: str) -> dict | None:
@@ -302,6 +481,29 @@ async def generate_script(data: dict) -> dict:
             "Welcome act skipped — set ELEVENLABS_PRIMARY_VOICE_NAME and "
             "ELEVENLABS_SECONDARY_VOICE_NAME to enable"
         )
+
+    # Preserve articles_24h / sources_24h across the validation step — the
+    # cleaner model can silently drop fields it doesn't recognize.
+    articles_24h = int(
+        clean_data.get("articles_24h") or data.get("articles_24h") or 0
+    )
+    sources_24h = int(
+        clean_data.get("sources_24h") or data.get("sources_24h") or 0
+    )
+    hook = _hook_act(article_count=articles_24h, source_count=sources_24h)
+    existing = script.get("acts") or []
+    if not (existing and existing[0].get("name") == "HOOK"):
+        script["acts"] = [hook] + existing
+        log.info(
+            "Hook act prepended (bg_music enabled, articles_24h=%d, sources_24h=%d)",
+            articles_24h,
+            sources_24h,
+        )
+
+    existing = script.get("acts") or []
+    if not any(a.get("name") == "SIGN_OFF" for a in existing):
+        script["acts"] = existing + [_signoff_act()]
+        log.info("Sign-off act appended (hook voice — bookends the cold-open hook)")
 
     out_path = SCRIPTS_DIR / f"{today}.json"
     serialized = json.dumps(script, indent=2)

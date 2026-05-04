@@ -3,6 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from .config import (
+    ELEVENLABS_HOOK_VOICE_ID,
+    ELEVENLABS_HOOK_VOICE_NAME,
     ELEVENLABS_PRIMARY_VOICE_ID,
     ELEVENLABS_SECONDARY_VOICE_ID,
     ELEVENLABS_PRIMARY_VOICE_NAME,
@@ -37,9 +39,22 @@ SECONDARY = VoiceConfig(
     style=0.45,
 )
 
+# Hook voice — the Hans orchestrator persona. Lower stability + moderate style
+# gives a more cinematic, attention-grabbing delivery distinct from the
+# anchor/analyst pairing. Falls back to the secondary voice ID when the hook
+# voice isn't configured, so the hook still differs from the welcome opener
+# (which leads with primary).
+HOOK = VoiceConfig(
+    name=ELEVENLABS_HOOK_VOICE_NAME or "Hans",
+    voice_id=ELEVENLABS_HOOK_VOICE_ID or ELEVENLABS_SECONDARY_VOICE_ID,
+    stability=0.50,
+    style=0.40,
+)
+
 VOICES: dict[str, VoiceConfig] = {
     "primary": PRIMARY,
     "secondary": SECONDARY,
+    "hook": HOOK,
 }
 
 # Acts handled primarily by each voice (both may still appear for dialogue)

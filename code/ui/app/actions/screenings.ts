@@ -437,6 +437,148 @@ export async function screeningsGetUserTrades(): Promise<
   };
 }
 
+export type BulkAnalysisJobStatus =
+  | "queued"
+  | "running"
+  | "done"
+  | "error"
+  | "cancelled";
+
+export interface BulkAnalysisJob {
+  id: string;
+  scan_run_id: number;
+  status: BulkAnalysisJobStatus;
+  total_tickers: number;
+  completed_tickers: number;
+  failed_tickers: number;
+  started_at: string | null;
+  finished_at: string | null;
+  error_message: string | null;
+  user_prompt: string | null;
+  created_at: string;
+}
+
+const BULK_JOB_COLUMNS =
+  "id, scan_run_id, status, total_tickers, completed_tickers, failed_tickers, started_at, finished_at, error_message, user_prompt, created_at";
+
+function asBulkJob(raw: unknown): BulkAnalysisJob {
+  const r = raw as Record<string, unknown>;
+  return {
+    id: String(r.id ?? ""),
+    scan_run_id: Number(r.scan_run_id ?? 0),
+    status: (r.status as BulkAnalysisJobStatus) ?? "queued",
+    total_tickers: Number(r.total_tickers ?? 0),
+    completed_tickers: Number(r.completed_tickers ?? 0),
+    failed_tickers: Number(r.failed_tickers ?? 0),
+    started_at: r.started_at != null ? String(r.started_at) : null,
+    finished_at: r.finished_at != null ? String(r.finished_at) : null,
+    error_message: r.error_message != null ? String(r.error_message) : null,
+    user_prompt: r.user_prompt != null ? String(r.user_prompt) : null,
+    created_at: String(r.created_at ?? ""),
+  };
+}
+
+/**
+ * Kick off a bulk per-ticker technical-analysis job for one scan run.
+ * Returns the job UUID immediately — the worker (Mac Mini, Ollama-backed) picks
+ * it up on its next 1-minute tick. Caller polls getBulkAnalysisJob for status.
+ *
+ * Refuses to queue a second job for the same scan run while one is already
+ * queued or running — surface the existing job to the user instead.
+ */
+export async function bulkAnalyzeScanRun(
+  runId: number,
+  userPrompt?: string | null,
+): Promise<ScreeningActionSuccess<BulkAnalysisJob> | ScreeningActionError> {
+  if (!Number.isFinite(runId) || runId < 1) {
+    return { ok: false, error: "Invalid run" };
+  }
+
+  const trimmedPrompt = (userPrompt ?? "").trim().slice(0, 2000) || null;
+
+  const supabase = await createClient();
+  const {
+    data: { user },
+    error: authError,
+  } = await supabase.auth.getUser();
+  if (authError || !user) return { ok: false, error: "Unauthorized" };
+
+  // Confirm the run belongs to the caller.
+  const { data: run, error: runErr } = await supabase
+    .schema("swingtrader")
+    .from("user_scan_runs")
+    .select("id, status")
+    .eq("id", runId)
+    .eq("user_id", user.id)
+    .maybeSingle();
+  if (runErr) return { ok: false, error: runErr.message };
+  if (!run) return { ok: false, error: "Screening not found" };
+  if (run.status === "deleted") {
+    return { ok: false, error: "Screening has been deleted" };
+  }
+
+  // Don't double-queue. Surface any existing in-flight job for this run.
+  const { data: existing, error: existingErr } = await supabase
+    .schema("swingtrader")
+    .from("user_bulk_analysis_jobs")
+    .select(BULK_JOB_COLUMNS)
+    .eq("user_id", user.id)
+    .eq("scan_run_id", runId)
+    .in("status", ["queued", "running"])
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (existingErr) return { ok: false, error: existingErr.message };
+  if (existing) return { ok: true, data: asBulkJob(existing) };
+
+  const { data: inserted, error: insertErr } = await supabase
+    .schema("swingtrader")
+    .from("user_bulk_analysis_jobs")
+    .insert({
+      user_id: user.id,
+      scan_run_id: runId,
+      status: "queued",
+      user_prompt: trimmedPrompt,
+    })
+    .select(BULK_JOB_COLUMNS)
+    .single();
+
+  if (insertErr) return { ok: false, error: insertErr.message };
+  return { ok: true, data: asBulkJob(inserted) };
+}
+
+/**
+ * Poll the bulk-analysis job for a scan run. Returns the latest job (queued,
+ * running, or finished) or null when no job has ever been created.
+ */
+export async function getBulkAnalysisJob(
+  runId: number,
+): Promise<ScreeningActionSuccess<BulkAnalysisJob | null> | ScreeningActionError> {
+  if (!Number.isFinite(runId) || runId < 1) {
+    return { ok: false, error: "Invalid run" };
+  }
+
+  const supabase = await createClient();
+  const {
+    data: { user },
+    error: authError,
+  } = await supabase.auth.getUser();
+  if (authError || !user) return { ok: false, error: "Unauthorized" };
+
+  const { data, error } = await supabase
+    .schema("swingtrader")
+    .from("user_bulk_analysis_jobs")
+    .select(BULK_JOB_COLUMNS)
+    .eq("user_id", user.id)
+    .eq("scan_run_id", runId)
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (error) return { ok: false, error: error.message };
+  return { ok: true, data: data ? asBulkJob(data) : null };
+}
+
 export async function screeningsAddTicker(
   runId: number,
   ticker: string,

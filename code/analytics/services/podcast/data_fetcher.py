@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from datetime import date
+from datetime import date, datetime, timedelta, timezone
 from typing import Any
 
 from shared.db import get_supabase_client, _as_json
@@ -28,6 +28,80 @@ log = logging.getLogger(__name__)
 
 
 # ── individual sections ────────────────────────────────────────────────────
+
+
+def _fetch_news_24h_stats() -> tuple[int, int]:
+    """Return (article_count, unique_publisher_count) for news_articles in last 24h.
+
+    Used by the HOOK act to ground Hans's "I have read N articles from M
+    sources" line in live numbers. Falls back to (0, 0) on any failure.
+
+    Two queries:
+      1. HEAD with count='exact' → accurate article total (cheap, no payload).
+      2. Paginated select on `publisher` → unique publisher set. PostgREST
+         caps page size at 1000 server-side, so we walk pages via .range()
+         until we've covered the article total.
+
+    The `source` column holds full URLs; `publisher` is the clean name
+    ("CNBC", "WSJ", "The Motley Fool"). Publishers are folded
+    case-insensitively to merge trivial dupes.
+    """
+    since = datetime.now(timezone.utc) - timedelta(hours=24)
+    since_iso = since.isoformat()
+    log.info("Querying Supabase for news_24h stats since %s", since_iso)
+    try:
+        client = get_supabase_client()
+
+        head = (
+            client.schema("swingtrader")
+            .table("news_articles")
+            .select("id", count="exact", head=True)
+            .gte("published_at", since_iso)
+            .execute()
+        )
+        article_count = int(getattr(head, "count", 0) or 0)
+
+        publishers: set[str] = set()
+        page = 1000
+        offset = 0
+        pages_fetched = 0
+        while offset < max(article_count, 1):
+            res = (
+                client.schema("swingtrader")
+                .table("news_articles")
+                .select("publisher")
+                .gte("published_at", since_iso)
+                .range(offset, offset + page - 1)
+                .execute()
+            )
+            rows = res.data or []
+            pages_fetched += 1
+            if not rows:
+                break
+            for r in rows:
+                p = (r.get("publisher") or "").strip().lower()
+                if p:
+                    publishers.add(p)
+            if len(rows) < page:
+                break
+            offset += page
+
+        source_count = len(publishers)
+        log.info(
+            "news_24h stats fetched: %d articles, %d unique publishers (paginated %d page(s))",
+            article_count,
+            source_count,
+            pages_fetched,
+        )
+        return article_count, source_count
+    except Exception as exc:
+        log.warning(
+            "news_24h stats fell back to 0/0 — DB query failed: %s: %s",
+            type(exc).__name__,
+            exc,
+        )
+        return 0, 0
+
 
 def _fetch_top_news() -> dict | None:
     """Highest-impact article from the last 14h, with associated ticker.
@@ -115,13 +189,17 @@ def _fetch_watchlist() -> list[dict]:
             rs_num = None
         if rs_num is None:
             continue
-        watchlist.append({
-            "ticker": r["symbol"],
-            "rs_rank": int(rs_num),
-            "stage": rd.get("stage") or 2,
-            "pct_from_pivot": float(rd.get("pct_from_pivot") or rd.get("pctFromPivot") or 0.0),
-            "setup_type": rd.get("setup_type") or rd.get("setupType") or "Base",
-        })
+        watchlist.append(
+            {
+                "ticker": r["symbol"],
+                "rs_rank": int(rs_num),
+                "stage": rd.get("stage") or 2,
+                "pct_from_pivot": float(
+                    rd.get("pct_from_pivot") or rd.get("pctFromPivot") or 0.0
+                ),
+                "setup_type": rd.get("setup_type") or rd.get("setupType") or "Base",
+            }
+        )
 
     watchlist.sort(key=lambda x: x["rs_rank"], reverse=True)
     return watchlist[:5]
@@ -131,7 +209,8 @@ def _fetch_vix() -> dict | None:
     """VIX current value + day-over-day change from FMP."""
     try:
         from services.rag.market import FMPClient
-        df = FMPClient.quote_price(["^VIX"])
+
+        df = FMPClient().quote_price(["^VIX"])
     except Exception as exc:
         log.warning("vix skipped — FMP fetch failed: %s", exc)
         return None
@@ -162,7 +241,8 @@ def _fetch_insider() -> dict | None:
     """
     try:
         from services.rag.market import FMPClient
-        df = FMPClient.insider_trading_latest(limit=50)
+
+        df = FMPClient().insider_trading_latest(limit=50)
     except Exception as exc:
         log.warning("insider skipped — FMP fetch failed: %s", exc)
         return None
@@ -171,9 +251,17 @@ def _fetch_insider() -> dict | None:
         log.info("insider skipped — empty FMP response")
         return None
 
-    needed = {"symbol", "transactionType", "securitiesTransacted", "price", "reportingName"}
+    needed = {
+        "symbol",
+        "transactionType",
+        "securitiesTransacted",
+        "price",
+        "reportingName",
+    }
     if not needed.issubset(df.columns):
-        log.warning("insider skipped — FMP response missing fields %s", needed - set(df.columns))
+        log.warning(
+            "insider skipped — FMP response missing fields %s", needed - set(df.columns)
+        )
         return None
 
     df = df.copy()
@@ -187,7 +275,11 @@ def _fetch_insider() -> dict | None:
 
     top = df.sort_values("dollar_value", ascending=False).iloc[0]
     txn_type = str(top["transactionType"] or "").upper()
-    action = "purchased" if txn_type.startswith("P") else "sold" if txn_type.startswith("S") else "transacted"
+    action = (
+        "purchased"
+        if txn_type.startswith("P")
+        else "sold" if txn_type.startswith("S") else "transacted"
+    )
     shares = int(top["securitiesTransacted"])
     price = float(top["price"])
     role = str(top.get("typeOfOwner") or "Insider").split(",")[0].strip() or "Insider"
@@ -203,8 +295,9 @@ def _fetch_earnings() -> dict | None:
     """Today's biggest earnings surprise from the FMP calendar."""
     try:
         from services.rag.market import FMPClient
+
         today = str(date.today())
-        df = FMPClient.earnings_calendar_range(today, today)
+        df = FMPClient().earnings_calendar_range(today, today)
     except Exception as exc:
         log.warning("earnings skipped — FMP calendar failed: %s", exc)
         return None
@@ -217,10 +310,13 @@ def _fetch_earnings() -> dict | None:
         df = df.dropna(subset=["epsActual", "epsEstimated"])
         if df.empty:
             return None
-        df = df.assign(surprise_pct=(
-            (df["epsActual"] - df["epsEstimated"]).abs() /
-            df["epsEstimated"].abs().replace(0, 1) * 100.0
-        ))
+        df = df.assign(
+            surprise_pct=(
+                (df["epsActual"] - df["epsEstimated"]).abs()
+                / df["epsEstimated"].abs().replace(0, 1)
+                * 100.0
+            )
+        )
         top = df.sort_values("surprise_pct", ascending=False).iloc[0]
         return {
             "ticker": top["symbol"],
@@ -272,6 +368,7 @@ def _fetch_regime_and_breadth() -> tuple[dict, dict]:
 
 # ── public entrypoint ─────────────────────────────────────────────────────
 
+
 async def fetch_live_data() -> dict:
     """Assemble the full data dict for the podcast script generator.
 
@@ -280,15 +377,19 @@ async def fetch_live_data() -> dict:
     """
     log.info("Fetching live podcast data")
 
-    top_news, watchlist, vix, earnings, insider, regime_breadth = await asyncio.gather(
-        asyncio.to_thread(_fetch_top_news),
-        asyncio.to_thread(_fetch_watchlist),
-        asyncio.to_thread(_fetch_vix),
-        asyncio.to_thread(_fetch_earnings),
-        asyncio.to_thread(_fetch_insider),
-        asyncio.to_thread(_fetch_regime_and_breadth),
+    top_news, watchlist, vix, earnings, insider, regime_breadth, news_stats = (
+        await asyncio.gather(
+            asyncio.to_thread(_fetch_top_news),
+            asyncio.to_thread(_fetch_watchlist),
+            asyncio.to_thread(_fetch_vix),
+            asyncio.to_thread(_fetch_earnings),
+            asyncio.to_thread(_fetch_insider),
+            asyncio.to_thread(_fetch_regime_and_breadth),
+            asyncio.to_thread(_fetch_news_24h_stats),
+        )
     )
     regime, breadth = regime_breadth
+    articles_24h, sources_24h = news_stats
 
     data: dict[str, Any] = {
         "date": str(date.today()),
@@ -296,6 +397,8 @@ async def fetch_live_data() -> dict:
         "breadth": breadth,
         "vix": vix or {"current": 0, "change_pct": 0, "direction": "flat"},
         "watchlist": watchlist,
+        "articles_24h": articles_24h,
+        "sources_24h": sources_24h,
     }
     if top_news:
         data["top_news"] = top_news
@@ -306,12 +409,17 @@ async def fetch_live_data() -> dict:
 
     log.info(
         "Live data assembled — top_news=%s, watchlist=%d, vix=%s, "
-        "earnings=%s, insider=%s, regime=%s (%.1f%%/%.1f%% above 50/200MA)",
-        bool(top_news), len(watchlist),
+        "earnings=%s, insider=%s, regime=%s (%.1f%%/%.1f%% above 50/200MA), "
+        "articles_24h=%d, sources_24h=%d",
+        bool(top_news),
+        len(watchlist),
         vix["current"] if vix else "missing",
         earnings["ticker"] if earnings else "none",
         insider["ticker"] if insider else "none",
         regime["status"],
-        breadth["pct_above_50ma"], breadth["pct_above_200ma"],
+        breadth["pct_above_50ma"],
+        breadth["pct_above_200ma"],
+        articles_24h,
+        sources_24h,
     )
     return data

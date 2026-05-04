@@ -25,6 +25,7 @@ import {
   Plus,
   Bot,
   FolderPlus,
+  Sparkles,
 } from "lucide-react";
 import { AiAnalysisPanel } from "@/components/ai-analysis-panel";
 import { CLUSTERS } from "../vectors/dimensions";
@@ -36,11 +37,14 @@ import {
   type EntryMarker,
 } from "@/components/ticker-charts";
 import {
+  bulkAnalyzeScanRun,
+  getBulkAnalysisJob,
   screeningsAddTicker,
   screeningsCreateRun,
   screeningsSoftDeleteRun,
   screeningsUpsertDismissNote,
   screeningsGetUserTrades,
+  type BulkAnalysisJob,
   type LoggedTrade,
 } from "@/app/actions/screenings";
 import {
@@ -314,6 +318,9 @@ export function ScreeningsUI({
   const [creatingRun, setCreatingRun] = useState(false);
   const [addTickerBusy, setAddTickerBusy] = useState(false);
   const [aiSelectedRow, setAiSelectedRow] = useState<ScreeningRow | null>(null);
+  const [bulkJob, setBulkJob] = useState<BulkAnalysisJob | null>(null);
+  const [bulkStarting, setBulkStarting] = useState(false);
+  const [bulkError, setBulkError] = useState<string | null>(null);
 
   // Load persisted UI preferences only after hydration to avoid SSR/client mismatch.
   useEffect(() => {
@@ -489,6 +496,57 @@ export function ScreeningsUI({
   useEffect(() => {
     setRowNotes(new Map(initialNotes.map((n) => [n.scan_row_id, n])));
   }, [selectedRunId, initialNotes]);
+
+  // ── Bulk-analysis job polling ────────────────────────────────────────────
+  useEffect(() => {
+    if (selectedRunId == null) {
+      setBulkJob(null);
+      setBulkError(null);
+      return;
+    }
+    let cancelled = false;
+
+    const fetchJob = async () => {
+      const res = await getBulkAnalysisJob(selectedRunId);
+      if (cancelled) return;
+      if (res.ok) {
+        setBulkJob(res.data);
+        setBulkError(null);
+      }
+    };
+
+    void fetchJob();
+    const interval = setInterval(() => {
+      if (cancelled) return;
+      // Slow the poll once the job has settled.
+      if (bulkJob && (bulkJob.status === "done" || bulkJob.status === "error" || bulkJob.status === "cancelled")) {
+        return;
+      }
+      void fetchJob();
+    }, 4000);
+
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
+  }, [selectedRunId, bulkJob?.status]);
+
+  const handleBulkAnalyze = useCallback(async (userPrompt: string) => {
+    if (selectedRunId == null || bulkStarting) return;
+    if (bulkJob?.status === "queued" || bulkJob?.status === "running") return;
+    setBulkStarting(true);
+    setBulkError(null);
+    try {
+      const res = await bulkAnalyzeScanRun(selectedRunId, userPrompt);
+      if (res.ok) {
+        setBulkJob(res.data);
+      } else {
+        setBulkError(res.error);
+      }
+    } finally {
+      setBulkStarting(false);
+    }
+  }, [selectedRunId, bulkStarting, bulkJob?.status]);
 
   const rowBySymbol = useMemo(() => {
     const map = new Map<string, ScreeningRow>();
@@ -1205,6 +1263,17 @@ export function ScreeningsUI({
               )}
             </button>
           )}
+          {/* Bulk-analysis trigger — always visible (independent of collapse) */}
+          {!addFilterOpen && selectedRunId != null && rows.length > 0 && (
+            <div className="shrink-0 self-center mr-2">
+              <BulkAnalyzeButton
+                job={bulkJob}
+                starting={bulkStarting}
+                error={bulkError}
+                onStart={handleBulkAnalyze}
+              />
+            </div>
+          )}
           {/* Scrollable tab strip */}
           <div className="flex-1 min-w-0 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
             <div className="flex items-end gap-x-0 flex-nowrap min-w-max">
@@ -1442,6 +1511,31 @@ export function ScreeningsUI({
                                 onAnnotations={handleChartAiAnnotations}
                                 messages={chartAiMessages}
                                 setMessages={scopedSetChartAiMessages}
+                                scanRowId={rowBySymbol.get(selectedTicker)?.scan_row_id}
+                                runId={rowBySymbol.get(selectedTicker)?.run_id}
+                                onStatusChange={({ status, comment, highlighted, ok }) => {
+                                  if (!ok) return;
+                                  const row = rowBySymbol.get(selectedTicker);
+                                  if (!row) return;
+                                  const now = new Date().toISOString();
+                                  const prev = rowNotes.get(row.scan_row_id);
+                                  const next: ScanRowNote = {
+                                    scan_row_id: row.scan_row_id,
+                                    run_id: row.run_id,
+                                    ticker: row.symbol,
+                                    user_id: prev?.user_id ?? "",
+                                    status,
+                                    highlighted: highlighted ?? prev?.highlighted ?? false,
+                                    comment: comment ?? prev?.comment ?? null,
+                                    stage: prev?.stage ?? null,
+                                    priority: prev?.priority ?? null,
+                                    tags: prev?.tags ?? [],
+                                    metadata_json: prev?.metadata_json ?? {},
+                                    created_at: prev?.created_at ?? now,
+                                    updated_at: now,
+                                  };
+                                  setRowNotes((m) => new Map(m).set(row.scan_row_id, next));
+                                }}
                                 onLoadingChange={(loading) => {
                                   if (!selectedTicker) return;
                                   setStreamingTickers((prev) => {
@@ -1499,6 +1593,31 @@ export function ScreeningsUI({
                               onAnnotations={handleChartAiAnnotations}
                               messages={chartAiMessages}
                               setMessages={scopedSetChartAiMessages}
+                              scanRowId={rowBySymbol.get(selectedTicker)?.scan_row_id}
+                              runId={rowBySymbol.get(selectedTicker)?.run_id}
+                              onStatusChange={({ status, comment, highlighted, ok }) => {
+                                if (!ok) return;
+                                const row = rowBySymbol.get(selectedTicker);
+                                if (!row) return;
+                                const now = new Date().toISOString();
+                                const prev = rowNotes.get(row.scan_row_id);
+                                const next: ScanRowNote = {
+                                  scan_row_id: row.scan_row_id,
+                                  run_id: row.run_id,
+                                  ticker: row.symbol,
+                                  user_id: prev?.user_id ?? "",
+                                  status,
+                                  highlighted: highlighted ?? prev?.highlighted ?? false,
+                                  comment: comment ?? prev?.comment ?? null,
+                                  stage: prev?.stage ?? null,
+                                  priority: prev?.priority ?? null,
+                                  tags: prev?.tags ?? [],
+                                  metadata_json: prev?.metadata_json ?? {},
+                                  created_at: prev?.created_at ?? now,
+                                  updated_at: now,
+                                };
+                                setRowNotes((m) => new Map(m).set(row.scan_row_id, next));
+                              }}
                               onLoadingChange={(loading) => {
                                 if (!selectedTicker) return;
                                 setStreamingTickers((prev) => {
@@ -1929,6 +2048,160 @@ export function ScreeningsUI({
             />
           );
         })()}
+    </div>
+  );
+}
+
+const BULK_ANALYZE_DEFAULT_PROMPT =
+  "Run a swing-trading technical analysis. Highlight setup quality, key levels, and any risks.";
+
+function BulkAnalyzeButton({
+  job,
+  starting,
+  error,
+  onStart,
+}: {
+  job: BulkAnalysisJob | null;
+  starting: boolean;
+  error: string | null;
+  onStart: (userPrompt: string) => Promise<void> | void;
+}) {
+  const inFlight = job?.status === "queued" || job?.status === "running";
+  const [panelOpen, setPanelOpen] = useState(false);
+  const [draft, setDraft] = useState("");
+  const containerRef = useRef<HTMLDivElement | null>(null);
+
+  // Seed the draft from the previous job's prompt when the panel opens.
+  useEffect(() => {
+    if (panelOpen) {
+      setDraft((prev) => prev || job?.user_prompt || "");
+    }
+  }, [panelOpen, job?.user_prompt]);
+
+  // Close on outside click or Esc.
+  useEffect(() => {
+    if (!panelOpen) return;
+    const onDown = (e: MouseEvent) => {
+      if (!containerRef.current) return;
+      if (!containerRef.current.contains(e.target as Node)) setPanelOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setPanelOpen(false);
+    };
+    window.addEventListener("mousedown", onDown);
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("mousedown", onDown);
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [panelOpen]);
+
+  let label: string;
+  let title: string;
+  if (starting) {
+    label = "Starting…";
+    title = "Queueing bulk analysis";
+  } else if (job?.status === "queued") {
+    label = "Queued";
+    title = "Job is queued — worker will pick it up within a minute";
+  } else if (job?.status === "running") {
+    const total = job.total_tickers || 0;
+    const done = job.completed_tickers || 0;
+    label = total ? `Running ${done}/${total}` : "Running…";
+    title = `Bulk analysis in progress${job.failed_tickers ? ` — ${job.failed_tickers} failed` : ""}`;
+  } else if (job?.status === "done") {
+    const succeeded = Math.max(0, (job.completed_tickers ?? 0) - (job.failed_tickers ?? 0));
+    label = `Re-analyze all (last: ${succeeded}/${job.total_tickers})`;
+    title = "Bulk analysis completed — click to run again";
+  } else if (job?.status === "error") {
+    label = "Re-analyze all (last failed)";
+    title = job.error_message || "Previous job errored";
+  } else {
+    label = "Analyze all";
+    title = "Run a per-ticker technical analysis on every ticker in this screening";
+  }
+
+  const handleClick = () => {
+    if (inFlight || starting) return;
+    setPanelOpen((o) => !o);
+  };
+
+  const handleSubmit = async () => {
+    const prompt = draft.trim() || BULK_ANALYZE_DEFAULT_PROMPT;
+    setPanelOpen(false);
+    await onStart(prompt);
+  };
+
+  return (
+    <div ref={containerRef} className="relative flex flex-col gap-1">
+      <button
+        type="button"
+        onClick={handleClick}
+        disabled={starting || inFlight}
+        title={title}
+        className={`flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded-md border transition-colors ${
+          inFlight
+            ? "border-primary/40 bg-primary/10 text-primary"
+            : "border-border text-muted-foreground hover:text-foreground hover:border-foreground/40"
+        } disabled:pointer-events-none disabled:opacity-60`}
+      >
+        {inFlight || starting ? (
+          <Loader2 className="w-3.5 h-3.5 animate-spin" />
+        ) : (
+          <Sparkles className="w-3.5 h-3.5" />
+        )}
+        {label}
+      </button>
+      {error ? (
+        <span className="text-[11px] text-destructive max-w-[16rem] truncate" title={error}>
+          {error}
+        </span>
+      ) : null}
+
+      {panelOpen && !inFlight && !starting ? (
+        <div className="absolute z-50 top-full left-0 mt-2 w-[22rem] max-w-[90vw] rounded-md border border-border bg-popover text-popover-foreground shadow-lg p-3">
+          <div className="flex flex-col gap-2">
+            <label className="text-xs font-medium text-foreground">
+              What should the analyst look for?
+            </label>
+            <textarea
+              autoFocus
+              value={draft}
+              onChange={(e) => setDraft(e.target.value)}
+              onKeyDown={(e) => {
+                if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
+                  e.preventDefault();
+                  void handleSubmit();
+                }
+              }}
+              placeholder={BULK_ANALYZE_DEFAULT_PROMPT}
+              rows={4}
+              maxLength={2000}
+              className="w-full text-xs rounded-md border border-input bg-background px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-ring resize-none"
+            />
+            <div className="flex items-center justify-between text-[11px] text-muted-foreground">
+              <span>Runs locally on Ollama. ⌘/Ctrl+Enter to start.</span>
+              <span>{draft.length}/2000</span>
+            </div>
+            <div className="flex items-center justify-end gap-2 pt-1">
+              <button
+                type="button"
+                onClick={() => setPanelOpen(false)}
+                className="text-xs px-2.5 py-1.5 rounded-md border border-border text-muted-foreground hover:text-foreground"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => void handleSubmit()}
+                className="text-xs px-2.5 py-1.5 rounded-md border border-foreground bg-foreground text-background hover:opacity-90"
+              >
+                Start
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }

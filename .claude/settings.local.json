@@ -5,7 +5,8 @@
       "mcp__claude_ai_Sanity__get_schema",
       "WebFetch(domain:github.com)",
       "Bash(gh api *)",
-      "Bash(npx tsc *)"
+      "Bash(npx tsc *)",
+      "Skill(claude-api)"
     ]
   }
 }

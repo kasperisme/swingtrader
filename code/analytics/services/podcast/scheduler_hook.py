@@ -15,10 +15,10 @@ from .config import (
     TELEGRAM_BOT_TOKEN,
     TELEGRAM_CHAT_ID,
 )
-from .elevenlabs_render import render_episode
+from .elevenlabs_render import ensure_hook_music, render_episode
 from .episode_packager import package_episode
-from .rss_publisher import publish_episode
-from .script_generator import generate_script, _welcome_act
+from .supabase_publisher import publish_episode
+from .script_generator import generate_script, _hook_act, _welcome_act
 from .telegram_gate import request_edited_script, send_approval_request
 
 log = logging.getLogger(__name__)
@@ -143,13 +143,16 @@ async def run_daily_podcast(
         chars = _count_chars(script)
 
         if skip_publish:
-            log.info("Skipping publish (skip_publish=True) — episode at %s", EPISODES_DIR / today)
+            log.info(
+                "Skipping publish (skip_publish=True) — bundled single-file MP3 ready: %s",
+                metadata["audio_path"],
+            )
             await _log_to_supabase(today, title, "", duration, script, chars, "local_only")
             return
 
+        # publish_episode uploads to Supabase Storage and upserts the
+        # podcast_episodes row itself, so no post-publish logging is needed.
         url = await publish_episode(metadata, today)
-
-        await _log_to_supabase(today, title, url, duration, script, chars, "published")
 
         await _send_notification(
             f"✅ Episode published: <b>{title}</b>\n{url}"
@@ -165,11 +168,11 @@ async def run_daily_podcast(
 
 
 async def run_welcome_only() -> Path:
-    """Render only the deterministic welcome scene through ElevenLabs + pydub.
+    """Render the hook + welcome opener through ElevenLabs + pydub.
 
     No LLM call, no data fetcher, no Telegram, no publish, no Supabase. Useful
-    for verifying voice configuration, ElevenLabs credentials, and audio
-    stitching end-to-end with minimal API spend (~2 short TTS calls).
+    for verifying voice configuration, ElevenLabs credentials, sound-effects
+    music generation, and audio stitching end-to-end with minimal API spend.
 
     Returns the path to the packaged MP3.
     """
@@ -183,11 +186,49 @@ async def run_welcome_only() -> Path:
             "must both be set to render the welcome scene"
         )
 
+    from .data_fetcher import _fetch_news_24h_stats
+    log.info("welcome-only: fetching live news_24h stats from Supabase")
+    try:
+        articles_24h, sources_24h = await asyncio.to_thread(_fetch_news_24h_stats)
+    except Exception as exc:
+        log.warning(
+            "welcome-only: news_24h fetch raised %s: %s — falling back to 0/0",
+            type(exc).__name__,
+            exc,
+        )
+        articles_24h, sources_24h = 0, 0
+    log.info(
+        "welcome-only: hook will render with articles_24h=%d, sources_24h=%d",
+        articles_24h,
+        sources_24h,
+    )
+
     script = {
         "episode_title": f"Welcome test — {today}",
-        "episode_description": "Local test render of the deterministic welcome scene. Not for publication.",
-        "acts": [welcome],
+        "episode_description": "Local test render of the hook + welcome opener. Not for publication.",
+        "acts": [
+            _hook_act(article_count=articles_24h, source_count=sources_24h),
+            welcome,
+        ],
     }
+
+    # Generate (or load cached) hook music up front so the test bundle always
+    # includes the sound-effects bed under the hook. render_episode will reuse
+    # the cached file via ensure_hook_music inside the same path.
+    log.info("welcome-only: ensuring sound-effects hook music is available")
+    music_path = await asyncio.to_thread(ensure_hook_music)
+    if music_path is None:
+        log.warning(
+            "welcome-only: hook music could not be prepared — bundle will play "
+            "the hook without a music bed (check ELEVENLABS_API_KEY and the "
+            "elevenlabs SDK install)"
+        )
+    else:
+        log.info(
+            "welcome-only: hook music ready at %s (%d bytes)",
+            music_path,
+            music_path.stat().st_size,
+        )
 
     output_root = EPISODES_DIR / f"{today}_welcome_test"
     segments_dir = output_root / "segments"
@@ -196,7 +237,9 @@ async def run_welcome_only() -> Path:
     metadata = package_episode(segments, script, today, output_root)
 
     log.info(
-        "Welcome-only render complete — %d chars TTS, %.1fs audio at %s",
-        _count_chars(script), metadata["duration_seconds"], output_root,
+        "Welcome-only render complete — %d chars TTS, %.1fs audio. Bundled single-file MP3: %s",
+        _count_chars(script),
+        metadata["duration_seconds"],
+        metadata["audio_path"],
     )
-    return output_root / f"{today}_episode.mp3"
+    return metadata["audio_path"]

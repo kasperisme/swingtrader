@@ -276,6 +276,8 @@ function AnnotationPills({ annotations }: { annotations: ChartAnnotation[] }) {
 
 // --- main component ---
 
+type TickerStatus = "active" | "dismissed" | "watchlist" | "pipeline";
+
 interface ChartAiChatProps {
   symbol: string;
   ohlcData: OhlcBar[];
@@ -288,6 +290,11 @@ interface ChartAiChatProps {
   /** True when a stream for this ticker is running in the background (e.g. user navigated away and back). */
   isStreaming?: boolean;
   side?: boolean;
+  /** Screening row identifiers — required to enable the model's status-change tool. */
+  scanRowId?: number;
+  runId?: number;
+  /** Called after the server applies a model-driven status change. */
+  onStatusChange?: (change: { status: TickerStatus; comment: string | null; highlighted: boolean | null; ok: boolean; error: string | null }) => void;
 }
 
 export function ChartAiChat({
@@ -301,6 +308,9 @@ export function ChartAiChat({
   onLoadingChange,
   isStreaming = false,
   side = false,
+  scanRowId,
+  runId,
+  onStatusChange,
 }: ChartAiChatProps) {
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
@@ -346,6 +356,8 @@ export function ChartAiChat({
         body: JSON.stringify({
           symbol, ohlcData, annotations, messages: history,
           ...(overridePersonas !== undefined ? { overridePersonas } : {}),
+          ...(typeof scanRowId === "number" ? { scanRowId } : {}),
+          ...(typeof runId === "number" ? { runId } : {}),
         }),
       });
 
@@ -407,6 +419,15 @@ export function ChartAiChat({
               const copy = [...prev];
               copy[copy.length - 1] = { role: "assistant", content: assistantContent };
               return copy;
+            });
+          } else if (msg.type === "status_change") {
+            const status = msg.status as TickerStatus;
+            onStatusChange?.({
+              status,
+              comment: (msg.comment as string | null) ?? null,
+              highlighted: (msg.highlighted as boolean | null) ?? null,
+              ok: !!msg.ok,
+              error: (msg.error as string | null) ?? null,
             });
           } else if (msg.type === "error") {
             setMessages((prev) => [...prev, { role: "assistant", content: `Error: ${String(msg.message)}` }]);

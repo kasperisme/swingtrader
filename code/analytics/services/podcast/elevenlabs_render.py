@@ -5,7 +5,12 @@ import logging
 import re
 from pathlib import Path
 
-from .config import ELEVENLABS_API_KEY
+from .config import (
+    ASSETS_DIR,
+    ELEVENLABS_API_KEY,
+    PODCAST_HOOK_MUSIC_DURATION_S,
+    PODCAST_HOOK_MUSIC_PROMPT,
+)
 from .voices import get_voice
 
 log = logging.getLogger(__name__)
@@ -73,10 +78,80 @@ async def render_segment(text: str, voice_name: str, output_path: Path) -> Path:
         raise
 
 
+def ensure_hook_music(
+    output_path: Path | None = None,
+    *,
+    prompt: str | None = None,
+    duration_seconds: float | None = None,
+) -> Path | None:
+    """Generate (and cache) a soft hook music bed via ElevenLabs sound effects.
+
+    The track is cached to disk so a daily podcast keeps a consistent intro
+    bed without re-spending API credits. Delete the cached file to regenerate.
+    Returns the path on success, None on failure (caller falls back to silence).
+    """
+    target = output_path or (ASSETS_DIR / "hook_music.mp3")
+    if target.exists() and target.stat().st_size > 0:
+        log.info(
+            "Hook music ready (cached): %s (%d bytes)",
+            target,
+            target.stat().st_size,
+        )
+        return target
+
+    if not ELEVENLABS_API_KEY:
+        log.warning("ELEVENLABS_API_KEY not set — cannot generate hook music")
+        return None
+
+    try:
+        from elevenlabs.client import ElevenLabs
+    except ImportError:
+        log.warning("elevenlabs package not installed — cannot generate hook music")
+        return None
+
+    target.parent.mkdir(parents=True, exist_ok=True)
+    client = ElevenLabs(api_key=ELEVENLABS_API_KEY)
+    effective_prompt = prompt or PODCAST_HOOK_MUSIC_PROMPT
+    effective_duration = duration_seconds or PODCAST_HOOK_MUSIC_DURATION_S
+
+    log.info(
+        "Generating hook music via ElevenLabs sound effects: duration=%.1fs, prompt=%r",
+        effective_duration,
+        effective_prompt[:80],
+    )
+    try:
+        audio = client.text_to_sound_effects.convert(
+            text=effective_prompt,
+            duration_seconds=effective_duration,
+            prompt_influence=0.3,
+        )
+        audio_bytes = b"".join(audio)
+        target.write_bytes(audio_bytes)
+        log.info("Hook music cached (%d bytes) → %s", len(audio_bytes), target)
+        return target
+    except Exception as exc:
+        log.warning("Hook music generation failed: %s", exc)
+        return None
+
+
 async def render_episode(script: dict, output_dir: Path) -> list[Path]:
     """Render all script lines sequentially, return ordered list of segment paths."""
     output_dir.mkdir(parents=True, exist_ok=True)
     segments: list[Path] = []
+
+    has_hook = any(
+        act.get("name") == "HOOK" or act.get("bg_music")
+        for act in script.get("acts", [])
+    )
+    if has_hook:
+        music_path = ensure_hook_music()
+        if music_path is None:
+            log.warning(
+                "Hook act present but no bg music available — episode will play "
+                "the hook without a music bed (set ELEVENLABS_API_KEY to enable "
+                "sound-effects generation, or place a file at %s)",
+                ASSETS_DIR / "hook_music.mp3",
+            )
 
     for act_data in script.get("acts", []):
         act_num = act_data["act"]
