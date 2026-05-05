@@ -4,7 +4,6 @@ News article retrieval — top articles, ticker news, ticker-article mapping.
 Consolidates:
   - services/agent/data_queries.get_top_articles
   - services/agent/data_queries.get_ticker_news
-  - services/video/data_fetcher.fetch_tickers_for_articles
 """
 
 from __future__ import annotations

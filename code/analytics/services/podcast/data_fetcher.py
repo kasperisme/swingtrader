@@ -27,6 +27,29 @@ from shared.db import get_supabase_client, _as_json
 log = logging.getLogger(__name__)
 
 
+# ── session context ────────────────────────────────────────────────────────
+
+
+def session_meta(today_iso: str) -> dict[str, str]:
+    """Build {weekday, session_context} from an ISO date.
+
+    LLMs hallucinate weekdays from raw dates ("2026-05-05" → "Monday"); we pass
+    these strings explicitly so the script never mis-states what day it is.
+    The session_context phrase orients the listener relative to the prior
+    trading session (Mon open vs. mid-week vs. weekend recap).
+    """
+    d = date.fromisoformat(today_iso)
+    weekday = d.strftime("%A")
+    if weekday == "Monday":
+        ctx = "Monday's open — first read after the weekend"
+    elif weekday in ("Saturday", "Sunday"):
+        ctx = f"{weekday} recap — markets last traded Friday"
+    else:
+        prior = (d - timedelta(days=1)).strftime("%A")
+        ctx = f"{weekday}'s session — coming off {prior}'s close"
+    return {"weekday": weekday, "session_context": ctx}
+
+
 # ── individual sections ────────────────────────────────────────────────────
 
 
@@ -391,8 +414,10 @@ async def fetch_live_data() -> dict:
     regime, breadth = regime_breadth
     articles_24h, sources_24h = news_stats
 
+    today_iso = str(date.today())
     data: dict[str, Any] = {
-        "date": str(date.today()),
+        "date": today_iso,
+        **session_meta(today_iso),
         "regime": regime,
         "breadth": breadth,
         "vix": vix or {"current": 0, "change_pct": 0, "direction": "flat"},

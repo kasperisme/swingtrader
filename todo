@@ -29,6 +29,7 @@ Prio 1:
 [ ] (Design) Optimize for mobile
 [ ] (UI) Searching is too slow
 [ ] (UI) Screenings should be generic and not linked to my setup
+[ ] (Podcast) Make sure the speakers are setting the scene and not just talking about the data
 
 Prio 2:
 [x] Get embedding searching to work with the ollama model

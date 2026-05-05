@@ -18,8 +18,15 @@ log = logging.getLogger(__name__)
 _PAUSE_RE = re.compile(r"\[PAUSE\]", re.IGNORECASE)
 
 
-def _strip_pause_markers(text: str) -> str:
-    return _PAUSE_RE.sub("", text).strip()
+def _normalize_pauses(text: str) -> str:
+    """Translate legacy [PAUSE] markers into ElevenLabs <break> tags.
+
+    The eleven_multilingual_v2 model honors `<break time="x.xs" />` (max 3s).
+    Older generated scripts may still contain bare [PAUSE] tokens — convert
+    them rather than dropping them so any leftover text still produces a
+    real pause. New scripts should emit `<break ... />` directly.
+    """
+    return _PAUSE_RE.sub('<break time="0.5s" />', text).strip()
 
 
 async def render_segment(text: str, voice_name: str, output_path: Path) -> Path:
@@ -33,7 +40,7 @@ async def render_segment(text: str, voice_name: str, output_path: Path) -> Path:
         raise RuntimeError("ELEVENLABS_API_KEY not set")
 
     voice = get_voice(voice_name)
-    clean_text = _strip_pause_markers(text)
+    clean_text = _normalize_pauses(text)
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
     client = ElevenLabs(api_key=ELEVENLABS_API_KEY)

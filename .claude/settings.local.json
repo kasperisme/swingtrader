@@ -6,7 +6,8 @@
       "WebFetch(domain:github.com)",
       "Bash(gh api *)",
       "Bash(npx tsc *)",
-      "Skill(claude-api)"
+      "Skill(claude-api)",
+      "Bash(python3 *)"
     ]
   }
 }

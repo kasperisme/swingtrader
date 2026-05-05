@@ -1,8 +1,7 @@
 """
 Single canonical definition of the 9 impact clusters and their dimensions.
 
-Previously duplicated across video/config.py and agent/engine.py system prompt.
-All services should import from here.
+All services should import from here rather than redefining locally.
 """
 
 from __future__ import annotations

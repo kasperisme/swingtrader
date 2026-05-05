@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 import re
 import time
 from datetime import date
@@ -24,15 +25,15 @@ from .config import (
 log = logging.getLogger(__name__)
 
 _HEARTBEAT_SECONDS = 5.0  # progress log interval during streaming
-_RETRY_MAX_ATTEMPTS = 3
+_RETRY_MAX_ATTEMPTS = max(1, int(os.environ.get("PODCAST_OLLAMA_RETRIES", "5")))
 _RETRY_INITIAL_BACKOFF_S = 2.0
 
 
 def _is_transient_ollama_error(exc: BaseException) -> bool:
     """True for errors a retry can plausibly recover from.
 
-    Covers Ollama Cloud's flapping 502/503/504/"unexpected EOF" responses,
-    plus low-level transport failures (connection drops, read timeouts).
+    Covers Ollama Cloud's flapping 502/503/504/429, "too many concurrent
+    requests", "unexpected EOF", plus transport failures (drops, timeouts).
     """
     if isinstance(
         exc,
@@ -46,8 +47,27 @@ def _is_transient_ollama_error(exc: BaseException) -> bool:
         ),
     ):
         return True
-    msg = str(exc)
-    return any(s in msg for s in ("502", "503", "504", "unexpected EOF"))
+    msg = str(exc).lower()
+    return any(
+        s in msg
+        for s in (
+            "502",
+            "503",
+            "504",
+            "429",
+            "408",
+            "unexpected eof",
+            "too many concurrent",
+        )
+    )
+
+
+def _ollama_retry_sleep_seconds(exc: BaseException, backoff: float) -> float:
+    """Longer pause after rate limits so the next attempt is less likely to 429."""
+    m = str(exc).lower()
+    if "429" in m or "too many concurrent" in m:
+        return max(backoff, 12.0)
+    return backoff
 
 _jinja_env = Environment(loader=FileSystemLoader(str(TEMPLATES_DIR)), autoescape=False)
 
@@ -80,11 +100,11 @@ def _hook_act(
             )
             article_clause = (
                 f" I have read {articles_phrase} from {sources_phrase} "
-                "in the last 24 hours. [PAUSE]"
+                "in the last 24 hours. <break time=\"0.5s\" />"
             )
         else:
             article_clause = (
-                f" I have read {articles_phrase} in the last 24 hours. [PAUSE]"
+                f" I have read {articles_phrase} in the last 24 hours. <break time=\"0.5s\" />"
             )
     else:
         article_clause = ""
@@ -98,9 +118,9 @@ def _hook_act(
                 "voice": "hook",
                 "text": (
                     "This is Hans — the orchestrator behind News Impact Screener. "
-                    "[PAUSE] I don't sleep, I don't have a P and L, "
+                    "<break time=\"0.5s\" /> I don't sleep, I don't have a P and L, "
                     "and I read every 8-K filed between yesterday's close "
-                    "and this morning's coffee. [PAUSE] Three of them matter."
+                    "and this morning's coffee. <break time=\"0.5s\" /> Three of them matter."
                     f"{article_clause} Let's go."
                 ),
             },
@@ -111,21 +131,21 @@ def _hook_act(
 def _signoff_act() -> dict:
     """Deterministic show-close in the hook voice, bookending the cold-open hook.
 
-    Sits at act 6 so it sorts after the LLM-generated CLOSE + THESIS (act 5)
+    Sits at act 7 so it sorts after the LLM-generated CLOSE + THESIS (act 6)
     in the renderer's filename scheme. Uses voice="hook" so the same Hans
     orchestrator persona that opens the show also closes it.
     """
     return {
-        "act": 6,
+        "act": 7,
         "name": "SIGN_OFF",
         "lines": [
             {
                 "voice": "hook",
                 "text": (
-                    "This was Hans. [PAUSE] "
-                    "Markets close — I don't. [PAUSE] "
+                    "This was Hans. <break time=\"0.5s\" /> "
+                    "Markets close — I don't. <break time=\"0.5s\" /> "
                     "I'll be back tomorrow with whatever moves overnight. "
-                    "[PAUSE] Trade well."
+                    "<break time=\"0.5s\" /> Trade well."
                 ),
             },
         ],
@@ -152,13 +172,26 @@ def _welcome_act() -> dict | None:
                 "voice": "primary",
                 "text": (
                     f"Welcome to News Impact Daily — your AI-powered market briefing, "
-                    f"fresh every trading day. I'm {primary}."
+                    f"fresh every trading day. I'm {primary}, and as always —"
                 ),
             },
             {
                 "voice": "secondary",
                 "text": (
-                    f"And I'm {secondary}. [PAUSE] Here's what moved markets today."
+                    f"— I'm {secondary}. Good to be back."
+                ),
+            },
+            {
+                "voice": "primary",
+                "text": (
+                    f"Got a lot to get through today. <break time=\"0.5s\" /> "
+                    f"You ready?"
+                ),
+            },
+            {
+                "voice": "secondary",
+                "text": (
+                    f"Always. Let's get into what moved markets today."
                 ),
             },
         ],
@@ -357,7 +390,7 @@ async def _call_script_model(
     Streaming keeps the connection alive token-by-token, sidestepping the
     ~60s internal timeout on Ollama's local-daemon → cloud proxy. On top of
     that, retries up to _RETRY_MAX_ATTEMPTS on transient backend errors
-    (502/503/504/EOF/network drops) with exponential backoff. Permanent
+    (502/503/504/429/EOF/network drops) with exponential backoff. Permanent
     errors (4xx auth, parse, etc.) raise on the first failure.
     """
     if retry_error:
@@ -395,7 +428,8 @@ async def _call_script_model(
                 str(exc)[:200],
                 backoff,
             )
-            await asyncio.sleep(backoff)
+            delay = _ollama_retry_sleep_seconds(exc, backoff)
+            await asyncio.sleep(delay)
             backoff *= 2
 
     assert last_exc is not None  # unreachable
@@ -427,6 +461,12 @@ async def generate_script(data: dict) -> dict:
 
     async with httpx.AsyncClient() as client:
         clean_data = await _validate_data(client, data)
+
+        # Space out Ollama Cloud calls (validation /generate then script /chat)
+        # to reduce 429 "too many concurrent requests" on the same account.
+        gap_s = float(os.environ.get("PODCAST_OLLAMA_CHAT_GAP_S", "3"))
+        if gap_s > 0:
+            await asyncio.sleep(gap_s)
 
         template = _jinja_env.get_template("script_prompt.j2")
         user_prompt = template.render(data=clean_data)

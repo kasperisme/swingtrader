@@ -8,6 +8,7 @@ user-specific tools. The prompt drives the behaviour.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import os
@@ -17,32 +18,28 @@ from typing import Any
 import httpx
 
 from shared.db import get_supabase_client
-from .fmp_tools import get_fmp_tool_schemas, call_fmp_tool, _FMP_SYSTEM_ADDON
 from shared.telegram import (
     get_user_chat_id,
     log_telegram_message,
     send_telegram_chunks,
 )
-from services.rag import (
-    get_cluster_trends,
-    get_dimension_trends,
-    get_ticker_sentiment,
-    get_top_articles,
-    get_ticker_relationships,
-    get_company_vectors,
-    get_user_positions,
-    get_user_alerts,
-    get_user_screening_notes,
-    get_user_trading_strategy,
-    search_news,
-    get_ticker_news,
-    TOOL_SCHEMAS as _RAG_TOOL_SCHEMAS,
-    get_market_tools,
-    get_user_tools,
+from services.agent_core import (
+    ToolRegistry,
+    build_market_registry,
+    build_user_registry,
+    run_tool_loop,
 )
-from services.rag.screening import apply_scan_filters as _apply_scan_filters, get_filtered_tickers_from_scan as _get_filtered_tickers_from_scan
-from services.rag.context import get_linked_scan_run_context as _get_linked_scan_run_context
+from services.rag import get_user_trading_strategy
+from services.rag.screening import (
+    apply_scan_filters as _apply_scan_filters,
+    get_filtered_tickers_from_scan as _get_filtered_tickers_from_scan,
+)
+from services.rag.context import (
+    get_linked_scan_run_context as _get_linked_scan_run_context,
+)
 from services.rag.taxonomy import CLUSTERS as _CLUSTERS
+
+from .fmp_tools import _FMP_SYSTEM_ADDON, call_fmp_tool, get_fmp_tool_schemas
 
 log = logging.getLogger(__name__)
 
@@ -154,92 +151,44 @@ _AGENT_SYSTEM = _AGENT_SYSTEM.replace("{_CLUSTER_BLOCK_PLACEHOLDER}", _CLUSTER_B
 _OLLAMA_URL_ENV = "OLLAMA_BASE_URL"
 _OLLAMA_MODEL_ENV = "OLLAMA_TIKTOK_MODEL"
 
-def fetch_url(url: str) -> dict[str, Any]:
-    """Fetch a URL and return its text content (truncated to 8000 chars)."""
-    try:
-        r = httpx.get(url, timeout=15.0, follow_redirects=True, headers={"User-Agent": "Mozilla/5.0"})
-        text = r.text[:8000]
-        return {"url": url, "status": r.status_code, "content": text}
-    except Exception as exc:
-        return {"error": str(exc)}
-
-
-_TOOLS_MARKET = {**get_market_tools(), "fetch_url": fetch_url}
-_TOOLS_USER = get_user_tools()
-
-_TOOL_SCHEMAS = _RAG_TOOL_SCHEMAS
-
 _FMP_ENABLED = bool(os.environ.get("FMP_API_KEY"))
 
 _MAX_TOOL_ROUNDS = 10
 
 
-# ── Ollama chat ─────────────────────────────────────────────────────────────
-
-def _ollama_chat(messages: list[dict], tools: list[dict] | None = None, num_predict: int = 1024) -> dict:
-    base = os.environ.get(_OLLAMA_URL_ENV, "http://localhost:11434").rstrip("/")
-    model = (
-        os.environ.get(_OLLAMA_MODEL_ENV)
-        or os.environ.get("OLLAMA_BLOG_MODEL")
-        or "gemma4:e4b"
-    )
-    payload: dict[str, Any] = {
-        "model": model,
-        "messages": messages,
-        "stream": False,
-        "format": "json",
-        "options": {"num_predict": num_predict},
-    }
-    if tools:
-        payload["tools"] = tools
-
-    r = httpx.post(f"{base}/api/chat", json=payload, timeout=300.0)
-    if r.status_code != 200:
-        raise RuntimeError(f"Ollama returned {r.status_code}: {r.text[:300]}")
-    return r.json()["message"]
-
-
-def _call_tool(name: str, args: dict, user_id: str | None = None) -> Any:
-    fn = _TOOLS_MARKET.get(name)
-    if fn:
-        try:
-            return fn(**args)
-        except Exception as exc:
-            return {"error": str(exc)}
-
-    user_fn = _TOOLS_USER.get(name)
-    if user_fn:
-        if user_id is None:
-            return {"error": f"Tool {name} requires an authenticated user"}
-        try:
-            return user_fn(user_id, **args)
-        except Exception as exc:
-            return {"error": str(exc)}
-
-    if _FMP_ENABLED:
-        return call_fmp_tool(name, args)
-
-    return {"error": f"Unknown tool: {name}"}
-
-
-# ── Scan filter helpers — logic lives in services/rag/screening.py ────────────
-
-
-# _apply_scan_filters, _get_filtered_tickers_from_scan, _get_linked_scan_run_context
-# are imported from services.rag at the top of this file.
-
-
 # ── Agent loop ──────────────────────────────────────────────────────────────
 
-def run_agent(prompt: str, user_id: str | None = None, tickers: list[str] | None = None, linked_scan_run_ids: list[int] | None = None, filtered_tickers: list[str] | None = None) -> dict:
+def _build_registry(user_id: str | None) -> ToolRegistry:
+    """Compose this agent's tool stack on top of the shared base.
+
+    Layers (low → high precedence):
+      1. base market RAG tools + fetch_url (services.agent_core)
+      2. user-scoped RAG tools when a user_id is given
+      3. FMP MCP tools when FMP_API_KEY is set
+    """
+    registry = build_market_registry()
+    if user_id:
+        registry.extend(build_user_registry(user_id))
+    if _FMP_ENABLED:
+        registry.add_schemas(get_fmp_tool_schemas(), call_fmp_tool)
+    return registry
+
+
+def run_agent(
+    prompt: str,
+    user_id: str | None = None,
+    tickers: list[str] | None = None,
+    linked_scan_run_ids: list[int] | None = None,
+    filtered_tickers: list[str] | None = None,
+) -> dict:
     """Run the screening agent loop. Returns {triggered, summary, data_used}."""
-    _base_system = _AGENT_SYSTEM + (_FMP_SYSTEM_ADDON if _FMP_ENABLED else "")
-    system = _base_system
+    base_system = _AGENT_SYSTEM + (_FMP_SYSTEM_ADDON if _FMP_ENABLED else "")
+    system = base_system
     if user_id:
         strategy = get_user_trading_strategy(user_id)
         if strategy:
             system = (
-                f"{_base_system}\n\n## User's Trading Strategy\n{strategy}\n"
+                f"{base_system}\n\n## User's Trading Strategy\n{strategy}\n"
                 "Apply this strategy when evaluating screening conditions and writing summaries. "
                 "Prioritise setups and signals that align with it."
             )
@@ -249,50 +198,50 @@ def run_agent(prompt: str, user_id: str | None = None, tickers: list[str] | None
             "Prioritise these symbols in tool calls where a tickers parameter is available."
         )
     if linked_scan_run_ids:
-        linked_context = _get_linked_scan_run_context(user_id, linked_scan_run_ids, filtered_tickers=filtered_tickers)
+        linked_context = _get_linked_scan_run_context(
+            user_id, linked_scan_run_ids, filtered_tickers=filtered_tickers
+        )
         if linked_context:
             system += (
                 f"\n\n## Linked Screening Context\n{linked_context}\n"
                 "Use this context alongside your own tool calls."
             )
-    messages = [
-        {"role": "system", "content": system},
-        {"role": "user", "content": prompt},
-    ]
 
-    data_used: dict[str, Any] = {}
-    resp: dict = {}
+    registry = _build_registry(user_id)
+    return asyncio.run(_run_agent_async(system, prompt, registry))
 
-    tool_schemas = _TOOL_SCHEMAS + (get_fmp_tool_schemas() if _FMP_ENABLED else [])
 
-    for _ in range(_MAX_TOOL_ROUNDS):
-        resp = _ollama_chat(messages, tools=tool_schemas)
+async def _run_agent_async(
+    system: str, user_prompt: str, registry: ToolRegistry
+) -> dict:
+    base_url = os.environ.get(_OLLAMA_URL_ENV, "http://localhost:11434").rstrip("/")
+    model = (
+        os.environ.get(_OLLAMA_MODEL_ENV)
+        or os.environ.get("OLLAMA_BLOG_MODEL")
+        or "gemma4:e4b"
+    )
+    async with httpx.AsyncClient() as client:
+        final_message, tool_results, _rounds = await run_tool_loop(
+            client,
+            base_url=base_url,
+            model=model,
+            system=system,
+            user=user_prompt,
+            registry=registry,
+            max_rounds=_MAX_TOOL_ROUNDS,
+            options={"num_predict": 1024},
+            request_format="json",
+            label="Screening agent",
+        )
 
-        tool_calls = resp.get("tool_calls")
-        if not tool_calls:
-            break
-
-        messages.append(resp)
-
-        for tc in tool_calls:
-            fn_name = tc["function"]["name"]
-            fn_args = tc["function"].get("arguments", {})
-            result = _call_tool(fn_name, fn_args, user_id=user_id)
-            data_used[fn_name] = _summarise_tool_result(fn_name, result)
-            messages.append({
-                "role": "tool",
-                "name": fn_name,
-                "content": json.dumps(result, default=str)[:8000],
-            })
-
-    raw = (resp.get("content") or "").strip()
+    data_used = {n: _summarise_tool_result(n, r) for n, r in tool_results.items()}
+    raw = (final_message.get("content") or "").strip()
     raw = raw.removeprefix("```json").removeprefix("```").removesuffix("```").strip()
     try:
         parsed = json.loads(raw)
     except json.JSONDecodeError:
         log.warning("Agent returned non-JSON: %s", raw[:300])
         parsed = {"triggered": False, "summary": None, "data_used": data_used}
-
     parsed.setdefault("data_used", data_used)
     return parsed
 

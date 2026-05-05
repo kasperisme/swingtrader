@@ -1,9 +1,13 @@
 """Integration tests: services.agent <-> services.rag wiring.
 
-Verifies the agent engine correctly imports tool registries, tool schemas,
-cluster taxonomy, and screening helpers from RAG instead of duplicating them.
+Verifies the screening engine builds its tool registry correctly by composing
+the shared agent_core base with RAG market + user tools. Asserts against the
+post-agent_core architecture: the engine no longer holds module-level tool
+dicts; it builds a fresh ``ToolRegistry`` per ``run_agent`` call via
+``engine._build_registry(user_id)``.
 """
 
+import asyncio
 from unittest import mock
 
 from services.agent import data_queries, engine
@@ -17,30 +21,42 @@ from services.rag import (
 
 # ── tool registries ────────────────────────────────────────────────────────
 
+
 def test_market_registry_matches_rag_plus_fetch_url():
-    """Engine adds fetch_url on top of RAG's market tools."""
-    assert set(engine._TOOLS_MARKET) == set(get_market_tools()) | {"fetch_url"}
+    """No user_id → registry holds RAG market tools + fetch_url."""
+    reg = engine._build_registry(user_id=None)
+    assert set(reg.names()) == set(get_market_tools()) | {"fetch_url"}
 
 
-def test_user_registry_matches_rag_exactly():
-    assert engine._TOOLS_USER == get_user_tools()
+def test_user_registry_layers_user_tools_on_top_of_market():
+    """With a user_id, the registry adds RAG's user-scoped tools."""
+    market_only = set(engine._build_registry(user_id=None).names())
+    with_user = set(engine._build_registry(user_id="u1").names())
+    assert with_user - market_only == set(get_user_tools())
 
 
 def test_every_registered_tool_has_a_schema():
-    schema_names = {s["function"]["name"] for s in engine._TOOL_SCHEMAS}
-    for name in {**engine._TOOLS_MARKET, **engine._TOOLS_USER}:
-        assert name in schema_names, f"Tool {name} has no schema"
+    """Every callable in the registry exposes a function-call schema."""
+    reg = engine._build_registry(user_id="u1")
+    schema_names = {s["function"]["name"] for s in reg.schemas()}
+    assert schema_names == set(reg.names())
 
 
 def test_no_duplicate_schemas():
-    """Engine schemas = RAG schemas; the duplicate fetch_url entry was removed."""
-    names = [s["function"]["name"] for s in engine._TOOL_SCHEMAS]
+    reg = engine._build_registry(user_id="u1")
+    names = [s["function"]["name"] for s in reg.schemas()]
     assert len(names) == len(set(names))
 
 
-def test_engine_schemas_equal_rag_schemas():
-    """fetch_url is already in RAG TOOL_SCHEMAS, so engine just re-uses them."""
-    assert engine._TOOL_SCHEMAS is RAG_TOOL_SCHEMAS
+def test_engine_schemas_are_canonical_rag_objects():
+    """Registry holds RAG's schema dicts by identity — not copies."""
+    reg = engine._build_registry(user_id="u1")
+    rag_by_name = {s["function"]["name"]: s for s in RAG_TOOL_SCHEMAS}
+    for s in reg.schemas():
+        name = s["function"]["name"]
+        assert s is rag_by_name[name], (
+            f"Schema for {name} is a copy — it should be the RAG canonical object"
+        )
 
 
 # ── system prompt cluster taxonomy ─────────────────────────────────────────
@@ -61,46 +77,61 @@ def test_every_dimension_key_appears_in_system_prompt():
             assert key in engine._AGENT_SYSTEM, f"Dimension {key} missing from prompt"
 
 
-# ── _call_tool dispatch ────────────────────────────────────────────────────
+# ── ToolRegistry.call dispatch ─────────────────────────────────────────────
 
-def test_call_tool_routes_market_tools():
+
+def test_registry_routes_market_tools():
+    """A market tool is dispatched by name through registry.call."""
     sentinel = {"called": "market"}
-    with mock.patch.dict(engine._TOOLS_MARKET, {"get_cluster_trends": lambda **kw: sentinel}):
-        assert engine._call_tool("get_cluster_trends", {"hours": 14}) is sentinel
+    reg = engine._build_registry(user_id=None)
+    # add_function overwrites the existing entry for the same name.
+    reg.add_function("get_cluster_trends", lambda **_: sentinel, description="stub")
+    out = asyncio.run(reg.call("get_cluster_trends", {"hours": 14}))
+    assert out is sentinel
 
 
-def test_call_tool_routes_user_tools_with_user_id():
-    captured = {}
+def test_registry_binds_user_id_to_user_tools():
+    """build_user_registry pre-binds user_id as the first positional arg."""
+    captured: dict = {}
 
-    def fake(user_id):
+    def fake(user_id, **_kwargs):
         captured["user_id"] = user_id
         return ["AAPL"]
 
-    with mock.patch.dict(engine._TOOLS_USER, {"get_user_positions": fake}):
-        out = engine._call_tool("get_user_positions", {}, user_id="u1")
+    with mock.patch(
+        "services.agent_core.market_tools.get_user_tools",
+        return_value={"get_user_positions": fake},
+    ):
+        reg = engine._build_registry(user_id="u1")
+        out = asyncio.run(reg.call("get_user_positions", {}))
 
     assert out == ["AAPL"]
     assert captured["user_id"] == "u1"
 
 
-def test_call_tool_user_tool_without_user_id_returns_error():
-    with mock.patch.dict(engine._TOOLS_USER, {"get_user_positions": lambda u: ["X"]}):
-        out = engine._call_tool("get_user_positions", {}, user_id=None)
-    assert "error" in out
-
-
-def test_call_tool_unknown_tool_returns_error_when_fmp_disabled():
-    with mock.patch.object(engine, "_FMP_ENABLED", False):
-        out = engine._call_tool("nonexistent_tool", {})
+def test_registry_excludes_user_tools_when_no_user_id():
+    """Without a user_id, user-scoped tools are absent — call returns Unknown tool."""
+    reg = engine._build_registry(user_id=None)
+    assert "get_user_positions" not in reg.names()
+    out = asyncio.run(reg.call("get_user_positions", {}))
     assert "Unknown tool" in out["error"]
 
 
-def test_call_tool_market_exception_is_wrapped_in_error():
+def test_registry_unknown_tool_returns_error_when_fmp_disabled():
+    with mock.patch.object(engine, "_FMP_ENABLED", False):
+        reg = engine._build_registry(user_id=None)
+    out = asyncio.run(reg.call("nonexistent_tool", {}))
+    assert "Unknown tool" in out["error"]
+
+
+def test_registry_wraps_tool_exceptions_in_error_dict():
+    """A tool that raises is converted to {'error': ...} so it can't crash the loop."""
     def boom(**_):
         raise RuntimeError("boom")
 
-    with mock.patch.dict(engine._TOOLS_MARKET, {"get_cluster_trends": boom}):
-        out = engine._call_tool("get_cluster_trends", {})
+    reg = engine._build_registry(user_id=None)
+    reg.add_function("get_cluster_trends", boom, description="stub")
+    out = asyncio.run(reg.call("get_cluster_trends", {}))
     assert out == {"error": "boom"}
 
 

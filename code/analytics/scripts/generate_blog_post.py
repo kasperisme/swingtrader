@@ -65,6 +65,7 @@ load_dotenv(dotenv_path=_REPO_ROOT / ".env")
 sys.path.insert(0, str(_REPO_ROOT))
 
 from shared.db import get_supabase_client, _as_json  # noqa: E402
+from services.agent_core import simple_chat  # noqa: E402
 from services.news.embeddings.semantic_retrieval import search_news_embeddings  # noqa: E402
 
 logging.basicConfig(
@@ -429,92 +430,69 @@ Original post:
 """
 
 
-async def _call_ollama_caveman(body_markdown: str) -> str:
-    """Call Ollama to produce a caveman-compressed version of the blog post."""
-    model = (
+def _ollama_model() -> str:
+    return (
         os.environ.get("OLLAMA_BLOG_MODEL")
         or os.environ.get("OLLAMA_IMPACT_MODEL")
         or "gemma4:e4b"
     )
-    base_url = os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434").rstrip("/")
-    url = f"{base_url}/api/chat"
-    num_predict = int(os.environ.get("OLLAMA_CAVEMAN_NUM_PREDICT", "600"))
 
-    payload = {
-        "model": model,
-        "stream": False,
-        "think": False,
-        "options": {"num_predict": num_predict},
-        "messages": [
-            {
-                "role": "system",
-                "content": (
-                    "You compress financial blog posts into ultra-terse caveman prose. "
-                    "Same structure, ~70% fewer words. No articles, no filler, no hedging. "
-                    "Keep all technical terms, tickers, numbers, and dimension names exact."
-                ),
-            },
-            {"role": "user", "content": _build_caveman_prompt(body_markdown)},
-        ],
-    }
 
-    log.info("Calling Ollama for caveman body, model=%s", model)
+def _ollama_base_url() -> str:
+    return os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434").rstrip("/")
+
+
+async def _ollama_simple_chat(
+    *, system: str, user: str, num_predict: int, label: str
+) -> str:
+    """Stream one Ollama chat completion via services.agent_core.
+
+    Streaming is required: OLLAMA_BLOG_MODEL is often a `:cloud` model that
+    proxies through Ollama Cloud, which closes idle connections after ~60s.
+    Non-streaming requests at typical num_predict sizes time out before the
+    model finishes generating.
+    """
+    model = _ollama_model()
+    log.info("Calling Ollama model=%s for %s", model, label)
     async with httpx.AsyncClient() as client:
-        try:
-            r = await client.post(url, json=payload, timeout=120.0)
-        except httpx.TimeoutException:
-            raise RuntimeError("Ollama timed out generating caveman body")
-        except httpx.RequestError as exc:
-            raise RuntimeError(f"Ollama connection error: {exc}") from exc
-
-    if r.status_code != 200:
-        raise RuntimeError(f"Ollama returned HTTP {r.status_code}: {r.text[:200]}")
-
-    return r.json()["message"]["content"].strip()
+        return await simple_chat(
+            client,
+            base_url=_ollama_base_url(),
+            model=model,
+            system=system,
+            user=user,
+            options={"num_predict": num_predict},
+            think=False,
+            label=label,
+        )
 
 
 async def _call_ollama(prompt: str) -> str:
-    """Call the local Ollama instance and return the blog post markdown."""
-    model = (
-        os.environ.get("OLLAMA_BLOG_MODEL")
-        or os.environ.get("OLLAMA_IMPACT_MODEL")
-        or "gemma4:e4b"
+    """Generate the blog post body markdown."""
+    return await _ollama_simple_chat(
+        system=(
+            "You are a quantitative finance market analyst writing concise, "
+            "insight-dense blog posts about how news events shift factor "
+            "exposures. Use plain English, no emojis, no hype."
+        ),
+        user=prompt,
+        num_predict=int(os.environ.get("OLLAMA_BLOG_NUM_PREDICT", "1500")),
+        label="Blog body",
     )
-    base_url = os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434").rstrip("/")
-    url = f"{base_url}/api/chat"
-    num_predict = int(os.environ.get("OLLAMA_BLOG_NUM_PREDICT", "1500"))
 
-    payload = {
-        "model": model,
-        "stream": False,
-        "think": False,
-        "options": {"num_predict": num_predict},
-        "messages": [
-            {
-                "role": "system",
-                "content": (
-                    "You are a quantitative finance market analyst writing concise, insight-dense blog posts "
-                    "about how news events shift factor exposures. Use plain English, no emojis, no hype."
-                ),
-            },
-            {"role": "user", "content": prompt},
-        ],
-    }
 
-    log.info("Calling Ollama model=%s at %s", model, base_url)
-    async with httpx.AsyncClient() as client:
-        try:
-            r = await client.post(url, json=payload, timeout=120.0)
-        except httpx.TimeoutException:
-            raise RuntimeError(f"Ollama timed out after 120s (model={model})")
-        except httpx.RequestError as exc:
-            raise RuntimeError(f"Ollama connection error: {exc}") from exc
-
-    if r.status_code != 200:
-        raise RuntimeError(f"Ollama returned HTTP {r.status_code}: {r.text[:200]}")
-
-    data = r.json()
-    return data["message"]["content"].strip()
+async def _call_ollama_caveman(body_markdown: str) -> str:
+    """Compress the blog post body into caveman style."""
+    return await _ollama_simple_chat(
+        system=(
+            "You compress financial blog posts into ultra-terse caveman prose. "
+            "Same structure, ~70% fewer words. No articles, no filler, no hedging. "
+            "Keep all technical terms, tickers, numbers, and dimension names exact."
+        ),
+        user=_build_caveman_prompt(body_markdown),
+        num_predict=int(os.environ.get("OLLAMA_CAVEMAN_NUM_PREDICT", "600")),
+        label="Caveman body",
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -745,45 +723,16 @@ Output only the 4 tweets separated by ---TWEET---. No other text before or after
 
 
 async def _call_ollama_for_x(prompt: str) -> str:
-    """Call Ollama with a reduced token budget suited for short tweet content."""
-    model = (
-        os.environ.get("OLLAMA_BLOG_MODEL")
-        or os.environ.get("OLLAMA_IMPACT_MODEL")
-        or "gemma4:e4b"
+    """Generate the 4-tweet X thread."""
+    return await _ollama_simple_chat(
+        system=(
+            "You write short, factual X (Twitter) threads about market-moving news. "
+            "Each tweet is strictly under 280 characters. No emojis. No filler. No numbering."
+        ),
+        user=prompt,
+        num_predict=int(os.environ.get("OLLAMA_X_NUM_PREDICT", "500")),
+        label="X thread",
     )
-    base_url = os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434").rstrip("/")
-    url = f"{base_url}/api/chat"
-
-    payload = {
-        "model": model,
-        "stream": False,
-        "think": False,
-        "options": {"num_predict": 500},
-        "messages": [
-            {
-                "role": "system",
-                "content": (
-                    "You write short, factual X (Twitter) threads about market-moving news. "
-                    "Each tweet is strictly under 280 characters. No emojis. No filler. No numbering."
-                ),
-            },
-            {"role": "user", "content": prompt},
-        ],
-    }
-
-    log.info("Calling Ollama for X thread, model=%s", model)
-    async with httpx.AsyncClient() as client:
-        try:
-            r = await client.post(url, json=payload, timeout=60.0)
-        except httpx.TimeoutException:
-            raise RuntimeError("Ollama timed out generating X thread")
-        except httpx.RequestError as exc:
-            raise RuntimeError(f"Ollama connection error: {exc}") from exc
-
-    if r.status_code != 200:
-        raise RuntimeError(f"Ollama returned HTTP {r.status_code}: {r.text[:200]}")
-
-    return r.json()["message"]["content"].strip()
 
 
 def _parse_x_thread(raw: str) -> list[str]:

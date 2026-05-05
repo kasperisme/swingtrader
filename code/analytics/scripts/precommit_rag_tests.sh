@@ -18,7 +18,7 @@ ANALYTICS_DIR="$REPO_ROOT/code/analytics"
 PYTHON_BIN="$ANALYTICS_DIR/.venv/bin/python"
 
 # Paths whose changes should trigger the RAG test suite.
-WATCH_PATTERN='^code/analytics/(services/(rag|agent|video|news/narrative|news/scoring)/|shared/llm/|tests/(test_rag_|test_.*_integration\.py))'
+WATCH_PATTERN='^code/analytics/(services/(rag|agent|news/narrative|news/scoring)/|shared/llm/|tests/(test_rag_|test_.*_integration\.py))'
 
 staged="$(git diff --cached --name-only --diff-filter=ACMR)"
 if [[ -z "$staged" ]] || ! grep -qE "$WATCH_PATTERN" <<< "$staged"; then
@@ -39,7 +39,6 @@ cd "$ANALYTICS_DIR"
   tests/test_rag_screening.py \
   tests/test_rag_tools.py \
   tests/test_agent_rag_integration.py \
-  tests/test_video_rag_integration.py \
   tests/test_narrative_rag_integration.py \
   tests/test_impact_scorer_llm_integration.py \
   --quiet --no-header

@@ -18,7 +18,17 @@ const FEED_LINK = "https://newsimpactscreener.com";
 const FEED_DESCRIPTION =
   "Daily AI-generated market intelligence for swing traders.";
 const FEED_AUTHOR = "newsimpactscreener.com";
-const DEFAULT_COVER = "https://www.newsimpactscreener.com/icon.png";
+// Spotify rejects feeds without itunes:owner + itunes:email. Override at
+// deploy time with PODCAST_OWNER_EMAIL.
+const FEED_OWNER_NAME = process.env.PODCAST_OWNER_NAME ?? FEED_AUTHOR;
+const FEED_OWNER_EMAIL =
+  process.env.PODCAST_OWNER_EMAIL ?? "podcast@newsimpactscreener.com";
+// Channel-level cover MUST be a square JPEG/PNG between 1400×1400 and
+// 3000×3000, RGB, <500KB. The site favicon will fail Spotify validation.
+// Override with PODCAST_FEED_COVER_URL pointing at the spec-compliant image.
+const DEFAULT_COVER =
+  process.env.PODCAST_FEED_COVER_URL ??
+  "https://www.newsimpactscreener.com/icon.png";
 
 interface EpisodeRow {
   date: string;
@@ -65,10 +75,13 @@ function renderItem(ep: EpisodeRow): string {
     <item>
       <title>${title}</title>
       <description><![CDATA[${description}]]></description>
+      <content:encoded><![CDATA[${description}]]></content:encoded>
+      <itunes:summary><![CDATA[${description}]]></itunes:summary>
       <enclosure url="${audioUrl}" length="${length}" type="audio/mpeg"/>
       <pubDate>${pubDate}</pubDate>
       <itunes:duration>${duration}</itunes:duration>
       <itunes:image href="${coverUrl}"/>
+      <itunes:episodeType>full</itunes:episodeType>
       <itunes:explicit>no</itunes:explicit>
       <guid isPermaLink="false">${guid}</guid>
     </item>`;
@@ -81,13 +94,20 @@ function renderFeed(episodes: EpisodeRow[]): string {
   return `<?xml version="1.0" encoding="UTF-8"?>
 <rss version="2.0"
   xmlns:itunes="http://www.itunes.com/dtds/podcast-1.0.dtd"
+  xmlns:content="http://purl.org/rss/1.0/modules/content/"
   xmlns:atom="http://www.w3.org/2005/Atom">
   <channel>
     <title>${xmlEscape(FEED_TITLE)}</title>
     <link>${FEED_LINK}</link>
     <atom:link href="${FEED_LINK}/podcast/feed.xml" rel="self" type="application/rss+xml"/>
     <description>${xmlEscape(FEED_DESCRIPTION)}</description>
+    <itunes:summary>${xmlEscape(FEED_DESCRIPTION)}</itunes:summary>
     <itunes:author>${xmlEscape(FEED_AUTHOR)}</itunes:author>
+    <itunes:owner>
+      <itunes:name>${xmlEscape(FEED_OWNER_NAME)}</itunes:name>
+      <itunes:email>${xmlEscape(FEED_OWNER_EMAIL)}</itunes:email>
+    </itunes:owner>
+    <itunes:type>episodic</itunes:type>
     <itunes:category text="Business">
       <itunes:category text="Investing"/>
     </itunes:category>

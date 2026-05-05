@@ -61,12 +61,18 @@ MOCK_DATA = {
 
 
 async def _live_data_fetcher() -> dict:
-    """Assemble live podcast data via services.podcast.data_fetcher.
+    """Assemble live podcast data.
 
-    Pulls top_news + watchlist from RAG / Supabase, VIX + earnings from FMP,
-    and regime/breadth from the latest screener run. Each section falls back
-    independently — never raises on partial source failures.
+    With PODCAST_AGENTIC=true (default), runs the research agent — the model
+    decides which tools to call per section, with an iteration cap surfaced
+    in the system prompt. With PODCAST_AGENTIC=false, falls back to the
+    one-shot parallel fetch in services.podcast.data_fetcher (cheaper, no
+    model planning).
     """
+    from services.podcast.config import PODCAST_AGENTIC
+    if PODCAST_AGENTIC:
+        from services.podcast.research_agent import gather_dossier
+        return await gather_dossier()
     from services.podcast.data_fetcher import fetch_live_data
     return await fetch_live_data()
 

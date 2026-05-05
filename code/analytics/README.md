@@ -41,6 +41,13 @@ Copy `.env.example` to `.env` (or edit `.env` directly) and fill in the required
 | `OLLAMA_BLOG_MODEL` | `gemma4:e4b` | Model used for blog and X thread generation |
 | `OLLAMA_BLOG_NUM_PREDICT` | `1500` | Max tokens for blog post |
 
+> All Ollama calls go through `services/agent_core` (streaming + retry +
+> heartbeat). New callers should use `simple_chat` (one-shot) or
+> `run_tool_loop` (tool-calling agent) — see
+> [`services/agent_core/README.md`](services/agent_core/README.md) for the
+> shared LLM pipeline architecture and the migration map of which
+> services consume what.
+
 ### Optional — X (Twitter)
 
 Required only when posting X threads. Uses OAuth 1.0a — Bearer Token alone is read-only and cannot post.

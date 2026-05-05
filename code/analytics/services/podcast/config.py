@@ -54,5 +54,24 @@ PODCAST_HOOK_MUSIC_DURATION_S = float(
 
 PODCAST_ENABLED = os.environ.get("PODCAST_ENABLED", "true").lower() == "true"
 
+# When true (default), the research agent decides which tools to call per
+# section. When false, fall back to the one-shot parallel fetch in
+# data_fetcher.fetch_live_data(). Useful for cheap testing or as a kill
+# switch if agentic research misbehaves.
+PODCAST_AGENTIC = os.environ.get("PODCAST_AGENTIC", "true").lower() == "true"
+
+# research_agent only: if the Ollama tool loop raises after retries, fall back
+# to fetch_live_data() (default true). Ollama Cloud often 502s before first
+# stream byte on long tool calls; set "false" to fail the pipeline instead.
+# PODCAST_RESEARCH_FALLBACK_ON_FAILURE=true|false
+# PODCAST_RESEARCH_OLLAMA_RETRIES=3  # per-request retry count (streaming /api/chat)
+#
+# script_generator: retries for streaming /api/chat (default 5). Longer waits
+# after 429 / "too many concurrent requests".
+# PODCAST_OLLAMA_RETRIES=5
+# Seconds to sleep after validation /api/generate before script /api/chat
+# (default 3) — reduces Ollama Cloud 429 when both run back-to-back.
+# PODCAST_OLLAMA_CHAT_GAP_S=3
+
 TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "")
 TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "")

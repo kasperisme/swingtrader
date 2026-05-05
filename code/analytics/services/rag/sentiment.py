@@ -2,7 +2,7 @@
 Market sentiment retrieval — cluster trends, dimension trends, ticker sentiment.
 
 Consolidates:
-  - services/agent/data_queries.get_cluster_trends  (+ label enrichment from video)
+  - services/agent/data_queries.get_cluster_trends
   - services/agent/data_queries.get_dimension_trends
   - services/agent/data_queries.get_ticker_sentiment
 """
