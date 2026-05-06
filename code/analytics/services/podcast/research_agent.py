@@ -214,6 +214,55 @@ The script writer combines your tool results with this notes field automatically
 # ── Public API ──────────────────────────────────────────────────────────────
 
 
+def _parse_dossier_json(raw: str) -> dict | None:
+    """Extract a JSON object from the agent's final message.
+
+    The system prompt asks for "ONLY a JSON object", but Ollama models
+    routinely prepend a preamble ("I now have all the data I need...") before
+    the JSON. Tries strict parse first, then falls back to slicing from the
+    first `{` to its matching `}` (string-aware so braces inside string
+    literals don't fool the bracket counter).
+    """
+    if not raw:
+        return None
+    try:
+        parsed = json.loads(raw)
+        return parsed if isinstance(parsed, dict) else None
+    except json.JSONDecodeError:
+        pass
+
+    start = raw.find("{")
+    if start == -1:
+        return None
+    depth = 0
+    in_string = False
+    escape = False
+    for i in range(start, len(raw)):
+        ch = raw[i]
+        if escape:
+            escape = False
+            continue
+        if ch == "\\" and in_string:
+            escape = True
+            continue
+        if ch == '"':
+            in_string = not in_string
+            continue
+        if in_string:
+            continue
+        if ch == "{":
+            depth += 1
+        elif ch == "}":
+            depth -= 1
+            if depth == 0:
+                try:
+                    parsed = json.loads(raw[start : i + 1])
+                except json.JSONDecodeError:
+                    return None
+                return parsed if isinstance(parsed, dict) else None
+    return None
+
+
 async def gather_dossier(today: str | None = None) -> dict:
     """Run the research agent, or fall back to parallel fetch on total failure.
 
@@ -277,11 +326,10 @@ async def _gather_dossier_via_agent(today: str) -> dict:
     raw = (final_message.get("content") or "").strip()
     raw = raw.removeprefix("```json").removeprefix("```").removesuffix("```").strip()
     research_notes = ""
-    try:
-        parsed = json.loads(raw)
-        if isinstance(parsed, dict):
-            research_notes = str(parsed.get("research_notes", "")).strip()
-    except json.JSONDecodeError:
+    parsed = _parse_dossier_json(raw)
+    if isinstance(parsed, dict):
+        research_notes = str(parsed.get("research_notes", "")).strip()
+    elif raw:
         log.warning(
             "Research agent: final message was not valid JSON (head=%r) — "
             "proceeding with tool data only",

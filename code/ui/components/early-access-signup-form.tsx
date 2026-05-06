@@ -3,11 +3,24 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 
-export function EarlyAccessSignupForm() {
+type EarlyAccessSignupFormProps = {
+  align?: "center" | "start";
+  idSuffix?: string;
+  source?: string;
+  ctaLabel?: string;
+};
+
+export function EarlyAccessSignupForm({
+  align = "center",
+  idSuffix = "default",
+  source = "landing",
+  ctaLabel = "Get Early Access",
+}: EarlyAccessSignupFormProps = {}) {
   const router = useRouter();
   const [email, setEmail] = useState("");
   const [status, setStatus] = useState<"idle" | "loading" | "success" | "error">("idle");
   const [message, setMessage] = useState<string | null>(null);
+  const inputId = `early-access-email-${idSuffix}`;
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -17,7 +30,7 @@ export function EarlyAccessSignupForm() {
       const res = await fetch("/api/early-access", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email: email.trim(), source: "landing" }),
+        body: JSON.stringify({ email: email.trim(), source }),
       });
       const data = (await res.json().catch(() => ({}))) as { error?: string };
       if (!res.ok) {
@@ -35,17 +48,19 @@ export function EarlyAccessSignupForm() {
     }
   }
 
+  const justify = align === "start" ? "sm:justify-start" : "sm:justify-center";
+
   return (
-    <div className="mt-8">
+    <div className="mt-6">
       <form
         onSubmit={onSubmit}
-        className="flex flex-col gap-3 sm:flex-row sm:justify-center"
+        className={`flex flex-col gap-3 sm:flex-row ${justify}`}
       >
-        <label htmlFor="early-access-email" className="sr-only">
+        <label htmlFor={inputId} className="sr-only">
           Email address
         </label>
         <input
-          id="early-access-email"
+          id={inputId}
           name="email"
           type="email"
           required
@@ -67,12 +82,14 @@ export function EarlyAccessSignupForm() {
           disabled={status === "loading"}
           className="inline-flex h-12 cursor-pointer items-center justify-center rounded-xl bg-violet-600 px-6 text-sm font-semibold text-white shadow-lg shadow-violet-500/20 transition-all hover:bg-violet-500 disabled:pointer-events-none disabled:opacity-60"
         >
-          {status === "loading" ? "Joining..." : "Get Early Access"}
+          {status === "loading" ? "Joining..." : ctaLabel}
         </button>
       </form>
       {message && (
         <p
-          className={`mt-3 text-sm ${status === "error" ? "text-destructive" : "text-muted-foreground"}`}
+          className={`mt-3 text-sm ${align === "start" ? "text-left" : ""} ${
+            status === "error" ? "text-destructive" : "text-muted-foreground"
+          }`}
           role={status === "error" ? "alert" : "status"}
         >
           {message}

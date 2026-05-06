@@ -47,14 +47,47 @@ MOCK_DATA = {
         "factor_summary": "Supply chain acceleration + AI infrastructure demand surge",
     },
     "watchlist": [
-        {"ticker": "NVDA", "rs_rank": 97, "stage": 2, "pct_from_pivot": 1.2, "setup_type": "VCP"},
-        {"ticker": "META", "rs_rank": 91, "stage": 2, "pct_from_pivot": 3.5, "setup_type": "Flat base"},
-        {"ticker": "MSTR", "rs_rank": 88, "stage": 2, "pct_from_pivot": -1.4, "setup_type": "Consolidation"},
-        {"ticker": "PLTR", "rs_rank": 85, "stage": 2, "pct_from_pivot": 5.1, "setup_type": "Cup with handle"},
-        {"ticker": "APP", "rs_rank": 82, "stage": 2, "pct_from_pivot": 2.0, "setup_type": "VCP"},
+        {
+            "ticker": "NVDA",
+            "rs_rank": 97,
+            "stage": 2,
+            "pct_from_pivot": 1.2,
+            "setup_type": "VCP",
+        },
+        {
+            "ticker": "META",
+            "rs_rank": 91,
+            "stage": 2,
+            "pct_from_pivot": 3.5,
+            "setup_type": "Flat base",
+        },
+        {
+            "ticker": "MSTR",
+            "rs_rank": 88,
+            "stage": 2,
+            "pct_from_pivot": -1.4,
+            "setup_type": "Consolidation",
+        },
+        {
+            "ticker": "PLTR",
+            "rs_rank": 85,
+            "stage": 2,
+            "pct_from_pivot": 5.1,
+            "setup_type": "Cup with handle",
+        },
+        {
+            "ticker": "APP",
+            "rs_rank": 82,
+            "stage": 2,
+            "pct_from_pivot": 2.0,
+            "setup_type": "VCP",
+        },
     ],
     "earnings": {"ticker": "AMZN", "surprise_pct": 12.4},
-    "insider": {"ticker": "TSLA", "description": "CEO purchased 500,000 shares at $248"},
+    "insider": {
+        "ticker": "TSLA",
+        "description": "CEO purchased 500,000 shares at $248",
+    },
     "articles_24h": 4237,
     "sources_24h": 142,
 }
@@ -70,31 +103,46 @@ async def _live_data_fetcher() -> dict:
     model planning).
     """
     from services.podcast.config import PODCAST_AGENTIC
+
     if PODCAST_AGENTIC:
         from services.podcast.research_agent import gather_dossier
+
         return await gather_dossier()
     from services.podcast.data_fetcher import fetch_live_data
+
     return await fetch_live_data()
 
 
 async def main() -> None:
     parser = argparse.ArgumentParser(description="Run the daily podcast pipeline")
     parser.add_argument("--mock", action="store_true", help="Use mock market data")
-    parser.add_argument("-v", "--verbose", action="store_true", help="Enable DEBUG logging")
+    parser.add_argument(
+        "-v", "--verbose", action="store_true", help="Enable DEBUG logging"
+    )
 
-    test_modes = parser.add_argument_group("test modes (mutually exclusive with full run)")
+    test_modes = parser.add_argument_group(
+        "test modes (mutually exclusive with full run)"
+    )
     test_modes.add_argument(
-        "--welcome-only", action="store_true",
+        "--welcome-only",
+        action="store_true",
         help="Render only the deterministic welcome scene (no LLM, no data, no publish)",
     )
     test_modes.add_argument(
-        "--script-only", action="store_true",
+        "--script-only",
+        action="store_true",
         help="Generate script JSON and stop (no TTS, no publish, no API spend on ElevenLabs)",
     )
 
     skips = parser.add_argument_group("skip flags")
-    skips.add_argument("--no-publish", action="store_true", help="Skip RSS / R2 upload / Telegram notification")
-    skips.add_argument("--no-telegram", action="store_true", help="Skip the Telegram approval gate")
+    skips.add_argument(
+        "--no-publish",
+        action="store_true",
+        help="Skip RSS / R2 upload / Telegram notification",
+    )
+    skips.add_argument(
+        "--no-telegram", action="store_true", help="Skip the Telegram approval gate"
+    )
 
     args = parser.parse_args()
     _configure_logging(args.verbose)

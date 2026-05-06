@@ -379,6 +379,11 @@ export default async function Home() {
   const freePlan = pricingPlans.find((p) => p.price === "$0");
   const futurePlans = pricingPlans.filter((p) => !p.isCurrentPhase && p !== freePlan);
   const finalPhasePlan = futurePlans[futurePlans.length - 1];
+  const heroSpotLimit = currentPlans[0]?.spotLimit ?? null;
+  const heroSpotsLeft =
+    heroSpotLimit != null ? Math.max(0, heroSpotLimit - signupCount) : null;
+  const heroFillPct =
+    heroSpotLimit ? Math.min(100, (signupCount / heroSpotLimit) * 100) : 0;
 
   const offerSectionLabel = cms?.offerSectionLabel ?? null;
   const offerHeading = cms?.offerHeading ?? null;
@@ -419,19 +424,28 @@ export default async function Home() {
                 {heroDescription}
               </p>
 
-              <div className="mt-8 flex flex-wrap gap-3">
-                <Link
-                  href="#final-cta"
-                  className="inline-flex cursor-pointer items-center gap-2 rounded-xl bg-violet-600 px-6 py-3 text-sm font-semibold text-white shadow-lg shadow-violet-500/20 transition-all hover:bg-violet-500 hover:shadow-violet-500/30"
-                >
-                  {heroPrimaryCtaLabel}
-                  <ArrowRight className="h-4 w-4" />
-                </Link>
+              <EarlyAccessSignupForm
+                align="start"
+                idSuffix="hero"
+                source="landing-hero"
+                ctaLabel={heroPrimaryCtaLabel}
+              />
+
+              <div className="mt-4 flex flex-wrap items-center gap-x-4 gap-y-2 text-xs">
+                {heroSpotsLeft != null && heroSpotLimit != null && (
+                  <span className="inline-flex items-center gap-2 font-semibold text-amber-400">
+                    <span className="relative flex h-2 w-2">
+                      <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-amber-400 opacity-75" />
+                      <span className="relative inline-flex h-2 w-2 rounded-full bg-amber-400" />
+                    </span>
+                    Only {heroSpotsLeft} of {heroSpotLimit} founder spots left
+                  </span>
+                )}
                 <Link
                   href="#how-it-works"
-                  className="inline-flex cursor-pointer items-center rounded-xl border border-border px-6 py-3 text-sm font-semibold text-foreground transition-colors hover:bg-muted"
+                  className="cursor-pointer font-medium text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"
                 >
-                  {heroSecondaryCtaLabel}
+                  {heroSecondaryCtaLabel} →
                 </Link>
               </div>
             </div>
@@ -472,8 +486,39 @@ export default async function Home() {
         </div>
       </section>
 
+      {/* ── PUBLISHERS ───────────────────────────────────────────── */}
+      <PublishersMarquee />
+
+      {/* ── HOW IT WORKS ─────────────────────────────────────────── */}
+      <section id="how-it-works" className="border-t border-border py-16 md:py-24">
+        <div className="mx-auto max-w-6xl px-4 sm:px-6 lg:px-8">
+          <p className="text-xs font-semibold uppercase tracking-widest text-amber-500">
+            {howItWorksSectionLabel}
+          </p>
+          <h2 className="mt-3 text-2xl font-bold tracking-tight sm:text-3xl">{howItWorksHeading}</h2>
+
+          <div className="relative mt-10">
+            <div
+              aria-hidden
+              className="absolute top-5 left-0 right-0 hidden h-px bg-gradient-to-r from-transparent via-amber-500/30 to-transparent md:block"
+            />
+            <div className="relative grid gap-8 md:grid-cols-3">
+              {howItWorksSteps.map((step, index) => (
+                <div key={step.label} className="flex flex-col">
+                  <div className="relative z-10 flex h-10 w-10 items-center justify-center rounded-full border border-amber-500/30 bg-amber-500/10 text-sm font-bold text-amber-400">
+                    {index + 1}
+                  </div>
+                  <h3 className="mt-5 text-base font-semibold">{step.label}</h3>
+                  <p className="mt-2 text-sm leading-6 text-muted-foreground">{step.detail}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      </section>
+
       {/* ── BENTO FEATURES ───────────────────────────────────────── */}
-      <section className="border-t border-border py-16 md:py-24">
+      <section className="py-16 md:py-24">
         <div className="mx-auto max-w-6xl px-4 sm:px-6 lg:px-8">
           <p className="text-xs font-semibold uppercase tracking-widest text-amber-500">
             {benefitsSectionLabel}
@@ -541,37 +586,6 @@ export default async function Home() {
         </div>
       </section>
 
-      {/* ── HOW IT WORKS ─────────────────────────────────────────── */}
-      <section id="how-it-works" className="py-16 md:py-24">
-        <div className="mx-auto max-w-6xl px-4 sm:px-6 lg:px-8">
-          <p className="text-xs font-semibold uppercase tracking-widest text-amber-500">
-            {howItWorksSectionLabel}
-          </p>
-          <h2 className="mt-3 text-2xl font-bold tracking-tight sm:text-3xl">{howItWorksHeading}</h2>
-
-          <div className="relative mt-10">
-            <div
-              aria-hidden
-              className="absolute top-5 left-0 right-0 hidden h-px bg-gradient-to-r from-transparent via-amber-500/30 to-transparent md:block"
-            />
-            <div className="relative grid gap-8 md:grid-cols-3">
-              {howItWorksSteps.map((step, index) => (
-                <div key={step.label} className="flex flex-col">
-                  <div className="relative z-10 flex h-10 w-10 items-center justify-center rounded-full border border-amber-500/30 bg-amber-500/10 text-sm font-bold text-amber-400">
-                    {index + 1}
-                  </div>
-                  <h3 className="mt-5 text-base font-semibold">{step.label}</h3>
-                  <p className="mt-2 text-sm leading-6 text-muted-foreground">{step.detail}</p>
-                </div>
-              ))}
-            </div>
-          </div>
-        </div>
-      </section>
-
-      {/* ── PUBLISHERS ───────────────────────────────────────────── */}
-      <PublishersMarquee />
-
       {/* ── PRODUCT VALUES ───────────────────────────────────────── */}
       <section className="py-16 md:py-24">
         <div className="mx-auto max-w-6xl px-4 sm:px-6 lg:px-8">
@@ -598,28 +612,31 @@ export default async function Home() {
         </div>
       </section>
 
-      {/* ── STRAIGHT ANSWERS ─────────────────────────────────────── */}
-      <section className="py-16 md:py-24">
-        <div className="mx-auto max-w-6xl px-4 sm:px-6 lg:px-8">
+      {/* ── PODCAST ──────────────────────────────────────────────── */}
+      <section id="podcast" className="border-t border-border py-16 md:py-24">
+        <div className="mx-auto max-w-3xl px-4 sm:px-6 lg:px-8">
           <p className="text-xs font-semibold uppercase tracking-widest text-amber-500">
-            {trustSectionLabel}
+            Daily podcast
           </p>
           <h2 className="mt-3 text-2xl font-bold tracking-tight sm:text-3xl">
-            {trustHeading}
+            Listen to the daily market briefing
           </h2>
-          <div className="mt-10 grid gap-4 sm:grid-cols-2 md:grid-cols-3">
-            {trustItems.map((item) => {
-              const Icon = resolveIcon(item.iconName, Shield);
-              return (
-                <article key={item.title} className="p-2">
-                  <div className="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-border bg-background/80">
-                    <Icon className="h-5 w-5 text-amber-400" />
-                  </div>
-                  <h3 className="mt-4 text-base font-semibold">{item.title}</h3>
-                  <p className="mt-2 text-sm leading-6 text-muted-foreground">{item.description}</p>
-                </article>
-              );
-            })}
+          <p className="mt-3 max-w-xl text-sm leading-6 text-muted-foreground">
+            A short, two-host walkthrough of the day&apos;s regime, top story, and watchlist setups — generated from the same data the screener runs on.
+          </p>
+          <div className="mt-8">
+            <iframe
+              data-testid="embed-iframe"
+              title="News Impact Screener — daily podcast on Spotify"
+              src="https://open.spotify.com/embed/show/40s2Y2bN4kT39ITmp3Ifp5?utm_source=generator"
+              width="100%"
+              height="352"
+              frameBorder={0}
+              allowFullScreen
+              allow="autoplay; clipboard-write; encrypted-media; fullscreen; picture-in-picture"
+              loading="lazy"
+              style={{ borderRadius: 12 }}
+            />
           </div>
         </div>
       </section>
@@ -644,10 +661,10 @@ export default async function Home() {
             freePlan={freePlan}
             currentPlans={currentPlans}
             finalPhasePlan={finalPhasePlan}
-            spotsLeft={currentPlans[0]?.spotLimit ? Math.max(0, currentPlans[0].spotLimit - signupCount) : null}
-            spotLimit={currentPlans[0]?.spotLimit ?? null}
+            spotsLeft={heroSpotsLeft}
+            spotLimit={heroSpotLimit}
             signupCount={signupCount}
-            fillPct={currentPlans[0]?.spotLimit ? Math.min(100, (signupCount / currentPlans[0].spotLimit) * 100) : 0}
+            fillPct={heroFillPct}
             founderNote={pricingFounderNote}
           />
 
@@ -738,6 +755,32 @@ export default async function Home() {
           </div>
         </section>
       )}
+
+      {/* ── STRAIGHT ANSWERS ─────────────────────────────────────── */}
+      <section className="py-16 md:py-24">
+        <div className="mx-auto max-w-6xl px-4 sm:px-6 lg:px-8">
+          <p className="text-xs font-semibold uppercase tracking-widest text-amber-500">
+            {trustSectionLabel}
+          </p>
+          <h2 className="mt-3 text-2xl font-bold tracking-tight sm:text-3xl">
+            {trustHeading}
+          </h2>
+          <div className="mt-10 grid gap-4 sm:grid-cols-2 md:grid-cols-3">
+            {trustItems.map((item) => {
+              const Icon = resolveIcon(item.iconName, Shield);
+              return (
+                <article key={item.title} className="p-2">
+                  <div className="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-border bg-background/80">
+                    <Icon className="h-5 w-5 text-amber-400" />
+                  </div>
+                  <h3 className="mt-4 text-base font-semibold">{item.title}</h3>
+                  <p className="mt-2 text-sm leading-6 text-muted-foreground">{item.description}</p>
+                </article>
+              );
+            })}
+          </div>
+        </div>
+      </section>
 
       {/* ── FINAL CTA ────────────────────────────────────────────── */}
       <section id="final-cta" className="border-t border-border py-20 md:py-28">

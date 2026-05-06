@@ -81,6 +81,7 @@ EDGE_LABEL: dict[str, str] = {
     "calls_rpc": "rpc",
     "fetches":   "http",
     "calls":     "calls",
+    "contains":  "defines",
 }
 
 # ── Graph ────────────────────────────────────────────────────────────────────
@@ -104,6 +105,99 @@ class Graph:
         if key not in self._edge_keys:
             self._edge_keys.add(key)
             self.edges.append({"from": from_id, "to": to_id, "type": edge_type})
+
+
+def _service_for_path(rel: str) -> str | None:
+    """Return the service-package name for ``rel`` (relative to repo root) or None.
+
+    Treats ``code/analytics/services/<name>/...`` as a service. Other Python
+    files (scripts/, shared/, top-level) return None — they're rendered in
+    their own `Other` group rather than misattributed to a service.
+    """
+    parts = rel.replace("\\", "/").split("/")
+    try:
+        i = parts.index("services")
+    except ValueError:
+        return None
+    # Anchor to code/analytics/services (not any other "services" segment).
+    if i + 1 >= len(parts) or parts[:i] != ["code", "analytics"]:
+        return None
+    name = parts[i + 1]
+    if name.endswith(".py"):  # services/<file>.py — not a package
+        return None
+    return name
+
+
+def _other_group_for_path(rel: str) -> str:
+    """Bucket non-service Python files for the diagrams."""
+    parts = rel.replace("\\", "/").split("/")
+    if "scripts" in parts:
+        return "scripts"
+    if "shared" in parts:
+        return "shared"
+    if "tests" in parts:
+        return "tests"
+    return "other"
+
+
+def _dir_parts(rel: str) -> tuple[str, ...]:
+    """Directory chain (trimmed) of a repo-relative path; filename stripped.
+
+    Used to cluster nodes by folder. Strips ``code/analytics/`` so the top
+    level becomes ``services``, ``scripts``, ``shared``, etc. Strips
+    ``code/ui/`` similarly so TS server actions cluster under ``ui``.
+
+    Examples:
+      code/analytics/services/news/scoring/impact_scorer.py → ('services','news','scoring')
+      code/analytics/scripts/generate_blog_post.py          → ('scripts',)
+      code/analytics/shared/db.py                           → ('shared',)
+      code/ui/app/actions/foo/bar.ts                        → ('ui','app','actions','foo')
+    """
+    parts = rel.replace("\\", "/").split("/")
+    if parts and "." in parts[-1]:
+        parts = parts[:-1]
+    if len(parts) >= 2 and parts[:2] == ["code", "analytics"]:
+        return tuple(parts[2:])
+    if len(parts) >= 2 and parts[:2] == ["code", "ui"]:
+        return ("ui",) + tuple(parts[2:])
+    return tuple(parts)
+
+
+def _build_nested_subgraphs(
+    items: list[tuple[str, tuple[str, ...], str]],
+    *,
+    base_indent: str = "  ",
+) -> list[str]:
+    """Render Mermaid nested subgraphs for ``(node_id, path_parts, label)`` items.
+
+    Items sharing a path-prefix are nested under the same subgraph chain.
+    Subgraphs whose name contains ``.`` (e.g. ``cli.py``) are rendered as
+    filename leaves; everything else is a directory and gets a trailing ``/``.
+    """
+    tree: dict[str, Any] = {"nodes": [], "children": {}}
+    for nid, parts, label in sorted(items, key=lambda x: (x[1], x[2])):
+        cur = tree
+        for p in parts:
+            cur = cur["children"].setdefault(p, {"nodes": [], "children": {}})
+        cur["nodes"].append((nid, label))
+
+    out: list[str] = []
+
+    def _emit(node: dict[str, Any], prefix: tuple[str, ...], depth: int) -> None:
+        indent = base_indent * (depth + 1)
+        for nid, label in node["nodes"]:
+            safe = label.replace('"', "'")
+            out.append(f'{indent}{_mid(nid)}["{safe}"]')
+        for name in sorted(node["children"]):
+            child_prefix = prefix + (name,)
+            sg_id = _mid("sg_" + "_".join(child_prefix))
+            display = name if "." in name else f"{name}/"
+            out.append(f'{indent}subgraph {sg_id}["{display}"]')
+            _emit(node["children"][name], child_prefix, depth + 1)
+            out.append(f"{indent}end")
+
+    _emit(tree, (), 0)
+    return out
 
 
 def _is_view(name: str) -> bool:
@@ -397,9 +491,10 @@ def _pass2_file(path: Path, graph: Graph) -> None:
         if not has_deps:
             continue
 
-        # Register node
+        # Register node + structural ownership edge from the parent module.
         graph.add_node(fi.node_id, "py_func", fi.name, rel,
                        description=fi.docstring or f"def {fi.name} in {rel}:{fi.start_line}")
+        graph.add_edge(file_node_id, fi.node_id, "contains")
 
         # DB edges
         for table, edge in table_ops:
@@ -421,9 +516,12 @@ def _pass2_file(path: Path, graph: Graph) -> None:
 
         # Cross-function call edges
         for target_fi in called_funcs:
-            # Ensure the target node exists
+            # Ensure the target node exists, plus a contains edge from its
+            # own parent module — otherwise functions reached only via
+            # cross-file calls float free of any file in the graph.
             graph.add_node(target_fi.node_id, "py_func", target_fi.name,
                            str(target_fi.file_path.relative_to(REPO_ROOT)))
+            graph.add_edge(target_fi.file_node_id, target_fi.node_id, "contains")
             graph.add_edge(fi.node_id, target_fi.node_id, "calls")
 
 
@@ -678,6 +776,7 @@ def _build_json(graph: Graph) -> dict[str, Any]:
             "calls_rpc": "PostgreSQL RPC call",
             "fetches":   "HTTP call to external API",
             "calls":     "Python function call (cross-file resolved)",
+            "contains":  "Structural: a Python module owns this function",
         },
         "nodes":               list(graph.nodes.values()),
         "edges":               graph.edges,
@@ -704,14 +803,13 @@ def _mermaid_db_graph(graph: Graph) -> str:
     rel_from = {e["from"] for e in rel_edges}
     rel_to   = {e["to"]   for e in rel_edges}
 
-    lines = ["graph LR"]
-    lines.append('  subgraph SRC["Source Files"]')
+    items: list[tuple[str, tuple[str, ...], str]] = []
     for nid in sorted(rel_from):
-        n   = graph.nodes.get(nid, {})
-        tag = "PY" if n.get("type") == "py_module" else "TS"
-        lbl = n["label"].replace('"', "'")
-        lines.append(f'    {_mid(nid)}["[{tag}] {lbl}"]')
-    lines.append("  end")
+        n = graph.nodes.get(nid, {})
+        items.append((nid, _dir_parts(n.get("path", "")), n.get("label", "")))
+
+    lines = ["graph LR"]
+    lines.extend(_build_nested_subgraphs(items))
 
     lines.append('  subgraph DB["Database — swingtrader schema"]')
     for nid in sorted(rel_to):
@@ -729,7 +827,7 @@ def _mermaid_db_graph(graph: Graph) -> str:
 
 
 def _mermaid_func_db_graph(graph: Graph) -> str:
-    """Function nodes → DB objects (subset: only cross-file interesting funcs)."""
+    """Function nodes → DB objects, nested under file → folder structure."""
     db_types  = {"db_table", "db_view", "db_rpc"}
     rel_edges = [e for e in graph.edges
                  if graph.nodes.get(e["to"],   {}).get("type") in db_types
@@ -740,23 +838,20 @@ def _mermaid_func_db_graph(graph: Graph) -> str:
     rel_from = {e["from"] for e in rel_edges}
     rel_to   = {e["to"]   for e in rel_edges}
 
-    lines = ["graph LR"]
-    # Group functions by file
-    file_groups: dict[str, list[str]] = defaultdict(list)
+    # Each function lives inside its file's subgraph; that file lives inside
+    # its directory chain. So path_parts = dir_parts + (filename,).
+    items: list[tuple[str, tuple[str, ...], str]] = []
     for nid in sorted(rel_from):
-        n    = graph.nodes.get(nid, {})
-        path = n.get("path", "unknown")
-        file_groups[path].append(nid)
+        n = graph.nodes.get(nid, {})
+        rel = n.get("path", "")
+        items.append((
+            nid,
+            _dir_parts(rel) + (Path(rel).name,) if rel else (),
+            n.get("label", ""),
+        ))
 
-    for fpath, nids in sorted(file_groups.items()):
-        sg_id = _mid(f"file_{fpath}")
-        short = Path(fpath).name
-        lines.append(f'  subgraph {sg_id}["{short}"]')
-        for nid in nids:
-            n   = graph.nodes.get(nid, {})
-            lbl = n["label"].replace('"', "'")
-            lines.append(f'    {_mid(nid)}["{lbl}"]')
-        lines.append("  end")
+    lines = ["graph LR"]
+    lines.extend(_build_nested_subgraphs(items))
 
     lines.append('  subgraph DB["Database"]')
     for nid in sorted(rel_to):
@@ -774,28 +869,24 @@ def _mermaid_func_db_graph(graph: Graph) -> str:
 
 
 def _mermaid_call_graph(graph: Graph) -> str:
-    """Function → Function call edges."""
+    """Function → Function call edges, nested under file → folder structure."""
     call_edges = [e for e in graph.edges if e["type"] == "calls"]
     if not call_edges:
         return ""
 
     involved = {e["from"] for e in call_edges} | {e["to"] for e in call_edges}
-    file_groups: dict[str, list[str]] = defaultdict(list)
+    items: list[tuple[str, tuple[str, ...], str]] = []
     for nid in sorted(involved):
-        n    = graph.nodes.get(nid, {})
-        path = n.get("path", "unknown")
-        file_groups[path].append(nid)
+        n = graph.nodes.get(nid, {})
+        rel = n.get("path", "")
+        items.append((
+            nid,
+            _dir_parts(rel) + (Path(rel).name,) if rel else (),
+            n.get("label", ""),
+        ))
 
     lines = ["graph LR"]
-    for fpath, nids in sorted(file_groups.items()):
-        sg_id = _mid(f"cg_{fpath}")
-        short = Path(fpath).name
-        lines.append(f'  subgraph {sg_id}["{short}"]')
-        for nid in nids:
-            n   = graph.nodes.get(nid, {})
-            lbl = n["label"].replace('"', "'")
-            lines.append(f'    {_mid(nid)}["{lbl}"]')
-        lines.append("  end")
+    lines.extend(_build_nested_subgraphs(items))
 
     for e in call_edges:
         lines.append(f'  {_mid(e["from"])} -->|"calls"| {_mid(e["to"])}')
@@ -813,14 +904,13 @@ def _mermaid_api_graph(graph: Graph) -> str:
     rel_from = {e["from"] for e in rel_edges}
     rel_to   = {e["to"]   for e in rel_edges}
 
-    lines = ["graph LR"]
-    lines.append('  subgraph SRC["Source Files"]')
+    items: list[tuple[str, tuple[str, ...], str]] = []
     for nid in sorted(rel_from):
-        n   = graph.nodes.get(nid, {})
-        tag = "PY" if n.get("type") == "py_module" else "TS"
-        lbl = n["label"].replace('"', "'")
-        lines.append(f'    {_mid(nid)}["[{tag}] {lbl}"]')
-    lines.append("  end")
+        n = graph.nodes.get(nid, {})
+        items.append((nid, _dir_parts(n.get("path", "")), n.get("label", "")))
+
+    lines = ["graph LR"]
+    lines.extend(_build_nested_subgraphs(items))
 
     lines.append('  subgraph EXT["External APIs"]')
     for nid in sorted(rel_to):
@@ -833,6 +923,101 @@ def _mermaid_api_graph(graph: Graph) -> str:
         lines.append(f'  {_mid(e["from"])} -.->|"http"| {_mid(e["to"])}')
 
     return "\n".join(lines)
+
+
+def _services_section(graph: Graph) -> str:
+    """Per-service rollup generated from disk + the live dependency graph.
+
+    Replaces the previously-hardcoded "Stack Overview" block, which named
+    directories (screen_agent/, news_impact/, tiktok/, src/) that no longer
+    exist. This version walks ``code/analytics/services/`` and aggregates
+    each service's modules, function deps, DB tables, and external APIs
+    from the graph.
+    """
+    services_dir = PY_SCAN_ROOT / "services"
+    if not services_dir.is_dir():
+        return ""
+
+    service_names = sorted(
+        d.name for d in services_dir.iterdir()
+        if d.is_dir() and not d.name.startswith(("_", "."))
+    )
+    if not service_names:
+        return ""
+
+    db_types = {"db_table", "db_view", "db_rpc"}
+    nodes_by_id = graph.nodes
+
+    rows = ["| Service | Modules | Funcs (with deps) | DB tables / views | External APIs |",
+            "|---------|--------:|------------------:|-------------------|---------------|"]
+
+    for svc in service_names:
+        modules = [
+            n for n in nodes_by_id.values()
+            if n["type"] == "py_module" and _service_for_path(n.get("path", "")) == svc
+        ]
+        if not modules:
+            continue
+        module_ids = {m["id"] for m in modules}
+
+        func_count = sum(
+            1 for n in nodes_by_id.values()
+            if n["type"] == "py_func"
+            and _service_for_path(n.get("path", "")) == svc
+        )
+
+        db_targets: set[str] = set()
+        api_targets: set[str] = set()
+        for e in graph.edges:
+            src = nodes_by_id.get(e["from"], {})
+            dst = nodes_by_id.get(e["to"], {})
+            from_in_svc = (
+                src.get("type") in ("py_module", "py_func")
+                and _service_for_path(src.get("path", "")) == svc
+            )
+            if not from_in_svc:
+                continue
+            if dst.get("type") in db_types:
+                db_targets.add(dst["label"])
+            elif dst.get("type") == "external_api":
+                api_targets.add(dst["label"])
+
+        readme = "📄" if (services_dir / svc / "README.md").exists() else "—"
+        db_cell = ", ".join(f"`{t}`" for t in sorted(db_targets)) or "—"
+        api_cell = ", ".join(f"`{a}`" for a in sorted(api_targets)) or "—"
+        rows.append(
+            f"| `{svc}/` {readme} | {len(modules)} | {func_count} | {db_cell} | {api_cell} |"
+        )
+
+    other_summary = _other_groups_summary(graph)
+
+    return (
+        "## Services\n\n"
+        "Auto-generated from `code/analytics/services/`. Each row aggregates the "
+        "service's module + function nodes from the graph below. 📄 = service has a README.\n\n"
+        + "\n".join(rows)
+        + ("\n\n" + other_summary if other_summary else "")
+    )
+
+
+def _other_groups_summary(graph: Graph) -> str:
+    """One-line rollup for non-service Python files (scripts, shared, tests)."""
+    buckets: dict[str, set[str]] = defaultdict(set)
+    for n in graph.nodes.values():
+        if n["type"] != "py_module":
+            continue
+        rel = n.get("path", "")
+        if _service_for_path(rel):
+            continue
+        if "code/analytics/" not in rel:
+            continue
+        buckets[_other_group_for_path(rel)].add(n["id"])
+
+    if not buckets:
+        return ""
+
+    parts = [f"**{name}/** ({len(ids)} modules)" for name, ids in sorted(buckets.items())]
+    return "**Non-service Python:** " + " · ".join(parts)
 
 
 def _db_xref_table(graph: Graph) -> str:
@@ -907,29 +1092,7 @@ def _build_markdown(graph: Graph) -> str:
 | Total edges | {len(graph.edges)} |
 """)
 
-    parts.append("""\
-## Stack Overview
-
-```
-Browser / Next.js App Router  (code/ui/)
-├── Server Actions             code/ui/app/actions/*.ts
-│   ├── Supabase JS client  →  swingtrader schema (PostgREST over HTTPS)
-│   └── FMP API             →  financialmodelingprep.com
-└── Pages, Components, Lib
-
-Python Analytics               code/analytics/
-├── screen_agent/              LLM agent loop (Ollama) → data tools → Telegram
-├── news_impact/               News ingestion, embeddings, impact scoring (Anthropic)
-├── tiktok/                    TikTok video pipeline
-├── src/db.py                  Supabase / psycopg2 connection layer
-├── src/fmp.py                 FMP API client (Python)
-└── src/telegram.py            Telegram bot delivery
-
-Database: Supabase — schema: swingtrader
-├── Tables  news_articles, user_scan_runs, user_trades, ...
-└── Views   *_v  (e.g. ticker_sentiment_heads_v, news_trends_cluster_daily_v)
-```
-""")
+    parts.append(_services_section(graph))
 
     if mmd_db:
         parts.append(f"""\
@@ -984,10 +1147,8 @@ Includes both file-level and function-level accessors.
 {xref}
 """)
 
-    # Per-file tables
-    py_rows = ["| Module | DB objects | External APIs |",
-               "|--------|-----------|---------------|"]
-    for n in sorted(py_nodes, key=lambda x: x["label"]):
+    # Per-file tables, grouped by service so the boundary is visible.
+    def _module_row(n: dict[str, Any]) -> str:
         nid = n["id"]
         db_t = sorted({graph.nodes[e["to"]]["label"]
                        for e in graph.edges if e["from"] == nid
@@ -995,9 +1156,37 @@ Includes both file-level and function-level accessors.
         api_t = sorted({graph.nodes[e["to"]]["label"]
                         for e in graph.edges if e["from"] == nid
                         and graph.nodes.get(e["to"], {}).get("type") == "external_api"})
-        py_rows.append(f"| `{n['path']}` | {', '.join(f'`{t}`' for t in db_t) or '—'} "
-                       f"| {', '.join(f'`{a}`' for a in api_t) or '—'} |")
-    parts.append("## Python Modules\n\n" + "\n".join(py_rows))
+        return (f"| `{n['path']}` | {', '.join(f'`{t}`' for t in db_t) or '—'} "
+                f"| {', '.join(f'`{a}`' for a in api_t) or '—'} |")
+
+    by_service: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    by_other:   dict[str, list[dict[str, Any]]] = defaultdict(list)
+    for n in py_nodes:
+        rel = n.get("path", "")
+        svc = _service_for_path(rel)
+        if svc:
+            by_service[svc].append(n)
+        else:
+            by_other[_other_group_for_path(rel)].append(n)
+
+    py_sections: list[str] = ["## Python Modules\n"]
+    for svc in sorted(by_service):
+        py_sections.append(f"### `services/{svc}/`\n")
+        rows = ["| Module | DB objects | External APIs |",
+                "|--------|-----------|---------------|"]
+        for n in sorted(by_service[svc], key=lambda x: x["path"]):
+            rows.append(_module_row(n))
+        py_sections.append("\n".join(rows) + "\n")
+    for bucket in sorted(by_other):
+        if not by_other[bucket]:
+            continue
+        py_sections.append(f"### `{bucket}/`\n")
+        rows = ["| Module | DB objects | External APIs |",
+                "|--------|-----------|---------------|"]
+        for n in sorted(by_other[bucket], key=lambda x: x["path"]):
+            rows.append(_module_row(n))
+        py_sections.append("\n".join(rows) + "\n")
+    parts.append("\n".join(py_sections))
 
     ts_rows = ["| Action file | DB objects | External APIs |",
                "|------------|-----------|---------------|"]
@@ -1053,6 +1242,7 @@ def _build_html(graph: Graph) -> str:
         "calls_rpc": "#8E44AD",
         "fetches":   "#E74C3C",
         "calls":     "#82C4F8",
+        "contains":  "#444",
     }
     vis_edges: list[dict] = []
     for i, e in enumerate(graph.edges):
@@ -1061,13 +1251,25 @@ def _build_html(graph: Graph) -> str:
         color     = edge_colors.get(e["type"], "#888")
         # Hide edges involving function-level nodes by default
         hidden    = (from_node.get("type") in func_types or to_node.get("type") in func_types)
+        is_contains = e["type"] == "contains"
         vis_edges.append({
             "id":    i,
             "from":  e["from"],
             "to":    e["to"],
-            "label": EDGE_LABEL.get(e["type"], e["type"]),
-            "arrows": "to",
-            "color": {"color": color, "highlight": color, "opacity": 0.7},
+            # `etype` is the canonical filter key (matches graph.edges[].type);
+            # `label` is the display text. Decoupling them so contains edges
+            # can be unlabelled while still filterable, and so the JS edge
+            # filter can match the type rather than its display alias.
+            "etype": e["type"],
+            "label": "" if is_contains else EDGE_LABEL.get(e["type"], e["type"]),
+            "arrows": "" if is_contains else "to",
+            "dashes": is_contains,
+            "width":  0.6 if is_contains else 1.5,
+            "color": {
+                "color":     color,
+                "highlight": color,
+                "opacity":   0.35 if is_contains else 0.7,
+            },
             "font":  {"size": 9, "color": "#888"},
             "hidden": hidden,
         })
@@ -1096,6 +1298,14 @@ body{{font-family:system-ui,sans-serif;background:#0d0d0d;color:#e0e0e0;height:1
 #hdr{{padding:10px 16px;background:#161616;border-bottom:1px solid #2a2a2a;display:flex;align-items:center;gap:12px;flex-shrink:0}}
 #hdr h1{{font-size:14px;font-weight:600;color:#fff}}
 #hdr span{{font-size:11px;color:#666}}
+#search-wrap{{display:flex;align-items:center;gap:6px;margin-left:auto}}
+#search{{background:#0f0f0f;border:1px solid #333;border-radius:4px;color:#e0e0e0;padding:5px 9px;font-size:12px;width:280px;outline:none;font-family:inherit}}
+#search:focus{{border-color:#4A90D9}}
+#search-count{{font-size:10px;color:#666;min-width:60px;font-variant-numeric:tabular-nums}}
+#search-count.has{{color:#82C4F8}}
+#filter-toggle{{display:flex;align-items:center;gap:5px;font-size:11px;color:#888;cursor:pointer;user-select:none}}
+#filter-toggle input{{accent-color:#4A90D9}}
+.kbd{{background:#222;border:1px solid #333;border-radius:3px;padding:0 4px;font-size:10px;color:#888}}
 #wrap{{flex:1;display:flex;overflow:hidden}}
 #net{{flex:1}}
 #side{{width:230px;background:#161616;border-left:1px solid #2a2a2a;padding:14px;overflow-y:auto;flex-shrink:0;font-size:12px}}
@@ -1121,6 +1331,13 @@ h2:first-child{{margin-top:0}}
 <div id="hdr">
   <h1>Swingtrader — Dependency Graph</h1>
   <span>Auto-generated · re-run: <code style="background:#222;padding:1px 5px;border-radius:3px">python analyze_deps.py</code></span>
+  <div id="search-wrap">
+    <input id="search" type="search" placeholder="Search nodes — name, path, description… (Esc to clear)" autocomplete="off" spellcheck="false">
+    <div id="search-count">&nbsp;</div>
+    <label id="filter-toggle" title="Hide non-matching nodes (with their direct neighbours kept for context)">
+      <input id="filter-only" type="checkbox"> filter
+    </label>
+  </div>
 </div>
 <div id="wrap">
   <div id="net"></div>
@@ -1142,6 +1359,7 @@ h2:first-child{{margin-top:0}}
     <div class="edge-row"><b style="color:#8E44AD">rpc</b> — stored procedure</div>
     <div class="edge-row"><b style="color:#E74C3C">http</b> — external fetch</div>
     <div class="edge-row"><b style="color:#82C4F8">calls</b> — function call</div>
+    <div class="edge-row"><b style="color:#666">— — —</b> defines — module owns this function</div>
 
     <h2>Selected Node</h2>
     <div id="info-content">Click a node</div>
@@ -1200,47 +1418,193 @@ function escHtml(s) {{
   return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 }}
 
-function setView(mode) {{
-  document.querySelectorAll('.view-btn').forEach(b => b.classList.remove('on'));
-  document.getElementById('btn-' + mode)?.classList.add('on');
+// ── State ─────────────────────────────────────────────────────────────────
+let currentMode  = 'file';
+let searchTerm   = '';
+let filterToOnly = false;
 
-  let visNodeIds, visEdgeTypes;
+// Pre-compute haystack for each node (label + path + docstring, lowercased).
+const SEARCH_HAYSTACK = new Map(
+  ALL_NODES.map(n => [
+    n.id,
+    ((n.label || '') + ' ' + (n.nodepath || '') + ' ' + (n.docstring || '')).toLowerCase()
+  ])
+);
 
+// Map of node → set of directly connected node ids (one-hop neighbours).
+const NEIGHBOURS = (() => {{
+  const m = new Map();
+  for (const e of ALL_EDGES) {{
+    if (!m.has(e.from)) m.set(e.from, new Set());
+    if (!m.has(e.to))   m.set(e.to,   new Set());
+    m.get(e.from).add(e.to);
+    m.get(e.to).add(e.from);
+  }}
+  return m;
+}})();
+
+// Map: py_module id → set of py_func ids it contains (for "include parent
+// module" expansion in func-* modes).
+const MODULE_FUNCS = (() => {{
+  const m = new Map();
+  for (const e of ALL_EDGES) {{
+    if (e.etype !== 'contains') continue;
+    if (!m.has(e.from)) m.set(e.from, new Set());
+    m.get(e.from).add(e.to);
+  }}
+  return m;
+}})();
+
+function _viewSets(mode) {{
   if (mode === 'file') {{
-    // File-level: modules/actions + DB + APIs; no py_func
-    visNodeIds   = new Set(ALL_NODES.filter(n => FILE_TYPES.has(n.group)).map(n => n.id));
-    visEdgeTypes = new Set(['reads','writes','upserts','calls_rpc','fetches']);
-  }} else if (mode === 'func-db') {{
-    // Functions → DB objects (+ DB nodes + API nodes)
-    visNodeIds   = new Set(ALL_NODES.filter(n => FUNC_TYPES.has(n.group)).map(n => n.id));
-    visEdgeTypes = new Set(['reads','writes','upserts','calls_rpc','fetches']);
-  }} else if (mode === 'func-call') {{
-    // Only py_func nodes + call edges (+ any DB they touch)
-    const callEdges = ALL_EDGES.filter(e => e.label === 'calls');
-    const funcInCall = new Set(callEdges.flatMap(e => [e.from, e.to]));
-    visNodeIds   = funcInCall;
-    visEdgeTypes = new Set(['calls']);
+    return {{
+      nodes: new Set(ALL_NODES.filter(n => FILE_TYPES.has(n.group)).map(n => n.id)),
+      edges: new Set(['reads','writes','upserts','calls_rpc','fetches']),
+    }};
+  }}
+  if (mode === 'func-db') {{
+    // Functions + their DB / API targets + parent py_module nodes so the
+    // file each function belongs to is visible (linked via "defines").
+    const funcNodes = ALL_NODES.filter(n => FUNC_TYPES.has(n.group));
+    const ids = new Set(funcNodes.map(n => n.id));
+    for (const [modId, funcIds] of MODULE_FUNCS) {{
+      for (const fid of funcIds) {{
+        if (ids.has(fid)) {{ ids.add(modId); break; }}
+      }}
+    }}
+    return {{
+      nodes: ids,
+      edges: new Set(['reads','writes','upserts','calls_rpc','fetches','contains']),
+    }};
+  }}
+  if (mode === 'func-call') {{
+    const callEdges = ALL_EDGES.filter(e => e.etype === 'calls');
+    const ids = new Set(callEdges.flatMap(e => [e.from, e.to]));
+    // Pull in parent modules for the functions on screen.
+    for (const [modId, funcIds] of MODULE_FUNCS) {{
+      for (const fid of funcIds) {{
+        if (ids.has(fid)) {{ ids.add(modId); break; }}
+      }}
+    }}
+    return {{
+      nodes: ids,
+      edges: new Set(['calls','contains']),
+    }};
+  }}
+  return {{
+    nodes: new Set(ALL_NODES.map(n => n.id)),
+    edges: new Set(['reads','writes','upserts','calls_rpc','fetches','calls','contains']),
+  }};
+}}
+
+function _searchMatches(term) {{
+  if (!term) return null;  // null = no search active
+  const matches = new Set();
+  for (const [id, hay] of SEARCH_HAYSTACK) {{
+    if (hay.includes(term)) matches.add(id);
+  }}
+  return matches;
+}}
+
+function applyFilters() {{
+  const view    = _viewSets(currentMode);
+  const matches = _searchMatches(searchTerm);
+
+  let visNodes;
+  if (matches === null) {{
+    visNodes = view.nodes;
+  }} else if (filterToOnly) {{
+    // Hide everything that isn't a match or a direct neighbour of a match.
+    const neighbourhood = new Set();
+    for (const id of matches) {{
+      neighbourhood.add(id);
+      const ns = NEIGHBOURS.get(id);
+      if (ns) for (const x of ns) neighbourhood.add(x);
+    }}
+    visNodes = new Set([...view.nodes].filter(id => neighbourhood.has(id)));
   }} else {{
-    // Everything
-    visNodeIds   = new Set(ALL_NODES.map(n => n.id));
-    visEdgeTypes = new Set(Object.keys({{reads:1,writes:1,upserts:1,calls_rpc:1,fetches:1,calls:1}}));
+    visNodes = view.nodes;
   }}
 
-  nodeSet.update(ALL_NODES.map(n => ({{id:n.id, hidden:!visNodeIds.has(n.id)}})));
+  nodeSet.update(ALL_NODES.map(n => ({{id: n.id, hidden: !visNodes.has(n.id)}})));
   edgeSet.update(ALL_EDGES.map(e => ({{
-    id: e.id,
-    hidden: !visEdgeTypes.has(e.label) || !visNodeIds.has(e.from) || !visNodeIds.has(e.to)
+    id:     e.id,
+    hidden: !view.edges.has(e.etype) || !visNodes.has(e.from) || !visNodes.has(e.to),
   }})));
 
-  const vis_n = ALL_NODES.filter(n => visNodeIds.has(n.id)).length;
+  // Highlight matches by selecting them; vis-network outlines selected nodes.
+  if (matches !== null && matches.size) {{
+    const visibleMatches = [...matches].filter(id => visNodes.has(id));
+    net.setSelection({{nodes: visibleMatches, edges: []}}, {{unselectAll: true}});
+    if (visibleMatches.length) {{
+      // Centre the view on the first match without zooming so deep that the
+      // user loses context.
+      net.focus(visibleMatches[0], {{scale: 0.9, animation: {{duration: 250}}}});
+    }}
+  }} else {{
+    net.unselectAll();
+  }}
+
+  // Update counters.
+  const vis_n = ALL_NODES.filter(n => visNodes.has(n.id)).length;
   const vis_e = ALL_EDGES.filter(e =>
-    !e.hidden && visEdgeTypes.has(e.label) &&
-    visNodeIds.has(e.from) && visNodeIds.has(e.to)
+    view.edges.has(e.etype) && visNodes.has(e.from) && visNodes.has(e.to)
   ).length;
   document.getElementById('stats').innerHTML =
     vis_n + ' nodes &middot; ' + vis_e + ' edges shown<br>'
     + '({func_count} functions · {call_edges} call edges total)';
+
+  const countEl = document.getElementById('search-count');
+  if (matches === null) {{
+    countEl.textContent = '';
+    countEl.classList.remove('has');
+  }} else {{
+    const visibleN = [...matches].filter(id => visNodes.has(id)).length;
+    countEl.textContent = `${{visibleN}} / ${{matches.size}} match${{matches.size === 1 ? '' : 'es'}}`;
+    countEl.classList.add('has');
+  }}
 }}
+
+function setView(mode) {{
+  currentMode = mode;
+  document.querySelectorAll('.view-btn').forEach(b => b.classList.remove('on'));
+  document.getElementById('btn-' + mode)?.classList.add('on');
+  applyFilters();
+}}
+
+// ── Search wiring ─────────────────────────────────────────────────────────
+const searchEl    = document.getElementById('search');
+const filterOnly  = document.getElementById('filter-only');
+
+let _debounce = null;
+searchEl.addEventListener('input', () => {{
+  clearTimeout(_debounce);
+  _debounce = setTimeout(() => {{
+    searchTerm = searchEl.value.trim().toLowerCase();
+    applyFilters();
+  }}, 80);
+}});
+searchEl.addEventListener('keydown', (ev) => {{
+  if (ev.key === 'Escape') {{
+    searchEl.value = '';
+    searchTerm = '';
+    applyFilters();
+    searchEl.blur();
+  }}
+}});
+filterOnly.addEventListener('change', () => {{
+  filterToOnly = filterOnly.checked;
+  applyFilters();
+}});
+
+// `/` focuses search from anywhere — like GitHub / Vim-style.
+document.addEventListener('keydown', (ev) => {{
+  if (ev.key === '/' && document.activeElement !== searchEl) {{
+    ev.preventDefault();
+    searchEl.focus();
+    searchEl.select();
+  }}
+}});
 
 setView('file');
 </script>

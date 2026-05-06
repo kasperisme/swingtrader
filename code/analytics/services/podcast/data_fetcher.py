@@ -8,10 +8,12 @@ a glance which sources are healthy.
 
 Sources:
   - top_news       → services.rag.get_top_articles + fetch_tickers_for_articles
-  - watchlist      → latest user_scan_runs row + user_scan_rows.row_data
+  - watchlist      → live FMP pre-screen (NYSE+NASDAQ, SCREENER==1 & RS>80)
   - vix            → FMP /api/v3/quote/^VIX
-  - earnings       → FMP earnings calendar (today)
-  - regime/breadth → user_scan_runs.market_json (latest), else defaults
+  - earnings       → FMP earnings calendar (yesterday → tomorrow)
+  - regime         → FMP daily chart on ^SPX + QQQ (SMA alignment, distribution
+                       days, OBV) via services.screener.technical
+  - breadth        → % of NYSE+NASDAQ quotes with price > priceAvg50 / 200 (FMP)
   - insider        → not yet sourced; field omitted until we wire FMP insider
 """
 
@@ -167,65 +169,86 @@ def _fetch_top_news() -> dict | None:
     }
 
 
-def _fetch_watchlist() -> list[dict]:
-    """Top setups from the latest market-wide scan run.
+_market_universe_cache: dict | None = None
 
-    Pulls scan rows ordered by RS rank (descending) and maps each row's
-    `row_data` JSON into the watchlist contract. Falls back to an empty list.
+
+def _market_universe() -> dict | None:
+    """Pull NYSE+NASDAQ quotes + RS once per run; reused by watchlist + breadth.
+
+    Returns a dict with `df_quote` (quotes merged with RS) and `df_tickers`,
+    or None if the FMP fetch fails. Cached process-wide because the same
+    podcast run calls both the watchlist and breadth fetchers.
     """
-    try:
-        client = get_supabase_client()
-        runs = (
-            client.schema("swingtrader")
-            .table("user_scan_runs")
-            .select("id")
-            .or_("status.eq.active,status.is.null")
-            .order("scan_date", desc=True)
-            .order("id", desc=True)
-            .limit(1)
-            .execute()
-        ).data or []
-        if not runs:
-            log.info("watchlist skipped — no scan runs found")
-            return []
+    global _market_universe_cache
+    if _market_universe_cache is not None:
+        return _market_universe_cache
 
-        run_id = runs[0]["id"]
-        rows = (
-            client.schema("swingtrader")
-            .table("user_scan_rows")
-            .select("symbol, row_data")
-            .eq("run_id", run_id)
-            .limit(200)
-            .execute()
-        ).data or []
+    try:
+        from services.screener.technical import technical
+        import pandas as pd
+
+        tech = technical()
+        df_col = [tech.get_exhange_tickers(ex) for ex in ("NYSE", "NASDAQ")]
+        df_tickers = pd.concat(df_col, axis=0).dropna(subset=["symbol"])
+        tickers = df_tickers["symbol"].tolist()
+
+        df_quote = tech.get_quote_prices(tickers).sort_values("symbol")
+        df_rs = tech.get_change_prices(tickers)
+        df_quote = df_quote.merge(df_rs, on="symbol", how="left")
     except Exception as exc:
-        log.warning("watchlist skipped — DB query failed: %s", exc)
+        log.warning("market universe fetch failed: %s", exc)
+        return None
+
+    _market_universe_cache = {"df_quote": df_quote, "df_tickers": df_tickers}
+    return _market_universe_cache
+
+
+def _fetch_watchlist() -> list[dict]:
+    """Top setups from a live NYSE+NASDAQ pre-screen.
+
+    Mirrors the initial filter + RS definition from `ibd_screener.py`:
+      1. Pull NYSE + NASDAQ tickers from FMP.
+      2. Build the SCREENER flag from quote data (price > SMA200,
+         SMA50 > SMA200, price > 1.25 * yearLow, price within 25% of yearHigh).
+      3. Compute weighted RS (3M*2 + 6M + 1Y) → RS percentile + IBD-style
+         RS_Rank (1–99).
+      4. Keep rows with SCREENER == 1 and RS > 80; sort by RS desc, take top 5.
+
+    Returns an empty list on any failure.
+    """
+    universe = _market_universe()
+    if universe is None:
+        return []
+
+    df_quote = universe["df_quote"]
+    mask = (df_quote["SCREENER"] == 1) & (df_quote["RS"] > 80)
+    df_pass = df_quote[mask].sort_values("RS", ascending=False).head(5)
+
+    if df_pass.empty:
+        log.info("watchlist empty — no tickers passed SCREENER==1 & RS>80")
         return []
 
     watchlist: list[dict] = []
-    for r in rows:
-        rd = _as_json(r.get("row_data"), default={}) or {}
-        rs = rd.get("rs_rank") or rd.get("rsRank") or rd.get("rs")
-        try:
-            rs_num = float(rs) if rs is not None else None
-        except (TypeError, ValueError):
-            rs_num = None
-        if rs_num is None:
-            continue
+    for row in df_pass.itertuples(index=False):
+        price = float(getattr(row, "price", 0.0) or 0.0)
+        year_high = float(getattr(row, "yearHigh", 0.0) or 0.0)
+        pct_from_pivot = ((price / year_high) - 1.0) * 100.0 if year_high else 0.0
+
+        rs_rank_val = getattr(row, "RS_Rank", None)
+        if rs_rank_val is None:
+            rs_rank_val = getattr(row, "RS", 0)
+
         watchlist.append(
             {
-                "ticker": r["symbol"],
-                "rs_rank": int(rs_num),
-                "stage": rd.get("stage") or 2,
-                "pct_from_pivot": float(
-                    rd.get("pct_from_pivot") or rd.get("pctFromPivot") or 0.0
-                ),
-                "setup_type": rd.get("setup_type") or rd.get("setupType") or "Base",
+                "ticker": row.symbol,
+                "rs_rank": int(round(float(rs_rank_val))),
+                "stage": 2,
+                "pct_from_pivot": round(pct_from_pivot, 2),
+                "setup_type": "Trend leader",
             }
         )
 
-    watchlist.sort(key=lambda x: x["rs_rank"], reverse=True)
-    return watchlist[:5]
+    return watchlist
 
 
 def _fetch_vix() -> dict | None:
@@ -315,23 +338,34 @@ def _fetch_insider() -> dict | None:
 
 
 def _fetch_earnings() -> dict | None:
-    """Today's biggest earnings surprise from the FMP calendar."""
+    """Biggest earnings surprise from the FMP calendar across yesterday → tomorrow.
+
+    Widened from a same-day window so the podcast still has something to talk
+    about pre-open (yesterday's after-hours prints) and so tomorrow's marquee
+    names get a forward-looking mention even when today is quiet. Only rows
+    with `epsActual` populated are eligible for the "surprise" pick — if the
+    biggest hit is a not-yet-reported tomorrow row, we skip rather than
+    fabricate a surprise number.
+    """
     try:
         from services.rag.market import FMPClient
 
-        today = str(date.today())
-        df = FMPClient().earnings_calendar_range(today, today)
+        today = date.today()
+        start = str(today - timedelta(days=1))
+        end = str(today + timedelta(days=1))
+        df = FMPClient().earnings_calendar_range(start, end)
     except Exception as exc:
         log.warning("earnings skipped — FMP calendar failed: %s", exc)
         return None
 
     if df is None or df.empty:
-        log.info("earnings skipped — no earnings reported today")
+        log.info("earnings skipped — no earnings in window %s → %s", start, end)
         return None
 
     if "epsActual" in df.columns and "epsEstimated" in df.columns:
         df = df.dropna(subset=["epsActual", "epsEstimated"])
         if df.empty:
+            log.info("earnings skipped — no reported prints in %s → %s", start, end)
             return None
         df = df.assign(
             surprise_pct=(
@@ -348,44 +382,97 @@ def _fetch_earnings() -> dict | None:
     return None
 
 
+_REGIME_LABELS = {
+    "uptrend": "Bull Confirmed",
+    "uptrend_under_pressure": "Uptrend Under Pressure",
+    "correction": "Correction",
+    "downtrend": "Downtrend",
+    "qqq_lagging": "Mixed (QQQ Lagging)",
+}
+
+
+def _days_in_current_regime(spx_df, condition: str) -> int:
+    """Count trailing sessions consistent with the current regime.
+
+    Cheap proxy: walks SPX history from the tail and counts consecutive rows
+    where `close > SMA200` matches the current regime (uptrend states require
+    above the 200-day, correction/downtrend require at/below). Returns 0 if
+    SMA200 hasn't built up yet.
+    """
+    try:
+        df = spx_df.copy()
+        df["SMA200"] = df["close"].rolling(window=200).mean()
+        df = df.dropna(subset=["SMA200"])
+        if df.empty:
+            return 0
+        bullish = condition in ("uptrend", "uptrend_under_pressure")
+        streak = 0
+        for close, sma200 in zip(
+            reversed(df["close"].tolist()), reversed(df["SMA200"].tolist())
+        ):
+            row_bullish = close > sma200
+            if row_bullish == bullish:
+                streak += 1
+            else:
+                break
+        return streak
+    except Exception:
+        return 0
+
+
 def _fetch_regime_and_breadth() -> tuple[dict, dict]:
-    """Read regime + breadth from the latest scan run's market_json if persisted,
-    otherwise return neutral defaults so the script template still renders."""
+    """Compute regime + breadth from FMP data.
+
+    Regime: SPX + QQQ daily charts via `technical.get_market_direction()` —
+    SMA alignment (21>50>150>200), distribution-day count, OBV trend. The
+    overall `condition` string is mapped to a human-readable status. Days in
+    regime is a trailing streak of `close > SMA200` (matching the current
+    bullish/bearish stance) on the SPX series.
+
+    Breadth: `pct_above_50ma` / `pct_above_200ma` computed across the cached
+    NYSE+NASDAQ quote universe — `priceAvg50` / `priceAvg200` are FMP fields.
+    Stocks with missing or non-positive averages are dropped before the ratio.
+
+    Returns neutral defaults on failure so the template still renders.
+    """
     regime_default = {"status": "Mixed", "days_in_regime": 0}
     breadth_default = {"pct_above_50ma": 50.0, "pct_above_200ma": 50.0}
 
+    # Regime via SPX + QQQ
     try:
-        client = get_supabase_client()
-        runs = (
-            client.schema("swingtrader")
-            .table("user_scan_runs")
-            .select("market_json")
-            .order("scan_date", desc=True)
-            .order("id", desc=True)
-            .limit(1)
-            .execute()
-        ).data or []
+        from services.screener.technical import technical
+
+        tech = technical()
+        direction = tech.get_market_direction(lookback_days=365)
+        condition = direction.get("condition") or "mixed"
+        status = _REGIME_LABELS.get(condition, condition.replace("_", " ").title())
+        days_in_regime = _days_in_current_regime(tech.spx_df, condition) \
+            if getattr(tech, "spx_df", None) is not None else 0
+        regime = {"status": status, "days_in_regime": days_in_regime}
     except Exception as exc:
-        log.warning("regime/breadth fell back to defaults — DB query failed: %s", exc)
-        return regime_default, breadth_default
+        log.warning("regime fell back to default — FMP fetch failed: %s", exc)
+        regime = regime_default
 
-    if not runs:
-        log.info("regime/breadth fell back to defaults — no scan runs found")
-        return regime_default, breadth_default
+    # Breadth from cached NYSE+NASDAQ universe
+    try:
+        universe = _market_universe()
+        if universe is None:
+            raise RuntimeError("market universe unavailable")
+        df = universe["df_quote"]
+        df50 = df[(df["priceAvg50"].notna()) & (df["priceAvg50"] > 0)]
+        df200 = df[(df["priceAvg200"].notna()) & (df["priceAvg200"] > 0)]
+        pct_50 = float((df50["price"] > df50["priceAvg50"]).mean() * 100.0) \
+            if not df50.empty else breadth_default["pct_above_50ma"]
+        pct_200 = float((df200["price"] > df200["priceAvg200"]).mean() * 100.0) \
+            if not df200.empty else breadth_default["pct_above_200ma"]
+        breadth = {
+            "pct_above_50ma": round(pct_50, 1),
+            "pct_above_200ma": round(pct_200, 1),
+        }
+    except Exception as exc:
+        log.warning("breadth fell back to default — universe unavailable: %s", exc)
+        breadth = breadth_default
 
-    market = _as_json(runs[0].get("market_json"), default={}) or {}
-    regime = {
-        "status": market.get("regime_status") or regime_default["status"],
-        "days_in_regime": int(market.get("days_in_regime") or 0),
-    }
-    breadth = {
-        "pct_above_50ma": float(
-            market.get("pct_above_50ma") or breadth_default["pct_above_50ma"]
-        ),
-        "pct_above_200ma": float(
-            market.get("pct_above_200ma") or breadth_default["pct_above_200ma"]
-        ),
-    }
     return regime, breadth
 
 
