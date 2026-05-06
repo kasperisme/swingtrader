@@ -139,9 +139,9 @@ get_user_screening_notes()
 ## Output format
 
 Respond with ONLY valid JSON (no markdown, no commentary):
-{"triggered": true/false, "summary": "..." or null, "data_used": {...}}
+{"triggered": true/false, "summary": "..." or null}
 
-data_used should contain the tool names and a brief summary of what was returned.
+Do NOT include data_used in your response — the engine fills it in from your tool calls. Emit only the two fields above. Keep the summary tight (a few sentences); do not echo raw tool results back into it.
 """
 
 _AGENT_SYSTEM = _AGENT_SYSTEM.replace("{_CLUSTER_BLOCK_PLACEHOLDER}", _CLUSTER_BLOCK)
@@ -278,7 +278,7 @@ async def _run_agent_async(
             user=user_prompt,
             registry=registry,
             max_rounds=_MAX_TOOL_ROUNDS,
-            options={"num_predict": 1024},
+            options={"num_predict": 4096},
             request_format="json",
             label="Screening agent",
         )
@@ -289,7 +289,10 @@ async def _run_agent_async(
     try:
         parsed = json.loads(raw)
     except json.JSONDecodeError:
-        log.warning("Agent returned non-JSON: %s", raw[:300])
+        log.warning(
+            "Agent returned non-JSON (len=%d, head=%r, tail=%r): %s",
+            len(raw), raw[:120], raw[-120:] if len(raw) > 120 else "", raw,
+        )
         parsed = {"triggered": False, "summary": None, "data_used": data_used}
     parsed.setdefault("data_used", data_used)
     return parsed
@@ -475,12 +478,28 @@ def persist_and_deliver(result: dict, result_id: str | None = None) -> None:
         return
 
     html = _format_telegram_message(result["name"], triggered, result.get("summary"), error=error)
+    message_type = (
+        "screening_error" if error
+        else "screening_alert" if triggered
+        else "screening_no_trigger"
+    )
     success, msg_id, err = send_telegram_chunks(chat_id, html)
+
+    if success:
+        log.info(
+            "Telegram delivered: screening=%s user=%s type=%s chat_id=%s msg_id=%s",
+            result["screening_id"], result["user_id"], message_type, chat_id, msg_id,
+        )
+    else:
+        log.warning(
+            "Telegram send FAILED: screening=%s user=%s type=%s chat_id=%s err=%s",
+            result["screening_id"], result["user_id"], message_type, chat_id, err,
+        )
 
     log_telegram_message(
         user_id=result["user_id"],
         chat_id=chat_id,
-        message_type="screening_error" if error else "screening_alert" if triggered else "screening_no_trigger",
+        message_type=message_type,
         message_text=html,
         success=success,
         telegram_message_id=msg_id,
