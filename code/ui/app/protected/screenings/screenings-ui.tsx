@@ -112,6 +112,7 @@ import {
   SCREENINGS_DEEP_DIVE_TABS,
   SCREENINGS_MULTI_SYMBOL_TABS,
 } from "./screenings-view-tab-presets";
+import { ScreeningsMobileViewPicker } from "./screenings-mobile-view-picker";
 
 export type { ScanRun, ScreeningRow, ScanRowNote } from "./screenings-types";
 
@@ -119,6 +120,54 @@ export type { ScanRun, ScreeningRow, ScanRowNote } from "./screenings-types";
 
 type Filters = ScreeningsFilters;
 const DEFAULT_FILTERS = DEFAULT_SCREENINGS_FILTERS;
+
+const OPTIMISTIC_ROW_ID = -1;
+
+function createOptimisticScreeningRow(
+  runId: number,
+  symbol: string,
+): ScreeningRow {
+  return {
+    scan_row_id: OPTIMISTIC_ROW_ID,
+    run_id: runId,
+    symbol,
+    rowData: {},
+    sector: "",
+    industry: "",
+    subSector: "",
+    RS_Rank: null,
+    Passed: false,
+    PASSED_FUNDAMENTALS: false,
+    PriceOverSMA150And200: false,
+    SMA150AboveSMA200: false,
+    SMA50AboveSMA150And200: false,
+    SMA200Slope: false,
+    PriceAbove25Percent52WeekLow: false,
+    PriceWithin25Percent52WeekHigh: false,
+    RSOver70: false,
+    adr_pct: null,
+    vol_ratio_today: null,
+    up_down_vol_ratio: null,
+    accumulation: null,
+    rs_line_new_high: null,
+    within_buy_range: null,
+    extended: null,
+    increasing_eps: false,
+    beat_estimate: false,
+    eps_growth_yoy: null,
+    rev_growth_yoy: null,
+    eps_accelerating: null,
+    three_yr_annual_eps_25pct: null,
+    roe: null,
+    roe_above_17pct: null,
+    passes_oneil_fundamentals: null,
+    sector_is_leader: null,
+    sector_rank: null,
+    total_sectors: null,
+    inst_shares_increasing: null,
+    inst_pct_accumulating: null,
+  };
+}
 
 /** Sort column: `symbol` or any key present in rowData (discovered per run). */
 type SortKey = string;
@@ -128,7 +177,7 @@ type SortDir = "asc" | "desc";
 
 export function ScreeningsUI({
   runs,
-  rows,
+  rows: incomingRows,
   selectedRunId,
   vectorTickers,
   companyVectorDimensions,
@@ -142,6 +191,20 @@ export function ScreeningsUI({
   initialNotes?: ScanRowNote[];
 }) {
   const router = useRouter();
+  // Mirror server rows into local state so optimistic inserts (e.g. "add ticker")
+  // are visible instantly without waiting for router.refresh() to round-trip.
+  const [rows, setRows] = useState<ScreeningRow[]>(incomingRows);
+  // Symbols added in this session — pinned to the top of the filtered list
+  // and exempted from filter exclusions until the user changes run.
+  const [recentlyAdded, setRecentlyAdded] = useState<Set<string>>(new Set());
+
+  useEffect(() => {
+    setRows(incomingRows);
+  }, [incomingRows]);
+
+  useEffect(() => {
+    setRecentlyAdded(new Set());
+  }, [selectedRunId]);
   const [search, setSearch] = useState("");
   const [filters, setFiltersState] = useState<Filters>(DEFAULT_FILTERS);
 
@@ -923,12 +986,45 @@ export function ScreeningsUI({
         window.alert(`${sym} is already in this screening.`);
         return;
       }
+
+      // Optimistic insert — make the row visible instantly. The real row id and
+      // any populated fields arrive on the next router.refresh().
+      const optimisticRow = createOptimisticScreeningRow(selectedRunId, sym);
+      setRows((prev) => [optimisticRow, ...prev]);
+      setRecentlyAdded((prev) => {
+        const next = new Set(prev);
+        next.add(sym);
+        return next;
+      });
+      setSearch("");
+
       const res = await screeningsAddTicker(selectedRunId, sym);
       if (!res.ok) {
+        // Roll back optimistic insert.
+        setRows((prev) =>
+          prev.filter(
+            (r) => !(r.symbol === sym && r.scan_row_id === OPTIMISTIC_ROW_ID),
+          ),
+        );
+        setRecentlyAdded((prev) => {
+          if (!prev.has(sym)) return prev;
+          const next = new Set(prev);
+          next.delete(sym);
+          return next;
+        });
         window.alert(res.error);
         return;
       }
-      setSearch("");
+      // Patch real id onto the optimistic row so any per-row keyed UI stabilises
+      // before the server refresh swaps it for the canonical row.
+      const newId = Number(res.data.id);
+      setRows((prev) =>
+        prev.map((r) =>
+          r.symbol === sym && r.scan_row_id === OPTIMISTIC_ROW_ID
+            ? { ...r, scan_row_id: newId }
+            : r,
+        ),
+      );
       router.refresh();
     } finally {
       setAddTickerBusy(false);
@@ -979,19 +1075,33 @@ export function ScreeningsUI({
     }
   }
 
-  const filtered = useMemo(
-    () =>
-      filterAndSortScreeningRows(
-        rows,
-        rowNotes,
-        filters,
-        search,
-        sortKey,
-        sortDir,
-        activePositionSymbols,
-      ),
-    [rows, rowNotes, filters, search, sortKey, sortDir, activePositionSymbols],
-  );
+  const filtered = useMemo(() => {
+    const base = filterAndSortScreeningRows(
+      rows,
+      rowNotes,
+      filters,
+      search,
+      sortKey,
+      sortDir,
+      activePositionSymbols,
+    );
+    if (recentlyAdded.size === 0) return base;
+    // Pin recently-added rows to the top, bypassing filter exclusions so they
+    // are always visible right after the user adds them.
+    const pinned = rows.filter((r) => recentlyAdded.has(r.symbol));
+    const pinnedSyms = new Set(pinned.map((r) => r.symbol));
+    const rest = base.filter((r) => !pinnedSyms.has(r.symbol));
+    return [...pinned, ...rest];
+  }, [
+    rows,
+    rowNotes,
+    filters,
+    search,
+    sortKey,
+    sortDir,
+    activePositionSymbols,
+    recentlyAdded,
+  ]);
 
   /** No visible rows for this search; query looks like a ticker and is not already in the screening. */
   const searchAddTickerOffer = useMemo(() => {
@@ -1274,8 +1384,19 @@ export function ScreeningsUI({
               />
             </div>
           )}
-          {/* Scrollable tab strip */}
-          <div className="flex-1 min-w-0 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+          {/* Mobile-only view picker — collapses 7 tabs into a thumb-friendly trigger */}
+          {!addFilterOpen && (
+            <div className="flex-1 min-w-0 self-center sm:hidden">
+              <ScreeningsMobileViewPicker
+                activeView={activeView}
+                onSelect={setActiveView}
+                tradeMonitoringDisabled={tradeMonitoringDisabled}
+                tradeMonitoringTitle={tradeMonitoringTitle}
+              />
+            </div>
+          )}
+          {/* Scrollable tab strip — desktop only */}
+          <div className="hidden sm:block flex-1 min-w-0 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
             <div className="flex items-end gap-x-0 flex-nowrap min-w-max">
               {!addFilterOpen && (
                 <>

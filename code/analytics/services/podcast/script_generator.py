@@ -21,6 +21,7 @@ from .config import (
     SCRIPTS_DIR,
     TEMPLATES_DIR,
 )
+from .taxonomy_glossary import build_taxonomy_glossary
 
 log = logging.getLogger(__name__)
 
@@ -469,7 +470,10 @@ async def generate_script(data: dict) -> dict:
             await asyncio.sleep(gap_s)
 
         template = _jinja_env.get_template("script_prompt.j2")
-        user_prompt = template.render(data=clean_data)
+        user_prompt = template.render(
+            data=clean_data,
+            taxonomy_glossary=build_taxonomy_glossary(),
+        )
         log.debug("Rendered user prompt: %d chars", len(user_prompt))
 
         system_msg = (

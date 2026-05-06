@@ -57,14 +57,6 @@ function findStopPrice(annotations: ChartAnnotation[]): number | null {
   return findRolePrice(annotations, "stop", "bottom");
 }
 
-function isHighConfidence(reports: PersonaReport[]): boolean {
-  const withScores = reports.filter((r) => r.scores);
-  if (!withScores.length) return false;
-  const avg = (fn: (r: PersonaReport) => number) =>
-    withScores.reduce((s, r) => s + fn(r), 0) / withScores.length;
-  return avg((r) => r.scores!.confidence) >= 65 && avg((r) => r.scores!.short_term) >= 60;
-}
-
 function parseDirection(content: string): "long" | "short" | null {
   const m = content.match(/\*\*Verdict\*\*:\s*(BULLISH|BEARISH)/i);
   if (!m) return null;
@@ -593,10 +585,10 @@ export function ChartAiChat({
                     <AnnotationPills annotations={streamingAnnotations} />
                   )}
                   {/* Save entry button */}
-                  {!busy && onSaveEntry && m.chartAnnotations && m.personaReports && (() => {
+                  {!busy && onSaveEntry && m.chartAnnotations && (() => {
                     const price = findEntryPrice(m.chartAnnotations!);
                     const direction = parseDirection(m.content);
-                    if (price === null || direction === null || !isHighConfidence(m.personaReports!)) return null;
+                    if (price === null || direction === null) return null;
                     const takeProfit = findTargetPrice(m.chartAnnotations!);
                     const stopLoss = findStopPrice(m.chartAnnotations!);
                     const saved = savedEntryIndices.has(i);

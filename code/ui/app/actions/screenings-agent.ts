@@ -33,6 +33,8 @@ export type ScheduledScreening = {
   linked_scan_run_ids: number[];
   scan_filters: ScreeningsFilters | null;
   trading_session: TradingSession | null;
+  condition_enabled: boolean;
+  trigger_condition: string | null;
   is_active: boolean;
   run_requested_at: string | null;
   last_run_at: string | null;
@@ -82,6 +84,8 @@ export async function createScheduledScreening(input: {
   linked_scan_run_ids?: number[];
   scan_filters?: ScreeningsFilters | null;
   trading_session?: TradingSession | null;
+  condition_enabled?: boolean;
+  trigger_condition?: string | null;
 }): ActionResult<ScheduledScreening> {
   const supabase = await createClient();
   const {
@@ -119,6 +123,10 @@ export async function createScheduledScreening(input: {
       linked_scan_run_ids: input.linked_scan_run_ids ?? [],
       scan_filters: input.scan_filters ?? null,
       trading_session: input.trading_session ?? "none",
+      condition_enabled: input.condition_enabled ?? false,
+      trigger_condition: input.condition_enabled
+        ? (input.trigger_condition ?? "").trim() || null
+        : null,
     })
     .select("*")
     .single();
@@ -138,6 +146,8 @@ export async function updateScheduledScreening(
     linked_scan_run_ids?: number[];
     scan_filters?: ScreeningsFilters | null;
     trading_session?: TradingSession | null;
+    condition_enabled?: boolean;
+    trigger_condition?: string | null;
     is_active?: boolean;
   }
 ): ActionResult<ScheduledScreening> {
@@ -147,10 +157,22 @@ export async function updateScheduledScreening(
   } = await supabase.auth.getUser();
   if (!user) return { ok: false, error: "Not authenticated" };
 
+  const patch: Record<string, unknown> = { ...input };
+  if (input.condition_enabled !== undefined) {
+    if (input.condition_enabled) {
+      const cond = (input.trigger_condition ?? "").trim();
+      patch.condition_enabled = true;
+      patch.trigger_condition = cond.length > 0 ? cond : null;
+    } else {
+      patch.condition_enabled = false;
+      patch.trigger_condition = null;
+    }
+  }
+
   const { data, error } = await supabase
     .schema(SCHEMA)
     .from("user_scheduled_screenings")
-    .update(input)
+    .update(patch)
     .eq("id", id)
     .eq("user_id", user.id)
     .select("*")

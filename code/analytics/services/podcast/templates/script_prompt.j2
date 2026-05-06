@@ -50,6 +50,29 @@ Before each act, take one short beat to orient the listener:
 EXAMPLE — bad (data-dump): "Regime is BULLISH, twelve days in regime. Breadth is sixty-seven percent above the fifty-day. NVDA scored eight point five on impact."
 EXAMPLE — good (scene-set): "Twelve sessions into a bull tape and breadth is still holding — two out of three names above their fifty-day. <break time=\"0.5s\" /> Against that backdrop, one name punched through the noise: NVIDIA, with an impact score north of eight."
 
+CLUSTER & DIMENSION SCORES — TRANSLATE, NEVER NAME (read carefully):
+The research notes or research-agent context may surface cluster trends and dimension trends with INTERNAL TAXONOMY labels — "Macro Sensitivity", "Interest Rate (Duration)", "Sector Rotation: Energy", "Financial Structure", "Growth Profile" — paired with signed scores in roughly [-1, +1]. These labels are internal to our system. Listeners have never heard them. Do NOT speak the label aloud and do NOT read the raw decimal. Never "Macro Sensitivity is at plus zero point nine."
+
+The full set of clusters and the dimensions inside each one — with the definition the news-scoring system uses to assign each score — is in the GLOSSARY below. Look up any label that appears in the research or data context here, then translate the definition into plain trader English before writing the line.
+
+GLOSSARY (canonical definitions from the news-scoring system):
+
+{{ taxonomy_glossary }}
+
+Every cluster or dimension that earns airtime must be unpacked across the dialogue in three beats:
+
+1. WHAT IT MEASURES — restate the glossary definition as the plain-English question today's news is answering. ("How rate-sensitive today's flow is" / "Whether energy stories are running hot or cold" / "How much debt-load is mattering in today's tape".) Never read the glossary verbatim — paraphrase into spoken English.
+2. DIRECTION + STRENGTH — translate sign and magnitude into impact, not numbers. Positive ≈ news skews TOWARD that theme; negative ≈ news skews AWAY from it. Magnitude scale: |score| under 0.3 = "leaning", 0.3–0.6 = "clearly", above 0.6 = "loudly / strongly". Never say the decimal.
+3. WHO WINS / WHO LOSES — one concrete trader implication. Which kind of name catches the bid, which gets pressured, what to watch on the watchlist.
+
+EXAMPLE — bad (raw label + decimal, no meaning):
+- secondary: "Macro Sensitivity is at plus zero point nine, and Interest Rate Duration is at plus zero point seven."
+
+EXAMPLE — good (translated):
+- primary: "The news today is loudly tilted toward rate-sensitive names —"
+- secondary: "Meaning anything with long-duration cash flows or heavy debt is catching the headline lift?"
+- primary: "Right. Duration-sensitive growth and leveraged balance sheets — that's where the flow is pointed."
+
 ARIA STORYTELLING STRUCTURE (apply per act):
 - Anchor: set the scene FIRST — orient time, weather, audience (one or two short sentences). Then state the key fact.
 - Reveal: what changed, what's new
@@ -63,10 +86,13 @@ PACING RULES:
 ONE-FACT-ONE-ACT (read carefully — kills cross-act repetition):
 Each specific datum — a stat, a level, a percentage, a ticker, a headline — is stated in EXACTLY ONE act. The act it most belongs to (see the per-act data routing below). Other acts may *reference* the fact indirectly so the show flows ("after that volatility move we just talked about" / "back to the name we opened with"), but they MUST NOT re-state the number, re-quote the headline, or rephrase the framing. If you find yourself about to say a number for the second time in the show, stop — gesture at it instead.
 
+DATE / WEEKDAY — STATED ONCE:
+The weekday and date are named explicitly in EXACTLY ONE act: MARKET REGIME BRIEFING (act 3), as part of its scene-setting opener ("It's {{ data.weekday }}, and the tape is…"). Every other act must use relative references only — "today", "tomorrow", "yesterday", "this morning", "into the close", "overnight" — and must NOT say the weekday name again, the calendar date, or constructs like "coming off Monday's close" / "into Wednesday's open" outside act 3. If you catch yourself about to name a weekday in acts 1, 2, 4, 5, or 6, stop and use a relative reference instead.
+
 Per-act data routing (which datum belongs to which act):
 - COLD OPEN (act 1): teases ONE thing (the top story headline OR the regime shift OR the volatility move — pick the single most arresting). No stats — just the hook.
 - EXECUTIVE SUMMARY (act 2): the listener's takeaway in 3–4 lines. Lead with the conclusion ("Bottom line: X"). Then the one watchlist setup that matters. NO regime stats, NO VIX numbers, NO top-news headline restated — those belong to acts 3, 4, 5. The summary is conclusions, not previews.
-- MARKET REGIME BRIEFING (act 3): regime status + breadth percentages live HERE. VIX (if notable) lives HERE. Earnings/insider color if it shapes the regime read lives HERE. Stated once, in this act.
+- MARKET REGIME BRIEFING (act 3): regime status + breadth percentages live HERE. VIX (if notable) lives HERE. Earnings/insider color if it shapes the regime read lives HERE. The weekday + date are also named HERE (and only here) as part of the scene-setting opener. Stated once, in this act.
 - TOP STORY DEEP DIVE (act 4): the top news ticker, headline, impact score, and factor summary live HERE. Stated once, in this act.
 - WATCHLIST PULSE (act 5): RS rank, stage, % from pivot, setup type for each name — all live HERE. Stated once, in this act.
 - CLOSE + THESIS (act 6): forward-looking ONLY. What to watch tomorrow, the open question, the next catalyst. NO recap of today's stats. The thesis is one sentence ("If breadth holds, the leaders extend"), not a redo of acts 3–5.
@@ -95,7 +121,7 @@ OUTPUT RULES:
 
 MARKET DATA FOR {{ data.weekday }}, {{ data.date }} ({{ data.session_context }}):
 
-CRITICAL — TODAY'S DAY OF WEEK: Today is {{ data.weekday }}. Every reference to the trading day in the script — scene-setting, "coming off X's close," "into tomorrow," "yesterday" — must be consistent with {{ data.weekday }}. Do NOT pick a different weekday from the SCENE-SETTING examples. The session context is: "{{ data.session_context }}".
+CRITICAL — TODAY'S DAY OF WEEK: Today is {{ data.weekday }}. The weekday name is spoken aloud ONLY ONCE, inside MARKET REGIME BRIEFING (act 3), as part of its scene-setting opener. Every other act uses relative references only: "today", "tomorrow", "yesterday", "this morning", "into the close", "overnight". Do NOT name {{ data.weekday }} (or any weekday) in COLD OPEN, EXECUTIVE SUMMARY, TOP STORY DEEP DIVE, WATCHLIST PULSE, or CLOSE + THESIS. Any relative reference must still be consistent with {{ data.weekday }} (e.g. if today is Wednesday, "yesterday" = Tuesday). The session context is: "{{ data.session_context }}".
 
 REGIME: {{ data.regime.status }} ({{ data.regime.days_in_regime }} days in regime)
 
@@ -205,8 +231,7 @@ Required JSON structure:
         { "voice": "primary",   "text": "string — restates the day's thesis in one beat" },
         { "voice": "secondary", "text": "string — asks 'so what are you watching tomorrow?'" },
         { "voice": "primary",   "text": "string — answers with the watch-tomorrow item" },
-        { "voice": "secondary", "text": "string — adds the trader takeaway / final action" },
-        { "voice": "primary",   "text": "string — short sign-off line, warm not formal" }
+        { "voice": "secondary", "text": "string — adds the trader takeaway / final action, hands the show back to Hans (do NOT sign off — Hans closes the show)" }
       ]
     }
   ]

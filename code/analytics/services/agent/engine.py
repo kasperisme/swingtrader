@@ -180,8 +180,16 @@ def run_agent(
     tickers: list[str] | None = None,
     linked_scan_run_ids: list[int] | None = None,
     filtered_tickers: list[str] | None = None,
+    trigger_condition: str | None = None,
 ) -> dict:
-    """Run the screening agent loop. Returns {triggered, summary, data_used}."""
+    """Run the screening agent loop. Returns {triggered, summary, data_used}.
+
+    When ``trigger_condition`` is a non-empty string, it acts as the
+    user-defined send gate: the agent only sets ``triggered=true`` if the
+    gathered data satisfies the condition. The informational-rundown
+    override is suppressed in that mode so the gate is the only thing
+    deciding delivery.
+    """
     base_system = _AGENT_SYSTEM + (_FMP_SYSTEM_ADDON if _FMP_ENABLED else "")
     system = base_system
     if user_id:
@@ -206,9 +214,50 @@ def run_agent(
                 f"\n\n## Linked Screening Context\n{linked_context}\n"
                 "Use this context alongside your own tool calls."
             )
+    has_condition = bool(trigger_condition and trigger_condition.strip())
+    if has_condition:
+        system += (
+            "\n\n## Send-to-Telegram condition (USER-SET — overrides every other trigger rule)\n"
+            "This screening only sends a Telegram alert when the following condition is satisfied "
+            "by the data your tools return:\n\n"
+            f"CONDITION: {trigger_condition.strip()}\n\n"
+            "Procedure:\n"
+            "1. Run the tool calls needed to gather the relevant data.\n"
+            "2. Evaluate the CONDITION against that data.\n"
+            "3. If the CONDITION is clearly TRUE, set triggered=true and write the summary normally — "
+            "include the specific data points that proved it.\n"
+            "4. If the CONDITION is FALSE, ambiguous, or the data needed to evaluate it is missing, "
+            "set triggered=false and summary=null.\n"
+            "5. The 'informational rundown / give me / show me' override above does NOT apply when a "
+            "CONDITION is set — the user has explicitly asked for a conditional alert. Do not flip "
+            "to triggered=true just because the prompt sounds informational."
+        )
+    else:
+        system += (
+            "\n\n## Send-to-Telegram mode: ALWAYS SEND (no condition set)\n"
+            "This screening has NO trigger condition, so it runs in always-send mode. You MUST "
+            "set triggered=true regardless of whether the data is strong, weak, partial, or "
+            "empty. Always write a summary describing what you found — even if signals are "
+            "weak, even if tools returned no rows, even if the user has no positions, even if "
+            "you couldn't satisfy every part of the prompt. The conservative rule above is "
+            "SUPPRESSED in this mode; the informational override is mandatory. summary must "
+            "never be null. If the data really is empty, say so plainly in the summary "
+            "(e.g. 'No positions found in your portfolio' or 'No news in the last 24 hours "
+            "for your holdings')."
+        )
 
     registry = _build_registry(user_id)
-    return asyncio.run(_run_agent_async(system, prompt, registry))
+    result = asyncio.run(_run_agent_async(system, prompt, registry))
+
+    if not has_condition:
+        result["triggered"] = True
+        if not (result.get("summary") or "").strip():
+            result["summary"] = (
+                "Screening ran in always-send mode but the agent did not produce a summary. "
+                "See data_used for the raw tool results."
+            )
+
+    return result
 
 
 async def _run_agent_async(
@@ -341,12 +390,20 @@ def run_screening(screening: dict, dry_run: bool = False, is_test: bool = False)
         else:
             resolved_tickers = explicit_tickers or None
 
+        condition_enabled = bool(screening.get("condition_enabled"))
+        trigger_condition = (
+            (screening.get("trigger_condition") or "").strip()
+            if condition_enabled
+            else None
+        )
+
         result = run_agent(
             screening["prompt"],
             user_id=screening.get("user_id"),
             tickers=resolved_tickers,
             linked_scan_run_ids=linked_ids or None,
             filtered_tickers=filtered_tickers,
+            trigger_condition=trigger_condition or None,
         )
         result.update(base)
         return result

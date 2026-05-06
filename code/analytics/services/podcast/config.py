@@ -60,6 +60,14 @@ PODCAST_ENABLED = os.environ.get("PODCAST_ENABLED", "true").lower() == "true"
 # switch if agentic research misbehaves.
 PODCAST_AGENTIC = os.environ.get("PODCAST_AGENTIC", "true").lower() == "true"
 
+# Selects which writing pipeline produces the script. Three options:
+#   single_agent   — research_agent.gather_dossier + script_generator (current default)
+#   multi_agent    — agents.multi_agent_pipeline (producer + per-scene chain + editor)
+#   parallel_fetch — data_fetcher.fetch_live_data + script_generator (cheap, no agents)
+# Defaults to single_agent so existing deployments are unaffected. The
+# multi_agent pipeline ships in phases (see services/podcast/agents/).
+PODCAST_PIPELINE = os.environ.get("PODCAST_PIPELINE", "single_agent").strip().lower()
+
 # research_agent only: if the Ollama tool loop raises after retries, fall back
 # to fetch_live_data() (default true). Ollama Cloud often 502s before first
 # stream byte on long tool calls; set "false" to fail the pipeline instead.

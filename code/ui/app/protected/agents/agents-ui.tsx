@@ -1064,6 +1064,8 @@ function PillPopover({
   const [editTickers, setEditTickers] = useState<string[]>(screening.tickers ?? []);
   const [editLinkedScanRunIds, setEditLinkedScanRunIds] = useState<number[]>(screening.linked_scan_run_ids ?? []);
   const [editScanFilters, setEditScanFilters] = useState<ScreeningsFilters>((screening.scan_filters as ScreeningsFilters | null) ?? DEFAULT_SCREENINGS_FILTERS);
+  const [editConditionEnabled, setEditConditionEnabled] = useState<boolean>(screening.condition_enabled ?? false);
+  const [editTriggerCondition, setEditTriggerCondition] = useState<string>(screening.trigger_condition ?? "");
   const [scanRuns, setScanRuns] = useState<ScanRunSummary[]>([]);
   const [saving, setSaving] = useState(false);
   const [saveErr, setSaveErr] = useState<string | null>(null);
@@ -1119,6 +1121,10 @@ function PillPopover({
 
   async function handleSave() {
     if (!editPrompt.trim()) return;
+    if (editConditionEnabled && !editTriggerCondition.trim()) {
+      setSaveErr("Trigger condition is required when 'Only send when condition is met' is enabled.");
+      return;
+    }
     setSaving(true);
     setSaveErr(null);
     const res = await updateScheduledScreening(screening.id, {
@@ -1130,6 +1136,8 @@ function PillPopover({
       linked_scan_run_ids: editLinkedScanRunIds,
       scan_filters: countScreeningsFilterRules(editScanFilters) > 0 ? editScanFilters : null,
       trading_session: (editTradingSession as TradingSession) ?? "none",
+      condition_enabled: editConditionEnabled,
+      trigger_condition: editConditionEnabled ? editTriggerCondition.trim() : null,
     });
     if (res.ok) {
       onClose();
@@ -1201,11 +1209,36 @@ function PillPopover({
               />
             </div>
           )}
+          <div className="flex flex-col gap-1.5">
+            <label className="inline-flex items-start gap-2 text-[11px] font-medium text-foreground">
+              <input
+                type="checkbox"
+                checked={editConditionEnabled}
+                onChange={(e) => setEditConditionEnabled(e.target.checked)}
+                className="mt-0.5 h-3 w-3 rounded border-input"
+              />
+              <span>
+                Only send when condition is met
+                <span className="ml-1 normal-case font-normal text-muted-foreground/60">
+                  agent only triggers if your condition is satisfied
+                </span>
+              </span>
+            </label>
+            {editConditionEnabled && (
+              <textarea
+                value={editTriggerCondition}
+                onChange={(e) => setEditTriggerCondition(e.target.value)}
+                rows={3}
+                placeholder="e.g. At least one holding has news with sentiment_score below -0.4 today."
+                className={inputClass}
+              />
+            )}
+          </div>
           <div className="flex items-center gap-2 pt-1 border-t border-border">
             <button
               type="button"
               onClick={() => void handleSave()}
-              disabled={saving || !editPrompt.trim()}
+              disabled={saving || !editPrompt.trim() || (editConditionEnabled && !editTriggerCondition.trim())}
               className="inline-flex items-center gap-1.5 rounded-md bg-foreground px-3 py-1.5 text-xs font-medium text-background transition-opacity hover:opacity-90 disabled:opacity-40 disabled:pointer-events-none"
             >
               {saving ? "Saving…" : "Save"}
@@ -1419,6 +1452,8 @@ function CreateForm({ onClose, atLimit, suggestionTickers }: { onClose: () => vo
   const [tickers, setTickers] = useState<string[]>([]);
   const [linkedScanRunIds, setLinkedScanRunIds] = useState<number[]>([]);
   const [scanFilters, setScanFilters] = useState<ScreeningsFilters>(DEFAULT_SCREENINGS_FILTERS);
+  const [conditionEnabled, setConditionEnabled] = useState(false);
+  const [triggerCondition, setTriggerCondition] = useState("");
   const [scanRuns, setScanRuns] = useState<ScanRunSummary[]>([]);
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -1433,6 +1468,11 @@ function CreateForm({ onClose, atLimit, suggestionTickers }: { onClose: () => vo
     if (!prompt.trim()) return;
     setSaving(true);
     setErr(null);
+    if (conditionEnabled && !triggerCondition.trim()) {
+      setErr("Trigger condition is required when 'Only send when condition is met' is enabled.");
+      setSaving(false);
+      return;
+    }
     const res = await createScheduledScreening({
       name: name.trim() || "Untitled Agent",
       prompt: prompt.trim(),
@@ -1442,6 +1482,8 @@ function CreateForm({ onClose, atLimit, suggestionTickers }: { onClose: () => vo
       linked_scan_run_ids: linkedScanRunIds,
       scan_filters: countScreeningsFilterRules(scanFilters) > 0 ? scanFilters : null,
       trading_session: (tradingSession as TradingSession) ?? "none",
+      condition_enabled: conditionEnabled,
+      trigger_condition: conditionEnabled ? triggerCondition.trim() : null,
     });
     if (res.ok) {
       onClose();
@@ -1539,12 +1581,35 @@ function CreateForm({ onClose, atLimit, suggestionTickers }: { onClose: () => vo
             />
           </div>
         )}
+        <div className="flex flex-col gap-1.5">
+          <label className="inline-flex items-center gap-2 text-xs font-medium text-foreground">
+            <input
+              type="checkbox"
+              checked={conditionEnabled}
+              onChange={(e) => setConditionEnabled(e.target.checked)}
+              className="h-3.5 w-3.5 rounded border-input"
+            />
+            Only send when a condition is met
+            <span className="normal-case font-normal text-muted-foreground/60">
+              the agent only triggers a Telegram alert if the condition you write is satisfied
+            </span>
+          </label>
+          {conditionEnabled && (
+            <textarea
+              value={triggerCondition}
+              onChange={(e) => setTriggerCondition(e.target.value)}
+              rows={3}
+              placeholder="e.g. At least one of my holdings has a same-day news article with sentiment_score below -0.4. OR: Relative volume on AAPL or NVDA is above 2x their 20-day average."
+              className={inputClass}
+            />
+          )}
+        </div>
         <div className="flex min-w-0 flex-col gap-3 border-t border-border pt-3 sm:flex-row sm:flex-wrap sm:items-center sm:gap-3 sm:pt-1">
           <div className="flex min-w-0 flex-wrap items-center gap-2 sm:gap-3">
             <button
               type="button"
               onClick={() => void handleSave()}
-              disabled={saving || atLimit || !prompt.trim()}
+              disabled={saving || atLimit || !prompt.trim() || (conditionEnabled && !triggerCondition.trim())}
               className="inline-flex items-center gap-1.5 rounded-md bg-foreground px-4 py-2 text-sm font-medium text-background transition-opacity hover:opacity-90 disabled:opacity-40 disabled:pointer-events-none"
             >
               {saving ? "Saving…" : "Save & activate"}
@@ -1582,6 +1647,8 @@ function AgentCard({ screening, suggestionTickers }: { screening: ScheduledScree
   const [editTickers, setEditTickers] = useState<string[]>(screening.tickers ?? []);
   const [editLinkedScanRunIds, setEditLinkedScanRunIds] = useState<number[]>(screening.linked_scan_run_ids ?? []);
   const [editScanFilters, setEditScanFilters] = useState<ScreeningsFilters>((screening.scan_filters as ScreeningsFilters | null) ?? DEFAULT_SCREENINGS_FILTERS);
+  const [editConditionEnabled, setEditConditionEnabled] = useState<boolean>(screening.condition_enabled ?? false);
+  const [editTriggerCondition, setEditTriggerCondition] = useState<string>(screening.trigger_condition ?? "");
   const [scanRuns, setScanRuns] = useState<ScanRunSummary[]>([]);
   const [saving, setSaving] = useState(false);
   const [saveErr, setSaveErr] = useState<string | null>(null);
@@ -1607,6 +1674,10 @@ function AgentCard({ screening, suggestionTickers }: { screening: ScheduledScree
 
   async function handleSave() {
     if (!editPrompt.trim()) return;
+    if (editConditionEnabled && !editTriggerCondition.trim()) {
+      setSaveErr("Trigger condition is required when 'Only send when condition is met' is enabled.");
+      return;
+    }
     setSaving(true);
     setSaveErr(null);
     const res = await updateScheduledScreening(screening.id, {
@@ -1618,6 +1689,8 @@ function AgentCard({ screening, suggestionTickers }: { screening: ScheduledScree
       linked_scan_run_ids: editLinkedScanRunIds,
       scan_filters: countScreeningsFilterRules(editScanFilters) > 0 ? editScanFilters : null,
       trading_session: (editTradingSession as TradingSession) ?? "none",
+      condition_enabled: editConditionEnabled,
+      trigger_condition: editConditionEnabled ? editTriggerCondition.trim() : null,
     });
     if (res.ok) {
       setEditing(false);
@@ -1720,11 +1793,34 @@ function AgentCard({ screening, suggestionTickers }: { screening: ScheduledScree
               />
             </div>
           )}
+          <div className="flex flex-col gap-1.5">
+            <label className="inline-flex items-center gap-2 text-xs font-medium text-foreground">
+              <input
+                type="checkbox"
+                checked={editConditionEnabled}
+                onChange={(e) => setEditConditionEnabled(e.target.checked)}
+                className="h-3.5 w-3.5 rounded border-input"
+              />
+              Only send when a condition is met
+              <span className="normal-case font-normal text-muted-foreground/60">
+                the agent only triggers a Telegram alert if the condition you write is satisfied
+              </span>
+            </label>
+            {editConditionEnabled && (
+              <textarea
+                value={editTriggerCondition}
+                onChange={(e) => setEditTriggerCondition(e.target.value)}
+                rows={3}
+                placeholder="e.g. At least one of my holdings has a same-day news article with sentiment_score below -0.4."
+                className={inputClass}
+              />
+            )}
+          </div>
           <div className="flex min-w-0 flex-wrap items-center gap-2 border-t border-border pt-3 sm:gap-3 sm:pt-1">
             <button
               type="button"
               onClick={() => void handleSave()}
-              disabled={saving || !editPrompt.trim()}
+              disabled={saving || !editPrompt.trim() || (editConditionEnabled && !editTriggerCondition.trim())}
               className="inline-flex items-center gap-1.5 rounded-md bg-foreground px-4 py-2 text-sm font-medium text-background transition-opacity hover:opacity-90 disabled:opacity-40 disabled:pointer-events-none"
             >
               {saving ? "Saving…" : "Save changes"}
@@ -1799,6 +1895,14 @@ function AgentCard({ screening, suggestionTickers }: { screening: ScheduledScree
                 Market hours
               </span>
             )}
+            {screening.condition_enabled && (
+              <span
+                className="inline-flex items-center gap-1 rounded bg-amber-500/10 px-1.5 py-0.5 font-medium text-amber-600 dark:text-amber-400"
+                title={screening.trigger_condition ?? undefined}
+              >
+                Conditional
+              </span>
+            )}
             <span className="min-w-0 break-all">{screening.timezone}</span>
             {screening.last_run_at && (
               <span className="min-w-0 break-words">
@@ -1840,7 +1944,7 @@ function AgentCard({ screening, suggestionTickers }: { screening: ScheduledScree
         <div className="flex shrink-0 items-center justify-end gap-2 sm:pt-1">
           <button
             type="button"
-            onClick={() => { setEditing(true); setEditName(screening.name); setEditPrompt(screening.prompt); setEditSchedule(screening.schedule); setEditTimezone(screening.timezone); setEditTradingSession(screening.trading_session ?? null); setEditTickers(screening.tickers ?? []); setEditLinkedScanRunIds(screening.linked_scan_run_ids ?? []); setSaveErr(null); }}
+            onClick={() => { setEditing(true); setEditName(screening.name); setEditPrompt(screening.prompt); setEditSchedule(screening.schedule); setEditTimezone(screening.timezone); setEditTradingSession(screening.trading_session ?? null); setEditTickers(screening.tickers ?? []); setEditLinkedScanRunIds(screening.linked_scan_run_ids ?? []); setEditConditionEnabled(screening.condition_enabled ?? false); setEditTriggerCondition(screening.trigger_condition ?? ""); setSaveErr(null); }}
             title="Edit agent"
             className="flex h-8 w-8 items-center justify-center rounded-md border border-border text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
           >

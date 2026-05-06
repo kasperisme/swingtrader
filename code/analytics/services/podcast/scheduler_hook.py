@@ -12,6 +12,7 @@ import httpx
 from .config import (
     EPISODES_DIR,
     PODCAST_ENABLED,
+    PODCAST_PIPELINE,
     TELEGRAM_BOT_TOKEN,
     TELEGRAM_CHAT_ID,
 )
@@ -108,11 +109,24 @@ async def run_daily_podcast(
     log.info("Starting daily podcast pipeline for %s%s", today, mode_str)
 
     try:
-        data = data_fetcher_fn()
-        if asyncio.iscoroutine(data):
-            data = await data
+        if PODCAST_PIPELINE == "multi_agent":
+            # The multi-agent pipeline owns its own data gathering (producer
+            # scouts, per-scene researchers fetch). data_fetcher_fn is ignored
+            # in this mode — log so it's obvious to the operator.
+            log.info(
+                "PODCAST_PIPELINE=multi_agent — ignoring data_fetcher_fn=%r and "
+                "running the producer-led pipeline",
+                getattr(data_fetcher_fn, "__name__", repr(data_fetcher_fn)),
+            )
+            from .agents import run_multi_agent_pipeline
 
-        script = await generate_script(data)
+            script = await run_multi_agent_pipeline(today)
+        else:
+            data = data_fetcher_fn()
+            if asyncio.iscoroutine(data):
+                data = await data
+
+            script = await generate_script(data)
 
         if script_only:
             log.info("Stopping after script generation (script_only=True)")

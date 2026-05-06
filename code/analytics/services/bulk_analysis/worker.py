@@ -160,18 +160,49 @@ def _upsert_note(
     ticker: str,
     status: str,
     comment: str,
+    entry: dict[str, Any] | None = None,
+    entry_bar_idx: int | None = None,
+    entry_date: str | None = None,
 ) -> None:
     client = get_supabase_client()
+    payload: dict[str, Any] = {
+        "scan_row_id": scan_row_id,
+        "run_id": run_id,
+        "ticker": ticker,
+        "user_id": user_id,
+        "status": status,
+        "comment": comment or None,
+        "updated_at": _now(),
+    }
+    if entry:
+        # Merge with existing metadata so we don't clobber other keys (e.g. tags,
+        # legacy pivots). The UI's setTickerEntryMarker uses the same shape:
+        # metadata_json.entry = { barIdx, date, price, direction, take_profit?, stop_loss? }
+        existing = (
+            client.schema(SCHEMA)
+            .table("user_scan_row_notes")
+            .select("metadata_json")
+            .eq("scan_row_id", scan_row_id)
+            .eq("user_id", user_id)
+            .limit(1)
+            .execute()
+        )
+        meta_raw = (existing.data or [{}])[0].get("metadata_json") or {}
+        meta: dict[str, Any] = dict(meta_raw) if isinstance(meta_raw, dict) else {}
+        # Drop legacy pivot keys when we write a new entry, mirroring the UI.
+        meta.pop("pivot", None)
+        meta.pop("pivot_points", None)
+        meta["entry"] = {
+            "barIdx": entry_bar_idx if entry_bar_idx is not None else 0,
+            "date": entry_date or "",
+            "price": entry["price"],
+            "direction": entry["direction"],
+            **({"take_profit": entry["take_profit"]} if "take_profit" in entry else {}),
+            **({"stop_loss": entry["stop_loss"]} if "stop_loss" in entry else {}),
+        }
+        payload["metadata_json"] = meta
     client.schema(SCHEMA).table("user_scan_row_notes").upsert(
-        {
-            "scan_row_id": scan_row_id,
-            "run_id": run_id,
-            "ticker": ticker,
-            "user_id": user_id,
-            "status": status,
-            "comment": comment or None,
-            "updated_at": _now(),
-        },
+        payload,
         on_conflict="scan_row_id,user_id",
     ).execute()
 
@@ -213,6 +244,16 @@ async def _process_ticker(
             chat_user_msg,
             parsed["analysis_markdown"],
         )
+        entry = parsed.get("entry")
+        # The UI resolves bar position by `date` first; barIdx is a fallback.
+        # Use the snapshot's last bar as the anchor when the LLM proposes one.
+        entry_bar_idx = (
+            int(snapshot.get("bars_total") or 0) - 1 if entry else None
+        )
+        if entry_bar_idx is not None and entry_bar_idx < 0:
+            entry_bar_idx = 0
+        entry_date = str(snapshot.get("last_date") or "") if entry else None
+
         await asyncio.to_thread(
             _upsert_note,
             user_id=user_id,
@@ -221,6 +262,9 @@ async def _process_ticker(
             ticker=ticker,
             status=parsed["status"],
             comment=parsed["comment"],
+            entry=entry,
+            entry_bar_idx=entry_bar_idx,
+            entry_date=entry_date,
         )
         await asyncio.to_thread(_bump_completed, job_id, failed=False)
         log.info("[%s] %s → %s", job_id[:8], ticker, parsed["status"])

@@ -20,13 +20,27 @@ SYSTEM = (
     '{\n'
     '  "status": "active" | "watchlist" | "pipeline" | "dismissed",\n'
     '  "comment": "<one short sentence — fits in a table cell>",\n'
-    '  "analysis_markdown": "<2-4 short paragraphs of markdown>"\n'
+    '  "analysis_markdown": "<2-4 short paragraphs of markdown>",\n'
+    '  "entry": null | {\n'
+    '    "direction": "long" | "short",\n'
+    '    "price": <number — pivot/entry trigger price>,\n'
+    '    "take_profit": <number, optional>,\n'
+    '    "stop_loss": <number, optional>\n'
+    '  }\n'
     '}\n\n'
     "Status semantics:\n"
     "- pipeline:  high-conviction setup, ready for action\n"
     "- watchlist: constructive but needs confirmation\n"
     "- active:    no clear edge, neutral\n"
     "- dismissed: clearly broken or no setup\n\n"
+    "Entry rules (entry is OPTIONAL):\n"
+    "- Whenever a tradeable setup is forming — a clear pivot, breakout level, "
+    "pullback to support, or short trigger — populate `entry` with the price, "
+    "direction, and stop/target if you can identify them. Otherwise set "
+    "`entry` to null. Do not gate on subjective confidence; if you can name a "
+    "level a trader could act on, include it.\n"
+    "- Use the snapshot's last_close as the reference; entry price should be "
+    "a real level visible in the recent action (recent high, SMA, swing low, etc.).\n\n"
     "analysis_markdown must use these labelled lines (each on its own line, "
     "bolded):\n"
     "**Trend:** ...\n"
@@ -89,4 +103,33 @@ def parse_response(raw: str) -> dict[str, Any]:
         "status": status,
         "comment": comment[:400],  # protect the column
         "analysis_markdown": analysis,
+        "entry": _parse_entry(payload.get("entry")),
     }
+
+
+def _parse_entry(raw: Any) -> dict[str, Any] | None:
+    """Extract a tradeable entry from the LLM payload, or None."""
+    if not isinstance(raw, dict):
+        return None
+    direction = str(raw.get("direction") or "").lower().strip()
+    if direction not in {"long", "short"}:
+        return None
+    try:
+        price = float(raw.get("price"))
+    except (TypeError, ValueError):
+        return None
+    if price != price or price <= 0:  # NaN or non-positive
+        return None
+    out: dict[str, Any] = {"direction": direction, "price": round(price, 4)}
+    for key in ("take_profit", "stop_loss"):
+        v = raw.get(key)
+        if v is None:
+            continue
+        try:
+            f = float(v)
+        except (TypeError, ValueError):
+            continue
+        if f != f or f <= 0:
+            continue
+        out[key] = round(f, 4)
+    return out
