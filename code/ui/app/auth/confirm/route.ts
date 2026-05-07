@@ -1,3 +1,4 @@
+import { welcomeUserIfNeeded } from "@/lib/email/welcome-user";
 import { createClient } from "@/lib/supabase/server";
 import { getCachedSubscriptionTier } from "@/lib/subscription";
 import { type EmailOtpType } from "@supabase/supabase-js";
@@ -19,7 +20,11 @@ export async function GET(request: NextRequest) {
     });
     if (!error) {
       const { data: { user } } = await supabase.auth.getUser();
-      if (user) await getCachedSubscriptionTier(user.id);
+      if (user) {
+        await getCachedSubscriptionTier(user.id);
+        // Idempotent — sends at most once per user via metadata flag.
+        await welcomeUserIfNeeded(user);
+      }
       redirect(next);
     } else {
       redirect(`/auth/error?error=${error?.message}`);

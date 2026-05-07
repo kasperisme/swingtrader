@@ -15,6 +15,8 @@ import { Label } from "@/components/ui/label";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
+import { track } from "@/lib/analytics/events";
+import { getPosthog } from "@/lib/analytics/posthog";
 
 export function SignUpForm({
   className,
@@ -40,7 +42,7 @@ export function SignUpForm({
     }
 
     try {
-      const { error } = await supabase.auth.signUp({
+      const { data, error } = await supabase.auth.signUp({
         email,
         password,
         options: {
@@ -48,6 +50,11 @@ export function SignUpForm({
         },
       });
       if (error) throw error;
+      if (data.user) {
+        const ph = getPosthog();
+        ph?.identify(data.user.id, { email: data.user.email });
+      }
+      track("signup_completed", { method: "email" });
       router.push("/auth/sign-up-success");
     } catch (error: unknown) {
       setError(error instanceof Error ? error.message : "An error occurred");

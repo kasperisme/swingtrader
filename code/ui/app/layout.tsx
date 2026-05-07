@@ -8,6 +8,7 @@ import { Analytics } from "@vercel/analytics/next";
 import { SiteFooter, SITE_X_PROFILE_URL } from "@/components/site-footer";
 import { SiteHeader, SiteHeaderFallback } from "@/components/site-header";
 import { CavemanModeProvider } from "@/lib/caveman-mode";
+import { AnalyticsProvider } from "@/lib/analytics/AnalyticsProvider";
 
 const defaultUrl = process.env.VERCEL_URL
   ? `https://${process.env.VERCEL_URL}`
@@ -66,6 +67,7 @@ export default function RootLayout({
       </head>
       <body className={`${jakartaSans.className} antialiased`}>
         <Analytics />
+        <AnalyticsProvider />
         <ThemeProvider
           attribute="class"
           defaultTheme="dark"

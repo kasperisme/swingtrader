@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useMemo, useCallback, useEffect, useId } from "react";
+import { track } from "@/lib/analytics/events";
 import { Bot, Pause, Play, Trash2, Plus, Clock, AlertCircle, Zap, Loader2, LayoutList, CalendarDays, ChevronLeft, ChevronRight, Pencil, X, Link2, Filter } from "lucide-react";
 import {
   type ScheduledScreening,
@@ -1101,6 +1102,7 @@ function PillPopover({
       setTesting(false);
       return;
     }
+    track("agent_run", { agent_id: screening.id, manual: true });
     const deadline = Date.now() + 3 * 60 * 1000;
     while (Date.now() < deadline) {
       await new Promise((r) => setTimeout(r, 3000));
@@ -1486,6 +1488,7 @@ function CreateForm({ onClose, atLimit, suggestionTickers }: { onClose: () => vo
       trigger_condition: conditionEnabled ? triggerCondition.trim() : null,
     });
     if (res.ok) {
+      track("agent_created", { agent_id: res.data?.id ?? "", kind: "scheduled_screening" });
       onClose();
       window.location.reload();
     } else {
@@ -1712,6 +1715,7 @@ function AgentCard({ screening, suggestionTickers }: { screening: ScheduledScree
       setTesting(false);
       return;
     }
+    track("agent_run", { agent_id: screening.id, manual: true });
 
     const deadline = Date.now() + 3 * 60 * 1000;
     while (Date.now() < deadline) {

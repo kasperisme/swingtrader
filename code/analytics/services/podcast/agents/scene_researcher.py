@@ -30,6 +30,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 from typing import Any
 
 import httpx
@@ -59,6 +60,70 @@ OLLAMA_PODCAST_SCENE_RESEARCH_MODEL = (
     or os.environ.get("OLLAMA_BLOG_MODEL")
     or OLLAMA_PODCAST_SCRIPT_MODEL
 )
+
+
+_THINK_RE = re.compile(r"<think>.*?</think>", flags=re.DOTALL)
+_FENCED_BLOCK_RE = re.compile(r"```(?:json)?\s*(\{.*?\})\s*```", flags=re.DOTALL)
+
+
+def _strip_envelope(raw: str) -> str:
+    """Strip reasoning tokens and markdown fences regardless of where they sit.
+
+    Some models prepend a chain-of-thought preamble or wrap their JSON in
+    a fenced block despite the prompt's "no markdown" instruction. We pull
+    the fenced body out when one is present, otherwise we leave the raw
+    text alone for ``_parse_dossier_json`` to slice from the first ``{``.
+    """
+    cleaned = _THINK_RE.sub("", raw).strip()
+    fenced = _FENCED_BLOCK_RE.search(cleaned)
+    if fenced:
+        return fenced.group(1).strip()
+    # Trim a leading bare fence if the closing one is missing.
+    return (
+        cleaned.removeprefix("```json")
+        .removeprefix("```")
+        .removesuffix("```")
+        .strip()
+    )
+
+
+async def _repair_json_once(raw: str, label: str) -> dict | None:
+    """One-shot non-tool call to coerce a malformed final message into JSON.
+
+    Used when the researcher's final message fails to parse — the model
+    almost always has the substance right but added prose, fences, or
+    invalid escapes around the JSON. We hand the raw text back and ask
+    for ONLY the dossier JSON.
+    """
+    messages = [
+        {
+            "role": "system",
+            "content": (
+                "You are a JSON repair tool. Read the user's input and emit a "
+                "single valid JSON object matching this schema exactly: "
+                '{"narrative_notes": "string", "carry_forward": "string"}. '
+                "Output ONLY the JSON object — no preamble, no markdown fences, "
+                "no commentary. Start with { and end with }."
+            ),
+        },
+        {"role": "user", "content": raw},
+    ]
+    async with httpx.AsyncClient() as client:
+        r = await client.post(
+            f"{OLLAMA_BASE_URL}/api/chat",
+            json={
+                "model": OLLAMA_PODCAST_SCENE_RESEARCH_MODEL,
+                "messages": messages,
+                "stream": False,
+                "options": {"num_predict": 1024, "temperature": 0.1},
+            },
+            timeout=120,
+        )
+    r.raise_for_status()
+    payload = r.json()
+    content = (payload.get("message", {}).get("content") or "").strip()
+    log.info("%s: repair call returned %d chars", label, len(content))
+    return _parse_dossier_json(_strip_envelope(content))
 
 
 def _format_world_state(world: dict) -> str:
@@ -219,8 +284,22 @@ async def research_scene(
         )
 
     raw = (final_message.get("content") or "").strip()
-    raw = raw.removeprefix("```json").removeprefix("```").removesuffix("```").strip()
-    parsed = _parse_dossier_json(raw)
+    cleaned = _strip_envelope(raw)
+    parsed = _parse_dossier_json(cleaned)
+    if not isinstance(parsed, dict) and cleaned:
+        log.warning(
+            "%s: first parse failed (raw=%d chars, head=%r) — attempting repair",
+            label,
+            len(raw),
+            raw[:300],
+        )
+        try:
+            parsed = await _repair_json_once(cleaned, label)
+        except Exception as exc:
+            log.warning("%s: repair call failed: %s", label, exc)
+            parsed = None
+        if isinstance(parsed, dict):
+            log.info("%s: repair succeeded — recovered valid JSON", label)
     narrative_notes = ""
     carry_forward = ""
     if isinstance(parsed, dict):
@@ -228,9 +307,9 @@ async def research_scene(
         carry_forward = str(parsed.get("carry_forward", "")).strip()
     elif raw:
         log.warning(
-            "%s: final message was not valid JSON (head=%r) — proceeding with empty notes",
+            "%s: dossier unrecoverable after repair (raw_head=%r) — proceeding with empty notes",
             label,
-            raw[:200],
+            raw[:300],
         )
 
     log.info(

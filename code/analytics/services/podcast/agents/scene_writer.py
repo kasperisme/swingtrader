@@ -236,14 +236,18 @@ async def _call_writer(
     messages: list[dict],
     label: str,
     retry_error: str | None = None,
+    prior_response: str | None = None,
 ) -> str:
     if retry_error:
         messages = messages + [
-            {"role": "assistant", "content": messages[-1].get("content", "")},
+            {"role": "assistant", "content": prior_response or ""},
             {
                 "role": "user",
                 "content": (
-                    f"JSON parse error: {retry_error}\nReturn only valid JSON, no other text."
+                    f"That response could not be parsed: {retry_error}. "
+                    "Reply again with ONLY the JSON object — no preamble, no "
+                    "markdown fences, no trailing commentary. Start with { "
+                    "and end with }."
                 ),
             },
         ]
@@ -374,6 +378,7 @@ async def write_scene(
                 messages,
                 label,
                 retry_error="Could not locate valid JSON in response",
+                prior_response=raw,
             )
             parsed = _parse_json(raw2)
             if parsed is not None:

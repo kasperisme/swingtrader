@@ -15,6 +15,8 @@ import { Label } from "@/components/ui/label";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
+import { track } from "@/lib/analytics/events";
+import { getPosthog } from "@/lib/analytics/posthog";
 
 export function LoginForm({
   className,
@@ -33,11 +35,16 @@ export function LoginForm({
     setError(null);
 
     try {
-      const { error } = await supabase.auth.signInWithPassword({
+      const { data, error } = await supabase.auth.signInWithPassword({
         email,
         password,
       });
       if (error) throw error;
+      if (data.user) {
+        const ph = getPosthog();
+        ph?.identify(data.user.id, { email: data.user.email ?? undefined });
+      }
+      track("login", { method: "email" });
       // Update this route to redirect to an authenticated route. The user already has an active session.
       router.push("/protected");
     } catch (error: unknown) {

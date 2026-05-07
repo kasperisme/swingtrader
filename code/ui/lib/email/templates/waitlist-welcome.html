@@ -1,0 +1,59 @@
+<!--
+  Waitlist welcome email — paste into the Resend stored-template editor and
+  set RESEND_WAITLIST_WELCOME_TEMPLATE_ID to the template's id.
+
+  Variables (passed from app/api/early-access/route.ts):
+    {{email}}   — the address that signed up
+    {{appUrl}}  — public site URL (e.g. https://newsimpactscreener.com)
+
+  Subject (set in the Resend dashboard):
+    You're on the News Impact Screener waitlist
+-->
+<!doctype html>
+<html lang="en">
+  <body style="margin:0;padding:0;background:#0b0b0c;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;color:#e7e7ea;">
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#0b0b0c;padding:32px 16px;">
+      <tr>
+        <td align="center">
+          <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:520px;background:#141416;border:1px solid #232327;border-radius:12px;padding:32px;">
+            <tr>
+              <td style="font-size:13px;letter-spacing:0.08em;text-transform:uppercase;color:#9b9ba1;padding-bottom:16px;">
+                News Impact Screener
+              </td>
+            </tr>
+            <tr>
+              <td style="font-size:22px;font-weight:600;color:#ffffff;line-height:1.3;padding-bottom:16px;">
+                You're on the waitlist.
+              </td>
+            </tr>
+            <tr>
+              <td style="font-size:15px;line-height:1.6;color:#c8c8cd;padding-bottom:20px;">
+                Thanks for signing up with <strong style="color:#ffffff;">{{email}}</strong>. We're letting traders in steadily so the platform stays fast and the signal stays sharp.
+              </td>
+            </tr>
+            <tr>
+              <td style="font-size:15px;line-height:1.6;color:#c8c8cd;padding-bottom:24px;">
+                You'll get an email the moment your spot opens — no extra steps from you.
+              </td>
+            </tr>
+            <tr>
+              <td style="padding-bottom:28px;">
+                <a href="{{appUrl}}" style="display:inline-block;background:#f5b301;color:#0b0b0c;text-decoration:none;font-weight:600;font-size:14px;padding:12px 20px;border-radius:8px;">
+                  Visit the site
+                </a>
+              </td>
+            </tr>
+            <tr>
+              <td style="font-size:13px;line-height:1.6;color:#7a7a82;border-top:1px solid #232327;padding-top:20px;">
+                If this wasn't you, just ignore this email — we won't reach out again.
+              </td>
+            </tr>
+          </table>
+          <div style="max-width:520px;font-size:11px;color:#5a5a62;text-align:center;padding-top:16px;">
+            News Impact Screener · <a href="{{appUrl}}" style="color:#7a7a82;text-decoration:none;">{{appUrl}}</a>
+          </div>
+        </td>
+      </tr>
+    </table>
+  </body>
+</html>

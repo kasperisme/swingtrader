@@ -238,10 +238,7 @@ export function ChartsPageClient({ tickersParam, suggestionTickers }: Props) {
 
       <ChartDateRangePicker onChange={setDateRange} onGranularityChange={setGranularity} />
 
-      <div
-        className="flex items-stretch w-full"
-        style={aiChatOpen ? { minHeight: "calc(100dvh - 20rem)" } : undefined}
-      >
+      <div className="flex items-stretch w-full">
         <div className="flex-1 min-w-0">
           <TickerChartsPanel
             symbols={symbols}

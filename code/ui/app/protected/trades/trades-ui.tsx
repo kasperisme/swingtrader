@@ -6,6 +6,7 @@ import { createClient } from "@/lib/supabase/client";
 import { Briefcase, Loader2, Plus, Trash2 } from "lucide-react";
 import { buildPortfolioFromTrades, type PortfolioPosition } from "./portfolio-from-trades";
 import { fmpGetPriceAtDate, fmpGetQuote, fmpSearchSymbol } from "@/app/actions/fmp";
+import { track } from "@/lib/analytics/events";
 
 type FmpSymbolHit = {
   symbol: string;
@@ -580,6 +581,7 @@ export function TradesUI({ initialTrades }: { initialTrades: UserTradeRow[] }) {
       return;
     }
     if (data) {
+      track("trade_logged", { trade_id: String(data.id), ticker: data.ticker, side: data.side });
       setTicker("");
       setQuantity("");
       setPricePerUnit("");

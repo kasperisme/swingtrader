@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getStripe } from "@/lib/stripe/client";
 import { getPriceId, type Plan, type BillingInterval } from "@/lib/stripe/prices";
 import { createClient } from "@/lib/supabase/server";
+import { captureServer } from "@/lib/analytics/server";
 
 const VALID_PLANS: Plan[] = ["investor", "trader"];
 const VALID_INTERVALS: BillingInterval[] = ["monthly", "annual"];
@@ -59,6 +60,8 @@ export async function POST(req: NextRequest) {
         },
       },
     });
+
+    captureServer(user.id, "checkout_initiated", { plan, interval, session_id: session.id });
 
     return NextResponse.json({ url: session.url });
   } catch (err) {

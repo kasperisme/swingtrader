@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { Copy, Check, Trash2, Plus, KeyRound, RefreshCw } from "lucide-react";
+import { track } from "@/lib/analytics/events";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -89,6 +90,7 @@ function NewKeyDialog({
       });
       const json = await res.json();
       if (!res.ok) throw new Error(json.error ?? "Failed to create key");
+      track("api_key_created", { scopes });
       onCreated(json);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Unknown error");
@@ -221,6 +223,7 @@ export function ApiKeysUI({ initialKeys }: { initialKeys: ApiKey[] }) {
     try {
       const res = await fetch(`/api/user/api-keys?id=${id}`, { method: "DELETE" });
       if (!res.ok) throw new Error();
+      track("api_key_revoked", {});
       setKeys((prev) =>
         prev.map((k) =>
           k.id === id ? { ...k, revoked_at: new Date().toISOString() } : k,
