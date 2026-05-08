@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { SiteHeaderMobileNav } from "@/components/site-header-mobile-nav";
 import { SiteHeaderDesktopAuthedNav } from "@/components/site-header-desktop-authed-nav";
 import { CavemanToggle } from "@/components/caveman-toggle";
+import { HelpChatTrigger } from "@/components/help-chat";
 
 function Logo() {
   return (
@@ -78,6 +79,7 @@ export async function SiteHeader() {
       {/* Right: desktop links + hamburger (mobile only, always rightmost) */}
       {isAuthed ? (
         <div className="flex shrink-0 items-center gap-3">
+          <HelpChatTrigger className={`${navLinkClass} hidden md:inline-flex items-center gap-1.5`} />
           <Link href="/pricing" className={`${navLinkClass} hidden md:inline`}>Pricing</Link>
           <Link href="/docs" className={`${navLinkClass} hidden md:inline`}>Docs</Link>
           <Link href="/blog" className={`${navLinkClass} hidden md:inline`}>Blog</Link>

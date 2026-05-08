@@ -1,9 +1,17 @@
+import { Suspense } from "react";
 import { createClient } from "@/lib/supabase/server";
 import { getUserSubscriptionTier } from "@/lib/subscription";
 import { computeNewsTrendsGate } from "@/lib/gate";
 import { loadClusterDailyTrends } from "@/lib/news-trends/load-news-trends";
 import { NewsTrendsClient } from "./news-trends-client";
 import type { TimeGate } from "@/lib/gate";
+import { getOnboardingTours } from "@/app/actions/onboarding";
+import { PageTour } from "@/app/protected/_components/page-tour";
+
+async function NewsTrendsTourMount() {
+  const tours = await getOnboardingTours();
+  return <PageTour tourKey="news_trends" autoStart={!tours.news_trends} />;
+}
 
 export default async function NewsTrendsPage() {
   const supabase = await createClient();
@@ -26,6 +34,9 @@ export default async function NewsTrendsPage() {
         gate={gate}
         tier={tier}
       />
+      <Suspense fallback={null}>
+        <NewsTrendsTourMount />
+      </Suspense>
     </div>
   );
 }

@@ -30,6 +30,10 @@ type EventMap = {
   api_key_created: { scopes: string[] };
   api_key_revoked: Record<string, never>;
   onboarding_completed: { skipped: boolean };
+  onboarding_step_clicked: { step: string };
+  onboarding_dismissed: { completed_steps: number; total_steps: number };
+  onboarding_collapsed_toggled: { collapsed: boolean };
+  onboarding_restarted: { completed_steps: number; total_steps: number };
 };
 
 export function track<K extends keyof EventMap>(

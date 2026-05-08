@@ -100,16 +100,16 @@ export function ScreeningsMobileViewPicker({
   };
 
   return (
-    <div ref={wrapRef} className="relative flex-1 min-w-0">
+    <div ref={wrapRef} className="relative w-full">
       <button
         type="button"
         onClick={() => setOpen((o) => !o)}
         aria-haspopup="menu"
         aria-expanded={open}
-        className="w-full min-h-[44px] flex items-center gap-2.5 px-3 rounded-md border border-border bg-muted/40 hover:bg-muted/60 transition-colors"
+        className="w-full min-h-[52px] flex items-center gap-3 px-3.5 rounded-lg border border-border bg-muted/40 hover:bg-muted/60 transition-colors"
       >
         <span
-          className={`shrink-0 w-1.5 h-1.5 rounded-full ${
+          className={`shrink-0 w-2 h-2 rounded-full ${
             active ? GROUP_DOT[active.group] : "bg-muted-foreground"
           }`}
           aria-hidden
@@ -120,16 +120,16 @@ export function ScreeningsMobileViewPicker({
         >
           View
         </span>
-        <span className="min-w-0 flex items-center gap-1.5 truncate">
+        <span className="min-w-0 flex items-center gap-2 truncate">
           {active?.icon ? (
             <span className="shrink-0 text-foreground/80">{active.icon}</span>
           ) : null}
-          <span className="font-mono text-[13px] tracking-[-0.01em] text-foreground truncate">
+          <span className="font-mono text-[15px] font-medium tracking-[-0.01em] text-foreground truncate">
             {active?.label ?? "—"}
           </span>
         </span>
         <ChevronDown
-          className={`ml-auto w-4 h-4 text-muted-foreground transition-transform ${
+          className={`ml-auto w-5 h-5 text-muted-foreground transition-transform ${
             open ? "rotate-180" : ""
           }`}
         />

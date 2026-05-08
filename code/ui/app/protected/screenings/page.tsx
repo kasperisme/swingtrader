@@ -7,6 +7,13 @@ import {
   type ScanRowNote,
 } from "./screenings-ui";
 import { normalizeRowData } from "./screenings-row-data";
+import { getOnboardingTours } from "@/app/actions/onboarding";
+import { PageTour } from "@/app/protected/_components/page-tour";
+
+async function ScreeningsTourMount() {
+  const tours = await getOnboardingTours();
+  return <PageTour tourKey="screenings" autoStart={!tours.screenings} />;
+}
 
 async function fetchRuns(): Promise<ScanRun[]> {
   const supabase = await createClient();
@@ -255,6 +262,9 @@ export default function ScreeningsPage({
         }
       >
         <ScreeningsData searchParams={searchParams} />
+      </Suspense>
+      <Suspense fallback={null}>
+        <ScreeningsTourMount />
       </Suspense>
     </div>
   );

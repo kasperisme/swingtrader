@@ -18,6 +18,7 @@ from .config import (
 )
 from .elevenlabs_render import ensure_hook_music, render_episode
 from .episode_packager import package_episode
+from .metadata_generator import regenerate_episode_metadata
 from .supabase_publisher import publish_episode
 from .script_generator import generate_script, _hook_act, _welcome_act
 from .telegram_gate import request_edited_script, send_approval_request
@@ -127,6 +128,11 @@ async def run_daily_podcast(
                 data = await data
 
             script = await generate_script(data)
+
+        # Always derive title + description from the actual act content so the
+        # Supabase row reflects the day's story even when the upstream LLM
+        # dropped those fields or fell back to "The Impact Tape".
+        script = await regenerate_episode_metadata(script, today)
 
         if script_only:
             log.info("Stopping after script generation (script_only=True)")

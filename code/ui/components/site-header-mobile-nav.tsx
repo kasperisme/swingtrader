@@ -8,6 +8,7 @@ import { createClient } from "@/lib/supabase/client";
 import { useRouter } from "next/navigation";
 import { cn } from "@/lib/utils";
 import { CavemanToggle } from "@/components/caveman-toggle";
+import { HelpChatTrigger } from "@/components/help-chat";
 
 const portfolioLinks = [
   { href: "/protected", label: "Portfolio" },
@@ -155,6 +156,20 @@ export function SiteHeaderMobileNav({ isAuthed, userEmail }: Props) {
             <nav className="min-h-0 flex-1 overflow-y-auto p-4 space-y-6">
               {isLoggedIn ? (
                 <>
+                  <div>
+                    <p className={sectionLabelClass}>Help</p>
+                    <ul className="space-y-0.5">
+                      <li onClick={close}>
+                        <HelpChatTrigger
+                          className={cn(
+                            linkClass,
+                            "inline-flex w-full items-center gap-2 text-amber-600 dark:text-amber-400",
+                          )}
+                        />
+                      </li>
+                    </ul>
+                  </div>
+
                   <div>
                     <p className={sectionLabelClass}>Ops center</p>
                     <ul className="space-y-0.5">

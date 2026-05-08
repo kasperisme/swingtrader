@@ -10,9 +10,29 @@ log = logging.getLogger(__name__)
 
 _SILENCE_300MS = 300
 _SILENCE_500MS = 500
+_INTERJECTION_GAP_MS = 50  # tight gap when a ≤3-word reaction sits next to a different voice
+_INTERJECTION_MAX_WORDS = 3
 _HOOK_MUSIC_GAIN_DB = -18  # soft bed so voice stays dominant
 _HOOK_MUSIC_PRE_ROLL_MS = 800
 _HOOK_MUSIC_TAIL_MS = 1200
+
+
+def _gap_between(prev_meta: tuple[str, int], next_meta: tuple[str, int]) -> int:
+    """Return inter-segment silence in ms.
+
+    When a short reaction (≤3 words) sits next to a different-voice line on
+    either side, drop the gap to 50ms so the interjection lands like a real
+    talk-over rather than a paced hand-off. Same-voice transitions and two
+    long lines from different voices keep the standard 300ms pause.
+    """
+    prev_voice, prev_words = prev_meta
+    next_voice, next_words = next_meta
+    if prev_voice != next_voice and (
+        prev_words <= _INTERJECTION_MAX_WORDS
+        or next_words <= _INTERJECTION_MAX_WORDS
+    ):
+        return _INTERJECTION_GAP_MS
+    return _SILENCE_300MS
 
 
 def _load_or_create_silent(path: Path, duration_ms: int = 2000) -> "AudioSegment":
@@ -99,20 +119,26 @@ def package_episode(
 
     # Bucket segments into hook (gets a music bed) vs the rest, walking
     # script.acts in the same order render_episode produced segments in.
+    # Track (voice, word_count) per non-hook segment so the stitcher can
+    # tighten the gap around short reactions.
     hook_paths: list[Path] = []
     other_paths: list[Path] = []
+    other_meta: list[tuple[str, int]] = []
     seg_idx = 0
     for act in script.get("acts", []):
-        line_count = len(act.get("lines", []))
-        bucket = (
-            hook_paths
-            if (act.get("name") == "HOOK" or act.get("bg_music"))
-            else other_paths
-        )
-        for _ in range(line_count):
-            if seg_idx < len(segments):
-                bucket.append(segments[seg_idx])
-                seg_idx += 1
+        is_hook_act = act.get("name") == "HOOK" or act.get("bg_music")
+        for line in act.get("lines", []):
+            if seg_idx >= len(segments):
+                break
+            seg_path = segments[seg_idx]
+            seg_idx += 1
+            if is_hook_act:
+                hook_paths.append(seg_path)
+            else:
+                voice = str(line.get("voice", "primary")).strip().lower()
+                word_count = len((line.get("text") or "").split())
+                other_paths.append(seg_path)
+                other_meta.append((voice, word_count))
 
     combined = intro + AudioSegment.silent(duration=_SILENCE_500MS)
 
@@ -120,11 +146,22 @@ def package_episode(
         combined += _build_hook_chunk(hook_paths, ASSETS_DIR / "hook_music.mp3")
         combined += AudioSegment.silent(duration=_SILENCE_500MS)
 
+    interjection_gaps = 0
     for i, seg_path in enumerate(other_paths):
         seg = AudioSegment.from_mp3(str(seg_path))
         combined += seg
         if i < len(other_paths) - 1:
-            combined += AudioSegment.silent(duration=_SILENCE_300MS)
+            gap_ms = _gap_between(other_meta[i], other_meta[i + 1])
+            if gap_ms == _INTERJECTION_GAP_MS:
+                interjection_gaps += 1
+            combined += AudioSegment.silent(duration=gap_ms)
+    log.info(
+        "Stitched %d segments — %d tight interjection gaps (%dms), rest at %dms",
+        len(other_paths),
+        interjection_gaps,
+        _INTERJECTION_GAP_MS,
+        _SILENCE_300MS,
+    )
 
     combined += outro
 
@@ -154,7 +191,7 @@ def package_episode(
     cover_path = output_dir / f"{date_str}_cover.png"
     _generate_cover_art(
         date_str,
-        script.get("episode_title", "NewsImpact Daily"),
+        script.get("episode_title", "The Impact Tape"),
         script,
         cover_path,
     )
@@ -173,7 +210,7 @@ def package_episode(
     return {
         "audio_path": audio_path,
         "cover_path": cover_path,
-        "title": script.get("episode_title", f"NewsImpact Daily — {date_str}"),
+        "title": script.get("episode_title", f"The Impact Tape — {date_str}"),
         "description": script.get("episode_description", ""),
         "duration_seconds": len(combined) // 1000,
         "file_size_bytes": audio_path.stat().st_size,

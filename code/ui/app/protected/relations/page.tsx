@@ -2,6 +2,13 @@ import { Suspense } from "react";
 import { createClient } from "@/lib/supabase/server";
 import { RelationshipsUI } from "./relationships-ui";
 import { type TickerRow } from "../vectors/vectors-ui";
+import { getOnboardingTours } from "@/app/actions/onboarding";
+import { PageTour } from "@/app/protected/_components/page-tour";
+
+async function RelationsTourMount() {
+  const tours = await getOnboardingTours();
+  return <PageTour tourKey="relations" autoStart={!tours.relations} />;
+}
 
 async function fetchCompanyVectors(): Promise<TickerRow[]> {
   const supabase = await createClient();
@@ -81,6 +88,9 @@ export default function RelationshipsPage() {
         }
       >
         <RelationshipsData />
+      </Suspense>
+      <Suspense fallback={null}>
+        <RelationsTourMount />
       </Suspense>
     </div>
   );

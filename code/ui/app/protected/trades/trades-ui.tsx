@@ -607,6 +607,7 @@ export function TradesUI({ initialTrades }: { initialTrades: UserTradeRow[] }) {
     <div className="flex flex-col gap-8">
       <form
         onSubmit={(e) => void handleSubmit(e)}
+        data-tour="trade-add"
         className="rounded-xl border border-border bg-card p-5 space-y-4"
       >
         <h2 className="text-lg font-semibold">Log a trade</h2>
@@ -748,7 +749,7 @@ export function TradesUI({ initialTrades }: { initialTrades: UserTradeRow[] }) {
 
       <PortfolioSection trades={trades} />
 
-      <div>
+      <div data-tour="trade-list">
         <h2 className="text-lg font-semibold mb-3">Your trades</h2>
         {sorted.length === 0 ? (
           <p className="text-sm text-muted-foreground rounded-lg border border-border p-6 text-center">

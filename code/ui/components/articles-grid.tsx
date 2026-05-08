@@ -55,7 +55,7 @@ export function ArticlesGrid({ articles }: { articles: ArticleGridItem[] }) {
   }
 
   return (
-    <div className="grid gap-4 sm:grid-cols-2">
+    <div data-tour="article-list" className="grid gap-4 sm:grid-cols-2">
       {articles.map((article) => (
         <div
           key={article.id}

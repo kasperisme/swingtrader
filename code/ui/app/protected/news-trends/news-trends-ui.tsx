@@ -483,12 +483,12 @@ function Leaderboard({
   });
 
   return (
-    <div className="flex flex-col gap-0.5">
+    <div data-tour="trends-list" className="flex flex-col gap-0.5">
       <p className="text-[9px] font-mono font-medium text-muted-foreground/40 uppercase tracking-[0.1em] mb-1.5 px-2">
         {cumulative ? "Cumulative" : maOff ? "Latest" : "MA Score"}
       </p>
       <div className="flex flex-col gap-0.5">
-      {sorted.map(({ cluster, score }) => {
+      {sorted.map(({ cluster, score }, idx) => {
         const color = CLUSTER_COLORS[cluster.id];
         const isSelected = selected.has(cluster.id);
         const isDrilled = drilldownId === cluster.id;
@@ -519,7 +519,7 @@ function Leaderboard({
               <span className="flex-1 text-xs font-medium truncate">
                 {cluster.label}
               </span>
-              <span className={`flex items-center gap-0.5 text-xs font-mono tabular-nums shrink-0 ${
+              <span data-tour={idx === 0 ? "trends-sentiment" : undefined} className={`flex items-center gap-0.5 text-xs font-mono tabular-nums shrink-0 ${
                 isPos ? "text-emerald-500" : isNeg ? "text-rose-500" : "text-muted-foreground/60"
               }`}>
                 {isPos ? (
@@ -1874,7 +1874,7 @@ export function NewsTrendsUI({
               autoApplyDefaultRange={false}
               settingsContent={
                 <div className="flex items-center flex-wrap gap-x-1 gap-y-1">
-                  <div className="flex items-center gap-1.5">
+                  <div data-tour="trends-window" className="flex items-center gap-1.5">
                     <span className="text-[9px] font-mono font-medium text-muted-foreground/40 uppercase tracking-[0.08em]">
                       MA
                     </span>

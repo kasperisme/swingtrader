@@ -5,6 +5,7 @@ export type UserProfile = {
   created_at: string;
   updated_at: string;
   welcomed_at: string | null;
+  onboarding_dismissed_at: string | null;
   display_name: string | null;
   metadata: Record<string, unknown>;
 };

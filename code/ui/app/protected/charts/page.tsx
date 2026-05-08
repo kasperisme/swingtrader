@@ -1,6 +1,13 @@
 import { Suspense } from "react";
 import { createClient } from "@/lib/supabase/server";
 import { ChartsPageClient } from "./charts-client";
+import { getOnboardingTours } from "@/app/actions/onboarding";
+import { PageTour } from "@/app/protected/_components/page-tour";
+
+async function ChartsTourMount() {
+  const tours = await getOnboardingTours();
+  return <PageTour tourKey="charts" autoStart={!tours.charts} />;
+}
 
 type PageProps = {
   searchParams?: Promise<{ tickers?: string }>;
@@ -78,6 +85,9 @@ export default function ChartsPage({ searchParams }: PageProps) {
           <ChartsBody searchParams={searchParams} />
         </Suspense>
       </div>
+      <Suspense fallback={null}>
+        <ChartsTourMount />
+      </Suspense>
     </div>
   );
 }

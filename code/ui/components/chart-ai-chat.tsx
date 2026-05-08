@@ -1,8 +1,15 @@
 "use client";
 
 import { useState, useRef, useEffect, type Dispatch, type SetStateAction } from "react";
+import { useRouter } from "next/navigation";
 import { Bot, Send, Loader2, Trash2, ChevronDown, ChevronRight, Crosshair, Check, Sparkles } from "lucide-react";
 import ReactMarkdown from "react-markdown";
+import {
+  RUN_TOUR_EVENT,
+  type RunTourEventDetail,
+} from "@/app/protected/_components/page-tour";
+import { TOURS } from "@/app/protected/_components/tour-configs";
+import type { TourKey } from "@/app/actions/onboarding";
 import type { ChartAnnotation } from "@/components/ticker-charts/types";
 import type { OhlcBar } from "@/components/ticker-charts/types";
 import { ANNOTATION_COLORS } from "@/components/ticker-charts/types";
@@ -304,6 +311,7 @@ export function ChartAiChat({
   runId,
   onStatusChange,
 }: ChartAiChatProps) {
+  const router = useRouter();
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
   // True whenever this component is actively streaming OR a background stream
@@ -421,6 +429,50 @@ export function ChartAiChat({
               ok: !!msg.ok,
               error: (msg.error as string | null) ?? null,
             });
+          } else if (msg.type === "navigate") {
+            const url = typeof msg.url === "string" ? msg.url : "";
+            const reply =
+              typeof msg.reply === "string" && msg.reply.trim()
+                ? msg.reply.trim()
+                : `Highlighting it now.`;
+            assistantContent = reply;
+            setMessages((prev) => {
+              const copy = [...prev];
+              copy[copy.length - 1] = { role: "assistant", content: assistantContent };
+              return copy;
+            });
+            if (url.startsWith("/")) {
+              const dest = new URL(url, window.location.origin);
+              const stepStr = dest.searchParams.get("step");
+              const endStr = dest.searchParams.get("end");
+              const fromStep = stepStr
+                ? Math.max(0, parseInt(stepStr, 10))
+                : undefined;
+              const toStep = endStr
+                ? Math.max(0, parseInt(endStr, 10))
+                : undefined;
+              const matchedKey = (Object.values(TOURS).find(
+                (t) => t.route === dest.pathname,
+              )?.key ?? null) as TourKey | null;
+              const samePathname = dest.pathname === window.location.pathname;
+
+              if (samePathname && matchedKey) {
+                const detail: RunTourEventDetail = {
+                  tourKey: matchedKey,
+                  fromStep,
+                  toStep,
+                };
+                setTimeout(() => {
+                  window.dispatchEvent(
+                    new CustomEvent(RUN_TOUR_EVENT, { detail }),
+                  );
+                }, 350);
+              } else {
+                // Defer slightly so the user sees the assistant reply before
+                // the route change yanks them away.
+                setTimeout(() => router.push(url), 350);
+              }
+            }
           } else if (msg.type === "error") {
             setMessages((prev) => [...prev, { role: "assistant", content: `Error: ${String(msg.message)}` }]);
           }

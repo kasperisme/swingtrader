@@ -259,6 +259,25 @@ export function ScreeningsUI({
     document.body.classList.toggle("hide-site-header", collapsed);
   }, [collapsed]);
   const [addFilterOpen, setAddFilterOpen] = useState(false);
+  const [showDismissedInList, setShowDismissedInList] = useState<boolean>(() => {
+    if (typeof window === "undefined") return false;
+    try {
+      return localStorage.getItem("screenings-show-dismissed") === "1";
+    } catch {
+      return false;
+    }
+  });
+  const toggleShowDismissedInList = useCallback(() => {
+    setShowDismissedInList((prev) => {
+      const next = !prev;
+      try {
+        localStorage.setItem("screenings-show-dismissed", next ? "1" : "0");
+      } catch {
+        /* ignore */
+      }
+      return next;
+    });
+  }, []);
   const [contextMenu, setContextMenu] = useState<{
     ticker: string;
     x: number;
@@ -739,7 +758,22 @@ export function ScreeningsUI({
     const row = rowBySymbol.get(ticker);
     if (!row) return;
     await upsertRowNote(row, { status: "dismissed" });
-    if (selectedTicker === ticker) setSelectedTicker(null);
+    if (selectedTicker === ticker) {
+      // Auto-advance to the next non-dismissed ticker in the current filter,
+      // otherwise the previous one — mirrors what the user expects when they
+      // clear something off the list.
+      const idx = filteredSymbols.indexOf(ticker);
+      const nextSymbol =
+        filteredSymbols
+          .slice(idx + 1)
+          .find((s) => !dismissedSymbols.has(s) && s !== ticker) ??
+        filteredSymbols
+          .slice(0, idx)
+          .reverse()
+          .find((s) => !dismissedSymbols.has(s) && s !== ticker) ??
+        null;
+      setSelectedTicker(nextSymbol);
+    }
   }
 
   async function restoreTicker(ticker: string) {
@@ -1121,6 +1155,21 @@ export function ScreeningsUI({
     [filtered],
   );
 
+  /** Symbols visible in the deep-dive ticker list (sidebar + mobile sheet).
+   * Dismissed symbols are hidden by default; user can toggle them back in. */
+  const deepDiveListSymbols = useMemo(() => {
+    if (showDismissedInList) return filteredSymbols;
+    return filteredSymbols.filter((s) => !dismissedSymbols.has(s));
+  }, [filteredSymbols, dismissedSymbols, showDismissedInList]);
+
+  const hiddenDismissedInListCount = useMemo(() => {
+    let count = 0;
+    for (const s of filteredSymbols) {
+      if (dismissedSymbols.has(s)) count++;
+    }
+    return count;
+  }, [filteredSymbols, dismissedSymbols]);
+
   const { quotes, loading: quotesLoading } = useQuotes(
     filteredSymbols.slice(0, 50),
   );
@@ -1172,6 +1221,7 @@ export function ScreeningsUI({
               Scan runs
             </p>
             <form
+              data-tour="screen-create"
               className="flex flex-wrap items-center gap-2 min-w-0"
               onSubmit={(e) => {
                 e.preventDefault();
@@ -1208,7 +1258,10 @@ export function ScreeningsUI({
               tickers from Charts or the Add to screening control.
             </p>
           ) : (
-            <div className="flex gap-2 overflow-x-auto pb-1 -mx-1 px-1 [scrollbar-width:thin]">
+            <div
+              data-tour="screen-runs"
+              className="flex gap-2 overflow-x-auto pb-1 -mx-1 px-1 [scrollbar-width:thin]"
+            >
               {runs.map((run) => {
                 const active = run.id === (selectedRun?.id ?? null);
                 const busy = deletingRunId === run.id;
@@ -1270,7 +1323,7 @@ export function ScreeningsUI({
         </div>
 
         {/* Search + count */}
-        <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-start sm:gap-3 mb-2">
+        <div data-tour="screen-filters" className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-start sm:gap-3 mb-2">
           <div className="flex flex-col gap-1.5 min-w-0 shrink-0 w-full max-w-[min(100%,20rem)] sm:w-56">
             <div className="relative w-full">
               <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none" />
@@ -1357,6 +1410,18 @@ export function ScreeningsUI({
 
       {/* View tabs */}
       <div className="border-b border-border pb-px shrink-0">
+        {/* Mobile-only view picker — its own row so it gets full width
+            (collapse toggle + bulk-analysis on the next row) */}
+        {!addFilterOpen && (
+          <div className="sm:hidden mb-2">
+            <ScreeningsMobileViewPicker
+              activeView={activeView}
+              onSelect={setActiveView}
+              tradeMonitoringDisabled={tradeMonitoringDisabled}
+              tradeMonitoringTitle={tradeMonitoringTitle}
+            />
+          </div>
+        )}
         <div className="flex items-stretch relative">
           {/* Collapse toggle — fixed, not scrollable */}
           {!addFilterOpen && (
@@ -1381,17 +1446,6 @@ export function ScreeningsUI({
                 starting={bulkStarting}
                 error={bulkError}
                 onStart={handleBulkAnalyze}
-              />
-            </div>
-          )}
-          {/* Mobile-only view picker — collapses 7 tabs into a thumb-friendly trigger */}
-          {!addFilterOpen && (
-            <div className="flex-1 min-w-0 self-center sm:hidden">
-              <ScreeningsMobileViewPicker
-                activeView={activeView}
-                onSelect={setActiveView}
-                tradeMonitoringDisabled={tradeMonitoringDisabled}
-                tradeMonitoringTitle={tradeMonitoringTitle}
               />
             </div>
           )}
@@ -1512,22 +1566,29 @@ export function ScreeningsUI({
           <div className="flex flex-col h-full min-h-0">
             {/* Mobile ticker nav bar — hidden on sm+ */}
             <MobileTickerBar
-              symbols={filteredSymbols}
+              symbols={deepDiveListSymbols}
               selectedTicker={selectedTicker}
               onSelect={setSelectedTicker}
               quotes={quotes}
               getStatus={getTickerStatus}
               dismissedSymbols={dismissedSymbols}
               highlightedSymbols={highlightedSymbols}
+              getNote={getTickerComment}
               onOpenActions={(ticker, anchorEl) => {
                 const rect = anchorEl.getBoundingClientRect();
                 openTickerActionsMenu(ticker, rect.left + rect.width / 2, rect.bottom + 4);
               }}
+              onEditNote={editTickerComment}
+              onDismiss={dismissTicker}
+              onRestore={restoreTicker}
+              hiddenDismissedCount={hiddenDismissedInListCount}
+              showDismissed={showDismissedInList}
+              onToggleShowDismissed={toggleShowDismissedInList}
             />
             <div className="flex min-h-0 flex-1 items-stretch gap-0">
               <div className="hidden min-h-0 w-56 shrink-0 self-stretch border-r border-border sm:flex sm:flex-col sm:overflow-hidden xl:w-64">
                 <TickerSidebar
-                  symbols={filteredSymbols}
+                  symbols={deepDiveListSymbols}
                   quotes={quotes}
                   selectedTicker={selectedTicker}
                   onSelect={setSelectedTicker}
@@ -1544,6 +1605,9 @@ export function ScreeningsUI({
                   }}
                   streamingTickers={streamingTickers}
                   getEntryMarker={getTickerEntryMarker}
+                  hiddenDismissedCount={hiddenDismissedInListCount}
+                  showDismissed={showDismissedInList}
+                  onToggleShowDismissed={toggleShowDismissedInList}
                 />
               </div>
               <div
@@ -1823,7 +1887,7 @@ export function ScreeningsUI({
                 No stocks match the current filters.
               </div>
             ) : (
-              <div className="overflow-x-auto border border-border">
+              <div data-tour="screen-results" className="overflow-x-auto border border-border">
                 <table className="min-w-max w-full text-sm">
                   <thead className="bg-muted/40 border-b border-border">
                     <tr>
@@ -2065,39 +2129,71 @@ export function ScreeningsUI({
       )}
       {workflowEditor && (
         <div
-          className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4"
+          className="fixed inset-0 z-50 bg-black/50 flex items-end sm:items-center justify-center sm:p-4"
           onClick={() => !savingWorkflowEditor && setWorkflowEditor(null)}
         >
           <div
-            className="w-full max-w-md rounded-lg border border-border bg-background p-4 shadow-xl flex flex-col gap-3"
+            className="w-full max-w-md rounded-t-2xl sm:rounded-lg border border-border bg-background shadow-2xl flex flex-col gap-3 p-4 pb-[max(1rem,env(safe-area-inset-bottom))] sm:pb-4"
             onClick={(e) => e.stopPropagation()}
           >
+            {/* Mobile drag handle */}
+            <div className="sm:hidden flex items-center justify-center -mt-1 mb-1">
+              <div className="w-10 h-1 rounded-full bg-border" />
+            </div>
             <div className="flex items-center justify-between">
               <h3 className="text-base font-semibold">Workflow update</h3>
               <span className="font-mono text-sm text-muted-foreground">
                 {workflowEditor.ticker}
               </span>
             </div>
-            <label className="flex flex-col gap-1">
-              <span className="text-xs text-muted-foreground">Status</span>
-              <select
-                value={workflowEditor.status}
-                onChange={(e) =>
-                  setWorkflowEditor((prev) =>
-                    prev
-                      ? { ...prev, status: e.target.value as NoteStatus }
-                      : prev,
-                  )
-                }
-                className="px-2 py-1.5 text-sm rounded border border-input bg-background focus:outline-none focus:ring-1 focus:ring-ring"
-                disabled={savingWorkflowEditor}
-              >
-                <option value="active">Active</option>
-                <option value="dismissed">Dismissed</option>
-                <option value="watchlist">Watchlist</option>
-                <option value="pipeline">Pipeline</option>
-              </select>
-            </label>
+            <div className="flex flex-col gap-1.5">
+              <span className="text-xs text-muted-foreground">Stage</span>
+              <div className="grid grid-cols-3 gap-1.5">
+                {(
+                  [
+                    { value: "active", label: "Active", color: "emerald" },
+                    { value: "watchlist", label: "Watchlist", color: "amber" },
+                    { value: "pipeline", label: "Pipeline", color: "sky" },
+                  ] as const
+                ).map(({ value, label, color }) => {
+                  const isActive = workflowEditor.status === value;
+                  const ring: Record<typeof color, string> = {
+                    emerald:
+                      "ring-emerald-500/50 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/40",
+                    amber:
+                      "ring-amber-500/50 bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/40",
+                    sky: "ring-sky-500/50 bg-sky-500/10 text-sky-600 dark:text-sky-400 border-sky-500/40",
+                  };
+                  return (
+                    <button
+                      key={value}
+                      type="button"
+                      disabled={
+                        savingWorkflowEditor ||
+                        workflowEditor.status === "dismissed"
+                      }
+                      onClick={() =>
+                        setWorkflowEditor((prev) =>
+                          prev ? { ...prev, status: value } : prev,
+                        )
+                      }
+                      className={`px-2 py-2 text-xs font-mono uppercase tracking-[0.08em] rounded border transition-all disabled:opacity-50 ${
+                        isActive
+                          ? `ring-2 ${ring[color]}`
+                          : "border-border hover:bg-muted"
+                      }`}
+                    >
+                      {label}
+                    </button>
+                  );
+                })}
+              </div>
+              {workflowEditor.status === "dismissed" && (
+                <p className="text-[11px] text-rose-500">
+                  Ticker is dismissed. Restore it below to change stage.
+                </p>
+              )}
+            </div>
             <label className="flex flex-col gap-1">
               <span className="text-xs text-muted-foreground">Note</span>
               <textarea
@@ -2107,27 +2203,58 @@ export function ScreeningsUI({
                     prev ? { ...prev, comment: e.target.value } : prev,
                   )
                 }
-                rows={4}
-                placeholder="Add screening notes..."
-                className="px-2 py-1.5 text-sm rounded border border-input bg-background focus:outline-none focus:ring-1 focus:ring-ring resize-y"
+                rows={6}
+                placeholder="What's the setup? Levels, catalysts, risks…"
+                className="px-2.5 py-2 text-sm rounded border border-input bg-background focus:outline-none focus:ring-1 focus:ring-ring resize-y min-h-[6.5rem] sm:min-h-0"
                 disabled={savingWorkflowEditor}
+                autoFocus
               />
             </label>
-            <div className="flex items-center justify-end gap-2 pt-1">
+            <div className="flex flex-col-reverse sm:flex-row sm:items-center sm:justify-between gap-2 pt-1">
               <button
-                onClick={() => setWorkflowEditor(null)}
-                className="px-3 py-1.5 text-sm rounded border border-border hover:bg-muted transition-colors"
+                type="button"
+                onClick={() =>
+                  setWorkflowEditor((prev) =>
+                    prev
+                      ? {
+                          ...prev,
+                          status:
+                            prev.status === "dismissed"
+                              ? "active"
+                              : "dismissed",
+                        }
+                      : prev,
+                  )
+                }
+                className={`min-h-[44px] sm:min-h-0 px-3 py-1.5 text-sm rounded border transition-colors ${
+                  workflowEditor.status === "dismissed"
+                    ? "border-emerald-500/40 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-500/10"
+                    : "border-rose-500/30 text-rose-500 hover:bg-rose-500/10"
+                }`}
                 disabled={savingWorkflowEditor}
               >
-                Cancel
+                {workflowEditor.status === "dismissed"
+                  ? "Restore ticker"
+                  : "Dismiss ticker"}
               </button>
-              <button
-                onClick={() => void saveWorkflowEditor()}
-                className="px-3 py-1.5 text-sm rounded bg-foreground text-background hover:opacity-90 transition-opacity disabled:opacity-50"
-                disabled={savingWorkflowEditor}
-              >
-                {savingWorkflowEditor ? "Saving..." : "Save"}
-              </button>
+              <div className="flex items-center justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => setWorkflowEditor(null)}
+                  className="min-h-[44px] sm:min-h-0 px-3 py-1.5 text-sm rounded border border-border hover:bg-muted transition-colors"
+                  disabled={savingWorkflowEditor}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void saveWorkflowEditor()}
+                  className="min-h-[44px] sm:min-h-0 px-4 py-1.5 text-sm rounded bg-foreground text-background hover:opacity-90 transition-opacity disabled:opacity-50"
+                  disabled={savingWorkflowEditor}
+                >
+                  {savingWorkflowEditor ? "Saving..." : "Save"}
+                </button>
+              </div>
             </div>
           </div>
         </div>

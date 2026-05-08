@@ -123,7 +123,7 @@ export function AddToScreening({ ticker }: AddToScreeningProps) {
   }
 
   return (
-    <div className="relative" ref={popoverRef}>
+    <div className="relative" data-tour="add-to-screening" ref={popoverRef}>
       <button
         type="button"
         onClick={() => { setOpen((o) => !o); setStatus("idle"); setErrorMsg(""); }}

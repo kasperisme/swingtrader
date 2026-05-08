@@ -2,6 +2,13 @@ import { Suspense } from "react";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { TradesUI, type UserTradeRow } from "./trades-ui";
+import { getOnboardingTours } from "@/app/actions/onboarding";
+import { PageTour } from "@/app/protected/_components/page-tour";
+
+async function TradesTourMount() {
+  const tours = await getOnboardingTours();
+  return <PageTour tourKey="trade" autoStart={!tours.trade} />;
+}
 
 async function TradesData() {
   const supabase = await createClient();
@@ -59,6 +66,9 @@ export default function TradesPage() {
         }
       >
         <TradesData />
+      </Suspense>
+      <Suspense fallback={null}>
+        <TradesTourMount />
       </Suspense>
     </div>
   );

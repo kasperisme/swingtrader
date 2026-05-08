@@ -172,7 +172,7 @@ def _welcome_act() -> dict | None:
             {
                 "voice": "primary",
                 "text": (
-                    f"Welcome to News Impact Daily — your AI-powered market briefing, "
+                    f"Welcome to The Impact Tape — your AI-powered market briefing, "
                     f"fresh every trading day. I'm {primary}, and as always —"
                 ),
             },
@@ -477,7 +477,7 @@ async def generate_script(data: dict) -> dict:
         log.debug("Rendered user prompt: %d chars", len(user_prompt))
 
         system_msg = (
-            "You are Hans, the AI host of NewsImpact Daily podcast. "
+            "You are Hans, the AI host of The Impact Tape podcast. "
             "You write engaging, information-dense market intelligence scripts. "
             "Always return ONLY valid JSON matching the specified structure. "
             "No preamble, no markdown, no explanation — start with { and end with }."

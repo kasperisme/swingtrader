@@ -1,6 +1,6 @@
 # Hans Podcast Pipeline
 
-Automated daily audio digest for NewsImpact Daily. Researches the day's market data with an agentic loop, writes a dialogue script, voices it with ElevenLabs, and publishes the packaged episode + cover art to Supabase Storage. The Next.js UI consumes `swingtrader.podcast_episodes` to render the public RSS feed at request time.
+Automated daily audio digest for The Impact Tape. Researches the day's market data with an agentic loop, writes a dialogue script, voices it with ElevenLabs, and publishes the packaged episode + cover art to Supabase Storage. The Next.js UI consumes `swingtrader.podcast_episodes` to render the public RSS feed at request time.
 
 Scheduled daily on trading days. Optional human approval via Telegram before audio is rendered.
 

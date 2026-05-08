@@ -6,6 +6,13 @@ import {
   listScheduledScreenings,
   getScreeningLimits,
 } from "@/app/actions/screenings-agent";
+import { getOnboardingTours } from "@/app/actions/onboarding";
+import { PageTour } from "@/app/protected/_components/page-tour";
+
+async function AgentsTourMount() {
+  const tours = await getOnboardingTours();
+  return <PageTour tourKey="agent" autoStart={!tours.agent} />;
+}
 
 async function fetchVectorTickers(): Promise<string[]> {
   const supabase = await createClient();
@@ -62,6 +69,9 @@ export default function AgentsPage() {
       </div>
       <Suspense fallback={<div className="text-muted-foreground/40 text-sm">Loading…</div>}>
         <AgentsData />
+      </Suspense>
+      <Suspense fallback={null}>
+        <AgentsTourMount />
       </Suspense>
     </div>
   );

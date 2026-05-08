@@ -20,11 +20,10 @@ interface TickerContextMenuProps {
   onCopyOhlcv: (() => void) | null;
 }
 
-const STATUS_OPTS: { value: NoteStatus; label: string }[] = [
+const STAGE_OPTS: { value: Exclude<NoteStatus, "dismissed">; label: string }[] = [
   { value: "active", label: "Active" },
   { value: "watchlist", label: "Watchlist" },
   { value: "pipeline", label: "Pipeline" },
-  { value: "dismissed", label: "Dismissed" },
 ];
 
 export function TickerContextMenu({
@@ -44,7 +43,6 @@ export function TickerContextMenu({
   const ref = useRef<HTMLDivElement>(null);
   const [pos, setPos] = useState({ left: x, top: y });
 
-  // Clamp to viewport after first render
   useEffect(() => {
     if (!ref.current) return;
     const { width, height } = ref.current.getBoundingClientRect();
@@ -76,46 +74,43 @@ export function TickerContextMenu({
     onClose();
   }
 
+  const stageStatus: Exclude<NoteStatus, "dismissed"> =
+    status === "dismissed" ? "active" : status;
+
   return (
     <div
       ref={ref}
       style={{ position: "fixed", left: pos.left, top: pos.top }}
-      className="z-[9999] min-w-[172px] rounded-lg border border-border bg-popover text-popover-foreground shadow-xl ring-1 ring-black/5 dark:ring-white/10 py-1 select-none"
+      className="z-[9999] min-w-[200px] rounded-lg border border-border bg-popover text-popover-foreground shadow-xl ring-1 ring-black/5 dark:ring-white/10 py-1 select-none"
     >
-      <div className="px-3 py-1.5 text-xs font-semibold font-mono text-muted-foreground border-b border-border mb-1">
-        {ticker}
+      <div className="flex items-center justify-between px-3 py-1.5 border-b border-border mb-1">
+        <span className="text-xs font-semibold font-mono text-muted-foreground">
+          {ticker}
+        </span>
+        {isDismissed && (
+          <span className="text-[9px] font-mono uppercase tracking-[0.12em] text-rose-500">
+            Dismissed
+          </span>
+        )}
       </div>
 
-      <button
-        type="button"
-        onClick={() => act(isDismissed ? onRestore : onDismiss)}
-        className={`w-full flex items-center gap-2.5 px-3 py-1.5 text-sm transition-colors hover:bg-muted/80 ${
-          isDismissed
-            ? "text-emerald-600 dark:text-emerald-400"
-            : "text-rose-500"
-        }`}
-      >
-        {isDismissed
-          ? <RotateCcw className="w-3.5 h-3.5 shrink-0" />
-          : <Trash2 className="w-3.5 h-3.5 shrink-0" />}
-        {isDismissed ? "Restore" : "Dismiss"}
-      </button>
-
-      <div className="border-t border-border mt-1 pt-1">
-        {STATUS_OPTS.map(({ value, label }) => (
-          <button
-            key={value}
-            type="button"
-            onClick={() => act(() => onSetStatus(value))}
-            className="w-full flex items-center justify-between gap-2 px-3 py-1.5 text-sm transition-colors hover:bg-muted/80"
-          >
-            {label}
-            {status === value && (
-              <Check className="w-3.5 h-3.5 text-foreground shrink-0" />
-            )}
-          </button>
-        ))}
+      <div className="px-3 pt-1 pb-0.5 text-[9px] font-mono uppercase tracking-[0.14em] text-muted-foreground/70">
+        Stage
       </div>
+      {STAGE_OPTS.map(({ value, label }) => (
+        <button
+          key={value}
+          type="button"
+          onClick={() => act(() => onSetStatus(value))}
+          disabled={isDismissed}
+          className="w-full flex items-center justify-between gap-2 px-3 py-1.5 text-sm transition-colors hover:bg-muted/80 disabled:opacity-40 disabled:hover:bg-transparent"
+        >
+          {label}
+          {stageStatus === value && !isDismissed && (
+            <Check className="w-3.5 h-3.5 text-foreground shrink-0" />
+          )}
+        </button>
+      ))}
 
       <div className="border-t border-border mt-1 pt-1">
         <button
@@ -137,6 +132,25 @@ export function TickerContextMenu({
             Copy OHLCV
           </button>
         )}
+      </div>
+
+      <div className="border-t border-border mt-1 pt-1">
+        <button
+          type="button"
+          onClick={() => act(isDismissed ? onRestore : onDismiss)}
+          className={`w-full flex items-center gap-2.5 px-3 py-1.5 text-sm transition-colors ${
+            isDismissed
+              ? "text-emerald-600 dark:text-emerald-400 hover:bg-emerald-500/10"
+              : "text-rose-500 hover:bg-rose-500/10"
+          }`}
+        >
+          {isDismissed ? (
+            <RotateCcw className="w-3.5 h-3.5 shrink-0" />
+          ) : (
+            <Trash2 className="w-3.5 h-3.5 shrink-0" />
+          )}
+          {isDismissed ? "Restore ticker" : "Dismiss ticker"}
+        </button>
       </div>
     </div>
   );

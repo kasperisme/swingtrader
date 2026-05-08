@@ -41,7 +41,7 @@ log = logging.getLogger(__name__)
 
 
 PODCAST_MULTI_AGENT_FALLBACK_ON_FAILURE = (
-    os.environ.get("PODCAST_MULTI_AGENT_FALLBACK_ON_FAILURE", "true").lower()
+    os.environ.get("PODCAST_MULTI_AGENT_FALLBACK_ON_FAILURE", "false").lower()
     == "true"
 )
 
@@ -210,7 +210,7 @@ async def _run_phase2(today: str) -> dict:
         )
 
     script = {
-        "episode_title": brief.get("episode_title") or "NewsImpact Daily",
+        "episode_title": brief.get("episode_title") or "The Impact Tape",
         "episode_description": brief.get("episode_description")
         or brief.get("scouting_notes", ""),
         "acts": written_scenes,
@@ -257,6 +257,20 @@ async def run_multi_agent_pipeline(today: str | None = None) -> dict:
     try:
         return await _run_phase2(today_iso)
     except Exception as exc:
+        # Any agent-level failure (producer, researcher, writer, editor)
+        # stops the show. Content-level errors mean the planned episode
+        # can't be made — falling back to single-agent would ship a
+        # different show than what was planned, hiding the real problem.
+        from .scene_researcher import PodcastAgentError
+
+        if isinstance(exc, PodcastAgentError):
+            log.error(
+                "Multi-agent: %s failed — aborting pipeline (no fallback for "
+                "agent-level failures). %s",
+                type(exc).__name__,
+                exc,
+            )
+            raise
         if not PODCAST_MULTI_AGENT_FALLBACK_ON_FAILURE:
             raise
         return await _fallback_to_single_agent(

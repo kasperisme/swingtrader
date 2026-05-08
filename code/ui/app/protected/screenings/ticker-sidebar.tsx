@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { MoreHorizontal } from "lucide-react";
+import { Eye, EyeOff, MoreHorizontal, StickyNote } from "lucide-react";
 import type { FmpQuote } from "@/lib/use-quotes";
 import type { EntryMarker } from "@/components/ticker-charts/types";
 
@@ -27,6 +27,9 @@ interface TickerSidebarProps {
   quotes: Record<string, FmpQuote | null>;
   streamingTickers?: Set<string>;
   getEntryMarker?: (ticker: string) => EntryMarker | null;
+  hiddenDismissedCount?: number;
+  showDismissed?: boolean;
+  onToggleShowDismissed?: () => void;
 }
 
 function SortArrow({ active, dir }: { active: boolean; dir: SortDir }) {
@@ -49,6 +52,9 @@ export function TickerSidebar({
   quotes,
   streamingTickers,
   getEntryMarker,
+  hiddenDismissedCount = 0,
+  showDismissed = false,
+  onToggleShowDismissed,
 }: TickerSidebarProps) {
   const listRef = useRef<HTMLDivElement>(null);
   const [sortKey, setSortKey] = useState<SortKey>("symbol");
@@ -137,6 +143,34 @@ export function TickerSidebar({
       className="flex min-h-0 flex-1 flex-col bg-background"
       onKeyDown={handleKeyDown}
     >
+      {hiddenDismissedCount > 0 && onToggleShowDismissed && (
+        <button
+          type="button"
+          onClick={onToggleShowDismissed}
+          className="shrink-0 flex items-center justify-between gap-2 px-2 py-1.5 border-b border-border bg-muted/30 hover:bg-muted/50 transition-colors text-left"
+          title={
+            showDismissed
+              ? "Hide dismissed tickers from this list"
+              : "Show dismissed tickers in this list"
+          }
+        >
+          <span className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
+            {showDismissed ? (
+              <EyeOff className="w-3 h-3" />
+            ) : (
+              <Eye className="w-3 h-3" />
+            )}
+            <span>
+              {showDismissed
+                ? `Hiding ${hiddenDismissedCount} dismissed`
+                : `${hiddenDismissedCount} dismissed hidden`}
+            </span>
+          </span>
+          <span className="text-[10px] font-mono uppercase tracking-[0.1em] text-foreground/80">
+            {showDismissed ? "Hide" : "Show"}
+          </span>
+        </button>
+      )}
       <div className="shrink-0 px-2 grid grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)_1.25rem] gap-x-1.5 items-center bg-muted/40 border-b border-border py-2 text-xs font-medium text-muted-foreground uppercase tracking-wide">
         <button
           type="button"
@@ -244,9 +278,17 @@ export function TickerSidebar({
                         title="Active position"
                       />
                     )}
-                    <span className="min-w-0 truncate font-mono text-sm font-semibold">
+                    <span
+                      className={`min-w-0 truncate font-mono text-sm font-semibold ${isDismissed ? "line-through" : ""}`}
+                    >
                       {sym}
                     </span>
+                    {note && (
+                      <StickyNote
+                        className="w-3 h-3 shrink-0 text-amber-500"
+                        aria-label="Has note"
+                      />
+                    )}
                     {isStreaming && (
                       <span
                         className="inline-flex shrink-0 items-center gap-0.5"

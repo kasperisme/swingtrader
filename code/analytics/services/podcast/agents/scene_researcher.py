@@ -27,6 +27,7 @@ Output (SceneDossier):
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import os
@@ -42,6 +43,24 @@ from ..research_agent import _build_podcast_dossier_tools, _parse_dossier_json
 from ..taxonomy_glossary import build_taxonomy_glossary
 
 log = logging.getLogger(__name__)
+
+
+class PodcastAgentError(RuntimeError):
+    """Base class for any LLM-agent-level failure in the multi-agent pipeline.
+
+    The multi-agent pipeline never falls back to single-agent on these —
+    the producer's plan is locked in, and shipping a different show with
+    different research silently is worse than failing loudly.
+    """
+
+
+class SceneResearchError(PodcastAgentError):
+    """Raised when a scene's dossier can't be recovered.
+
+    Failing fast here is preferred over shipping empty narrative_notes — a
+    writer with no research produces filler that pretends to know the
+    market.
+    """
 
 
 PODCAST_SCENE_RESEARCH_MAX_ROUNDS = int(
@@ -64,6 +83,202 @@ OLLAMA_PODCAST_SCENE_RESEARCH_MODEL = (
 
 _THINK_RE = re.compile(r"<think>.*?</think>", flags=re.DOTALL)
 _FENCED_BLOCK_RE = re.compile(r"```(?:json)?\s*(\{.*?\})\s*```", flags=re.DOTALL)
+_NARRATIVE_NOTES_RE = re.compile(
+    r'"narrative_notes"\s*:\s*"((?:[^"\\]|\\.)*)"',
+    flags=re.DOTALL,
+)
+_CARRY_FORWARD_RE = re.compile(
+    r'"carry_forward"\s*:\s*"((?:[^"\\]|\\.)*)"',
+    flags=re.DOTALL,
+)
+# Truncation fallbacks — used when the model cuts off mid-string and the
+# strict regex above can't find a closing quote. Captures from the opening
+# quote until either the next field key or end-of-input.
+_NARRATIVE_NOTES_TRUNCATED_RE = re.compile(
+    r'"narrative_notes"\s*:\s*"((?:[^"\\]|\\.)*)$',
+    flags=re.DOTALL,
+)
+_CARRY_FORWARD_TRUNCATED_RE = re.compile(
+    r'"carry_forward"\s*:\s*"((?:[^"\\]|\\.)*)$',
+    flags=re.DOTALL,
+)
+_REPAIR_RETRY_INITIAL_BACKOFF_S = 2.0
+
+
+def _is_transient_ollama_error(exc: BaseException) -> bool:
+    """True for errors a retry can plausibly recover from.
+
+    Mirrors script_generator's classifier: covers Ollama Cloud's flapping
+    502/503/504/429, "too many concurrent requests", "unexpected EOF",
+    plus transport failures (drops, timeouts).
+    """
+    if isinstance(
+        exc,
+        (
+            httpx.RemoteProtocolError,
+            httpx.ReadTimeout,
+            httpx.ConnectTimeout,
+            httpx.ConnectError,
+            httpx.NetworkError,
+            httpx.PoolTimeout,
+        ),
+    ):
+        return True
+    if isinstance(exc, httpx.HTTPStatusError):
+        if 500 <= exc.response.status_code < 600 or exc.response.status_code in (
+            408,
+            429,
+        ):
+            return True
+    msg = str(exc).lower()
+    return any(
+        s in msg
+        for s in ("502", "503", "504", "429", "408", "unexpected eof", "too many concurrent")
+    )
+
+
+def _salvage_partial_dossier(raw: str) -> dict | None:
+    """Extract narrative_notes / carry_forward from unclosed JSON via regex.
+
+    The model occasionally truncates mid-object so ``_parse_dossier_json``'s
+    brace-matcher gives up. Most of the value (the narrative notes the
+    writer needs) is usually present before the cut. Best-effort: returns
+    a dict only if at least one field was recovered.
+    """
+    notes_match = _NARRATIVE_NOTES_RE.search(raw)
+    carry_match = _CARRY_FORWARD_RE.search(raw)
+    notes = notes_match.group(1) if notes_match else ""
+    carry = carry_match.group(1) if carry_match else ""
+    # Truncation fallback: model cut off mid-string with no closing quote.
+    # Read to end-of-input but stop at the next field key so we don't bleed
+    # one field into another.
+    if not notes:
+        m = _NARRATIVE_NOTES_TRUNCATED_RE.search(raw)
+        if m:
+            notes = m.group(1).split('"carry_forward"', 1)[0].rstrip(", \n\t")
+    if not carry:
+        m = _CARRY_FORWARD_TRUNCATED_RE.search(raw)
+        if m:
+            carry = m.group(1).split('"narrative_notes"', 1)[0].rstrip(", \n\t")
+    if not (notes or carry):
+        return None
+    # Unescape minimal JSON string escapes so the salvaged text reads cleanly.
+    def _unescape(s: str) -> str:
+        return (
+            s.replace('\\"', '"')
+            .replace("\\\\", "\\")
+            .replace("\\n", "\n")
+            .replace("\\t", "\t")
+        )
+
+    return {
+        "narrative_notes": _unescape(notes).strip(),
+        "carry_forward": _unescape(carry).strip(),
+    }
+
+
+def _summarize_tool_results(tool_results: dict, max_chars: int = 6000) -> str:
+    """Render tool_results as a compact JSON blob for synthesis prompts.
+
+    Truncates each entry's serialized form to keep the total under
+    ``max_chars`` so we don't blow the context budget when a researcher's
+    tool loop pulled long article bodies.
+    """
+    if not tool_results:
+        return "(no tools were called)"
+    parts: list[str] = []
+    budget = max_chars
+    for name, value in tool_results.items():
+        body = json.dumps(value, default=str)
+        if len(body) > 1500:
+            body = body[:1500] + "…(truncated)"
+        entry = f"## {name}\n{body}"
+        if budget - len(entry) <= 0:
+            parts.append(f"## {name}\n(omitted — context budget exhausted)")
+            break
+        parts.append(entry)
+        budget -= len(entry)
+    return "\n\n".join(parts)
+
+
+async def _synthesize_dossier_from_tools(
+    tool_results: dict,
+    scene: dict,
+    label: str,
+) -> dict | None:
+    """Last-resort recovery when the researcher's final message was empty.
+
+    Sometimes the model exits the tool loop without emitting any text
+    (returns a content-empty message). The tool_results are still in hand,
+    so we call the model fresh with those results inlined and ask it to
+    emit ONLY the dossier JSON. Retried on transient errors.
+    """
+    if not tool_results:
+        return None
+    user_prompt = (
+        f"Scene: act {scene.get('act')} {scene.get('name')}.\n"
+        f"Angle: {scene.get('angle', '').strip()}\n\n"
+        "Below are the tool results gathered for this scene. Synthesize them "
+        "into a dossier JSON object with exactly two fields:\n"
+        '  - "narrative_notes": 2-4 sentences of context for the writer\n'
+        '  - "carry_forward": 1-2 sentences for the next scene\'s researcher\n\n'
+        "Output ONLY the JSON object. Start with { and end with }.\n\n"
+        f"TOOL RESULTS:\n\n{_summarize_tool_results(tool_results)}"
+    )
+    messages = [
+        {
+            "role": "system",
+            "content": (
+                "You are a research synthesizer. Read the user's tool results "
+                "and emit a single valid JSON object: "
+                '{"narrative_notes": "string", "carry_forward": "string"}. '
+                "No preamble, no markdown fences. Start with { and end with }."
+            ),
+        },
+        {"role": "user", "content": user_prompt},
+    ]
+    backoff = _REPAIR_RETRY_INITIAL_BACKOFF_S
+    last_exc: BaseException | None = None
+    for attempt in range(1, _RETRY_MAX_ATTEMPTS + 1):
+        try:
+            async with httpx.AsyncClient() as client:
+                r = await client.post(
+                    f"{OLLAMA_BASE_URL}/api/chat",
+                    json={
+                        "model": OLLAMA_PODCAST_SCENE_RESEARCH_MODEL,
+                        "messages": messages,
+                        "stream": False,
+                        "options": {"num_predict": 1024, "temperature": 0.2},
+                    },
+                    timeout=180,
+                )
+                r.raise_for_status()
+                payload = r.json()
+            content = (payload.get("message", {}).get("content") or "").strip()
+            log.info(
+                "%s: synthesis call returned %d chars (attempt %d)",
+                label,
+                len(content),
+                attempt,
+            )
+            return _parse_dossier_json(_strip_envelope(content))
+        except Exception as exc:
+            last_exc = exc
+            if not _is_transient_ollama_error(exc) or attempt == _RETRY_MAX_ATTEMPTS:
+                raise
+            log.warning(
+                "%s: synthesis attempt %d/%d failed (%s: %s) — retrying in %.0fs",
+                label,
+                attempt,
+                _RETRY_MAX_ATTEMPTS,
+                type(exc).__name__,
+                str(exc)[:200],
+                backoff,
+            )
+            await asyncio.sleep(backoff)
+            backoff *= 2
+    assert last_exc is not None
+    raise last_exc
 
 
 def _strip_envelope(raw: str) -> str:
@@ -108,22 +323,49 @@ async def _repair_json_once(raw: str, label: str) -> dict | None:
         },
         {"role": "user", "content": raw},
     ]
-    async with httpx.AsyncClient() as client:
-        r = await client.post(
-            f"{OLLAMA_BASE_URL}/api/chat",
-            json={
-                "model": OLLAMA_PODCAST_SCENE_RESEARCH_MODEL,
-                "messages": messages,
-                "stream": False,
-                "options": {"num_predict": 1024, "temperature": 0.1},
-            },
-            timeout=120,
-        )
-    r.raise_for_status()
-    payload = r.json()
-    content = (payload.get("message", {}).get("content") or "").strip()
-    log.info("%s: repair call returned %d chars", label, len(content))
-    return _parse_dossier_json(_strip_envelope(content))
+    backoff = _REPAIR_RETRY_INITIAL_BACKOFF_S
+    last_exc: BaseException | None = None
+    for attempt in range(1, _RETRY_MAX_ATTEMPTS + 1):
+        try:
+            async with httpx.AsyncClient() as client:
+                r = await client.post(
+                    f"{OLLAMA_BASE_URL}/api/chat",
+                    json={
+                        "model": OLLAMA_PODCAST_SCENE_RESEARCH_MODEL,
+                        "messages": messages,
+                        "stream": False,
+                        "options": {"num_predict": 1024, "temperature": 0.1},
+                    },
+                    timeout=120,
+                )
+                r.raise_for_status()
+                payload = r.json()
+            content = (payload.get("message", {}).get("content") or "").strip()
+            log.info(
+                "%s: repair call returned %d chars (attempt %d)",
+                label,
+                len(content),
+                attempt,
+            )
+            return _parse_dossier_json(_strip_envelope(content))
+        except Exception as exc:
+            last_exc = exc
+            if not _is_transient_ollama_error(exc) or attempt == _RETRY_MAX_ATTEMPTS:
+                raise
+            log.warning(
+                "%s: repair attempt %d/%d failed (%s: %s) — retrying in %.0fs",
+                label,
+                attempt,
+                _RETRY_MAX_ATTEMPTS,
+                type(exc).__name__,
+                str(exc)[:200],
+                backoff,
+            )
+            await asyncio.sleep(backoff)
+            backoff *= 2
+
+    assert last_exc is not None  # unreachable
+    raise last_exc
 
 
 def _format_world_state(world: dict) -> str:
@@ -174,7 +416,7 @@ def _system_prompt(
     max_rounds: int,
 ) -> str:
     glossary = build_taxonomy_glossary()
-    return f"""You are the scene researcher for act {scene['act']} {scene['name']} of NewsImpact Daily, the swing-trader podcast hosted by Hans (today: {today}, {weekday}).
+    return f"""You are the scene researcher for act {scene['act']} {scene['name']} of The Impact Tape, the swing-trader podcast hosted by Hans (today: {today}, {weekday}).
 
 # Episode-level context (from the producer)
 
@@ -285,31 +527,73 @@ async def research_scene(
 
     raw = (final_message.get("content") or "").strip()
     cleaned = _strip_envelope(raw)
-    parsed = _parse_dossier_json(cleaned)
-    if not isinstance(parsed, dict) and cleaned:
-        log.warning(
-            "%s: first parse failed (raw=%d chars, head=%r) — attempting repair",
-            label,
-            len(raw),
-            raw[:300],
-        )
-        try:
-            parsed = await _repair_json_once(cleaned, label)
-        except Exception as exc:
-            log.warning("%s: repair call failed: %s", label, exc)
-            parsed = None
-        if isinstance(parsed, dict):
-            log.info("%s: repair succeeded — recovered valid JSON", label)
+    parsed = _parse_dossier_json(cleaned) if cleaned else None
+
+    if not isinstance(parsed, dict):
+        if cleaned:
+            log.warning(
+                "%s: first parse failed (raw=%d chars, head=%r) — attempting salvage",
+                label,
+                len(raw),
+                raw[:300],
+            )
+            # Cheap regex salvage first — recovers narrative_notes from
+            # truncated/unclosed JSON without spending another Ollama call.
+            salvaged = _salvage_partial_dossier(cleaned)
+            if salvaged is not None:
+                parsed = salvaged
+                log.info(
+                    "%s: regex salvage recovered notes=%d chars, carry=%d chars (skipping LLM repair)",
+                    label,
+                    len(salvaged.get("narrative_notes", "")),
+                    len(salvaged.get("carry_forward", "")),
+                )
+            else:
+                try:
+                    parsed = await _repair_json_once(cleaned, label)
+                except Exception as exc:
+                    log.warning("%s: repair call failed: %s", label, exc)
+                    parsed = None
+                if isinstance(parsed, dict):
+                    log.info("%s: repair succeeded — recovered valid JSON", label)
+        else:
+            log.warning(
+                "%s: final message was empty (0 chars) — falling back to "
+                "tool-results synthesis (%d tools called)",
+                label,
+                len(tool_results),
+            )
+
+        # Synthesis fallback: if salvage/repair didn't recover the dossier
+        # (or the final message was empty to begin with), ask the model to
+        # build it directly from the tool_results we already have.
+        if not isinstance(parsed, dict) and tool_results:
+            try:
+                parsed = await _synthesize_dossier_from_tools(
+                    tool_results, scene, label
+                )
+                if isinstance(parsed, dict):
+                    log.info(
+                        "%s: synthesis succeeded — dossier built from %d tool results",
+                        label,
+                        len(tool_results),
+                    )
+            except Exception as exc:
+                log.warning("%s: synthesis call failed: %s", label, exc)
+                parsed = None
+
     narrative_notes = ""
     carry_forward = ""
     if isinstance(parsed, dict):
         narrative_notes = str(parsed.get("narrative_notes", "")).strip()
         carry_forward = str(parsed.get("carry_forward", "")).strip()
-    elif raw:
-        log.warning(
-            "%s: dossier unrecoverable after repair (raw_head=%r) — proceeding with empty notes",
-            label,
-            raw[:300],
+
+    if not narrative_notes:
+        raise SceneResearchError(
+            f"{label}: dossier unrecoverable — narrative_notes empty after parse + "
+            f"salvage + repair + synthesis "
+            f"(raw={len(raw)} chars, tools_called={len(tool_results)}, "
+            f"head={raw[:300]!r}). Refusing to ship a writer with no research."
         )
 
     log.info(

@@ -190,7 +190,7 @@ def generate_cover_art(date_str: str, title: str, script: dict, output_path: Pat
     cx = _px(0.50)
 
     # ── Brand header ─────────────────────────────────────────────────────
-    draw.text((cx, _px(0.078)), "News Impact Daily", font=font_large, fill=_BRAND_GOLD, anchor="mm")
+    draw.text((cx, _px(0.078)), "The Impact Tape", font=font_large, fill=_BRAND_GOLD, anchor="mm")
     draw.text((cx, _px(0.139)), "Market Intelligence Digest", font=font_small, fill=_TEXT_DIM, anchor="mm")
     draw.text((cx, _px(0.193)), date_str, font=font_medium, fill=_TEXT_WHITE, anchor="mm")
 

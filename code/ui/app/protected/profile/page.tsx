@@ -2,13 +2,16 @@ import { Suspense } from "react";
 import { createClient } from "@/lib/supabase/server";
 import { redirect } from "next/navigation";
 import Link from "next/link";
-import { KeyRound, Lock, LogOut, CreditCard } from "lucide-react";
+import { KeyRound, Lock, LogOut, CreditCard, Sparkles } from "lucide-react";
 import { LogoutButton } from "@/components/logout-button";
 import { TelegramConnect } from "@/components/telegram-connect";
 import { ManageBillingButton } from "@/components/manage-billing-button";
 import { Badge } from "@/components/ui/badge";
 import { TradingStrategyForm } from "@/components/trading-strategy-form";
 import { getTradingStrategy } from "@/app/actions/trading-strategy";
+import { getOnboardingProgress, getOnboardingTours } from "@/app/actions/onboarding";
+import { PageTour } from "@/app/protected/_components/page-tour";
+import { RestartOnboardingButton } from "@/app/protected/_components/restart-onboarding-button";
 
 export const metadata = { title: "Profile" };
 
@@ -42,7 +45,7 @@ async function ProfileContent() {
 
   if (error || !user) redirect("/auth/login");
 
-  const [{ data: subscription }, tradingStrategy] = await Promise.all([
+  const [{ data: subscription }, tradingStrategy, onboardingProgress] = await Promise.all([
     supabase
       .schema("swingtrader")
       .from("user_subscriptions")
@@ -50,7 +53,11 @@ async function ProfileContent() {
       .eq("user_id", user.id)
       .maybeSingle(),
     getTradingStrategy(),
+    getOnboardingProgress(),
   ]);
+
+  const onboardingTotal = 8;
+  const onboardingCompleted = Object.values(onboardingProgress).filter(Boolean).length;
 
   const joined = new Date(user.created_at).toLocaleDateString("en-US", {
     year: "numeric",
@@ -103,7 +110,7 @@ async function ProfileContent() {
       </section>
 
       {/* Subscription */}
-      <section className="rounded-2xl border border-border bg-card overflow-hidden">
+      <section data-tour="subscription" className="rounded-2xl border border-border bg-card overflow-hidden">
         <div className="border-b border-border px-5 py-3 flex items-center justify-between">
           <p className="text-xs font-semibold uppercase tracking-widest text-amber-500">
             Subscription
@@ -164,7 +171,7 @@ async function ProfileContent() {
       </section>
 
       {/* Telegram — pair account for Daily Narrative delivery */}
-      <section>
+      <section data-tour="telegram-connect">
         <div className="mb-3">
           <p className="text-xs font-semibold uppercase tracking-widest text-amber-500">
             Notifications
@@ -174,7 +181,7 @@ async function ProfileContent() {
       </section>
 
       {/* Trading strategy */}
-      <section className="rounded-2xl border border-border bg-card overflow-hidden">
+      <section data-tour="trading-strategy" className="rounded-2xl border border-border bg-card overflow-hidden">
         <div className="border-b border-border px-5 py-3">
           <p className="text-xs font-semibold uppercase tracking-widest text-amber-500">
             Trading strategy
@@ -196,7 +203,25 @@ async function ProfileContent() {
           </p>
         </div>
         <div className="divide-y divide-border">
+          <div className="flex items-center gap-3 px-5 py-4">
+            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-border bg-background">
+              <Sparkles className="h-4 w-4 text-amber-400" />
+            </div>
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-medium">Onboarding tour</p>
+              <p className="text-xs text-muted-foreground">
+                {onboardingCompleted === onboardingTotal
+                  ? `All ${onboardingTotal} steps complete — restart to revisit any page tour.`
+                  : `${onboardingCompleted} of ${onboardingTotal} steps complete — restart to clear progress and walk through every page tour again.`}
+              </p>
+            </div>
+            <RestartOnboardingButton
+              completedSteps={onboardingCompleted}
+              totalSteps={onboardingTotal}
+            />
+          </div>
           <Link
+            data-tour="api-keys"
             href="/protected/api-keys"
             className="flex cursor-pointer items-center gap-3 px-5 py-4 transition-colors hover:bg-muted/50"
           >
@@ -236,6 +261,11 @@ async function ProfileContent() {
   );
 }
 
+async function ProfileTourMount() {
+  const tours = await getOnboardingTours();
+  return <PageTour tourKey="profile" autoStart={!tours.profile} />;
+}
+
 export default function ProfilePage() {
   return (
     <div className="flex-1 w-full max-w-2xl">
@@ -245,6 +275,9 @@ export default function ProfilePage() {
         }
       >
         <ProfileContent />
+      </Suspense>
+      <Suspense fallback={null}>
+        <ProfileTourMount />
       </Suspense>
     </div>
   );

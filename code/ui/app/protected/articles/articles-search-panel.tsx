@@ -79,7 +79,7 @@ export function ArticlesSearchPanel({ initialArticles }: { initialArticles: Arti
 
   return (
     <div className="flex flex-col gap-4">
-      <div className="flex flex-wrap items-end gap-2">
+      <div data-tour="article-filters" className="flex flex-wrap items-end gap-2">
         <div className="flex min-w-[260px] flex-1 flex-col gap-1.5">
           <span className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Search</span>
           <div className="relative min-w-[260px] flex-1">

@@ -105,6 +105,7 @@ export function AgentsUI({ screenings, limits, error, suggestionTickers }: Props
               type="button"
               onClick={() => setShowForm(true)}
               disabled={atLimit}
+              data-tour="agent-create"
               className="inline-flex items-center gap-1.5 rounded-md bg-foreground px-3 py-2.5 text-sm font-medium text-background transition-opacity hover:opacity-90 disabled:opacity-40 disabled:pointer-events-none"
             >
               <Plus className="w-3.5 h-3.5" />
@@ -127,7 +128,7 @@ export function AgentsUI({ screenings, limits, error, suggestionTickers }: Props
 
       {/* Agent list */}
       {view === "list" && (
-        <div className="flex flex-col gap-3">
+        <div data-tour="agent-list" className="flex flex-col gap-3">
           {screenings.length === 0 && !showForm && (
             <div className="rounded-2xl border border-dashed border-border px-6 py-14 text-center">
               <Bot className="mx-auto w-8 h-8 text-muted-foreground/30 mb-3" />
@@ -1534,7 +1535,7 @@ function CreateForm({ onClose, atLimit, suggestionTickers }: { onClose: () => vo
             className={inputClass}
           />
         </div>
-        <div className="flex flex-col gap-1.5">
+        <div data-tour="agent-schedule" className="flex flex-col gap-1.5">
           <label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
             Recurrence
           </label>

@@ -11,8 +11,9 @@ This is a smoother, not a rewriter. Its job:
   but the writer model can still mirror a stat from a prior scene's tail).
 - Keep the narrative arc consistent across junctions.
 
-The editor is best-effort: failures don't take down the episode. The
-pipeline simply ships the unedited 6-scene draft when the editor errors.
+The editor must succeed: any failure (transport error, malformed JSON,
+zero junctions applied) raises ``EditorError`` and aborts the episode,
+matching the pipeline-wide rule that any agent failure stops the show.
 
 Output schema:
 
@@ -40,8 +41,18 @@ import time
 import httpx
 
 from ..config import OLLAMA_BASE_URL, OLLAMA_PODCAST_SCRIPT_MODEL
+from .scene_researcher import PodcastAgentError
 
 log = logging.getLogger(__name__)
+
+
+class EditorError(PodcastAgentError):
+    """Raised when the editor can't smooth the junctions.
+
+    Failure modes: transport errors after retries, malformed JSON, or zero
+    junctions successfully applied. The pipeline-wide rule is that any
+    agent failure stops the show — the editor is no exception.
+    """
 
 
 _HEARTBEAT_SECONDS = 5.0
@@ -63,10 +74,6 @@ OLLAMA_PODCAST_EDITOR_MODEL = (
 # The five LLM-to-LLM junctions. The deterministic HOOK / WELCOME /
 # SIGN_OFF acts bookend the show and are not edited.
 _JUNCTIONS = [(1, 2), (2, 3), (3, 4), (4, 5), (5, 6)]
-
-
-class EditorError(Exception):
-    pass
 
 
 def _is_transient_ollama_error(exc: BaseException) -> bool:
@@ -165,7 +172,7 @@ def _system_prompt(
     scenes: list[dict],
     junction_lines: int,
 ) -> str:
-    return f"""You are the editor for NewsImpact Daily, the swing-trader podcast hosted by Hans.
+    return f"""You are the editor for The Impact Tape, the swing-trader podcast hosted by Hans.
 
 Six writers have produced their acts in sequence. Your job is to smooth the JUNCTIONS between consecutive acts so the show flows as one continuous conversation, not six pasted segments.
 
@@ -195,6 +202,9 @@ These rewritten lines REPLACE the original tail/head when applied. The middle of
 5. **One-fact-one-act** — If a head line repeats a stat already stated earlier in the show, rewrite it to gesture at the fact indirectly ("after that volatility move we just talked about") rather than restating the number.
 6. **Date/weekday rule** — The weekday is spoken aloud only in act 3. If you spot the weekday name in act 1, 2, 4, 5, or 6 in the lines you rewrite, replace it with a relative reference ("today", "yesterday", "tomorrow").
 7. **Conversational hand-offs** — Use questions, interjections, co-completions to thread the junction. Avoid hard stops at the tail or fresh announcements at the head.
+8. **Burstiness at the junction** — Don't rewrite a junction into two equal-length sentences. The hand-off should land on a length contrast: one anchor line (15–25 words) paired with a short reaction (3–6 words), not two 12-word lines from different voices.
+9. **Banned formulaic transitions** — Never use "Let's dive in", "Let's dive into", "Let's unpack", "Moving on", "Now let's talk about", "Now over to", "It's worth noting", "It's important to note", "In other news", "On another note", "Speaking of which" (as a hard pivot), "Buckle up", "Strap in", "At the end of the day", "All things considered". These are LLM tells. If a writer used one in a tail/head you're rewriting, replace it with a topic-bridge that finishes the prior thought and starts the next on a reaction or question.
+10. **Hedge balance** — If the junction's secondary-voice line reads as purely reactive, fold in ONE hedge or personal-stance marker ("honestly,", "I'd push back —", "I'm less sure on that", "look —", "my take —", "if you ask me,") so the analyst voice keeps an opinion, not just an echo.
 
 # Output format
 
@@ -340,6 +350,12 @@ async def _stream_once(
             "model": OLLAMA_PODCAST_EDITOR_MODEL,
             "messages": messages,
             "stream": True,
+            # think=false disables the reasoning block on glm-5.1 / qwen-think
+            # / similar models. Without this, the model can spend the entire
+            # num_predict budget on `<think>...</think>` and emit zero real
+            # content tokens — exactly the silent-empty pattern this editor
+            # has been hitting.
+            "think": False,
             "options": {"temperature": 0.6, "num_predict": 3072},
         },
         timeout=600,
@@ -429,12 +445,271 @@ async def _call_editor(
     raise last_exc
 
 
+# Per-junction object pattern. Brace-aware scan because each junction
+# contains nested arrays of line objects. Captures the full junction body
+# starting at "after_act" so we can re-parse each one independently.
+_AFTER_ACT_RE = re.compile(r'"after_act"\s*:\s*(\d+)')
+# Inline line pattern (voice + text in either order, tolerates escapes).
+_INLINE_LINE_RE = re.compile(
+    r'\{\s*'
+    r'(?:"voice"\s*:\s*"(?P<voice1>[^"]+)"\s*,\s*"text"\s*:\s*"(?P<text1>(?:[^"\\]|\\.)*)"'
+    r'|"text"\s*:\s*"(?P<text2>(?:[^"\\]|\\.)*)"\s*,\s*"voice"\s*:\s*"(?P<voice2>[^"]+)")'
+    r'\s*\}',
+    flags=re.DOTALL,
+)
+_PREV_TAIL_KEY_RE = re.compile(r'"prev_act_tail"\s*:\s*\[')
+_NEXT_HEAD_KEY_RE = re.compile(r'"next_act_head"\s*:\s*\[')
+
+
+def _extract_lines_inside(raw: str, after_pos: int, end_pos: int) -> list[dict]:
+    """Pull `{voice, text}` line objects out of a raw text window."""
+    out: list[dict] = []
+    for m in _INLINE_LINE_RE.finditer(raw, after_pos, end_pos):
+        voice = (m.group("voice1") or m.group("voice2") or "primary").strip().lower()
+        if voice not in ("primary", "secondary"):
+            voice = "primary"
+        text_raw = m.group("text1") or m.group("text2") or ""
+        text = (
+            text_raw.replace('\\"', '"')
+            .replace("\\\\", "\\")
+            .replace("\\n", "\n")
+            .replace("\\t", "\t")
+            .strip()
+        )
+        if text:
+            out.append({"voice": voice, "text": text})
+    return out
+
+
+def _salvage_junctions(raw: str) -> dict | None:
+    """Extract `{junctions: [...]}` from malformed/partial editor output.
+
+    Walks the raw text finding each ``"after_act": N`` marker, then for
+    each marker locates the ``prev_act_tail`` / ``next_act_head`` arrays
+    that follow and pulls line objects out of those windows via regex.
+
+    Returns a dict matching the editor's expected schema, or None when
+    no junctions could be recovered. Caller treats None as "synthesis
+    truly failed" — anything else is good enough to apply.
+    """
+    if not raw:
+        return None
+    matches = list(_AFTER_ACT_RE.finditer(raw))
+    if not matches:
+        return None
+
+    junctions: list[dict] = []
+    for i, m in enumerate(matches):
+        try:
+            after_act = int(m.group(1))
+        except ValueError:
+            continue
+        # Window ends at the next "after_act" or end of string.
+        next_start = matches[i + 1].start() if i + 1 < len(matches) else len(raw)
+        window_start = m.start()
+
+        # Locate the two array keys inside this window.
+        prev_match = _PREV_TAIL_KEY_RE.search(raw, window_start, next_start)
+        next_match = _NEXT_HEAD_KEY_RE.search(raw, window_start, next_start)
+
+        prev_lines: list[dict] = []
+        next_lines: list[dict] = []
+        if prev_match:
+            # prev_act_tail spans from after the [ until either next_match
+            # start or the window's end.
+            prev_end = next_match.start() if next_match else next_start
+            prev_lines = _extract_lines_inside(raw, prev_match.end(), prev_end)
+        if next_match:
+            next_lines = _extract_lines_inside(raw, next_match.end(), next_start)
+
+        if not prev_lines and not next_lines:
+            continue
+        junctions.append(
+            {
+                "after_act": after_act,
+                "prev_act_tail": prev_lines,
+                "next_act_head": next_lines,
+            }
+        )
+
+    if not junctions:
+        return None
+    return {"junctions": junctions}
+
+
+def _format_junctions_compact(
+    scenes: list[dict], junction_lines: int
+) -> str:
+    """Render only the lines the editor needs to rewrite.
+
+    Each junction shows the last ``junction_lines`` lines of act N and the
+    first ``junction_lines`` of act N+1, plus the act names so the model
+    can ground itself. Used by the synthesis fallback so the prompt fits
+    the model's attention budget when the full-draft render didn't.
+    """
+    by_act = {int(s.get("act", -1)): s for s in scenes if isinstance(s, dict)}
+    out: list[str] = []
+    for prev_act, next_act in _JUNCTIONS:
+        prev = by_act.get(prev_act)
+        nxt = by_act.get(next_act)
+        if not prev or not nxt:
+            continue
+        out.append(f"--- Junction {prev_act}→{next_act} ---")
+        out.append(f"END OF ACT {prev_act} {prev.get('name','')}:")
+        prev_lines = (prev.get("lines") or [])[-junction_lines:]
+        for ln in prev_lines:
+            voice = (ln.get("voice") or "primary").strip().lower()
+            text = (ln.get("text") or "").replace("\n", " ").strip()
+            out.append(f"  [{voice}]: \"{text}\"")
+        out.append(f"START OF ACT {next_act} {nxt.get('name','')}:")
+        next_lines = (nxt.get("lines") or [])[:junction_lines]
+        for ln in next_lines:
+            voice = (ln.get("voice") or "primary").strip().lower()
+            text = (ln.get("text") or "").replace("\n", " ").strip()
+            out.append(f"  [{voice}]: \"{text}\"")
+        out.append("")
+    return "\n".join(out).rstrip()
+
+
+async def _synthesize_junctions_compact(
+    scenes: list[dict],
+    episode_brief: dict,
+    junction_lines: int,
+    label: str,
+) -> tuple[dict | None, str]:
+    """Last-resort fallback when the streaming editor call returned empty.
+
+    Uses a stripped-down prompt (only the junction context, no full draft,
+    no taxonomy glossary) and a non-streaming /api/chat call so we get the
+    full body in one shot. Some models silently emit zero stream tokens
+    when the prompt sits at the edge of their context budget — switching
+    to non-streaming and trimming the prompt usually dislodges that.
+    """
+    junction_block = _format_junctions_compact(scenes, junction_lines)
+    user_prompt = (
+        "Smooth the FIVE junctions below so consecutive acts flow as one "
+        "conversation. Rewrite ONLY the tail of each prev act and the head "
+        "of each next act — never the middle. Keep substance, smooth rhythm.\n\n"
+        f"NARRATIVE ARC: {episode_brief.get('narrative_arc','').strip()}\n\n"
+        f"JUNCTIONS:\n\n{junction_block}\n\n"
+        "Output ONLY this JSON object — no preamble, no markdown:\n"
+        "{\n"
+        '  "junctions": [\n'
+        '    {"after_act": 1, "prev_act_tail": [{"voice":"primary"|"secondary","text":"..."}, ...], "next_act_head": [{"voice":"primary"|"secondary","text":"..."}, ...]},\n'
+        '    {"after_act": 2, ...},\n'
+        '    {"after_act": 3, ...},\n'
+        '    {"after_act": 4, ...},\n'
+        '    {"after_act": 5, ...}\n'
+        "  ]\n"
+        "}\n\n"
+        f"Each tail/head must contain {junction_lines} line object(s). "
+        "Voices must stay primary or secondary. Start with { and end with }."
+    )
+    messages = [
+        {
+            "role": "system",
+            "content": (
+                "You are a junction smoother. Emit ONLY the JSON object "
+                'matching {"junctions": [...]}. No preamble, no markdown.'
+            ),
+        },
+        {"role": "user", "content": user_prompt},
+    ]
+    backoff = _RETRY_INITIAL_BACKOFF_S
+    last_exc: BaseException | None = None
+    last_content = ""
+    for attempt in range(1, _RETRY_MAX_ATTEMPTS + 1):
+        try:
+            async with httpx.AsyncClient() as client:
+                r = await client.post(
+                    f"{OLLAMA_BASE_URL}/api/chat",
+                    json={
+                        "model": OLLAMA_PODCAST_EDITOR_MODEL,
+                        "messages": messages,
+                        "stream": False,
+                        "options": {"num_predict": 2048, "temperature": 0.3},
+                    },
+                    timeout=240,
+                )
+                r.raise_for_status()
+                payload = r.json()
+            content = (payload.get("message", {}).get("content") or "").strip()
+            log.info(
+                "%s: synthesis call returned %d chars (attempt %d)",
+                label,
+                len(content),
+                attempt,
+            )
+            if content:
+                last_content = content
+            if not content:
+                # Treat empty content as transient — the model didn't
+                # actually fail, it just didn't produce text. Retry.
+                raise RuntimeError("synthesis returned empty content")
+
+            parsed = _parse_json(content)
+            if isinstance(parsed, dict):
+                return parsed, content
+            # Content arrived but didn't parse — try regex salvage before
+            # spending another attempt. Salvage on a 330-char-with-content
+            # response is much more likely to recover something useful
+            # than retrying for another empty response.
+            salvaged = _salvage_junctions(content)
+            if salvaged is not None:
+                log.info(
+                    "%s: synthesis attempt %d returned unparseable JSON, "
+                    "but regex salvage recovered %d junctions",
+                    label,
+                    attempt,
+                    len(salvaged.get("junctions", [])),
+                )
+                return salvaged, content
+            log.warning(
+                "%s: synthesis attempt %d returned %d chars but neither "
+                "parse nor salvage could extract junctions — head=%r",
+                label,
+                attempt,
+                len(content),
+                content[:200],
+            )
+            # Treat parse-failure with content as transient too — the model
+            # produced output, just not in the right shape. Retry.
+            raise RuntimeError("synthesis returned unparseable content")
+        except Exception as exc:
+            last_exc = exc
+            transient = (
+                _is_transient_ollama_error(exc)
+                or "synthesis returned empty content" in str(exc)
+                or "synthesis returned unparseable content" in str(exc)
+            )
+            if not transient or attempt == _RETRY_MAX_ATTEMPTS:
+                # Last attempt or hard failure: surface what we have so the
+                # caller can include it in the error message.
+                if isinstance(exc, RuntimeError) and last_content:
+                    return None, last_content
+                raise
+            log.warning(
+                "%s: synthesis attempt %d/%d failed (%s: %s) — retrying in %.0fs",
+                label,
+                attempt,
+                _RETRY_MAX_ATTEMPTS,
+                type(exc).__name__,
+                str(exc)[:200],
+                backoff,
+            )
+            await asyncio.sleep(_retry_sleep(exc, backoff))
+            backoff *= 2
+    assert last_exc is not None
+    raise last_exc
+
+
 async def edit_junctions(scenes: list[dict], episode_brief: dict) -> list[dict]:
     """Smooth the five LLM-to-LLM junctions; return the edited scenes.
 
-    Does not raise on editor failure — logs and returns the input scenes
-    unchanged so the pipeline ships the un-smoothed draft rather than no
-    episode at all.
+    Raises ``EditorError`` on any failure (transport, parse, zero
+    junctions applied). The pipeline-wide rule is that any agent failure
+    stops the show — silently shipping the unedited draft would mask a
+    real problem.
     """
     if len(scenes) < 2:
         log.info("Editor: fewer than 2 scenes — nothing to smooth")
@@ -451,7 +726,7 @@ async def edit_junctions(scenes: list[dict], episode_brief: dict) -> list[dict]:
 
     system_msg = (
         "You are Hans's voice editor. You smooth the junctions between "
-        "consecutive acts of NewsImpact Daily. Always return ONLY valid JSON "
+        "consecutive acts of The Impact Tape. Always return ONLY valid JSON "
         "matching the requested schema. No preamble, no markdown — start "
         "with { and end with }."
     )
@@ -464,30 +739,86 @@ async def edit_junctions(scenes: list[dict], episode_brief: dict) -> list[dict]:
         {"role": "user", "content": user_prompt},
     ]
 
+    raw = ""
+    primary_call_failed = False
     try:
         async with httpx.AsyncClient() as client:
             raw = await _call_editor(client, messages, label)
     except Exception as exc:
-        log.error(
-            "%s: failed (%s: %s) — shipping unedited draft",
+        log.warning(
+            "%s: streaming call failed (%s: %s) — will try compact synthesis",
             label,
             type(exc).__name__,
             exc,
         )
-        return scenes
+        primary_call_failed = True
 
-    parsed = _parse_json(raw)
+    parsed = _parse_json(raw) if raw else None
+    if not isinstance(parsed, dict) and raw:
+        # Streaming returned content that didn't parse — try salvage
+        # before falling through to synthesis.
+        salvaged = _salvage_junctions(raw)
+        if salvaged is not None:
+            log.info(
+                "%s: streaming response unparseable, but regex salvage "
+                "recovered %d junctions",
+                label,
+                len(salvaged.get("junctions", [])),
+            )
+            parsed = salvaged
+
+    # Synthesis fallback when the streaming call returned empty / unparseable
+    # or raised. Uses a stripped-down prompt + non-streaming chat — both
+    # changes meaningfully reduce the chance of a content-empty response.
+    synthesis_raw = ""
     if not isinstance(parsed, dict):
         log.warning(
-            "%s: response was not parseable JSON (head=%r) — shipping unedited draft",
+            "%s: streaming response unusable (raw=%d chars, head=%r) — "
+            "falling back to compact synthesis",
             label,
+            len(raw),
             raw[:200],
         )
-        return scenes
+        try:
+            parsed, synthesis_raw = await _synthesize_junctions_compact(
+                scenes,
+                episode_brief,
+                PODCAST_EDITOR_JUNCTION_LINES,
+                label,
+            )
+            if isinstance(parsed, dict):
+                log.info(
+                    "%s: synthesis recovered junctions JSON (%d chars raw)",
+                    label,
+                    len(synthesis_raw),
+                )
+        except Exception as exc:
+            raise EditorError(
+                f"{label}: streaming + synthesis both failed "
+                f"(streaming_raw={len(raw)} chars, primary_call_failed={primary_call_failed}, "
+                f"synthesis_error={type(exc).__name__}: {exc}). "
+                "Refusing to ship unedited draft."
+            ) from exc
+
+    if not isinstance(parsed, dict):
+        raise EditorError(
+            f"{label}: response was not parseable JSON after synthesis "
+            f"(streaming_raw={len(raw)} chars, "
+            f"synthesis_raw={len(synthesis_raw)} chars, "
+            f"streaming_head={raw[:200]!r}, "
+            f"synthesis_head={synthesis_raw[:400]!r}). "
+            "Refusing to ship unedited draft."
+        )
 
     edited, applied = _apply_junction_edits(
         scenes, parsed, PODCAST_EDITOR_JUNCTION_LINES
     )
+    if applied == 0:
+        raise EditorError(
+            f"{label}: zero junctions applied out of {len(_JUNCTIONS)} "
+            f"(parsed_keys={list(parsed.keys())}). "
+            "Refusing to ship unedited draft."
+        )
     log.info(
         "%s: %d/%d junctions applied",
         label,

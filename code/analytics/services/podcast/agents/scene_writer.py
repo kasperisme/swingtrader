@@ -34,8 +34,18 @@ from ..config import (
     TEMPLATES_DIR,
 )
 from ..taxonomy_glossary import build_taxonomy_glossary
+from .scene_researcher import PodcastAgentError, _is_transient_ollama_error
 
 log = logging.getLogger(__name__)
+
+
+class SceneWriterError(PodcastAgentError):
+    """Raised when a writer produces no usable lines for an act.
+
+    A scene with placeholder lines breaks the show's narrative — better to
+    abort than ship an act that says "(placeholder — writer produced no
+    usable lines)" through TTS.
+    """
 
 
 _HEARTBEAT_SECONDS = 5.0
@@ -50,10 +60,6 @@ OLLAMA_PODCAST_SCENE_WRITER_MODEL = (
 )
 
 _jinja_env = Environment(loader=FileSystemLoader(str(TEMPLATES_DIR)), autoescape=False)
-
-
-class SceneWriterError(Exception):
-    pass
 
 
 def _is_transient_ollama_error(exc: BaseException) -> bool:
@@ -277,30 +283,158 @@ async def _call_writer(
     raise last_exc
 
 
-def _validate_scene_script(scene: dict, raw_script: dict | None) -> dict:
-    """Coerce the writer's output into a SceneScript with at least one line.
+# Per-line object pattern. Tolerant of:
+#   - whitespace anywhere
+#   - voice/text key order swapped
+#   - missing trailing comma
+#   - text containing escaped quotes (\")
+# Captures voice and text independently so we can pair them after the fact.
+_LINE_OBJECT_RE = re.compile(
+    r'\{\s*'
+    r'(?:"voice"\s*:\s*"(?P<voice1>[^"]+)"\s*,\s*"text"\s*:\s*"(?P<text1>(?:[^"\\]|\\.)*)"'
+    r'|"text"\s*:\s*"(?P<text2>(?:[^"\\]|\\.)*)"\s*,\s*"voice"\s*:\s*"(?P<voice2>[^"]+)")'
+    r'\s*\}',
+    flags=re.DOTALL,
+)
+_SYNTHESIS_RETRY_MAX_ATTEMPTS = max(
+    1, int(os.environ.get("PODCAST_SCENE_WRITER_SYNTHESIS_RETRIES", "3"))
+)
+_SYNTHESIS_RETRY_INITIAL_BACKOFF_S = 2.0
 
-    Empty / malformed responses fall back to a placeholder line so the
-    pipeline can continue and the editor or operator can fix the scene
-    later.
+
+def _salvage_lines(raw: str) -> list[dict]:
+    """Regex-extract line objects from malformed/truncated JSON.
+
+    Useful when the model emits a partial response: closes ``{}`` early,
+    drops the ``lines`` array key, or appends commentary that breaks the
+    parser. Each match is converted to ``{voice, text}``. Voices outside
+    primary/secondary are coerced to primary so the renderer doesn't fail
+    on an unknown voice id.
+    """
+    out: list[dict] = []
+    for m in _LINE_OBJECT_RE.finditer(raw):
+        voice = (m.group("voice1") or m.group("voice2") or "primary").strip().lower()
+        if voice not in ("primary", "secondary"):
+            voice = "primary"
+        text_raw = m.group("text1") or m.group("text2") or ""
+        text = (
+            text_raw.replace('\\"', '"')
+            .replace("\\\\", "\\")
+            .replace("\\n", "\n")
+            .replace("\\t", "\t")
+            .strip()
+        )
+        if text:
+            out.append({"voice": voice, "text": text})
+    return out
+
+
+async def _synthesize_scene_from_inputs(
+    scene: dict,
+    episode_brief: dict,
+    scene_dossier: dict,
+    label: str,
+) -> dict | None:
+    """Last-resort writer fallback when the main call won't produce JSON.
+
+    A fresh, non-tool LLM call with a stripped-down prompt: just the
+    scene's act/name/angle plus the researcher's narrative_notes. We ask
+    only for the ``lines`` array — no taxonomy glossary, no episode
+    brief, no prior tail. Smaller surface area = higher chance the model
+    actually emits the schema.
+    """
+    angle = (scene.get("angle") or "").strip()
+    notes = (scene_dossier.get("narrative_notes") or "").strip()
+    arc = (episode_brief.get("narrative_arc") or "").strip()
+
+    user_prompt = (
+        f"Write the dialogue lines for act {scene['act']} {scene['name']} of "
+        "The Impact Tape, a swing-trader podcast.\n\n"
+        f"Episode arc: {arc}\n"
+        f"This act's angle: {angle}\n"
+        f"Research notes: {notes}\n\n"
+        "Write 8-14 short interleaved lines between two voices (primary, secondary). "
+        "Each line MUST be its own JSON object: "
+        '{"voice": "primary"|"secondary", "text": "..."}. '
+        "Output ONLY this JSON object:\n"
+        f'{{"act": {scene["act"]}, "name": "{scene["name"]}", "lines": [...]}}\n\n'
+        "Start with { and end with }. No preamble, no markdown fences."
+    )
+    messages = [
+        {
+            "role": "system",
+            "content": (
+                "You are a dialogue writer. Emit exactly one JSON object: "
+                '{"act": int, "name": string, "lines": [{"voice": "primary"|"secondary", "text": string}, ...]}. '
+                "No preamble, no markdown."
+            ),
+        },
+        {"role": "user", "content": user_prompt},
+    ]
+    backoff = _SYNTHESIS_RETRY_INITIAL_BACKOFF_S
+    last_exc: BaseException | None = None
+    for attempt in range(1, _SYNTHESIS_RETRY_MAX_ATTEMPTS + 1):
+        try:
+            async with httpx.AsyncClient() as client:
+                r = await client.post(
+                    f"{OLLAMA_BASE_URL}/api/chat",
+                    json={
+                        "model": OLLAMA_PODCAST_SCENE_WRITER_MODEL,
+                        "messages": messages,
+                        "stream": False,
+                        "options": {"num_predict": 2048, "temperature": 0.5},
+                    },
+                    timeout=240,
+                )
+                r.raise_for_status()
+                payload = r.json()
+            content = (payload.get("message", {}).get("content") or "").strip()
+            log.info(
+                "%s: synthesis call returned %d chars (attempt %d)",
+                label,
+                len(content),
+                attempt,
+            )
+            return _parse_json(content)
+        except Exception as exc:
+            last_exc = exc
+            if (
+                not _is_transient_ollama_error(exc)
+                or attempt == _SYNTHESIS_RETRY_MAX_ATTEMPTS
+            ):
+                raise
+            log.warning(
+                "%s: synthesis attempt %d/%d failed (%s: %s) — retrying in %.0fs",
+                label,
+                attempt,
+                _SYNTHESIS_RETRY_MAX_ATTEMPTS,
+                type(exc).__name__,
+                str(exc)[:200],
+                backoff,
+            )
+            await asyncio.sleep(backoff)
+            backoff *= 2
+    assert last_exc is not None
+    raise last_exc
+
+
+def _validate_scene_script(scene: dict, raw_script: dict | None) -> dict:
+    """Coerce the writer's output into a SceneScript or raise SceneWriterError.
+
+    Empty / malformed responses raise instead of inserting a placeholder
+    line — a writer that produced no usable text means the act has no
+    content, and shipping the show with a missing act is a worse outcome
+    than aborting.
     """
     if not isinstance(raw_script, dict):
         raw_script = {}
     lines = raw_script.get("lines") or []
     if not isinstance(lines, list) or not lines:
-        log.warning(
-            "Scene writer act %d: empty or malformed lines — inserting placeholder",
-            scene["act"],
+        raise SceneWriterError(
+            f"Writer act {scene['act']} {scene['name']}: response had no "
+            f"'lines' array (raw_keys={list(raw_script.keys())}). "
+            "Refusing to ship the act."
         )
-        lines = [
-            {
-                "voice": "primary",
-                "text": (
-                    f"(Act {scene['act']} {scene['name']} placeholder — writer "
-                    "produced no usable lines.)"
-                ),
-            }
-        ]
     cleaned: list[dict] = []
     for ln in lines:
         if not isinstance(ln, dict):
@@ -313,7 +447,11 @@ def _validate_scene_script(scene: dict, raw_script: dict | None) -> dict:
             continue
         cleaned.append({"voice": voice, "text": text})
     if not cleaned:
-        cleaned = lines  # fall back to whatever we had so the act isn't lost
+        raise SceneWriterError(
+            f"Writer act {scene['act']} {scene['name']}: produced "
+            f"{len(lines)} lines but none had usable text after cleaning. "
+            "Refusing to ship the act."
+        )
     return {"act": scene["act"], "name": scene["name"], "lines": cleaned}
 
 
@@ -352,7 +490,7 @@ async def write_scene(
     )
 
     system_msg = (
-        "You are Hans's voice writer. You write ONE act of NewsImpact Daily as "
+        "You are Hans's voice writer. You write ONE act of The Impact Tape as "
         "TTS-ready dialogue between two hosts (primary + secondary). Always "
         "return ONLY valid JSON matching the requested schema. No preamble, no "
         "markdown, no explanation — start with { and end with }."
@@ -363,6 +501,8 @@ async def write_scene(
         {"role": "user", "content": user_prompt},
     ]
 
+    raw = ""
+    raw2 = ""
     async with httpx.AsyncClient() as client:
         raw = await _call_writer(client, messages, label)
         parsed = _parse_json(raw)
@@ -383,6 +523,66 @@ async def write_scene(
             parsed = _parse_json(raw2)
             if parsed is not None:
                 log.info("%s: retry succeeded — recovered valid JSON", label)
+
+    # Salvage path — when parse succeeded but the dict is empty / has no
+    # lines, regex-extract line objects from whichever raw response had
+    # content. Common when the model emits `{}` or wraps lines in stray
+    # commentary that the brace-matcher couldn't pin.
+    needs_salvage = (
+        not isinstance(parsed, dict)
+        or not parsed.get("lines")
+        or not isinstance(parsed.get("lines"), list)
+    )
+    if needs_salvage:
+        for source_label, source_raw in (("retry", raw2), ("first", raw)):
+            if not source_raw:
+                continue
+            salvaged_lines = _salvage_lines(source_raw)
+            if salvaged_lines:
+                log.info(
+                    "%s: regex salvage recovered %d lines from %s response",
+                    label,
+                    len(salvaged_lines),
+                    source_label,
+                )
+                parsed = {
+                    "act": scene["act"],
+                    "name": scene["name"],
+                    "lines": salvaged_lines,
+                }
+                break
+
+    # Synthesis path — when both attempts failed and salvage couldn't pull
+    # any line objects either, do a final stripped-down LLM call from the
+    # scene's research notes + angle. Smaller prompt surface = higher
+    # chance the model emits valid JSON.
+    needs_synthesis = (
+        not isinstance(parsed, dict)
+        or not parsed.get("lines")
+        or not isinstance(parsed.get("lines"), list)
+    )
+    if needs_synthesis:
+        log.warning(
+            "%s: parse + retry + salvage all failed — falling back to "
+            "synthesis from dossier + angle",
+            label,
+        )
+        try:
+            synthesized = await _synthesize_scene_from_inputs(
+                scene=scene,
+                episode_brief=episode_brief,
+                scene_dossier=scene_dossier,
+                label=label,
+            )
+            if isinstance(synthesized, dict) and synthesized.get("lines"):
+                parsed = synthesized
+                log.info(
+                    "%s: synthesis succeeded — %d lines",
+                    label,
+                    len(synthesized.get("lines") or []),
+                )
+        except Exception as exc:
+            log.warning("%s: synthesis call failed: %s", label, exc)
 
     script = _validate_scene_script(scene, parsed)
     log.info(

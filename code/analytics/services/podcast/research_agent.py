@@ -158,7 +158,7 @@ def _build_podcast_dossier_tools() -> ToolRegistry:
 
 
 def _system_prompt(today: str, max_rounds: int) -> str:
-    return f"""You are the research producer for NewsImpact Daily, the swing-trader podcast hosted by Hans (today: {today}).
+    return f"""You are the research producer for The Impact Tape, the swing-trader podcast hosted by Hans (today: {today}).
 
 Your job: decide which data tools to call, gather just what the script needs, then return a JSON dossier. You are NOT writing the script — a separate writer takes your dossier and produces the audio script.
 

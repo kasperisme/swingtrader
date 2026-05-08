@@ -7,6 +7,8 @@ import {
   type ArticleGridItem,
 } from "@/components/articles-grid";
 import { ArticlesSearchPanel } from "./articles-search-panel";
+import { getOnboardingTours } from "@/app/actions/onboarding";
+import { PageTour } from "@/app/protected/_components/page-tour";
 
 async function ArticlesData() {
   const supabase = await createClient();
@@ -35,6 +37,11 @@ async function ArticlesData() {
   return <ArticlesSearchPanel initialArticles={(data ?? []) as ArticleGridItem[]} />;
 }
 
+async function ArticlesTourMount() {
+  const tours = await getOnboardingTours();
+  return <PageTour tourKey="articles" autoStart={!tours.articles} />;
+}
+
 export default function ArticlesPage() {
   return (
     <div className="flex-1 w-full flex flex-col gap-4">
@@ -46,6 +53,9 @@ export default function ArticlesPage() {
       </div>
       <Suspense fallback={<ArticlesGridFallback />}>
         <ArticlesData />
+      </Suspense>
+      <Suspense fallback={null}>
+        <ArticlesTourMount />
       </Suspense>
     </div>
   );

@@ -644,7 +644,7 @@ export function RelationshipNetworkExplorer(
             }
           >
             {!hideSeedControls ? (
-              <div className="flex gap-2">
+              <div data-tour="relations-search" className="flex gap-2">
                 <TickerSearchCombobox
                   className="flex-1"
                   value={seedInput}
@@ -662,7 +662,7 @@ export function RelationshipNetworkExplorer(
                 </button>
               </div>
             ) : null}
-            <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1">
+            <div data-tour="relations-filters" className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1">
               <span className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
                 Edges
               </span>
@@ -762,6 +762,7 @@ export function RelationshipNetworkExplorer(
             </button>
             <div
               ref={containerRef}
+              data-tour="relations-graph"
               className={
                 fillViewport
                   ? "relative z-0 isolate h-full overflow-hidden bg-card"

@@ -205,7 +205,7 @@ export function ChartsPageClient({ tickersParam, suggestionTickers }: Props) {
 
   return (
     <div className="flex flex-col gap-4 w-full">
-      <div className="grid gap-3 md:grid-cols-6">
+      <div data-tour="chart-ticker-input" className="grid gap-3 md:grid-cols-6">
         <TickerSearchCombobox
           className="md:col-span-5"
           value={searchInput}
@@ -236,10 +236,12 @@ export function ChartsPageClient({ tickersParam, suggestionTickers }: Props) {
         </p>
       ) : null}
 
-      <ChartDateRangePicker onChange={setDateRange} onGranularityChange={setGranularity} />
+      <div data-tour="chart-indicators">
+        <ChartDateRangePicker onChange={setDateRange} onGranularityChange={setGranularity} />
+      </div>
 
       <div className="flex items-stretch w-full">
-        <div className="flex-1 min-w-0">
+        <div data-tour="chart-canvas" className="flex-1 min-w-0">
           <TickerChartsPanel
             symbols={symbols}
             selectedTicker={selectedTicker}
@@ -288,7 +290,7 @@ export function ChartsPageClient({ tickersParam, suggestionTickers }: Props) {
 
         {/* AI chat side panel */}
         {aiChatOpen && selectedTicker && (
-          <div className="hidden sm:flex w-[340px] shrink-0 flex-col border-l border-border min-h-0">
+          <div data-tour="chart-ai-panel" className="hidden sm:flex w-[340px] shrink-0 flex-col border-l border-border min-h-0">
             <ChartAiChat
               key={selectedTicker}
               symbol={selectedTicker}

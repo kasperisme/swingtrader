@@ -36,9 +36,11 @@ framing aggregates.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import os
+import re
 from datetime import date
 from typing import Any
 
@@ -49,8 +51,24 @@ from services.agent_core import build_market_registry, run_tool_loop
 from ..config import OLLAMA_BASE_URL, OLLAMA_PODCAST_SCRIPT_MODEL
 from ..research_agent import _build_podcast_dossier_tools, _parse_dossier_json
 from ..taxonomy_glossary import build_taxonomy_glossary
+from .scene_researcher import (
+    PodcastAgentError,
+    _is_transient_ollama_error,
+    _strip_envelope,
+    _summarize_tool_results,
+)
 
 log = logging.getLogger(__name__)
+
+
+class ProducerError(PodcastAgentError):
+    """Raised when the producer's brief is missing or unusable.
+
+    Downstream researchers and writers depend on the brief's narrative_arc,
+    title, and per-scene angles. A blank brief means the show has no plan —
+    failing here is preferred over shipping a writer with placeholder
+    angles and a generic title.
+    """
 
 
 PODCAST_PRODUCER_MAX_ROUNDS = int(
@@ -86,7 +104,7 @@ _LLM_ACT_NAMES: list[tuple[int, str]] = [
 
 def _system_prompt(today: str, max_rounds: int) -> str:
     glossary = build_taxonomy_glossary()
-    return f"""You are the executive producer for NewsImpact Daily, the swing-trader podcast hosted by Hans (today: {today}).
+    return f"""You are the executive producer for The Impact Tape, the swing-trader podcast hosted by Hans (today: {today}).
 
 Your job: scout today's market with the tools available, find the single narrative thread that ties the whole episode together, and plan all six LLM-written acts. You are NOT writing the script — per-scene researchers and writers do that downstream. Your output is the producer's brief.
 
@@ -154,24 +172,35 @@ These are INTERNAL labels. Listeners never hear them. Use this glossary to trans
 
 
 def _validate_brief(brief: dict) -> dict:
-    """Backfill missing fields so downstream agents always see all six scenes.
+    """Validate the producer's brief or raise ProducerError.
 
-    The model occasionally drops a scene or skips a field. Rather than fail
-    the pipeline, fill the gap with a placeholder string so the editor and
-    writers degrade gracefully.
+    Every LLM-written act must have a non-empty angle, the brief must have
+    a narrative arc, and a title. Anything missing means the producer
+    didn't actually plan the show — refusing to continue beats shipping a
+    writer with a placeholder angle.
     """
     scenes_in = brief.get("scenes") or []
     scenes_by_act = {int(s.get("act", -1)): s for s in scenes_in if isinstance(s, dict)}
 
+    title = str(brief.get("episode_title") or "").strip()
+    arc = str(brief.get("narrative_arc") or "").strip()
+    missing: list[str] = []
+    if not title:
+        missing.append("episode_title")
+    if not arc:
+        missing.append("narrative_arc")
+
     repaired: list[dict] = []
     for act_num, name in _LLM_ACT_NAMES:
         s = scenes_by_act.get(act_num) or {}
+        angle = str(s.get("angle") or "").strip()
+        if not angle:
+            missing.append(f"scene act{act_num} {name} angle")
         repaired.append(
             {
                 "act": act_num,
                 "name": name,
-                "angle": str(s.get("angle") or "").strip()
-                or f"(producer left {name} angle blank — writer falls back to template)",
+                "angle": angle,
                 "hand_off_to_next": (
                     str(s.get("hand_off_to_next") or "").strip()
                     if act_num < 6
@@ -183,15 +212,280 @@ def _validate_brief(brief: dict) -> dict:
             }
         )
 
+    if missing:
+        raise ProducerError(
+            f"Producer brief is missing required fields: {', '.join(missing)}. "
+            "Refusing to ship downstream agents with a blank plan."
+        )
+
     return {
-        "episode_title": str(brief.get("episode_title") or "").strip()
-        or "NewsImpact Daily",
+        "episode_title": title,
         "episode_description": str(brief.get("episode_description") or "").strip(),
-        "narrative_arc": str(brief.get("narrative_arc") or "").strip()
-        or "(producer left narrative arc blank)",
+        "narrative_arc": arc,
         "scouting_notes": str(brief.get("scouting_notes") or "").strip(),
         "scenes": repaired,
     }
+
+
+_SYNTHESIS_RETRY_MAX_ATTEMPTS = max(
+    1, int(os.environ.get("PODCAST_PRODUCER_SYNTHESIS_RETRIES", "3"))
+)
+_SYNTHESIS_RETRY_INITIAL_BACKOFF_S = 2.0
+
+
+# Per-field regex salvage. Used when the model emits a partial brief
+# (truncated mid-string, missing closing braces, etc.) and ``_parse_dossier_json``
+# can't recover the dict. Each field is extracted independently so a
+# truncation halfway through ``scouting_notes`` still gives us title + arc.
+_TITLE_RE = re.compile(
+    r'"episode_title"\s*:\s*"((?:[^"\\]|\\.)*)"', flags=re.DOTALL
+)
+_DESCRIPTION_RE = re.compile(
+    r'"episode_description"\s*:\s*"((?:[^"\\]|\\.)*)"', flags=re.DOTALL
+)
+_ARC_RE = re.compile(r'"narrative_arc"\s*:\s*"((?:[^"\\]|\\.)*)"', flags=re.DOTALL)
+_SCOUTING_RE = re.compile(
+    r'"scouting_notes"\s*:\s*"((?:[^"\\]|\\.)*)"', flags=re.DOTALL
+)
+# Per-scene angle: capture by act number so we don't depend on order.
+_SCENE_ANGLE_RE = re.compile(
+    r'"act"\s*:\s*(\d+)\s*,[^}]*?"angle"\s*:\s*"((?:[^"\\]|\\.)*)"',
+    flags=re.DOTALL,
+)
+_SCENE_HANDOFF_RE = re.compile(
+    r'"act"\s*:\s*(\d+)\s*,[^}]*?"hand_off_to_next"\s*:\s*"((?:[^"\\]|\\.)*)"',
+    flags=re.DOTALL,
+)
+
+
+def _unescape_json_string(s: str) -> str:
+    return (
+        s.replace('\\"', '"')
+        .replace("\\\\", "\\")
+        .replace("\\n", "\n")
+        .replace("\\t", "\t")
+    )
+
+
+def _salvage_brief(raw: str) -> dict:
+    """Best-effort regex extraction of brief fields from malformed text.
+
+    Returns whatever fields could be recovered. Never raises, never
+    returns None — an empty dict means nothing was extractable. The
+    caller merges this onto whatever ``_parse_dossier_json`` produced so
+    a partial parse + partial salvage can still satisfy the validator.
+    """
+    out: dict = {}
+    for key, pattern in (
+        ("episode_title", _TITLE_RE),
+        ("episode_description", _DESCRIPTION_RE),
+        ("narrative_arc", _ARC_RE),
+        ("scouting_notes", _SCOUTING_RE),
+    ):
+        m = pattern.search(raw)
+        if m:
+            value = _unescape_json_string(m.group(1)).strip()
+            if value:
+                out[key] = value
+
+    angle_by_act: dict[int, str] = {}
+    for m in _SCENE_ANGLE_RE.finditer(raw):
+        try:
+            act_num = int(m.group(1))
+        except ValueError:
+            continue
+        angle = _unescape_json_string(m.group(2)).strip()
+        if angle and act_num not in angle_by_act:
+            angle_by_act[act_num] = angle
+
+    handoff_by_act: dict[int, str] = {}
+    for m in _SCENE_HANDOFF_RE.finditer(raw):
+        try:
+            act_num = int(m.group(1))
+        except ValueError:
+            continue
+        handoff = _unescape_json_string(m.group(2)).strip()
+        if act_num not in handoff_by_act:
+            handoff_by_act[act_num] = handoff
+
+    if angle_by_act or handoff_by_act:
+        scenes: list[dict] = []
+        for act_num, name in _LLM_ACT_NAMES:
+            scene_entry: dict = {"act": act_num, "name": name}
+            if act_num in angle_by_act:
+                scene_entry["angle"] = angle_by_act[act_num]
+            if act_num in handoff_by_act:
+                scene_entry["hand_off_to_next"] = handoff_by_act[act_num]
+            scenes.append(scene_entry)
+        out["scenes"] = scenes
+    return out
+
+
+def _missing_required_fields(brief: dict) -> list[str]:
+    """Return the list of validator-required fields still empty.
+
+    Cheap precheck so the call site can skip synthesis when salvage
+    already produced a complete brief, and so retry can show the model
+    which fields it still needs to fill.
+    """
+    missing: list[str] = []
+    if not isinstance(brief, dict):
+        return ["episode_title", "narrative_arc"] + [
+            f"scene act{n} {name} angle" for n, name in _LLM_ACT_NAMES
+        ]
+    if not str(brief.get("episode_title") or "").strip():
+        missing.append("episode_title")
+    if not str(brief.get("narrative_arc") or "").strip():
+        missing.append("narrative_arc")
+    scenes_by_act = {
+        int(s.get("act", -1)): s
+        for s in (brief.get("scenes") or [])
+        if isinstance(s, dict)
+    }
+    for act_num, name in _LLM_ACT_NAMES:
+        scene = scenes_by_act.get(act_num) or {}
+        if not str(scene.get("angle") or "").strip():
+            missing.append(f"scene act{act_num} {name} angle")
+    return missing
+
+
+def _merge_briefs(*briefs: dict) -> dict:
+    """Merge partial briefs left-to-right, preferring later non-empty values.
+
+    For ``scenes``, merges per-act so a synthesized angle for act 3 wins
+    over an empty angle for act 3 in an earlier brief, while a salvaged
+    title still wins if synthesis didn't return one.
+    """
+    merged: dict = {}
+    scenes_by_act: dict[int, dict] = {}
+    for brief in briefs:
+        if not isinstance(brief, dict):
+            continue
+        for key, value in brief.items():
+            if key == "scenes":
+                continue
+            if value:  # non-empty
+                merged[key] = value
+        for scene in brief.get("scenes") or []:
+            if not isinstance(scene, dict):
+                continue
+            try:
+                act_num = int(scene.get("act", -1))
+            except (TypeError, ValueError):
+                continue
+            existing = scenes_by_act.setdefault(act_num, {"act": act_num})
+            for k, v in scene.items():
+                if v:
+                    existing[k] = v
+    if scenes_by_act:
+        merged["scenes"] = [scenes_by_act[k] for k in sorted(scenes_by_act)]
+    return merged
+
+
+async def _synthesize_brief_from_tools(
+    tool_results: dict, today: str, partial: dict | None = None
+) -> dict | None:
+    """Last-resort recovery when the producer's final message is missing.
+
+    Sometimes the model exits the tool loop with empty content or a
+    response that doesn't parse. The tool_results are still in hand, so
+    we call the model fresh with those results inlined and ask it to
+    emit ONLY the EpisodeBrief JSON.
+
+    When ``partial`` is provided (from a previous synthesis attempt or
+    salvage), it's shown to the model along with which fields are still
+    missing — the model only needs to produce the remaining values.
+    Retried on transient errors.
+    """
+    if not tool_results:
+        return None
+
+    partial_block = ""
+    if partial and any(partial.values()):
+        missing = _missing_required_fields(partial)
+        partial_block = (
+            "\n\nPARTIAL BRIEF (from prior attempts — keep these values, "
+            f"fill the missing fields):\n{json.dumps(partial, indent=2)}\n"
+            f"STILL MISSING: {missing or '[]'}\n"
+        )
+
+    user_prompt = (
+        f"Today is {today}. Below are the scouting tool results gathered for "
+        "today's episode. Synthesize them into an EpisodeBrief JSON object "
+        "with EXACTLY this schema:\n\n"
+        "{\n"
+        '  "episode_title": "5-9 word concrete title",\n'
+        '  "episode_description": "2-3 sentence show-notes summary",\n'
+        '  "narrative_arc": "one-sentence story arc",\n'
+        '  "scouting_notes": "2-4 sentences of cross-section context",\n'
+        '  "scenes": [\n'
+        '    {"act": 1, "name": "COLD OPEN",              "angle": "what this act teases", "hand_off_to_next": "tonal pivot", "tools_to_prioritize": []},\n'
+        '    {"act": 2, "name": "EXECUTIVE SUMMARY",      "angle": "...", "hand_off_to_next": "...", "tools_to_prioritize": []},\n'
+        '    {"act": 3, "name": "MARKET REGIME BRIEFING", "angle": "...", "hand_off_to_next": "...", "tools_to_prioritize": []},\n'
+        '    {"act": 4, "name": "TOP STORY DEEP DIVE",    "angle": "...", "hand_off_to_next": "...", "tools_to_prioritize": []},\n'
+        '    {"act": 5, "name": "WATCHLIST PULSE",        "angle": "...", "hand_off_to_next": "...", "tools_to_prioritize": []},\n'
+        '    {"act": 6, "name": "CLOSE + THESIS",         "angle": "...", "hand_off_to_next": "",    "tools_to_prioritize": []}\n'
+        "  ]\n"
+        "}\n\n"
+        "Every angle must be a non-empty concrete sentence. Output ONLY the "
+        "JSON object — no preamble, no markdown fences. Start with { and end with }."
+        f"{partial_block}\n"
+        f"TOOL RESULTS:\n\n{_summarize_tool_results(tool_results)}"
+    )
+    messages = [
+        {
+            "role": "system",
+            "content": (
+                "You are an episode-brief synthesizer. Read the user's tool "
+                "results and emit a single valid EpisodeBrief JSON object. "
+                "No preamble, no markdown fences. Start with { and end with }."
+            ),
+        },
+        {"role": "user", "content": user_prompt},
+    ]
+    backoff = _SYNTHESIS_RETRY_INITIAL_BACKOFF_S
+    last_exc: BaseException | None = None
+    for attempt in range(1, _SYNTHESIS_RETRY_MAX_ATTEMPTS + 1):
+        try:
+            async with httpx.AsyncClient() as client:
+                r = await client.post(
+                    f"{OLLAMA_BASE_URL}/api/chat",
+                    json={
+                        "model": OLLAMA_PODCAST_PRODUCER_MODEL,
+                        "messages": messages,
+                        "stream": False,
+                        "options": {"num_predict": 2048, "temperature": 0.2},
+                    },
+                    timeout=240,
+                )
+                r.raise_for_status()
+                payload = r.json()
+            content = (payload.get("message", {}).get("content") or "").strip()
+            log.info(
+                "Producer: synthesis call returned %d chars (attempt %d)",
+                len(content),
+                attempt,
+            )
+            return _parse_dossier_json(_strip_envelope(content))
+        except Exception as exc:
+            last_exc = exc
+            if (
+                not _is_transient_ollama_error(exc)
+                or attempt == _SYNTHESIS_RETRY_MAX_ATTEMPTS
+            ):
+                raise
+            log.warning(
+                "Producer: synthesis attempt %d/%d failed (%s: %s) — retrying in %.0fs",
+                attempt,
+                _SYNTHESIS_RETRY_MAX_ATTEMPTS,
+                type(exc).__name__,
+                str(exc)[:200],
+                backoff,
+            )
+            await asyncio.sleep(backoff)
+            backoff *= 2
+    assert last_exc is not None
+    raise last_exc
 
 
 async def plan_episode(
@@ -240,15 +534,75 @@ async def plan_episode(
 
     raw = (final_message.get("content") or "").strip()
     raw = raw.removeprefix("```json").removeprefix("```").removesuffix("```").strip()
-    parsed = _parse_dossier_json(raw)
-    if not isinstance(parsed, dict):
-        log.warning(
-            "Producer: final message was not valid JSON (head=%r) — using empty brief",
-            raw[:200],
-        )
-        parsed = {}
+    parsed = _parse_dossier_json(raw) if raw else None
 
-    brief = _validate_brief(parsed)
+    # Always run regex salvage on the raw text — costs nothing and lets a
+    # truncated brief still contribute its title / arc / partial scenes.
+    salvaged = _salvage_brief(raw) if raw else {}
+    if salvaged:
+        log.info(
+            "Producer: regex salvage recovered keys=%s, scenes=%d",
+            sorted(k for k in salvaged if k != "scenes"),
+            len(salvaged.get("scenes") or []),
+        )
+
+    candidate = _merge_briefs(parsed if isinstance(parsed, dict) else {}, salvaged)
+
+    # Validation pre-check: if salvage + parse already yields a complete
+    # brief, skip the synthesis call entirely.
+    needs_synthesis = _missing_required_fields(candidate)
+
+    if needs_synthesis:
+        log.warning(
+            "Producer: parse + salvage incomplete (missing=%s) — "
+            "falling back to tool-results synthesis (%d tools called, raw=%d chars)",
+            needs_synthesis[:5],
+            len(tool_results),
+            len(raw),
+        )
+        if not tool_results:
+            raise ProducerError(
+                "Producer brief unrecoverable — final message was unusable "
+                f"(raw={len(raw)} chars, head={raw[:200]!r}) AND the tool "
+                "loop produced zero tool_results, so synthesis has no "
+                "market data to build a brief from. The producer never "
+                "actually scouted the market."
+            )
+
+        # Retry synthesis with feedback when it returns a brief that still
+        # fails validation. Each attempt sees the partial brief from the
+        # last try so the model knows which fields to fill.
+        for attempt in range(1, _SYNTHESIS_RETRY_MAX_ATTEMPTS + 1):
+            try:
+                synthesized = await _synthesize_brief_from_tools(
+                    tool_results,
+                    today,
+                    partial=candidate if any(candidate.values()) else None,
+                )
+            except Exception as exc:
+                log.warning(
+                    "Producer: synthesis attempt %d/%d call failed: %s",
+                    attempt,
+                    _SYNTHESIS_RETRY_MAX_ATTEMPTS,
+                    exc,
+                )
+                synthesized = None
+
+            if isinstance(synthesized, dict):
+                candidate = _merge_briefs(candidate, synthesized)
+                missing_after = _missing_required_fields(candidate)
+                log.info(
+                    "Producer: synthesis attempt %d merged — missing now=%s",
+                    attempt,
+                    missing_after[:5] or "[]",
+                )
+                if not missing_after:
+                    break
+
+    if not isinstance(candidate, dict):
+        candidate = {}
+
+    brief = _validate_brief(candidate)
 
     log.info(
         "Producer: brief ready — rounds=%d/%d, tools_called=%d, arc=%r",

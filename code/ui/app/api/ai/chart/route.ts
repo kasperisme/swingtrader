@@ -6,6 +6,12 @@ import { getAnthropicClient, DEFAULT_MODEL, ROUTER_MODEL } from "@/lib/anthropic
 import { PERSONA_PROMPTS, ORCHESTRATOR_PROMPT, ROUTER_PROMPT, PERSONA_LABELS, withTradingStrategy, type PersonaId } from "@/lib/chart-ai/personas";
 import type { PersonaScores } from "@/app/actions/chart-workspace";
 import { screeningsUpsertDismissNote } from "@/app/actions/screenings";
+import {
+  TOURS,
+  howToBriefMarkdown,
+  howToUrl,
+} from "@/app/protected/_components/tour-configs";
+import type { TourKey } from "@/app/actions/onboarding";
 
 type TickerStatus = "active" | "dismissed" | "watchlist" | "pipeline";
 const TICKER_STATUSES: readonly TickerStatus[] = ["active", "dismissed", "watchlist", "pipeline"];
@@ -91,9 +97,47 @@ const UPDATE_STATUS_TOOL: Anthropic.Tool = {
   },
 };
 
+const TOUR_KEYS = Object.keys(TOURS) as TourKey[];
+
+const SHOW_HOW_TO_TOOL: Anthropic.Tool = {
+  name: "show_how_to",
+  description:
+    "Drive a guided tour highlighting the exact UI elements that answer a 'how do I…' question. Use when the user asks how to do something the platform supports — creating a screening, adding a ticker, scheduling an agent, connecting Telegram, etc. Pick the tour_key whose route matches the feature; pass from_step / to_step (0-based, inclusive) when the question only needs a slice of the tour. The user is auto-navigated to the right page; the tour drives itself.",
+  input_schema: {
+    type: "object",
+    required: ["tour_key"],
+    properties: {
+      tour_key: {
+        type: "string",
+        enum: TOUR_KEYS,
+        description:
+          "Which tour to drive. Each tour belongs to one route — see the how-to brief in the system prompt.",
+      },
+      from_step: {
+        type: "integer",
+        minimum: 0,
+        description:
+          "0-based first step to play. Defaults to 0 (start of tour). Use a higher index when the answer lives mid-tour.",
+      },
+      to_step: {
+        type: "integer",
+        minimum: 0,
+        description:
+          "0-based last step to play (inclusive). Defaults to the final step. Keep the range tight — usually 1–3 steps.",
+      },
+      reply: {
+        type: "string",
+        description:
+          "Short markdown sentence shown alongside the navigation, e.g. 'Taking you to the screener — watch the highlighted steps.' Keep under 200 chars.",
+      },
+    },
+  },
+};
+
 const DRAW_CHART_TOOL: Anthropic.Tool = {
   name: "draw_on_chart",
-  description: "Draw technical analysis annotations on the price chart and provide your analysis. You MUST call this tool for every response.",
+  description:
+    "Draw technical analysis annotations on the price chart and provide your analysis. Call this for any analysis or drawing request. Skip it for pure how-to / 'where is X' questions — use show_how_to instead.",
   input_schema: {
     type: "object",
     required: ["annotations", "analysis"],
@@ -355,14 +399,23 @@ export async function POST(req: Request) {
         ];
 
         const tools: Anthropic.Tool[] = canUpdateStatus
-          ? [DRAW_CHART_TOOL, UPDATE_STATUS_TOOL]
-          : [DRAW_CHART_TOOL];
+          ? [DRAW_CHART_TOOL, UPDATE_STATUS_TOOL, SHOW_HOW_TO_TOOL]
+          : [DRAW_CHART_TOOL, SHOW_HOW_TO_TOOL];
+
+        const howToSystem =
+          `\n\n## How-to / "show me" questions\n` +
+          `If the user asks how to do something the platform supports (e.g. "how do I add this to a screening", "where do I schedule an agent", "how does Telegram work"), call the show_how_to tool with the matching tour_key + step range instead of writing prose. The user is auto-navigated and the tour drives itself.\n\n` +
+          `Pick a tight step range (often 1–3 steps) — only span more steps when the question genuinely covers more.\n\n` +
+          `Available tours and their steps (use these tour_key values verbatim):\n\n` +
+          howToBriefMarkdown();
 
         const tOrchestrator = performance.now();
         let result: ClaudeResult;
         try {
           result = await callClaude(orchestratorMessages, {
-            system: withTradingStrategy(ORCHESTRATOR_PROMPT(symbol), tradingStrategy ?? ""),
+            system:
+              withTradingStrategy(ORCHESTRATOR_PROMPT(symbol), tradingStrategy ?? "") +
+              howToSystem,
             tools,
             toolChoice: { type: "auto" },
             maxTokens: 4096,
@@ -378,6 +431,25 @@ export async function POST(req: Request) {
             const args = tu.input as { annotations?: RawAnnotation[]; analysis?: string };
             annotations = parseAnnotations(args.annotations ?? []);
             if (args.analysis) analysisText = args.analysis;
+          } else if (tu.name === "show_how_to") {
+            const args = tu.input as {
+              tour_key?: string;
+              from_step?: number;
+              to_step?: number;
+              reply?: string;
+            };
+            if (
+              typeof args.tour_key === "string" &&
+              (TOUR_KEYS as string[]).includes(args.tour_key)
+            ) {
+              const url = howToUrl(
+                args.tour_key as TourKey,
+                args.from_step,
+                args.to_step,
+              );
+              emit(controller, { type: "navigate", url, reply: args.reply ?? null });
+              if (args.reply) analysisText = args.reply;
+            }
           } else if (tu.name === "update_ticker_status" && canUpdateStatus) {
             const args = tu.input as { status?: string; comment?: string; highlighted?: boolean };
             const status = TICKER_STATUSES.includes(args.status as TickerStatus)
