@@ -129,6 +129,7 @@ function opsForField(f: FieldKind): OpDef[] {
     case "wf_priority":
       return [
         { id: "eq", label: "Equals", sym: "=" },
+        { id: "neq", label: "Not equal", sym: "≠" },
         { id: "gt", label: "Greater than", sym: ">" },
         { id: "gte", label: "Greater or equal", sym: "≥" },
         { id: "lt", label: "Less than", sym: "<" },
@@ -144,6 +145,7 @@ function opsForField(f: FieldKind): OpDef[] {
     case "row_num":
       return [
         { id: "eq", label: "Equals", sym: "=" },
+        { id: "neq", label: "Not equal", sym: "≠" },
         { id: "gt", label: "Greater than", sym: ">" },
         { id: "gte", label: "Greater or equal", sym: "≥" },
         { id: "lt", label: "Less than", sym: "<" },
@@ -152,12 +154,15 @@ function opsForField(f: FieldKind): OpDef[] {
     case "row_str_cat":
       return [
         { id: "in", label: "Is one of…", sym: "∈" },
+        { id: "not_in", label: "Is none of…", sym: "∉" },
         { id: "eq", label: "Equals", sym: "=" },
+        { id: "neq", label: "Not equal", sym: "≠" },
       ];
     case "row_str_free":
       return [
         { id: "contains", label: "Contains", sym: "~~" },
         { id: "eq", label: "Equals", sym: "=" },
+        { id: "neq", label: "Not equal", sym: "≠" },
       ];
     default:
       return [];
@@ -289,6 +294,16 @@ function buildPills(filters: ScreeningsFilters, setFilters: SetFilters) {
       });
     }
   }
+  // Not-equal renders alongside range filters since they compose (e.g.
+  // "1 ≤ priority ≤ 10 AND priority ≠ 5"). Skipped only when an exact-eq
+  // is set, since neq can't coexist with eq (the apply handler clears it).
+  if (!pq(filters.notePriorityEq) && pq(filters.notePriorityNeq ?? "")) {
+    pills.push({
+      id: "pr-neq",
+      text: `priority ≠ ${pq(filters.notePriorityNeq ?? "")}`,
+      remove: () => patch((p) => ({ ...p, notePriorityNeq: "" })),
+    });
+  }
   for (const t of filters.noteTagsAny) {
     pills.push({
       id: `tag-${t}`,
@@ -393,6 +408,18 @@ function buildPills(filters: ScreeningsFilters, setFilters: SetFilters) {
         }),
     });
   }
+  for (const [k, v] of Object.entries(filters.numNeq ?? {})) {
+    if (!pq(v)) continue;
+    pills.push({
+      id: `nne-${k}`,
+      text: `${k} ≠ ${pq(v)}`,
+      remove: () =>
+        patch((p) => {
+          const { [k]: _, ...rest } = p.numNeq;
+          return { ...p, numNeq: rest };
+        }),
+    });
+  }
   for (const [k, vals] of Object.entries(filters.stringOneOf)) {
     if (!vals.length) continue;
     const label = vals.length === 1 ? `${k} = ${vals[0]}` : `${k} ∈ (${vals.length} values)`;
@@ -428,6 +455,32 @@ function buildPills(filters: ScreeningsFilters, setFilters: SetFilters) {
         patch((p) => {
           const { [k]: _, ...rest } = p.stringEquals;
           return { ...p, stringEquals: rest };
+        }),
+    });
+  }
+  for (const [k, vals] of Object.entries(filters.stringNoneOf ?? {})) {
+    if (!vals.length) continue;
+    const label = vals.length === 1 ? `${k} ≠ ${vals[0]}` : `${k} ∉ (${vals.length} values)`;
+    pills.push({
+      id: `sno-${k}`,
+      text: label,
+      title: vals.join(", "),
+      remove: () =>
+        patch((p) => {
+          const { [k]: _, ...rest } = p.stringNoneOf;
+          return { ...p, stringNoneOf: rest };
+        }),
+    });
+  }
+  for (const [k, v] of Object.entries(filters.stringNotEquals ?? {})) {
+    if (!pq(v)) continue;
+    pills.push({
+      id: `sne-${k}`,
+      text: `${k} ≠ "${pq(v).slice(0, 20)}${pq(v).length > 20 ? "…" : ""}"`,
+      remove: () =>
+        patch((p) => {
+          const { [k]: _, ...rest } = p.stringNotEquals;
+          return { ...p, stringNotEquals: rest };
         }),
     });
   }
@@ -699,6 +752,18 @@ export function AddFilterWidget({
           notePriorityMax: n,
           notePriorityGt: "",
           notePriorityLt: "",
+          notePriorityNeq: "",
+        }));
+        return;
+      }
+      if (op === "neq") {
+        // Not-equal can coexist with range filters (e.g. "1 ≤ priority ≤ 5
+        // but not 3"), but obviously contradicts an exact-equal — so clear
+        // the eq fields when setting neq.
+        applyFilter((p) => ({
+          ...p,
+          notePriorityNeq: n,
+          notePriorityEq: "",
         }));
         return;
       }
@@ -746,6 +811,23 @@ export function AddFilterWidget({
           numMax: { ...strip(p.numMax, k), [k]: n },
           numGt: strip(p.numGt, k),
           numLt: strip(p.numLt, k),
+          numNeq: strip(p.numNeq ?? {}, k),
+        }));
+        return;
+      }
+      if (op === "neq") {
+        applyFilter((p) => ({
+          ...p,
+          numNeq: { ...strip(p.numNeq ?? {}, k), [k]: n },
+          // Drop a contradictory exact-equal (eq is encoded as min==max).
+          numMin:
+            p.numMin[k] === p.numMax[k]
+              ? strip(p.numMin, k)
+              : p.numMin,
+          numMax:
+            p.numMin[k] === p.numMax[k]
+              ? strip(p.numMax, k)
+              : p.numMax,
         }));
         return;
       }
@@ -791,6 +873,23 @@ export function AddFilterWidget({
         applyFilter((p) => ({ ...p, stringOneOf: { ...p.stringOneOf, [k]: [v] } }));
         return;
       }
+      if (op === "neq") {
+        const v = valueDraft.trim();
+        if (!v) return;
+        applyFilter((p) => ({
+          ...p,
+          stringNotEquals: { ...p.stringNotEquals, [k]: v },
+        }));
+        return;
+      }
+      if (op === "not_in") {
+        if (catDraft.size === 0) return;
+        applyFilter((p) => ({
+          ...p,
+          stringNoneOf: { ...p.stringNoneOf, [k]: [...catDraft] },
+        }));
+        return;
+      }
       if (catDraft.size === 0) return;
       applyFilter((p) => ({ ...p, stringOneOf: { ...p.stringOneOf, [k]: [...catDraft] } }));
       return;
@@ -801,6 +900,11 @@ export function AddFilterWidget({
       if (!v) return;
       if (op === "contains") {
         applyFilter((p) => ({ ...p, stringContains: { ...p.stringContains, [k]: v } }));
+      } else if (op === "neq") {
+        applyFilter((p) => ({
+          ...p,
+          stringNotEquals: { ...p.stringNotEquals, [k]: v },
+        }));
       } else {
         applyFilter((p) => ({ ...p, stringEquals: { ...p.stringEquals, [k]: v } }));
       }

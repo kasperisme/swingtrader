@@ -86,6 +86,14 @@ export function filterAndSortScreeningRows(
         if (p == null || !Number.isFinite(p) || p >= bound) return false;
       }
     }
+    const pneqNote = (filters.notePriorityNeq ?? "").trim();
+    if (pneqNote) {
+      const bound = parseFloat(pneqNote);
+      if (Number.isFinite(bound)) {
+        const p = note?.priority;
+        if (p != null && Number.isFinite(p) && p === bound) return false;
+      }
+    }
 
     if (filters.noteTagsAny.length > 0) {
       const rowTags = new Set(
@@ -138,11 +146,28 @@ export function filterAndSortScreeningRows(
       const n = typeof v === "number" ? v : parseFloat(String(v));
       if (!Number.isFinite(n) || n >= lt) return false;
     }
+    for (const [k, neqStr] of Object.entries(filters.numNeq ?? {})) {
+      const t = neqStr?.trim();
+      if (!t) continue;
+      const neq = parseFloat(t);
+      if (!Number.isFinite(neq)) continue;
+      const v = getRowDataValue(r, k);
+      const n = typeof v === "number" ? v : parseFloat(String(v));
+      // Reject only when the row has a comparable number that matches.
+      // Missing/non-numeric values pass (otherwise neq would silently
+      // exclude all unparseable rows, which surprises the user).
+      if (Number.isFinite(n) && n === neq) return false;
+    }
 
     for (const [k, allowed] of Object.entries(filters.stringOneOf)) {
       if (!allowed.length) continue;
       const s = stringifyRowDataValueForFilter(getRowDataValue(r, k));
       if (!allowed.includes(s)) return false;
+    }
+    for (const [k, denied] of Object.entries(filters.stringNoneOf ?? {})) {
+      if (!denied.length) continue;
+      const s = stringifyRowDataValueForFilter(getRowDataValue(r, k));
+      if (denied.includes(s)) return false;
     }
     for (const [k, sub] of Object.entries(filters.stringContains)) {
       const needle = sub.trim().toLowerCase();
@@ -157,6 +182,12 @@ export function filterAndSortScreeningRows(
       if (!want) continue;
       const s = stringifyRowDataValueForFilter(getRowDataValue(r, k));
       if (s !== want) return false;
+    }
+    for (const [k, exact] of Object.entries(filters.stringNotEquals ?? {})) {
+      const want = exact.trim();
+      if (!want) continue;
+      const s = stringifyRowDataValueForFilter(getRowDataValue(r, k));
+      if (s === want) return false;
     }
 
     return true;

@@ -46,9 +46,12 @@ def apply_scan_filters(rows: list[dict], filters: dict) -> list[str]:
     num_max: dict[str, str] = filters.get("numMax") or {}
     num_gt: dict[str, str] = filters.get("numGt") or {}
     num_lt: dict[str, str] = filters.get("numLt") or {}
+    num_neq: dict[str, str] = filters.get("numNeq") or {}
     str_one_of: dict[str, list[str]] = filters.get("stringOneOf") or {}
+    str_none_of: dict[str, list[str]] = filters.get("stringNoneOf") or {}
     str_contains: dict[str, str] = filters.get("stringContains") or {}
     str_equals: dict[str, str] = filters.get("stringEquals") or {}
+    str_not_equals: dict[str, str] = filters.get("stringNotEquals") or {}
 
     wf_status = filters.get("status") or "all"
     wf_has_row_note = filters.get("hasRowNote") or "any"
@@ -57,6 +60,7 @@ def apply_scan_filters(rows: list[dict], filters: dict) -> list[str]:
     wf_comment = filters.get("noteComment") or "any"
     wf_stage = filters.get("noteStage") or ""
     wf_priority_eq = (filters.get("notePriorityEq") or "").strip()
+    wf_priority_neq = (filters.get("notePriorityNeq") or "").strip()
     wf_priority_gt = (filters.get("notePriorityGt") or "").strip()
     wf_priority_lt = (filters.get("notePriorityLt") or "").strip()
     wf_priority_min = (filters.get("notePriorityMin") or "").strip()
@@ -129,6 +133,12 @@ def apply_scan_filters(rows: list[dict], filters: dict) -> list[str]:
                 pv = _num(rd.get("__note_priority"))
                 if pv is None or pv > float(wf_priority_max):
                     continue
+            if wf_priority_neq:
+                pv = _num(rd.get("__note_priority"))
+                # Reject only when the row has a comparable priority that
+                # matches; missing priorities pass (mirrors the UI evaluator).
+                if pv is not None and pv == float(wf_priority_neq):
+                    continue
 
         if wf_tags_any:
             note_tags: list[str] = rd.get("__note_tags") or []
@@ -194,8 +204,27 @@ def apply_scan_filters(rows: list[dict], filters: dict) -> list[str]:
         if skip:
             continue
 
+        for key, bound_s in num_neq.items():
+            if not (bound_s or "").strip():
+                continue
+            try:
+                # Reject only when the value parses AND equals the bound.
+                # Unparseable / missing values pass (mirrors the UI).
+                if float(_stringify_value(rd.get(key))) == float(bound_s):
+                    skip = True; break
+            except (TypeError, ValueError):
+                pass
+        if skip:
+            continue
+
         for key, allowed in str_one_of.items():
             if allowed and _stringify_value(rd.get(key)) not in allowed:
+                skip = True; break
+        if skip:
+            continue
+
+        for key, denied in str_none_of.items():
+            if denied and _stringify_value(rd.get(key)) in denied:
                 skip = True; break
         if skip:
             continue
@@ -208,6 +237,12 @@ def apply_scan_filters(rows: list[dict], filters: dict) -> list[str]:
 
         for key, expected in str_equals.items():
             if (expected or "").strip() and _stringify_value(rd.get(key)) != expected.strip():
+                skip = True; break
+        if skip:
+            continue
+
+        for key, banned in str_not_equals.items():
+            if (banned or "").strip() and _stringify_value(rd.get(key)) == banned.strip():
                 skip = True; break
         if skip:
             continue

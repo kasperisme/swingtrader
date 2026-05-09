@@ -31,6 +31,8 @@ export interface ScreeningsFilters {
   notePriorityGt: string;
   notePriorityLt: string;
   notePriorityEq: string;
+  /** Reject rows where note priority equals this value. */
+  notePriorityNeq: string;
   noteTagsAny: string[];
   boolRequire: Record<string, boolean>;
   /** When true, row value must be falsy (boolean columns). */
@@ -39,10 +41,16 @@ export interface ScreeningsFilters {
   numMax: Record<string, string>;
   numGt: Record<string, string>;
   numLt: Record<string, string>;
+  /** Reject rows where the numeric value equals this number. */
+  numNeq: Record<string, string>;
   stringOneOf: Record<string, string[]>;
+  /** Reject rows whose stringified value is in this list (categorical exclude). */
+  stringNoneOf: Record<string, string[]>;
   stringContains: Record<string, string>;
   /** Exact match on `stringifyRowDataValueForFilter` (row string columns). */
   stringEquals: Record<string, string>;
+  /** Reject rows whose stringified value matches this exactly. */
+  stringNotEquals: Record<string, string>;
 }
 
 export const DEFAULT_SCREENINGS_FILTERS: ScreeningsFilters = {
@@ -58,6 +66,7 @@ export const DEFAULT_SCREENINGS_FILTERS: ScreeningsFilters = {
   notePriorityGt: "",
   notePriorityLt: "",
   notePriorityEq: "",
+  notePriorityNeq: "",
   noteTagsAny: [],
   boolRequire: {},
   boolReject: {},
@@ -65,9 +74,12 @@ export const DEFAULT_SCREENINGS_FILTERS: ScreeningsFilters = {
   numMax: {},
   numGt: {},
   numLt: {},
+  numNeq: {},
   stringOneOf: {},
+  stringNoneOf: {},
   stringContains: {},
   stringEquals: {},
+  stringNotEquals: {},
 };
 
 export function countScreeningsFilterRules(f: ScreeningsFilters): number {
@@ -84,6 +96,7 @@ export function countScreeningsFilterRules(f: ScreeningsFilters): number {
   if (f.notePriorityGt.trim()) n++;
   if (f.notePriorityLt.trim()) n++;
   if (f.notePriorityEq.trim()) n++;
+  if (f.notePriorityNeq?.trim()) n++;
   if (f.noteTagsAny.length > 0) n++;
   for (const on of Object.values(f.boolRequire)) {
     if (on) n++;
@@ -103,13 +116,22 @@ export function countScreeningsFilterRules(f: ScreeningsFilters): number {
   for (const s of Object.values(f.numLt)) {
     if (s && String(s).trim()) n++;
   }
+  for (const s of Object.values(f.numNeq ?? {})) {
+    if (s && String(s).trim()) n++;
+  }
   for (const arr of Object.values(f.stringOneOf)) {
+    if (arr && arr.length > 0) n++;
+  }
+  for (const arr of Object.values(f.stringNoneOf ?? {})) {
     if (arr && arr.length > 0) n++;
   }
   for (const s of Object.values(f.stringContains)) {
     if (s && String(s).trim()) n++;
   }
   for (const s of Object.values(f.stringEquals)) {
+    if (s && String(s).trim()) n++;
+  }
+  for (const s of Object.values(f.stringNotEquals ?? {})) {
     if (s && String(s).trim()) n++;
   }
   return n;
