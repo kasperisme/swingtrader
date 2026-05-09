@@ -1,5 +1,6 @@
 import { getOrCreateUserProfile } from "@/lib/user-profile";
 import { WelcomeDialog } from "./_components/welcome-dialog";
+import { PostWelcomeHighlightTour } from "./_components/post-welcome-highlight-tour";
 import { HelpChatRoot } from "@/components/help-chat";
 
 export default async function ProtectedLayout({
@@ -16,6 +17,7 @@ export default async function ProtectedLayout({
         {children}
       </div>
       {showWelcome && <WelcomeDialog displayName={profile?.display_name ?? null} />}
+      <PostWelcomeHighlightTour />
       <HelpChatRoot />
     </main>
   );

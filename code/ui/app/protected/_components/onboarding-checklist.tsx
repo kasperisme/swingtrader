@@ -24,10 +24,7 @@ import {
   type OnboardingStepKey,
   type VisitStepKey,
 } from "@/app/actions/onboarding";
-import {
-  clearPostWelcomeHighlight,
-  usePostWelcomeHighlight,
-} from "./onboarding-highlight";
+import { clearPostWelcomeHighlight } from "./onboarding-highlight";
 import { AskAiReminder } from "./ask-ai-reminder";
 
 type Step = {
@@ -131,7 +128,6 @@ export function OnboardingChecklist({ initialProgress }: { initialProgress: Onbo
     const firstIncomplete = STEPS.findIndex((s) => !initialProgress[s.key]);
     return firstIncomplete === -1 ? 0 : firstIncomplete;
   });
-  const highlight = usePostWelcomeHighlight();
   const [, startTransition] = useTransition();
 
   useEffect(() => {
@@ -214,12 +210,8 @@ export function OnboardingChecklist({ initialProgress }: { initialProgress: Onbo
 
   if (allComplete) {
     return (
-      <div className="space-y-2">
-        <div
-          className={`rounded-lg border border-emerald-500/30 bg-emerald-500/5 px-4 py-3 text-sm transition-shadow ${
-            highlight ? "ring-2 ring-amber-400 ring-offset-2 ring-offset-background animate-pulse" : ""
-          }`}
-        >
+      <div className="space-y-2" data-tour="onboarding-checklist">
+        <div className="rounded-lg border border-emerald-500/30 bg-emerald-500/5 px-4 py-3 text-sm">
           <div className="flex items-center justify-between gap-3">
             <div className="flex items-center gap-2">
               <Sparkles className="h-4 w-4 text-emerald-500" aria-hidden />
@@ -259,9 +251,8 @@ export function OnboardingChecklist({ initialProgress }: { initialProgress: Onbo
 
   return (
     <div
-      className={`rounded-lg border border-border bg-card transition-shadow ${
-        highlight ? "ring-2 ring-amber-400 ring-offset-2 ring-offset-background animate-pulse" : ""
-      }`}
+      data-tour="onboarding-checklist"
+      className="rounded-lg border border-border bg-card"
     >
       <div
         className={`flex items-start justify-between gap-3 px-4 py-3 ${

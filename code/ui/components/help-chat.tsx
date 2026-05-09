@@ -26,10 +26,7 @@ import {
   type RunTourEventDetail,
 } from "@/app/protected/_components/page-tour";
 import { TOURS } from "@/app/protected/_components/tour-configs";
-import {
-  clearPostWelcomeHighlight,
-  usePostWelcomeHighlight,
-} from "@/app/protected/_components/onboarding-highlight";
+import { clearPostWelcomeHighlight } from "@/app/protected/_components/onboarding-highlight";
 import type { TourKey } from "@/app/actions/onboarding";
 
 type ChatMessage = { role: "user" | "assistant"; content: string };
@@ -60,16 +57,10 @@ export function closeHelpChat() {
 }
 
 export function HelpChatTrigger({ className = "" }: { className?: string }) {
-  const highlight = usePostWelcomeHighlight();
-  const baseClass =
-    className ||
-    "inline-flex items-center gap-1.5 text-sm font-medium text-muted-foreground transition-colors hover:text-foreground cursor-pointer";
-  const highlightClass = highlight
-    ? "rounded-md ring-2 ring-amber-400 ring-offset-2 ring-offset-background animate-pulse"
-    : "";
   return (
     <button
       type="button"
+      data-tour="ask-ai"
       onClick={() => {
         // Don't stop propagation — the mobile nav drawer wraps the trigger
         // in <li onClick={close}> and we want that to fire too so the drawer
@@ -77,7 +68,10 @@ export function HelpChatTrigger({ className = "" }: { className?: string }) {
         clearPostWelcomeHighlight();
         openHelpChat();
       }}
-      className={`${baseClass} ${highlightClass}`.trim()}
+      className={
+        className ||
+        "inline-flex items-center gap-1.5 text-sm font-medium text-muted-foreground transition-colors hover:text-foreground cursor-pointer"
+      }
       aria-label="Open help chat"
     >
       <Sparkles className="h-3.5 w-3.5" />

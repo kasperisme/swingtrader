@@ -14,7 +14,10 @@ import { clearPostWelcomeHighlight } from "./onboarding-highlight";
  */
 export function AskAiReminder() {
   return (
-    <div className="rounded-lg border border-border/60 bg-muted/20 px-4 py-3 text-xs text-muted-foreground">
+    <div
+      data-tour="onboarding-checklist"
+      className="rounded-lg border border-border/60 bg-muted/20 px-4 py-3 text-xs text-muted-foreground"
+    >
       <div className="flex items-center gap-2">
         <Sparkles className="h-3.5 w-3.5 shrink-0 text-amber-400" aria-hidden />
         <span>
