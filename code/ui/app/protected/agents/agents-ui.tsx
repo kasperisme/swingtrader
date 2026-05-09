@@ -2,7 +2,8 @@
 
 import { useState, useMemo, useCallback, useEffect, useId } from "react";
 import { track } from "@/lib/analytics/events";
-import { Bot, Pause, Play, Trash2, Plus, Clock, AlertCircle, Zap, Loader2, LayoutList, CalendarDays, ChevronLeft, ChevronRight, Pencil, X, Link2, Filter } from "lucide-react";
+import { Bot, Pause, Play, Trash2, Plus, Clock, AlertCircle, Zap, Loader2, LayoutList, CalendarDays, ChevronLeft, ChevronRight, Pencil, X, Link2, Filter, Send } from "lucide-react";
+import { TelegramConnect } from "@/components/telegram-connect";
 import {
   type ScheduledScreening,
   type ScreeningResult,
@@ -46,12 +47,14 @@ type Props = {
   } | null;
   error: string | null;
   suggestionTickers: string[];
+  telegramConnected: boolean;
 };
 
-export function AgentsUI({ screenings, limits, error, suggestionTickers }: Props) {
+export function AgentsUI({ screenings, limits, error, suggestionTickers, telegramConnected }: Props) {
   const [showForm, setShowForm] = useState(false);
   const [view, setView] = useState<"list" | "calendar">("list");
   const atLimit = limits ? limits.used >= limits.limit : true;
+  const createBlocked = !telegramConnected || atLimit;
 
   return (
     <div className="flex min-w-0 w-full flex-col gap-6">
@@ -59,6 +62,22 @@ export function AgentsUI({ screenings, limits, error, suggestionTickers }: Props
         <div className="flex min-w-0 items-start gap-3 rounded-xl border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm text-destructive">
           <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
           <span className="min-w-0 break-words">{error}</span>
+        </div>
+      )}
+
+      {!telegramConnected && (
+        <div className="flex min-w-0 flex-col gap-3">
+          <div className="flex min-w-0 items-start gap-3 rounded-xl border border-amber-500/40 bg-amber-500/5 px-4 py-3 text-sm">
+            <Send className="w-4 h-4 shrink-0 mt-0.5 text-amber-500" />
+            <div className="min-w-0">
+              <p className="font-medium text-foreground">Connect Telegram to create agents</p>
+              <p className="mt-0.5 text-xs text-muted-foreground">
+                Agents deliver alerts via Telegram. Pair your account below — once
+                connected, you&apos;ll be able to create and run scheduled agents.
+              </p>
+            </div>
+          </div>
+          <TelegramConnect />
         </div>
       )}
 
@@ -104,8 +123,15 @@ export function AgentsUI({ screenings, limits, error, suggestionTickers }: Props
             <button
               type="button"
               onClick={() => setShowForm(true)}
-              disabled={atLimit}
+              disabled={createBlocked}
               data-tour="agent-create"
+              title={
+                !telegramConnected
+                  ? "Connect Telegram first to create agents"
+                  : atLimit
+                    ? "You've reached your active-agent limit"
+                    : undefined
+              }
               className="inline-flex items-center gap-1.5 rounded-md bg-foreground px-3 py-2.5 text-sm font-medium text-background transition-opacity hover:opacity-90 disabled:opacity-40 disabled:pointer-events-none"
             >
               <Plus className="w-3.5 h-3.5" />
@@ -115,7 +141,7 @@ export function AgentsUI({ screenings, limits, error, suggestionTickers }: Props
         </div>
       </div>
 
-      {showForm && (
+      {showForm && telegramConnected && (
         <CreateForm
           onClose={() => setShowForm(false)}
           atLimit={atLimit}

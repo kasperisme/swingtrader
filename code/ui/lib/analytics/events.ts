@@ -34,6 +34,7 @@ type EventMap = {
   onboarding_dismissed: { completed_steps: number; total_steps: number };
   onboarding_collapsed_toggled: { collapsed: boolean };
   onboarding_restarted: { completed_steps: number; total_steps: number };
+  ask_ai_reminder_clicked: Record<string, never>;
 };
 
 export function track<K extends keyof EventMap>(

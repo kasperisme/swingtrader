@@ -33,6 +33,18 @@ async function fetchVectorTickers(): Promise<string[]> {
   return out;
 }
 
+async function fetchTelegramConnected(userId: string): Promise<boolean> {
+  const supabase = await createClient();
+  const { data } = await supabase
+    .schema("swingtrader")
+    .from("user_telegram_connections")
+    .select("chat_id")
+    .eq("user_id", userId)
+    .limit(1)
+    .maybeSingle();
+  return Boolean(data?.chat_id);
+}
+
 async function AgentsData() {
   const supabase = await createClient();
   const {
@@ -40,10 +52,11 @@ async function AgentsData() {
   } = await supabase.auth.getUser();
   if (!user) redirect("/auth/login");
 
-  const [screeningsRes, limitsRes, suggestionTickers] = await Promise.all([
+  const [screeningsRes, limitsRes, suggestionTickers, telegramConnected] = await Promise.all([
     listScheduledScreenings(),
     getScreeningLimits(),
     fetchVectorTickers(),
+    fetchTelegramConnected(user.id),
   ]);
 
   return (
@@ -52,6 +65,7 @@ async function AgentsData() {
       limits={limitsRes.ok ? limitsRes.data : null}
       error={screeningsRes.ok ? null : screeningsRes.error}
       suggestionTickers={suggestionTickers}
+      telegramConnected={telegramConnected}
     />
   );
 }

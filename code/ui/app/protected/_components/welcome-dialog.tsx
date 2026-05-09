@@ -5,6 +5,7 @@ import { PlayCircle } from "lucide-react";
 
 import { markWelcomed } from "@/app/actions/onboarding";
 import { track } from "@/lib/analytics/events";
+import { setPostWelcomeHighlight } from "./onboarding-highlight";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -34,6 +35,10 @@ export function WelcomeDialog({ displayName }: Props) {
   function dismiss(skipped = false) {
     setOpen(false);
     track("onboarding_completed", { skipped });
+    // Briefly highlight the onboarding checklist + the Ask AI button so
+    // the user knows where to go next. Auto-clears after 30s or first
+    // interaction with either element.
+    setPostWelcomeHighlight();
     // Persist in the background; the dialog stays closed even if this fails
     // (worst case: user sees it again on next navigation).
     startTransition(async () => {

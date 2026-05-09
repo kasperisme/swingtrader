@@ -2,7 +2,17 @@
 
 import { useEffect, useMemo, useState, useTransition } from "react";
 import Link from "next/link";
-import { Check, X, Sparkles, ArrowRight, ChevronDown, ChevronUp, RotateCcw } from "lucide-react";
+import {
+  Check,
+  X,
+  Sparkles,
+  ArrowRight,
+  ChevronDown,
+  ChevronUp,
+  ChevronLeft,
+  ChevronRight,
+  RotateCcw,
+} from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { track } from "@/lib/analytics/events";
@@ -14,6 +24,11 @@ import {
   type OnboardingStepKey,
   type VisitStepKey,
 } from "@/app/actions/onboarding";
+import {
+  clearPostWelcomeHighlight,
+  usePostWelcomeHighlight,
+} from "./onboarding-highlight";
+import { AskAiReminder } from "./ask-ai-reminder";
 
 type Step = {
   key: OnboardingStepKey;
@@ -112,6 +127,11 @@ export function OnboardingChecklist({ initialProgress }: { initialProgress: Onbo
   const [progress, setProgress] = useState<OnboardingProgress>(initialProgress);
   const [hidden, setHidden] = useState(false);
   const [collapsed, setCollapsed] = useState(false);
+  const [currentStepIndex, setCurrentStepIndex] = useState(() => {
+    const firstIncomplete = STEPS.findIndex((s) => !initialProgress[s.key]);
+    return firstIncomplete === -1 ? 0 : firstIncomplete;
+  });
+  const highlight = usePostWelcomeHighlight();
   const [, startTransition] = useTransition();
 
   useEffect(() => {
@@ -141,6 +161,9 @@ export function OnboardingChecklist({ initialProgress }: { initialProgress: Onbo
 
   function handleStepClick(step: Step) {
     track("onboarding_step_clicked", { step: step.key });
+    // First click anywhere in the checklist clears the post-welcome pulse —
+    // the user got the message.
+    clearPostWelcomeHighlight();
     if (!step.visitKey) return;
     const visitKey = step.visitKey;
     if (progress[step.key]) return;
@@ -178,6 +201,7 @@ export function OnboardingChecklist({ initialProgress }: { initialProgress: Onbo
       charts: false,
       screenings: false,
     }));
+    setCurrentStepIndex(0);
     setHidden(false);
     setCollapsed(false);
     if (typeof window !== "undefined") {
@@ -190,41 +214,55 @@ export function OnboardingChecklist({ initialProgress }: { initialProgress: Onbo
 
   if (allComplete) {
     return (
-      <div className="rounded-lg border border-emerald-500/30 bg-emerald-500/5 px-4 py-3 text-sm">
-        <div className="flex items-center justify-between gap-3">
-          <div className="flex items-center gap-2">
-            <Sparkles className="h-4 w-4 text-emerald-500" aria-hidden />
-            <span className="font-medium">You're set up.</span>
-            <span className="text-muted-foreground">
-              All eight steps complete — happy hunting.
-            </span>
-          </div>
-          <div className="flex items-center gap-3">
-            <button
-              type="button"
-              onClick={handleRestart}
-              className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
-            >
-              <RotateCcw className="h-3 w-3" aria-hidden />
-              Restart tour
-            </button>
-            <button
-              type="button"
-              onClick={handleDismiss}
-              className="text-xs text-muted-foreground hover:text-foreground transition-colors"
-            >
-              Hide
-            </button>
+      <div className="space-y-2">
+        <div
+          className={`rounded-lg border border-emerald-500/30 bg-emerald-500/5 px-4 py-3 text-sm transition-shadow ${
+            highlight ? "ring-2 ring-amber-400 ring-offset-2 ring-offset-background animate-pulse" : ""
+          }`}
+        >
+          <div className="flex items-center justify-between gap-3">
+            <div className="flex items-center gap-2">
+              <Sparkles className="h-4 w-4 text-emerald-500" aria-hidden />
+              <span className="font-medium">You're set up.</span>
+              <span className="text-muted-foreground">
+                All eight steps complete — happy hunting.
+              </span>
+            </div>
+            <div className="flex items-center gap-3">
+              <button
+                type="button"
+                onClick={handleRestart}
+                className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
+              >
+                <RotateCcw className="h-3 w-3" aria-hidden />
+                Restart tour
+              </button>
+              <button
+                type="button"
+                onClick={handleDismiss}
+                className="text-xs text-muted-foreground hover:text-foreground transition-colors"
+              >
+                Hide
+              </button>
+            </div>
           </div>
         </div>
+        <AskAiReminder />
       </div>
     );
   }
 
-  let lastGroup: Step["group"] | null = null;
+  const currentStep = STEPS[currentStepIndex];
+  const currentDone = progress[currentStep.key];
+  const canPrev = currentStepIndex > 0;
+  const canNext = currentStepIndex < STEPS.length - 1;
 
   return (
-    <div className="rounded-lg border border-border bg-card">
+    <div
+      className={`rounded-lg border border-border bg-card transition-shadow ${
+        highlight ? "ring-2 ring-amber-400 ring-offset-2 ring-offset-background animate-pulse" : ""
+      }`}
+    >
       <div
         className={`flex items-start justify-between gap-3 px-4 py-3 ${
           collapsed ? "" : "border-b border-border"
@@ -241,11 +279,11 @@ export function OnboardingChecklist({ initialProgress }: { initialProgress: Onbo
             Get started
           </p>
           <h2 className="mt-0.5 text-sm font-medium">
-            Eight steps to learn the platform
+            Walk through the platform, one step at a time
           </h2>
           {!collapsed && (
             <p className="mt-1 text-xs text-muted-foreground">
-              Setup → Research → Operations. Each step opens a page and explains what you'll get from it.
+              Setup → Research → Operations. Each step opens a page and explains what you'll get from it. Use the arrows to navigate.
             </p>
           )}
         </button>
@@ -288,54 +326,105 @@ export function OnboardingChecklist({ initialProgress }: { initialProgress: Onbo
       </div>
 
       {collapsed ? null : (
-      <ol id="onboarding-checklist-body" className="divide-y divide-border">
-        {STEPS.map((step) => {
-          const done = progress[step.key];
-          const showGroupHeader = step.group !== lastGroup;
-          lastGroup = step.group;
-          return (
-            <li key={step.key}>
-              {showGroupHeader && (
-                <div className="bg-muted/20 px-4 py-1.5 text-[10px] font-semibold uppercase tracking-widest text-muted-foreground/60">
-                  {step.group}
-                </div>
-              )}
-              <div className="flex items-start gap-3 px-4 py-3">
-                <div
-                  aria-hidden
-                  className={`mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full border ${
-                    done
-                      ? "border-emerald-500 bg-emerald-500 text-white"
-                      : "border-border bg-background text-transparent"
-                  }`}
+      <div id="onboarding-checklist-body">
+        <div className="flex items-start gap-3 px-4 py-4">
+          <div
+            aria-hidden
+            className={`mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full border ${
+              currentDone
+                ? "border-emerald-500 bg-emerald-500 text-white"
+                : "border-border bg-background text-transparent"
+            }`}
+          >
+            <Check className="h-3 w-3" />
+          </div>
+          <div className="min-w-0 flex-1">
+            <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground/60">
+              {currentStep.group} · Step {currentStepIndex + 1} of {STEPS.length}
+            </p>
+            <p
+              className={`mt-1 text-sm font-medium ${
+                currentDone ? "text-muted-foreground line-through" : ""
+              }`}
+            >
+              {currentStep.title}
+            </p>
+            <p className="mt-1 text-xs text-muted-foreground leading-relaxed">
+              {currentStep.description}
+            </p>
+            <div className="mt-3">
+              <Button
+                asChild
+                size="sm"
+                variant={currentDone ? "ghost" : "outline"}
+              >
+                <Link
+                  href={`${currentStep.href}?tour=1`}
+                  onClick={() => handleStepClick(currentStep)}
                 >
-                  <Check className="h-3 w-3" />
-                </div>
-                <div className="min-w-0 flex-1">
-                  <p className={`text-sm font-medium ${done ? "text-muted-foreground line-through" : ""}`}>
-                    {step.title}
-                  </p>
-                  <p className="mt-0.5 text-xs text-muted-foreground">{step.description}</p>
-                </div>
-                <Button
-                  asChild
-                  size="sm"
-                  variant={done ? "ghost" : "outline"}
-                  className="shrink-0"
-                >
-                  <Link
-                    href={`${step.href}?tour=1`}
-                    onClick={() => handleStepClick(step)}
-                  >
-                    {done ? "Retake tour" : step.cta}
-                    <ArrowRight className="ml-1 h-3 w-3" />
-                  </Link>
-                </Button>
-              </div>
-            </li>
-          );
-        })}
-      </ol>
+                  {currentDone ? "Retake tour" : currentStep.cta}
+                  <ArrowRight className="ml-1 h-3 w-3" />
+                </Link>
+              </Button>
+            </div>
+          </div>
+        </div>
+
+        <div className="flex items-center justify-between gap-3 border-t border-border px-4 py-2">
+          <button
+            type="button"
+            onClick={() => setCurrentStepIndex((i) => Math.max(0, i - 1))}
+            disabled={!canPrev}
+            aria-label="Previous step"
+            className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs text-muted-foreground hover:bg-muted hover:text-foreground transition-colors disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-muted-foreground"
+          >
+            <ChevronLeft className="h-3.5 w-3.5" />
+            Prev
+          </button>
+
+          <div
+            className="flex items-center gap-1.5"
+            role="tablist"
+            aria-label="Onboarding steps"
+          >
+            {STEPS.map((step, i) => {
+              const done = progress[step.key];
+              const isCurrent = i === currentStepIndex;
+              const baseClasses =
+                "h-2 rounded-full transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-ring";
+              const stateClasses = isCurrent
+                ? "w-6 bg-foreground"
+                : done
+                ? "w-2 bg-emerald-500"
+                : "w-2 bg-muted-foreground/30 hover:bg-muted-foreground/60";
+              return (
+                <button
+                  key={step.key}
+                  type="button"
+                  role="tab"
+                  aria-selected={isCurrent}
+                  aria-label={`Step ${i + 1}: ${step.title}${done ? " (complete)" : ""}`}
+                  onClick={() => setCurrentStepIndex(i)}
+                  className={`${baseClasses} ${stateClasses}`}
+                />
+              );
+            })}
+          </div>
+
+          <button
+            type="button"
+            onClick={() =>
+              setCurrentStepIndex((i) => Math.min(STEPS.length - 1, i + 1))
+            }
+            disabled={!canNext}
+            aria-label="Next step"
+            className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs text-muted-foreground hover:bg-muted hover:text-foreground transition-colors disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-muted-foreground"
+          >
+            Next
+            <ChevronRight className="h-3.5 w-3.5" />
+          </button>
+        </div>
+      </div>
       )}
     </div>
   );

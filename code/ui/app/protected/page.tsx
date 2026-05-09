@@ -6,6 +6,7 @@ import { getOnboardingProgress } from "@/app/actions/onboarding";
 import { getOrCreateUserProfile } from "@/lib/user-profile";
 import { OpsCenterUI, type UserTradeRow } from "./ops-center-ui";
 import { OnboardingChecklist } from "./_components/onboarding-checklist";
+import { AskAiReminder } from "./_components/ask-ai-reminder";
 
 async function OpsCenterData() {
   const supabase = await createClient();
@@ -37,7 +38,9 @@ async function OpsCenterData() {
 async function OnboardingChecklistSlot() {
   const profile = await getOrCreateUserProfile();
   if (!profile) return null;
-  if (profile.onboarding_dismissed_at) return null;
+  // Dismissed users still get the persistent Ask AI reminder so they
+  // know the chat is the long-term answer to "where do I find X?".
+  if (profile.onboarding_dismissed_at) return <AskAiReminder />;
 
   const progress = await getOnboardingProgress();
   return <OnboardingChecklist initialProgress={progress} />;
