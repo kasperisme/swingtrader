@@ -455,11 +455,13 @@ export interface BulkAnalysisJob {
   finished_at: string | null;
   error_message: string | null;
   user_prompt: string | null;
+  /** Filtered ticker symbols to analyse. null → analyse every row in the run. */
+  ticker_subset: string[] | null;
   created_at: string;
 }
 
 const BULK_JOB_COLUMNS =
-  "id, scan_run_id, status, total_tickers, completed_tickers, failed_tickers, started_at, finished_at, error_message, user_prompt, created_at";
+  "id, scan_run_id, status, total_tickers, completed_tickers, failed_tickers, started_at, finished_at, error_message, user_prompt, ticker_subset, created_at";
 
 function asBulkJob(raw: unknown): BulkAnalysisJob {
   const r = raw as Record<string, unknown>;
@@ -474,6 +476,9 @@ function asBulkJob(raw: unknown): BulkAnalysisJob {
     finished_at: r.finished_at != null ? String(r.finished_at) : null,
     error_message: r.error_message != null ? String(r.error_message) : null,
     user_prompt: r.user_prompt != null ? String(r.user_prompt) : null,
+    ticker_subset: Array.isArray(r.ticker_subset)
+      ? (r.ticker_subset as unknown[]).map((s) => String(s))
+      : null,
     created_at: String(r.created_at ?? ""),
   };
 }
@@ -489,12 +494,29 @@ function asBulkJob(raw: unknown): BulkAnalysisJob {
 export async function bulkAnalyzeScanRun(
   runId: number,
   userPrompt?: string | null,
+  tickerSubset?: ReadonlyArray<string> | null,
 ): Promise<ScreeningActionSuccess<BulkAnalysisJob> | ScreeningActionError> {
   if (!Number.isFinite(runId) || runId < 1) {
     return { ok: false, error: "Invalid run" };
   }
 
   const trimmedPrompt = (userPrompt ?? "").trim().slice(0, 2000) || null;
+
+  // Normalize the ticker subset: trim, uppercase, dedupe, drop empties. Null
+  // (or an empty array after cleanup) means "analyse every row in the run" —
+  // the worker treats those identically.
+  let normalizedSubset: string[] | null = null;
+  if (tickerSubset && tickerSubset.length > 0) {
+    const seen = new Set<string>();
+    const cleaned: string[] = [];
+    for (const sym of tickerSubset) {
+      const upper = String(sym ?? "").trim().toUpperCase();
+      if (!upper || seen.has(upper)) continue;
+      seen.add(upper);
+      cleaned.push(upper);
+    }
+    normalizedSubset = cleaned.length > 0 ? cleaned : null;
+  }
 
   const supabase = await createClient();
   const {
@@ -539,6 +561,7 @@ export async function bulkAnalyzeScanRun(
       scan_run_id: runId,
       status: "queued",
       user_prompt: trimmedPrompt,
+      ticker_subset: normalizedSubset,
     })
     .select(BULK_JOB_COLUMNS)
     .single();

@@ -5,7 +5,11 @@ import { Suspense } from "react";
 import Script from "next/script";
 import "./globals.css";
 import { Analytics } from "@vercel/analytics/next";
-import { SiteFooter, SITE_X_PROFILE_URL } from "@/components/site-footer";
+import {
+  SiteFooter,
+  SITE_X_PROFILE_URL,
+  SITE_INSTAGRAM_PROFILE_URL,
+} from "@/components/site-footer";
 import { SiteHeader, SiteHeaderFallback } from "@/components/site-header";
 import { CavemanModeProvider } from "@/lib/caveman-mode";
 import { AnalyticsProvider } from "@/lib/analytics/AnalyticsProvider";
@@ -34,6 +38,7 @@ export const metadata: Metadata = {
   other: {
     "social:x": SITE_X_PROFILE_URL,
     "social:twitter": SITE_X_PROFILE_URL,
+    "social:instagram": SITE_INSTAGRAM_PROFILE_URL,
   },
 };
 

@@ -14,6 +14,12 @@ interface BulkAiPanelProps {
   onStart: (userPrompt: string) => Promise<void> | void;
   /** Number of tickers in the current scope, for context in the empty state. */
   tickerCount: number;
+  /**
+   * Number of filter rules currently active. When > 0, the panel tells the
+   * user the run will respect those filters (the snapshot is taken at submit
+   * time and stored on the job's ticker_subset).
+   */
+  activeFilterCount?: number;
   /** Disabled when no run is selected (no rows to analyze). */
   disabled?: boolean;
 }
@@ -24,6 +30,7 @@ export function BulkAiPanel({
   error,
   onStart,
   tickerCount,
+  activeFilterCount = 0,
   disabled = false,
 }: BulkAiPanelProps) {
   const inFlight = job?.status === "queued" || job?.status === "running";
@@ -46,7 +53,12 @@ export function BulkAiPanel({
   return (
     <div className="flex flex-col h-full min-h-0">
       <div className="flex-1 min-h-0 overflow-y-auto px-3 py-3 space-y-3">
-        <StatusBanner job={job} starting={starting} tickerCount={tickerCount} />
+        <StatusBanner
+          job={job}
+          starting={starting}
+          tickerCount={tickerCount}
+          activeFilterCount={activeFilterCount}
+        />
 
         {error ? (
           <div className="flex items-start gap-2 rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-[12px] text-destructive">
@@ -68,9 +80,14 @@ export function BulkAiPanel({
 
         {!job && !starting && !error ? (
           <p className="text-[12px] text-muted-foreground leading-relaxed">
-            Run the same prompt across every ticker in this screening. Each
-            ticker gets its own per-ticker analysis written back to its row,
-            so you can review them in the regular chat afterwards.
+            Run the same prompt across{" "}
+            {activeFilterCount > 0 ? "the filtered" : "every"} ticker in this
+            screening. Each ticker gets its own per-ticker analysis written
+            back to its row, so you can review them in the regular chat
+            afterwards.
+            {activeFilterCount > 0
+              ? " Active filters are snapshotted at submit time — adding or removing filters after will not change a running job."
+              : null}
           </p>
         ) : null}
       </div>
@@ -133,10 +150,12 @@ function StatusBanner({
   job,
   starting,
   tickerCount,
+  activeFilterCount,
 }: {
   job: BulkAnalysisJob | null;
   starting: boolean;
   tickerCount: number;
+  activeFilterCount: number;
 }) {
   if (starting) {
     return (
@@ -154,7 +173,18 @@ function StatusBanner({
           <span className="font-semibold text-foreground">
             {tickerCount}
           </span>{" "}
-          {tickerCount === 1 ? "ticker" : "tickers"}.
+          {tickerCount === 1 ? "ticker" : "tickers"}
+          {activeFilterCount > 0 ? (
+            <>
+              {" "}matching your{" "}
+              <span className="font-semibold text-foreground">
+                {activeFilterCount}
+              </span>{" "}
+              active {activeFilterCount === 1 ? "filter" : "filters"}.
+            </>
+          ) : (
+            "."
+          )}
         </span>
       </Banner>
     );

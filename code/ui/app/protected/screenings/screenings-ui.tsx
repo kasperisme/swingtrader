@@ -615,13 +615,29 @@ export function ScreeningsUI({
     };
   }, [selectedRunId, bulkJob?.status]);
 
+  // Held in a ref because handleBulkAnalyze is defined before filteredSymbols
+  // is computed (the memo lives further down). The ref is updated by an
+  // effect after filteredSymbols is in scope, so the callback always reads
+  // the latest snapshot at click time without a circular dependency.
+  const bulkScopeRef = useRef<{
+    filteredSymbols: string[];
+    filtersActive: boolean;
+  }>({ filteredSymbols: [], filtersActive: false });
+
   const handleBulkAnalyze = useCallback(async (userPrompt: string) => {
     if (selectedRunId == null || bulkStarting) return;
     if (bulkJob?.status === "queued" || bulkJob?.status === "running") return;
     setBulkStarting(true);
     setBulkError(null);
     try {
-      const res = await bulkAnalyzeScanRun(selectedRunId, userPrompt);
+      // Snapshot the visible filtered tickers so the worker analyses exactly
+      // the rows the user is looking at — not every ticker in the scan run.
+      // Pass null (no subset) when no filters are active so the legacy
+      // "analyse everything" path stays the default for unfiltered views.
+      const { filtersActive, filteredSymbols: scopeSymbols } =
+        bulkScopeRef.current;
+      const subset = filtersActive ? scopeSymbols : null;
+      const res = await bulkAnalyzeScanRun(selectedRunId, userPrompt, subset);
       if (res.ok) {
         setBulkJob(res.data);
       } else {
@@ -1172,6 +1188,16 @@ export function ScreeningsUI({
     [filtered],
   );
 
+  // Mirror the current filter scope into a ref so handleBulkAnalyze (defined
+  // earlier in the component, before filteredSymbols exists) can read the
+  // latest values at click time.
+  useEffect(() => {
+    bulkScopeRef.current = {
+      filteredSymbols,
+      filtersActive: countScreeningsFilterRules(filters) > 0,
+    };
+  }, [filteredSymbols, filters]);
+
   /** Symbols visible in the deep-dive ticker list (sidebar + mobile sheet).
    * Dismissed symbols are hidden by default; user can toggle them back in. */
   const deepDiveListSymbols = useMemo(() => {
@@ -1249,6 +1275,7 @@ export function ScreeningsUI({
           error={bulkError}
           onStart={handleBulkAnalyze}
           tickerCount={filteredSymbols.length}
+          activeFilterCount={countScreeningsFilterRules(filters)}
           disabled={selectedRunId == null || rows.length === 0}
         />
       );

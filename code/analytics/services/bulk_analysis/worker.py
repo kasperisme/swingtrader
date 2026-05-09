@@ -51,8 +51,18 @@ def _load_job(job_id: str) -> dict | None:
     return (res.data or [None])[0]
 
 
-def _load_scan_rows(scan_run_id: int, user_id: str) -> list[dict]:
-    """Return [{scan_row_id, ticker}] for every row in the scan run."""
+def _load_scan_rows(
+    scan_run_id: int,
+    user_id: str,
+    ticker_subset: list[str] | None = None,
+) -> list[dict]:
+    """Return [{scan_row_id, ticker}] for rows in the scan run.
+
+    When ``ticker_subset`` is provided, only rows whose symbol is in that
+    list are returned. The UI snapshots the visible filtered tickers at
+    submit time, so the worker analyses exactly what the user saw —
+    not every ticker in the underlying scan run.
+    """
     client = get_supabase_client()
     res = (
         client.schema(SCHEMA)
@@ -62,11 +72,19 @@ def _load_scan_rows(scan_run_id: int, user_id: str) -> list[dict]:
         .eq("user_id", user_id)
         .execute()
     )
+    allow: set[str] | None = None
+    if ticker_subset:
+        allow = {s.strip().upper() for s in ticker_subset if s and s.strip()}
+        if not allow:
+            allow = None  # treat empty subset same as None (analyse all)
+
     rows = []
     seen: set[str] = set()
     for r in res.data or []:
         sym = (r.get("symbol") or "").strip().upper()
         if not sym or sym in seen:
+            continue
+        if allow is not None and sym not in allow:
             continue
         seen.add(sym)
         rows.append({"scan_row_id": int(r["id"]), "ticker": sym})
@@ -286,16 +304,37 @@ async def _run_job_async(job: dict) -> dict:
     user_id = job["user_id"]
     scan_run_id = int(job["scan_run_id"])
     user_prompt = (job.get("user_prompt") or None)
+    ticker_subset_raw = job.get("ticker_subset")
+    ticker_subset: list[str] | None = (
+        [str(s) for s in ticker_subset_raw]
+        if isinstance(ticker_subset_raw, list) and ticker_subset_raw
+        else None
+    )
 
-    rows = await asyncio.to_thread(_load_scan_rows, scan_run_id, user_id)
+    rows = await asyncio.to_thread(
+        _load_scan_rows, scan_run_id, user_id, ticker_subset
+    )
     if not rows:
         _set_job(
             job_id,
             status="error",
-            error_message="scan run has no tickers",
+            error_message=(
+                "no tickers matched the requested filters"
+                if ticker_subset
+                else "scan run has no tickers"
+            ),
             finished_at=_now(),
         )
         return {"status": "error", "tickers": 0}
+
+    if ticker_subset:
+        log.info(
+            "Bulk job %s: analysing %d/%d tickers (filter subset of %d)",
+            job_id,
+            len(rows),
+            len(rows),
+            len(ticker_subset),
+        )
 
     _set_job(
         job_id,

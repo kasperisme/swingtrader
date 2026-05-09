@@ -5,6 +5,10 @@ import { ThemeSwitcher } from "@/components/theme-switcher";
 export const SITE_X_PROFILE_URL = "https://x.com/newsimpactscrnr";
 const X_HANDLE = "@newsimpactscrnr";
 
+/** Canonical Instagram profile for metadata and footer links. */
+export const SITE_INSTAGRAM_PROFILE_URL = "https://instagram.com/newsimpactscreener";
+const INSTAGRAM_HANDLE = "@newsimpactscreener";
+
 export function SiteFooter() {
   return (
     <footer className="w-full border-t border-border">
@@ -22,6 +26,14 @@ export function SiteFooter() {
             className="transition-colors hover:text-foreground cursor-pointer"
           >
             {X_HANDLE} on X
+          </a>
+          <a
+            href={SITE_INSTAGRAM_PROFILE_URL}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="transition-colors hover:text-foreground cursor-pointer"
+          >
+            {INSTAGRAM_HANDLE} on Instagram
           </a>
           <Link href="/terms" className="transition-colors hover:text-foreground">
             Terms
