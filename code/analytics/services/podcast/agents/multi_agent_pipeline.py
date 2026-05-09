@@ -158,10 +158,21 @@ def _inject_deterministic_acts(script: dict, world: dict) -> dict:
     return script
 
 
-async def _run_phase2(today: str) -> dict:
-    """Producer → sequential researcher/writer chain → deterministic injection."""
+async def _run_phase2(episode_id: str) -> dict:
+    """Producer → sequential researcher/writer chain → deterministic injection.
+
+    ``episode_id`` is the episode slug (e.g. ``2026-05-09_0815``); the date
+    is parsed from its first 10 chars for the world-state baseline. The
+    script JSON is written to ``SCRIPTS_DIR/{episode_id}.json`` so multiple
+    runs in the same day don't overwrite each other.
+    """
     pipeline_start = time.monotonic()
-    log.info("Multi-agent (Phase 2): start for %s", today)
+    today = episode_id[:10] if len(episode_id) >= 10 else episode_id
+    log.info(
+        "Multi-agent (Phase 2): start for episode_id=%s (date=%s)",
+        episode_id,
+        today,
+    )
 
     brief, scout_results = await plan_episode(today)
     world = _build_world_state(today, scout_results)
@@ -219,7 +230,7 @@ async def _run_phase2(today: str) -> dict:
     _inject_deterministic_acts(script, world)
 
     SCRIPTS_DIR.mkdir(parents=True, exist_ok=True)
-    out_path = SCRIPTS_DIR / f"{today}.json"
+    out_path = SCRIPTS_DIR / f"{episode_id}.json"
     serialized = json.dumps(script, indent=2)
     out_path.write_text(serialized)
     log.info(
@@ -232,7 +243,7 @@ async def _run_phase2(today: str) -> dict:
     return script
 
 
-async def _fallback_to_single_agent(today: str, reason: str) -> dict:
+async def _fallback_to_single_agent(episode_id: str, reason: str) -> dict:
     log.error(
         "Multi-agent: %s — falling back to single-agent path. "
         "Set PODCAST_MULTI_AGENT_FALLBACK_ON_FAILURE=false to fail hard.",
@@ -241,21 +252,27 @@ async def _fallback_to_single_agent(today: str, reason: str) -> dict:
     from ..research_agent import gather_dossier
     from ..script_generator import generate_script
 
+    today = episode_id[:10] if len(episode_id) >= 10 else episode_id
     dossier = await gather_dossier(today)
-    return await generate_script(dossier)
+    return await generate_script(dossier, episode_id=episode_id)
 
 
-async def run_multi_agent_pipeline(today: str | None = None) -> dict:
+async def run_multi_agent_pipeline(episode_id: str | None = None) -> dict:
     """Run the full multi-agent pipeline; return the final script dict.
+
+    ``episode_id`` is the slug used for storage paths and the script JSON
+    filename. Defaults to today's date for backwards compatibility — the
+    scheduler hook normally passes a ``YYYY-MM-DD_HHMM`` slug so multiple
+    runs per day don't collide.
 
     Returns the same shape ``script_generator.generate_script`` returns
     (acts list with HOOK / WELCOME / SIGN_OFF already injected). The
     caller (``scheduler_hook.run_daily_podcast``) treats the result
     identically to the single-agent path.
     """
-    today_iso = today or str(date.today())
+    episode_id = episode_id or str(date.today())
     try:
-        return await _run_phase2(today_iso)
+        return await _run_phase2(episode_id)
     except Exception as exc:
         # Any agent-level failure (producer, researcher, writer, editor)
         # stops the show. Content-level errors mean the planned episode
@@ -274,5 +291,5 @@ async def run_multi_agent_pipeline(today: str | None = None) -> dict:
         if not PODCAST_MULTI_AGENT_FALLBACK_ON_FAILURE:
             raise
         return await _fallback_to_single_agent(
-            today_iso, f"phase 2 failed ({type(exc).__name__}: {exc})"
+            episode_id, f"phase 2 failed ({type(exc).__name__}: {exc})"
         )

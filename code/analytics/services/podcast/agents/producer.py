@@ -454,7 +454,7 @@ async def _synthesize_brief_from_tools(
                         "model": OLLAMA_PODCAST_PRODUCER_MODEL,
                         "messages": messages,
                         "stream": False,
-                        "options": {"num_predict": 2048, "temperature": 0.2},
+                        "options": {"temperature": 0.2},
                     },
                     timeout=240,
                 )
@@ -528,7 +528,6 @@ async def plan_episode(
             registry=registry,
             max_rounds=PODCAST_PRODUCER_MAX_ROUNDS,
             max_attempts=_RETRY_MAX_ATTEMPTS,
-            options={"num_predict": 2048},
             label="Producer",
         )
 

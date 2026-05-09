@@ -70,6 +70,7 @@ def _upload(file_path: Path, object_key: str) -> str:
 
 def _upsert_episode_row(
     *,
+    episode_id: str,
     date_str: str,
     title: str,
     description: str,
@@ -107,21 +108,41 @@ def _upsert_episode_row(
     client.schema(_SCHEMA).table("podcast_episodes").upsert(
         payload, on_conflict="guid"
     ).execute()
-    log.info("podcast_episodes upserted (date=%s, guid=%s)", date_str, guid[:8])
+    log.info(
+        "podcast_episodes upserted (episode_id=%s, date=%s, guid=%s)",
+        episode_id,
+        date_str,
+        guid[:8],
+    )
 
 
-async def publish_episode(metadata: dict, date_str: str) -> str:
+async def publish_episode(
+    metadata: dict, episode_id: str, *, date_str: str | None = None
+) -> str:
     """Upload episode artefacts to Supabase + write metadata row.
+
+    ``episode_id`` is the unique slug for this run (default ``YYYY-MM-DD_HHMM``);
+    storage keys and the GUID derive from it so multiple episodes per day
+    don't collide. ``date_str`` (the DB ``date`` column value) defaults to
+    the slug's 10-char prefix.
 
     Returns the public audio URL. The UI's RSS handler renders the rest.
     """
     audio_path: Path = metadata["audio_path"]
     cover_path: Path = metadata["cover_path"]
 
-    audio_key = f"{date_str}_episode.mp3"
-    cover_key = f"{date_str}_cover.png"
+    if date_str is None:
+        date_str = episode_id[:10] if len(episode_id) >= 10 else episode_id
 
-    log.info("Publishing episode for %s to Supabase bucket=%s", date_str, _BUCKET)
+    audio_key = f"{episode_id}_episode.mp3"
+    cover_key = f"{episode_id}_cover.png"
+
+    log.info(
+        "Publishing episode for episode_id=%s (date=%s) to Supabase bucket=%s",
+        episode_id,
+        date_str,
+        _BUCKET,
+    )
 
     audio_url = _upload(audio_path, audio_key)
     cover_url = _upload(cover_path, cover_key)
@@ -129,6 +150,7 @@ async def publish_episode(metadata: dict, date_str: str) -> str:
     guid = str(uuid.uuid5(uuid.NAMESPACE_URL, audio_url))
 
     _upsert_episode_row(
+        episode_id=episode_id,
         date_str=date_str,
         title=metadata["title"],
         description=metadata.get("description") or "",

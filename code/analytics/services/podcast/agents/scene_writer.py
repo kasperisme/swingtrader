@@ -176,7 +176,7 @@ async def _stream_once(
             "model": OLLAMA_PODCAST_SCENE_WRITER_MODEL,
             "messages": messages,
             "stream": True,
-            "options": {"temperature": 0.75, "num_predict": 2048},
+            "options": {"temperature": 0.75},
         },
         timeout=600,
     ) as r:
@@ -382,7 +382,7 @@ async def _synthesize_scene_from_inputs(
                         "model": OLLAMA_PODCAST_SCENE_WRITER_MODEL,
                         "messages": messages,
                         "stream": False,
-                        "options": {"num_predict": 2048, "temperature": 0.5},
+                        "options": {"temperature": 0.5},
                     },
                     timeout=240,
                 )

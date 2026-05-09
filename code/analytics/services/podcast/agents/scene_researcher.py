@@ -248,7 +248,7 @@ async def _synthesize_dossier_from_tools(
                         "model": OLLAMA_PODCAST_SCENE_RESEARCH_MODEL,
                         "messages": messages,
                         "stream": False,
-                        "options": {"num_predict": 1024, "temperature": 0.2},
+                        "options": {"temperature": 0.2},
                     },
                     timeout=180,
                 )
@@ -334,7 +334,7 @@ async def _repair_json_once(raw: str, label: str) -> dict | None:
                         "model": OLLAMA_PODCAST_SCENE_RESEARCH_MODEL,
                         "messages": messages,
                         "stream": False,
-                        "options": {"num_predict": 1024, "temperature": 0.1},
+                        "options": {"temperature": 0.1},
                     },
                     timeout=120,
                 )
@@ -521,7 +521,6 @@ async def research_scene(
             registry=registry,
             max_rounds=PODCAST_SCENE_RESEARCH_MAX_ROUNDS,
             max_attempts=_RETRY_MAX_ATTEMPTS,
-            options={"num_predict": 1024},
             label=label,
         )
 

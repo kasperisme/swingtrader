@@ -144,6 +144,18 @@ async def main() -> None:
         "--no-telegram", action="store_true", help="Skip the Telegram approval gate"
     )
 
+    parser.add_argument(
+        "--episode-id",
+        default=None,
+        help=(
+            "Override the episode slug used for storage paths, GUID seed, and "
+            "the script JSON filename. Defaults to YYYY-MM-DD_HHMM so multiple "
+            "runs in the same day produce distinct episodes. Pass an explicit "
+            "slug (e.g. '2026-05-09_morning') for predictable naming or to "
+            "re-run a specific episode."
+        ),
+    )
+
     args = parser.parse_args()
     _configure_logging(args.verbose)
     log = logging.getLogger(__name__)
@@ -164,6 +176,7 @@ async def main() -> None:
 
     await run_daily_podcast(
         fetcher,
+        episode_id=args.episode_id,
         script_only=args.script_only,
         skip_approval=args.no_telegram,
         skip_publish=args.no_publish,

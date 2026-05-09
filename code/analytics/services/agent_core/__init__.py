@@ -38,6 +38,7 @@ from .loop import (
 )
 from .market_tools import (
     build_market_registry,
+    build_screening_write_registry,
     build_user_registry,
     fetch_url,
 )
@@ -46,6 +47,7 @@ __all__ = [
     "Tool",
     "ToolRegistry",
     "build_market_registry",
+    "build_screening_write_registry",
     "build_user_registry",
     "fetch_url",
     "is_transient_ollama_error",

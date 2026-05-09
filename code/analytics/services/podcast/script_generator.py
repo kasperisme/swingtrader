@@ -325,7 +325,7 @@ async def _stream_chat_once(
             "model": OLLAMA_PODCAST_SCRIPT_MODEL,
             "messages": messages,
             "stream": True,
-            "options": {"temperature": 0.75, "num_predict": 4096},
+            "options": {"temperature": 0.75},
         },
         timeout=600,
     ) as r:
@@ -454,11 +454,20 @@ def _parse_json(raw: str) -> dict | None:
         return None
 
 
-async def generate_script(data: dict) -> dict:
+async def generate_script(data: dict, *, episode_id: str | None = None) -> dict:
     today = data.get("date", str(date.today()))
+    # Script JSON is keyed by episode_id (slug) so multiple runs per day
+    # don't overwrite each other. Falls back to the data's date when the
+    # caller didn't pass one — preserves single-agent CLI usage.
+    out_key = episode_id or today
     SCRIPTS_DIR.mkdir(parents=True, exist_ok=True)
     pipeline_start = time.monotonic()
-    log.info("Pipeline start: date=%s, input=%d top-level keys", today, len(data))
+    log.info(
+        "Pipeline start: episode_id=%s date=%s, input=%d top-level keys",
+        out_key,
+        today,
+        len(data),
+    )
 
     async with httpx.AsyncClient() as client:
         clean_data = await _validate_data(client, data)
@@ -549,7 +558,7 @@ async def generate_script(data: dict) -> dict:
         script["acts"] = existing + [_signoff_act()]
         log.info("Sign-off act appended (hook voice — bookends the cold-open hook)")
 
-    out_path = SCRIPTS_DIR / f"{today}.json"
+    out_path = SCRIPTS_DIR / f"{out_key}.json"
     serialized = json.dumps(script, indent=2)
     out_path.write_text(serialized)
     log.info(

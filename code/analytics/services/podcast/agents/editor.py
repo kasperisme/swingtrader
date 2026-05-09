@@ -351,12 +351,12 @@ async def _stream_once(
             "messages": messages,
             "stream": True,
             # think=false disables the reasoning block on glm-5.1 / qwen-think
-            # / similar models. Without this, the model can spend the entire
-            # num_predict budget on `<think>...</think>` and emit zero real
-            # content tokens — exactly the silent-empty pattern this editor
-            # has been hitting.
+            # / similar models. Without this, the model can spend its entire
+            # output budget on `<think>...</think>` and emit zero real content
+            # tokens — exactly the silent-empty pattern this editor has been
+            # hitting.
             "think": False,
-            "options": {"temperature": 0.6, "num_predict": 3072},
+            "options": {"temperature": 0.6},
         },
         timeout=600,
     ) as r:
@@ -627,7 +627,10 @@ async def _synthesize_junctions_compact(
                         "model": OLLAMA_PODCAST_EDITOR_MODEL,
                         "messages": messages,
                         "stream": False,
-                        "options": {"num_predict": 2048, "temperature": 0.3},
+                        # See _stream_once: disables the model's reasoning
+                        # block so the output budget isn't consumed by <think>.
+                        "think": False,
+                        "options": {"temperature": 0.3},
                     },
                     timeout=240,
                 )
@@ -706,22 +709,31 @@ async def _synthesize_junctions_compact(
 async def edit_junctions(scenes: list[dict], episode_brief: dict) -> list[dict]:
     """Smooth the five LLM-to-LLM junctions; return the edited scenes.
 
-    Raises ``EditorError`` on any failure (transport, parse, zero
-    junctions applied). The pipeline-wide rule is that any agent failure
-    stops the show — silently shipping the unedited draft would mask a
-    real problem.
+    The editor is a polish pass — it rewrites only ~10 lines out of the
+    full show. When it fails, ship the unedited 6-scene draft rather than
+    aborting the entire episode. This is intentionally different from
+    the producer/researcher/writer rule: those generate content, this
+    one smooths existing content. A pipeline that won't ship without
+    polish is too brittle.
+
+    Set ``PODCAST_EDITOR_ENABLED=false`` in env to skip the editor
+    entirely, or ``PODCAST_EDITOR_FAIL_HARD=true`` to revert to the
+    strict-fail rule.
     """
     if len(scenes) < 2:
         log.info("Editor: fewer than 2 scenes — nothing to smooth")
         return scenes
 
+    fail_hard = os.environ.get("PODCAST_EDITOR_FAIL_HARD", "false").lower() == "true"
+
     label = "Editor"
     log.info(
-        "%s: starting (model=%s, %d scenes, junction_lines=%d)",
+        "%s: starting (model=%s, %d scenes, junction_lines=%d, fail_hard=%s)",
         label,
         OLLAMA_PODCAST_EDITOR_MODEL,
         len(scenes),
         PODCAST_EDITOR_JUNCTION_LINES,
+        fail_hard,
     )
 
     system_msg = (
@@ -738,6 +750,16 @@ async def edit_junctions(scenes: list[dict], episode_brief: dict) -> list[dict]:
         {"role": "system", "content": system_msg},
         {"role": "user", "content": user_prompt},
     ]
+
+    def _give_up(reason: str) -> list[dict]:
+        if fail_hard:
+            raise EditorError(reason)
+        log.warning(
+            "%s: %s — shipping unedited 6-scene draft (PODCAST_EDITOR_FAIL_HARD=true to abort instead)",
+            label,
+            reason,
+        )
+        return scenes
 
     raw = ""
     primary_call_failed = False
@@ -793,31 +815,28 @@ async def edit_junctions(scenes: list[dict], episode_brief: dict) -> list[dict]:
                     len(synthesis_raw),
                 )
         except Exception as exc:
-            raise EditorError(
-                f"{label}: streaming + synthesis both failed "
+            return _give_up(
+                f"streaming + synthesis both failed "
                 f"(streaming_raw={len(raw)} chars, primary_call_failed={primary_call_failed}, "
-                f"synthesis_error={type(exc).__name__}: {exc}). "
-                "Refusing to ship unedited draft."
-            ) from exc
+                f"synthesis_error={type(exc).__name__}: {exc})"
+            )
 
     if not isinstance(parsed, dict):
-        raise EditorError(
-            f"{label}: response was not parseable JSON after synthesis "
+        return _give_up(
+            f"response was not parseable JSON after synthesis "
             f"(streaming_raw={len(raw)} chars, "
             f"synthesis_raw={len(synthesis_raw)} chars, "
             f"streaming_head={raw[:200]!r}, "
-            f"synthesis_head={synthesis_raw[:400]!r}). "
-            "Refusing to ship unedited draft."
+            f"synthesis_head={synthesis_raw[:400]!r})"
         )
 
     edited, applied = _apply_junction_edits(
         scenes, parsed, PODCAST_EDITOR_JUNCTION_LINES
     )
     if applied == 0:
-        raise EditorError(
-            f"{label}: zero junctions applied out of {len(_JUNCTIONS)} "
-            f"(parsed_keys={list(parsed.keys())}). "
-            "Refusing to ship unedited draft."
+        return _give_up(
+            f"zero junctions applied out of {len(_JUNCTIONS)} "
+            f"(parsed_keys={list(parsed.keys())})"
         )
     log.info(
         "%s: %d/%d junctions applied",

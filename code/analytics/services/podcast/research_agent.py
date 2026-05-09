@@ -319,7 +319,6 @@ async def _gather_dossier_via_agent(today: str) -> dict:
             registry=registry,
             max_rounds=PODCAST_RESEARCH_MAX_ROUNDS,
             max_attempts=_RETRY_MAX_ATTEMPTS,
-            options={"num_predict": 2048},
             label="Research agent",
         )
 

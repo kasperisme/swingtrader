@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-from datetime import date
+from datetime import date, datetime
 from pathlib import Path
 from typing import Callable, Awaitable
 
@@ -26,6 +26,36 @@ from .telegram_gate import request_edited_script, send_approval_request
 log = logging.getLogger(__name__)
 
 
+def _generate_episode_id() -> str:
+    """Default episode identifier — `YYYY-MM-DD_HHMM` from local time.
+
+    Used as the slug for storage paths, the script JSON filename, the
+    GUID-derivation seed, and the cover-art filename. The first 10 chars
+    are still a valid `YYYY-MM-DD` string so they parse cleanly into the
+    DB ``date`` column.
+
+    Multiple runs in the same minute would collide; if you need finer
+    granularity (e.g. for tests), pass an explicit ``episode_id`` to
+    ``run_daily_podcast``.
+    """
+    return datetime.now().strftime("%Y-%m-%d_%H%M")
+
+
+def _episode_id_to_date(episode_id: str) -> str:
+    """Extract the `YYYY-MM-DD` prefix from an episode id.
+
+    Falls back to today's date when the id doesn't start with a parseable
+    date (e.g. caller passed an opaque slug). The DB ``date`` column is a
+    DATE, so we always need a real ISO date to write.
+    """
+    prefix = episode_id[:10]
+    try:
+        datetime.strptime(prefix, "%Y-%m-%d")
+        return prefix
+    except ValueError:
+        return str(date.today())
+
+
 async def _send_notification(text: str) -> None:
     if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
         return
@@ -38,7 +68,7 @@ async def _send_notification(text: str) -> None:
 
 
 async def _log_to_supabase(
-    today: str,
+    episode_id: str,
     title: str,
     url: str,
     duration_seconds: int,
@@ -61,7 +91,7 @@ async def _log_to_supabase(
 
         client = get_supabase_client()
         _tbl(client, "podcast_episodes").insert({
-            "date": today,
+            "date": _episode_id_to_date(episode_id),
             "title": title,
             "episode_url": url,
             "duration_seconds": duration_seconds,
@@ -70,7 +100,7 @@ async def _log_to_supabase(
             "estimated_cost_usd": estimated_cost,
             "status": status,
         }).execute()
-        log.info("Podcast episode logged to Supabase")
+        log.info("Podcast episode logged to Supabase (episode_id=%s)", episode_id)
     except Exception as exc:
         log.error("Failed to log episode to Supabase: %s", exc)
 
@@ -86,12 +116,17 @@ def _count_chars(script: dict) -> int:
 async def run_daily_podcast(
     data_fetcher_fn: Callable[[], Awaitable[dict] | dict],
     *,
+    episode_id: str | None = None,
     script_only: bool = False,
     skip_approval: bool = False,
     skip_publish: bool = False,
 ) -> None:
     """Run the full pipeline. Optional flags skip later stages for cheap tests.
 
+    episode_id     — slug used for storage paths, script JSON filename, GUID seed,
+                     and cover-art filename. Defaults to ``YYYY-MM-DD_HHMM`` so
+                     multiple runs in the same day produce distinct episodes.
+                     The DB ``date`` column is parsed from the slug's first 10 chars.
     script_only    — stop after the LLM produces the JSON script (no TTS, no publish)
     skip_approval  — bypass the Telegram approval gate
     skip_publish   — render + package locally but skip RSS / R2 / Telegram-notify
@@ -100,14 +135,21 @@ async def run_daily_podcast(
         log.info("Podcast disabled (PODCAST_ENABLED=false)")
         return
 
-    today = str(date.today())
+    if not episode_id:
+        episode_id = _generate_episode_id()
+    episode_date = _episode_id_to_date(episode_id)
     mode_tags = [t for t, on in [
         ("script-only", script_only),
         ("skip-approval", skip_approval),
         ("skip-publish", skip_publish),
     ] if on]
     mode_str = f" [{', '.join(mode_tags)}]" if mode_tags else ""
-    log.info("Starting daily podcast pipeline for %s%s", today, mode_str)
+    log.info(
+        "Starting podcast pipeline for episode_id=%s (date=%s)%s",
+        episode_id,
+        episode_date,
+        mode_str,
+    )
 
     try:
         if PODCAST_PIPELINE == "multi_agent":
@@ -121,18 +163,18 @@ async def run_daily_podcast(
             )
             from .agents import run_multi_agent_pipeline
 
-            script = await run_multi_agent_pipeline(today)
+            script = await run_multi_agent_pipeline(episode_id)
         else:
             data = data_fetcher_fn()
             if asyncio.iscoroutine(data):
                 data = await data
 
-            script = await generate_script(data)
+            script = await generate_script(data, episode_id=episode_id)
 
         # Always derive title + description from the actual act content so the
         # Supabase row reflects the day's story even when the upstream LLM
         # dropped those fields or fell back to "The Impact Tape".
-        script = await regenerate_episode_metadata(script, today)
+        script = await regenerate_episode_metadata(script, episode_date)
 
         if script_only:
             log.info("Stopping after script generation (script_only=True)")
@@ -146,17 +188,19 @@ async def run_daily_podcast(
             )
             if decision == "reject":
                 log.info("Podcast rejected via Telegram")
-                await _log_to_supabase(today, script.get("episode_title", ""), "", 0, script, 0, "rejected")
+                await _log_to_supabase(episode_id, script.get("episode_title", ""), "", 0, script, 0, "rejected")
                 return
             if decision == "edit":
                 script = await request_edited_script(
                     script, bot_token=TELEGRAM_BOT_TOKEN, chat_id=TELEGRAM_CHAT_ID
                 )
 
-        segments_dir = EPISODES_DIR / today / "segments"
+        segments_dir = EPISODES_DIR / episode_id / "segments"
         segments = await render_episode(script, segments_dir)
 
-        metadata = package_episode(segments, script, today, EPISODES_DIR / today)
+        metadata = package_episode(
+            segments, script, episode_id, EPISODES_DIR / episode_id
+        )
 
         title = metadata["title"]
         duration = metadata["duration_seconds"]
@@ -167,12 +211,12 @@ async def run_daily_podcast(
                 "Skipping publish (skip_publish=True) — bundled single-file MP3 ready: %s",
                 metadata["audio_path"],
             )
-            await _log_to_supabase(today, title, "", duration, script, chars, "local_only")
+            await _log_to_supabase(episode_id, title, "", duration, script, chars, "local_only")
             return
 
         # publish_episode uploads to Supabase Storage and upserts the
         # podcast_episodes row itself, so no post-publish logging is needed.
-        url = await publish_episode(metadata, today)
+        url = await publish_episode(metadata, episode_id)
 
         await _send_notification(
             f"✅ Episode published: <b>{title}</b>\n{url}"
@@ -182,8 +226,10 @@ async def run_daily_podcast(
     except Exception as exc:
         log.exception("Podcast pipeline failed: %s", exc)
         if not (script_only or skip_publish):
-            await _send_notification(f"❌ Podcast pipeline failed ({today}): {exc}")
-            await _log_to_supabase(today, "", "", 0, {}, 0, "error")
+            await _send_notification(
+                f"❌ Podcast pipeline failed ({episode_id}): {exc}"
+            )
+            await _log_to_supabase(episode_id, "", "", 0, {}, 0, "error")
         raise
 
 

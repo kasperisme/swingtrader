@@ -107,10 +107,17 @@ def _generate_cover_art(date_str: str, title: str, script: dict, output_path: Pa
 def package_episode(
     segments: list[Path],
     script: dict,
-    date_str: str,
+    episode_id: str,
     output_dir: Path,
+    *,
+    date_str: str | None = None,
 ) -> dict:
     from pydub import AudioSegment
+
+    if date_str is None:
+        # Slug prefix is the date; trim to YYYY-MM-DD if it parses, else use
+        # the slug verbatim for cover-art display.
+        date_str = episode_id[:10] if len(episode_id) >= 10 else episode_id
 
     output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -165,7 +172,7 @@ def package_episode(
 
     combined += outro
 
-    audio_path = output_dir / f"{date_str}_episode.mp3"
+    audio_path = output_dir / f"{episode_id}_episode.mp3"
     combined.export(str(audio_path), format="mp3", bitrate="128k")
 
     structure = " → ".join(
@@ -188,7 +195,7 @@ def package_episode(
         structure,
     )
 
-    cover_path = output_dir / f"{date_str}_cover.png"
+    cover_path = output_dir / f"{episode_id}_cover.png"
     _generate_cover_art(
         date_str,
         script.get("episode_title", "The Impact Tape"),

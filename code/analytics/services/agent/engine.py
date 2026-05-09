@@ -26,6 +26,7 @@ from shared.telegram import (
 from services.agent_core import (
     ToolRegistry,
     build_market_registry,
+    build_screening_write_registry,
     build_user_registry,
     run_tool_loop,
 )
@@ -158,17 +159,27 @@ _MAX_TOOL_ROUNDS = 10
 
 # ── Agent loop ──────────────────────────────────────────────────────────────
 
-def _build_registry(user_id: str | None) -> ToolRegistry:
+def _build_registry(
+    user_id: str | None,
+    writeable_run_ids: list[int] | None = None,
+) -> ToolRegistry:
     """Compose this agent's tool stack on top of the shared base.
 
     Layers (low → high precedence):
       1. base market RAG tools + fetch_url (services.agent_core)
       2. user-scoped RAG tools when a user_id is given
-      3. FMP MCP tools when FMP_API_KEY is set
+      3. screening write tools — only when the scheduled agent is connected
+         to one or more screenings (writeable_run_ids non-empty). The build
+         function rejects writes to any run_id outside this whitelist.
+      4. FMP MCP tools when FMP_API_KEY is set
     """
     registry = build_market_registry()
     if user_id:
         registry.extend(build_user_registry(user_id))
+        if writeable_run_ids:
+            registry.extend(
+                build_screening_write_registry(user_id, writeable_run_ids)
+            )
     if _FMP_ENABLED:
         registry.add_schemas(get_fmp_tool_schemas(), call_fmp_tool)
     return registry
@@ -214,6 +225,46 @@ def run_agent(
                 f"\n\n## Linked Screening Context\n{linked_context}\n"
                 "Use this context alongside your own tool calls."
             )
+
+    # Expose write tools only when the agent is connected to screenings AND a
+    # user is in scope. With no user_id we wouldn't know whose screening to
+    # mutate, so the writes are unavailable by design.
+    writeable_run_ids = (
+        list(linked_scan_run_ids) if (user_id and linked_scan_run_ids) else None
+    )
+    if writeable_run_ids:
+        system += (
+            "\n\n## Screening write tools\n"
+            "This scheduled agent is connected to one or more screenings, so "
+            "you also have write access to them via:\n"
+            " - add_ticker_to_screening(run_id, ticker)\n"
+            " - set_screening_ticker_status(run_id, ticker, status?, comment?, highlighted?)\n"
+            " - set_screening_ticker_note(run_id, ticker, comment)\n\n"
+            f"Allowed run_ids (the only screenings you can write to): "
+            f"{writeable_run_ids}\n\n"
+            "When to call:\n"
+            " - Use add_ticker_to_screening when the data clearly surfaces a "
+            "new ticker the user should track in their list (e.g. a fresh "
+            "high-impact catalyst on a name not yet in the screening).\n"
+            " - Use set_screening_ticker_status to mark workflow state on a "
+            "ticker that's already in the list — for example, dismiss a "
+            "ticker the news has invalidated, move a name from active to "
+            "watchlist, or add a short note explaining why.\n"
+            " - Use set_screening_ticker_note when you only want to add a "
+            "note without changing status.\n\n"
+            "Rules:\n"
+            " - Only call write tools when the user prompt or data clearly "
+            "warrants it — these mutate the user's screening list.\n"
+            " - Write tools never decide whether the screening is triggered. "
+            "Decide triggered/summary based on the data, then optionally use "
+            "the writes as side-effects.\n"
+            " - Notes should be short (1 sentence, under 200 chars) and "
+            "explain WHY this ticker / state change matters today.\n"
+            " - status values: active, dismissed, watchlist, pipeline. "
+            "If unsure, prefer 'watchlist' over 'pipeline'.\n"
+            " - You may NOT write to any run_id outside the allowed list "
+            "above; out-of-scope writes are rejected automatically."
+        )
     has_condition = bool(trigger_condition and trigger_condition.strip())
     if has_condition:
         system += (
@@ -246,7 +297,7 @@ def run_agent(
             "for your holdings')."
         )
 
-    registry = _build_registry(user_id)
+    registry = _build_registry(user_id, writeable_run_ids=writeable_run_ids)
     result = asyncio.run(_run_agent_async(system, prompt, registry))
 
     if not has_condition:
