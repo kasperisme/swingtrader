@@ -82,6 +82,7 @@ import {
 } from "@/app/actions/chart-workspace";
 import { ChartAiChat } from "@/components/chart-ai-chat";
 import { MobileAiChatSheet } from "@/components/mobile-ai-chat-sheet";
+import { BulkAiPanel } from "@/components/bulk-ai-panel";
 import {
   ChartDateRangePicker,
   type ChartGranularity,
@@ -303,6 +304,7 @@ export function ScreeningsUI({
   );
   const [chartAiOpen, setChartAiOpen] = useState(true);
   const [mobileChatOpen, setMobileChatOpen] = useState(false);
+  const [chatMode, setChatMode] = useState<"ticker" | "bulk">("ticker");
   const [streamingTickers, setStreamingTickers] = useState<Set<string>>(
     new Set(),
   );
@@ -1223,6 +1225,108 @@ export function ScreeningsUI({
     ? "Set a pivot on the Charts tab (right-click) to enable this view"
     : undefined;
 
+  // ── Chat surface (shared between desktop side panel and mobile bottom sheet) ──
+  const chatModeTabs = (
+    <ChatModeTabs
+      mode={chatMode}
+      onChange={setChatMode}
+      hasTicker={!!selectedTicker}
+      selectedTicker={selectedTicker}
+      bulkInFlight={
+        bulkJob?.status === "queued" ||
+        bulkJob?.status === "running" ||
+        bulkStarting
+      }
+    />
+  );
+
+  const renderChatBody = (variant: "desktop" | "mobile") => {
+    if (chatMode === "bulk") {
+      return (
+        <BulkAiPanel
+          job={bulkJob}
+          starting={bulkStarting}
+          error={bulkError}
+          onStart={handleBulkAnalyze}
+          tickerCount={filteredSymbols.length}
+          disabled={selectedRunId == null || rows.length === 0}
+        />
+      );
+    }
+    if (!selectedTicker) return <ChatEmptyTickerState />;
+    return (
+      <ChartAiChat
+        key={`${variant}-${selectedTicker}`}
+        symbol={selectedTicker}
+        ohlcData={ohlcvDataRef.current}
+        annotations={chartAnnotations}
+        onAnnotations={handleChartAiAnnotations}
+        messages={chartAiMessages}
+        setMessages={scopedSetChartAiMessages}
+        scanRowId={rowBySymbol.get(selectedTicker)?.scan_row_id}
+        runId={rowBySymbol.get(selectedTicker)?.run_id}
+        onStatusChange={({ status, comment, highlighted, ok }) => {
+          if (!ok) return;
+          const row = rowBySymbol.get(selectedTicker);
+          if (!row) return;
+          const now = new Date().toISOString();
+          const prev = rowNotes.get(row.scan_row_id);
+          const next: ScanRowNote = {
+            scan_row_id: row.scan_row_id,
+            run_id: row.run_id,
+            ticker: row.symbol,
+            user_id: prev?.user_id ?? "",
+            status,
+            highlighted: highlighted ?? prev?.highlighted ?? false,
+            comment: comment ?? prev?.comment ?? null,
+            stage: prev?.stage ?? null,
+            priority: prev?.priority ?? null,
+            tags: prev?.tags ?? [],
+            metadata_json: prev?.metadata_json ?? {},
+            created_at: prev?.created_at ?? now,
+            updated_at: now,
+          };
+          setRowNotes((m) => new Map(m).set(row.scan_row_id, next));
+        }}
+        onLoadingChange={(loading) => {
+          if (!selectedTicker) return;
+          setStreamingTickers((prev) => {
+            const next = new Set(prev);
+            if (loading) next.add(selectedTicker);
+            else next.delete(selectedTicker);
+            return next;
+          });
+        }}
+        onSaveEntry={(price, direction, takeProfit, stopLoss) => {
+          const ohlc = ohlcvDataRef.current;
+          const lastIdx = ohlc.length - 1;
+          const last = ohlc[lastIdx];
+          if (!last) return;
+          void setTickerEntryMarker(
+            selectedTicker,
+            {
+              barIdx: lastIdx,
+              date: last.date,
+              price,
+              open: last.open,
+              high: last.high,
+              low: last.low,
+              close: last.close,
+            },
+            direction,
+            takeProfit,
+            stopLoss,
+          );
+        }}
+        isStreaming={streamingTickers.has(selectedTicker ?? "")}
+        side={variant === "desktop"}
+      />
+    );
+  };
+
+  const tickerBarVisible =
+    isDeepDiveView(activeView) && filteredSymbols.length > 0;
+
   return (
     <div className="flex flex-col h-full min-h-0 w-full pb-[env(safe-area-inset-bottom,0px)]">
       {/* Collapsible: scan runs + search + filters */}
@@ -1453,17 +1557,6 @@ export function ScreeningsUI({
               )}
             </button>
           )}
-          {/* Bulk-analysis trigger — always visible (independent of collapse) */}
-          {!addFilterOpen && selectedRunId != null && rows.length > 0 && (
-            <div className="shrink-0 self-center mr-2">
-              <BulkAnalyzeButton
-                job={bulkJob}
-                starting={bulkStarting}
-                error={bulkError}
-                onStart={handleBulkAnalyze}
-              />
-            </div>
-          )}
           {/* Scrollable tab strip — desktop only */}
           <div className="hidden sm:block flex-1 min-w-0 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
             <div className="flex items-end gap-x-0 flex-nowrap min-w-max">
@@ -1567,9 +1660,11 @@ export function ScreeningsUI({
         </div>
       </div>
 
+      {/* Main row: view content + global AI chat side panel (desktop) */}
+      <div className="flex flex-1 min-h-0 min-w-0">
       {/* View content — scrollable area */}
       <div
-        className={`flex-1 min-h-0 ${isDeepDiveView(activeView) && filteredSymbols.length > 0 ? "overflow-hidden" : "overflow-y-auto"}`}
+        className={`flex-1 min-w-0 min-h-0 ${isDeepDiveView(activeView) && filteredSymbols.length > 0 ? "overflow-hidden" : "overflow-y-auto"}`}
       >
         {rows.length === 0 ? (
           <div className="text-sm text-muted-foreground py-8 text-center">
@@ -1661,182 +1756,6 @@ export function ScreeningsUI({
                           }}
                         />
                       </div>
-                      {selectedTicker && (
-                        <>
-                          {/* Desktop: collapsible sidebar toggle + panel */}
-                          <button
-                            type="button"
-                            onClick={() => setChartAiOpen((v) => !v)}
-                            className="hidden sm:flex items-center justify-center w-5 shrink-0 border-l border-border bg-background hover:bg-muted transition-colors"
-                            title={
-                              chartAiOpen
-                                ? "Collapse AI chat"
-                                : "Expand AI chat"
-                            }
-                          >
-                            {chartAiOpen ? (
-                              <ChevronRight className="w-3 h-3 text-muted-foreground" />
-                            ) : (
-                              <ChevronLeft className="w-3 h-3 text-muted-foreground" />
-                            )}
-                          </button>
-                          {chartAiOpen && (
-                            <div className="hidden sm:flex w-[320px] shrink-0 flex-col border-l border-border">
-                              <ChartAiChat
-                                key={selectedTicker}
-                                symbol={selectedTicker}
-                                ohlcData={ohlcvDataRef.current}
-                                annotations={chartAnnotations}
-                                onAnnotations={handleChartAiAnnotations}
-                                messages={chartAiMessages}
-                                setMessages={scopedSetChartAiMessages}
-                                scanRowId={rowBySymbol.get(selectedTicker)?.scan_row_id}
-                                runId={rowBySymbol.get(selectedTicker)?.run_id}
-                                onStatusChange={({ status, comment, highlighted, ok }) => {
-                                  if (!ok) return;
-                                  const row = rowBySymbol.get(selectedTicker);
-                                  if (!row) return;
-                                  const now = new Date().toISOString();
-                                  const prev = rowNotes.get(row.scan_row_id);
-                                  const next: ScanRowNote = {
-                                    scan_row_id: row.scan_row_id,
-                                    run_id: row.run_id,
-                                    ticker: row.symbol,
-                                    user_id: prev?.user_id ?? "",
-                                    status,
-                                    highlighted: highlighted ?? prev?.highlighted ?? false,
-                                    comment: comment ?? prev?.comment ?? null,
-                                    stage: prev?.stage ?? null,
-                                    priority: prev?.priority ?? null,
-                                    tags: prev?.tags ?? [],
-                                    metadata_json: prev?.metadata_json ?? {},
-                                    created_at: prev?.created_at ?? now,
-                                    updated_at: now,
-                                  };
-                                  setRowNotes((m) => new Map(m).set(row.scan_row_id, next));
-                                }}
-                                onLoadingChange={(loading) => {
-                                  if (!selectedTicker) return;
-                                  setStreamingTickers((prev) => {
-                                    const next = new Set(prev);
-                                    if (loading) next.add(selectedTicker);
-                                    else next.delete(selectedTicker);
-                                    return next;
-                                  });
-                                }}
-                                onSaveEntry={(
-                                  price,
-                                  direction,
-                                  takeProfit,
-                                  stopLoss,
-                                ) => {
-                                  const ohlc = ohlcvDataRef.current;
-                                  const lastIdx = ohlc.length - 1;
-                                  const last = ohlc[lastIdx];
-                                  if (!last) return;
-                                  void setTickerEntryMarker(
-                                    selectedTicker,
-                                    {
-                                      barIdx: lastIdx,
-                                      date: last.date,
-                                      price,
-                                      open: last.open,
-                                      high: last.high,
-                                      low: last.low,
-                                      close: last.close,
-                                    },
-                                    direction,
-                                    takeProfit,
-                                    stopLoss,
-                                  );
-                                }}
-                                isStreaming={streamingTickers.has(selectedTicker ?? "")}
-                                side
-                              />
-                            </div>
-                          )}
-
-                          {/* Mobile: FAB + bottom sheet */}
-                          <MobileAiChatSheet
-                            open={mobileChatOpen}
-                            onOpen={() => setMobileChatOpen(true)}
-                            onClose={() => setMobileChatOpen(false)}
-                            title={selectedTicker}
-                            hasIndicator={chartAiMessages.length > 0}
-                          >
-                            <ChartAiChat
-                              key={`mobile-${selectedTicker}`}
-                              symbol={selectedTicker}
-                              ohlcData={ohlcvDataRef.current}
-                              annotations={chartAnnotations}
-                              onAnnotations={handleChartAiAnnotations}
-                              messages={chartAiMessages}
-                              setMessages={scopedSetChartAiMessages}
-                              scanRowId={rowBySymbol.get(selectedTicker)?.scan_row_id}
-                              runId={rowBySymbol.get(selectedTicker)?.run_id}
-                              onStatusChange={({ status, comment, highlighted, ok }) => {
-                                if (!ok) return;
-                                const row = rowBySymbol.get(selectedTicker);
-                                if (!row) return;
-                                const now = new Date().toISOString();
-                                const prev = rowNotes.get(row.scan_row_id);
-                                const next: ScanRowNote = {
-                                  scan_row_id: row.scan_row_id,
-                                  run_id: row.run_id,
-                                  ticker: row.symbol,
-                                  user_id: prev?.user_id ?? "",
-                                  status,
-                                  highlighted: highlighted ?? prev?.highlighted ?? false,
-                                  comment: comment ?? prev?.comment ?? null,
-                                  stage: prev?.stage ?? null,
-                                  priority: prev?.priority ?? null,
-                                  tags: prev?.tags ?? [],
-                                  metadata_json: prev?.metadata_json ?? {},
-                                  created_at: prev?.created_at ?? now,
-                                  updated_at: now,
-                                };
-                                setRowNotes((m) => new Map(m).set(row.scan_row_id, next));
-                              }}
-                              onLoadingChange={(loading) => {
-                                if (!selectedTicker) return;
-                                setStreamingTickers((prev) => {
-                                  const next = new Set(prev);
-                                  if (loading) next.add(selectedTicker);
-                                  else next.delete(selectedTicker);
-                                  return next;
-                                });
-                              }}
-                              onSaveEntry={(
-                                price,
-                                direction,
-                                takeProfit,
-                                stopLoss,
-                              ) => {
-                                const ohlc = ohlcvDataRef.current;
-                                const lastIdx = ohlc.length - 1;
-                                const last = ohlc[lastIdx];
-                                if (!last) return;
-                                void setTickerEntryMarker(
-                                  selectedTicker,
-                                  {
-                                    barIdx: lastIdx,
-                                    date: last.date,
-                                    price,
-                                    open: last.open,
-                                    high: last.high,
-                                    low: last.low,
-                                    close: last.close,
-                                  },
-                                  direction,
-                                  takeProfit,
-                                  stopLoss,
-                                );
-                              }}
-                              isStreaming={streamingTickers.has(selectedTicker ?? "")}
-                            />
-                          </MobileAiChatSheet>
-                        </>
-                      )}
                     </div>
                   </div>
                 ) : activeView === "relationship" ? (
@@ -1893,6 +1812,15 @@ export function ScreeningsUI({
               hiddenDismissedCount={hiddenDismissedInListCount}
               showDismissed={showDismissedInList}
               onToggleShowDismissed={toggleShowDismissedInList}
+              onOpenChat={() => {
+                if (!selectedTicker) setChatMode("bulk");
+                setMobileChatOpen(true);
+              }}
+              chatHasIndicator={
+                chartAiMessages.length > 0 ||
+                bulkJob?.status === "running" ||
+                bulkJob?.status === "queued"
+              }
             />
           </div>
         ) : activeView === "results" ? (
@@ -2131,6 +2059,58 @@ export function ScreeningsUI({
           />
         )}
       </div>
+
+        {/* Desktop: collapsible AI chat toggle (always visible) */}
+        <button
+          type="button"
+          onClick={() => setChartAiOpen((v) => !v)}
+          className="hidden sm:flex items-center justify-center w-5 shrink-0 border-l border-border bg-background hover:bg-muted transition-colors"
+          title={chartAiOpen ? "Collapse AI chat" : "Expand AI chat"}
+        >
+          {chartAiOpen ? (
+            <ChevronRight className="w-3 h-3 text-muted-foreground" />
+          ) : (
+            <ChevronLeft className="w-3 h-3 text-muted-foreground" />
+          )}
+        </button>
+
+        {/* Desktop: AI chat side panel (always available, regardless of view) */}
+        {chartAiOpen && (
+          <div className="hidden sm:flex w-[320px] shrink-0 flex-col border-l border-border">
+            {chatModeTabs}
+            {renderChatBody("desktop")}
+          </div>
+        )}
+      </div>
+
+      {/* Mobile: AI chat bottom sheet (overlay; trigger lives in MobileTickerBar in deep-dive, FAB elsewhere) */}
+      <MobileAiChatSheet
+        open={mobileChatOpen}
+        onOpen={() => {
+          if (!selectedTicker) setChatMode("bulk");
+          setMobileChatOpen(true);
+        }}
+        onClose={() => setMobileChatOpen(false)}
+        title={
+          chatMode === "bulk"
+            ? "All tickers"
+            : selectedTicker ?? "AI Chat"
+        }
+        hasIndicator={
+          chatMode === "bulk"
+            ? bulkJob?.status === "running" || bulkJob?.status === "queued"
+            : chartAiMessages.length > 0
+        }
+        showTrigger={!tickerBarVisible}
+      >
+        <div className="flex flex-col h-full min-h-0">
+          {chatModeTabs}
+          <div className="flex-1 min-h-0 flex flex-col">
+            {renderChatBody("mobile")}
+          </div>
+        </div>
+      </MobileAiChatSheet>
+
       {aiSelectedRow && (
         <AiAnalysisPanel
           key={aiSelectedRow.scan_row_id}
@@ -2315,156 +2295,72 @@ export function ScreeningsUI({
   );
 }
 
-const BULK_ANALYZE_DEFAULT_PROMPT =
-  "Run a swing-trading technical analysis. Highlight setup quality, key levels, and any risks.";
-
-function BulkAnalyzeButton({
-  job,
-  starting,
-  error,
-  onStart,
+function ChatModeTabs({
+  mode,
+  onChange,
+  hasTicker,
+  selectedTicker,
+  bulkInFlight,
 }: {
-  job: BulkAnalysisJob | null;
-  starting: boolean;
-  error: string | null;
-  onStart: (userPrompt: string) => Promise<void> | void;
+  mode: "ticker" | "bulk";
+  onChange: (m: "ticker" | "bulk") => void;
+  hasTicker: boolean;
+  selectedTicker: string | null;
+  bulkInFlight: boolean;
 }) {
-  const inFlight = job?.status === "queued" || job?.status === "running";
-  const [panelOpen, setPanelOpen] = useState(false);
-  const [draft, setDraft] = useState("");
-  const containerRef = useRef<HTMLDivElement | null>(null);
-
-  // Seed the draft from the previous job's prompt when the panel opens.
-  useEffect(() => {
-    if (panelOpen) {
-      setDraft((prev) => prev || job?.user_prompt || "");
-    }
-  }, [panelOpen, job?.user_prompt]);
-
-  // Close on outside click or Esc.
-  useEffect(() => {
-    if (!panelOpen) return;
-    const onDown = (e: MouseEvent) => {
-      if (!containerRef.current) return;
-      if (!containerRef.current.contains(e.target as Node)) setPanelOpen(false);
-    };
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setPanelOpen(false);
-    };
-    window.addEventListener("mousedown", onDown);
-    window.addEventListener("keydown", onKey);
-    return () => {
-      window.removeEventListener("mousedown", onDown);
-      window.removeEventListener("keydown", onKey);
-    };
-  }, [panelOpen]);
-
-  let label: string;
-  let title: string;
-  if (starting) {
-    label = "Starting…";
-    title = "Queueing bulk analysis";
-  } else if (job?.status === "queued") {
-    label = "Queued";
-    title = "Job is queued — worker will pick it up within a minute";
-  } else if (job?.status === "running") {
-    const total = job.total_tickers || 0;
-    const done = job.completed_tickers || 0;
-    label = total ? `Running ${done}/${total}` : "Running…";
-    title = `Bulk analysis in progress${job.failed_tickers ? ` — ${job.failed_tickers} failed` : ""}`;
-  } else if (job?.status === "done") {
-    const succeeded = Math.max(0, (job.completed_tickers ?? 0) - (job.failed_tickers ?? 0));
-    label = `Re-analyze all (last: ${succeeded}/${job.total_tickers})`;
-    title = "Bulk analysis completed — click to run again";
-  } else if (job?.status === "error") {
-    label = "Re-analyze all (last failed)";
-    title = job.error_message || "Previous job errored";
-  } else {
-    label = "Analyze all";
-    title = "Run a per-ticker technical analysis on every ticker in this screening";
-  }
-
-  const handleClick = () => {
-    if (inFlight || starting) return;
-    setPanelOpen((o) => !o);
-  };
-
-  const handleSubmit = async () => {
-    const prompt = draft.trim() || BULK_ANALYZE_DEFAULT_PROMPT;
-    setPanelOpen(false);
-    await onStart(prompt);
-  };
+  const tabBase =
+    "flex-1 inline-flex items-center justify-center gap-1.5 px-2 py-1.5 text-[12px] font-medium rounded-md transition-colors";
+  const tabActive = "bg-background text-foreground shadow-sm";
+  const tabInactive = "text-muted-foreground hover:text-foreground";
 
   return (
-    <div ref={containerRef} className="relative flex flex-col gap-1">
-      <button
-        type="button"
-        onClick={handleClick}
-        disabled={starting || inFlight}
-        title={title}
-        className={`flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded-md border transition-colors ${
-          inFlight
-            ? "border-primary/40 bg-primary/10 text-primary"
-            : "border-border text-muted-foreground hover:text-foreground hover:border-foreground/40"
-        } disabled:pointer-events-none disabled:opacity-60`}
+    <div className="shrink-0 px-2 py-2 border-b border-border">
+      <div
+        role="tablist"
+        aria-label="AI chat scope"
+        className="flex items-center gap-0.5 rounded-md bg-muted/50 p-0.5"
       >
-        {inFlight || starting ? (
-          <Loader2 className="w-3.5 h-3.5 animate-spin" />
-        ) : (
-          <Sparkles className="w-3.5 h-3.5" />
-        )}
-        {label}
-      </button>
-      {error ? (
-        <span className="text-[11px] text-destructive max-w-[16rem] truncate" title={error}>
-          {error}
-        </span>
-      ) : null}
+        <button
+          type="button"
+          role="tab"
+          aria-selected={mode === "ticker"}
+          disabled={!hasTicker}
+          onClick={() => onChange("ticker")}
+          className={`${tabBase} ${mode === "ticker" ? tabActive : tabInactive} disabled:opacity-40 disabled:cursor-not-allowed`}
+          title={hasTicker ? `Chat about ${selectedTicker}` : "Select a ticker first"}
+        >
+          <Bot className="w-3.5 h-3.5" />
+          <span>{hasTicker && selectedTicker ? selectedTicker : "This ticker"}</span>
+        </button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={mode === "bulk"}
+          onClick={() => onChange("bulk")}
+          className={`${tabBase} ${mode === "bulk" ? tabActive : tabInactive}`}
+          title="Run an analysis across every ticker in this screening"
+        >
+          {bulkInFlight ? (
+            <Loader2 className="w-3.5 h-3.5 animate-spin" />
+          ) : (
+            <Sparkles className="w-3.5 h-3.5" />
+          )}
+          <span>All tickers</span>
+        </button>
+      </div>
+    </div>
+  );
+}
 
-      {panelOpen && !inFlight && !starting ? (
-        <div className="absolute z-50 top-full left-0 mt-2 w-[22rem] max-w-[90vw] rounded-md border border-border bg-popover text-popover-foreground shadow-lg p-3">
-          <div className="flex flex-col gap-2">
-            <label className="text-xs font-medium text-foreground">
-              What should the analyst look for?
-            </label>
-            <textarea
-              autoFocus
-              value={draft}
-              onChange={(e) => setDraft(e.target.value)}
-              onKeyDown={(e) => {
-                if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
-                  e.preventDefault();
-                  void handleSubmit();
-                }
-              }}
-              placeholder={BULK_ANALYZE_DEFAULT_PROMPT}
-              rows={4}
-              maxLength={2000}
-              className="w-full text-xs rounded-md border border-input bg-background px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-ring resize-none"
-            />
-            <div className="flex items-center justify-between text-[11px] text-muted-foreground">
-              <span>Runs locally on Ollama. ⌘/Ctrl+Enter to start.</span>
-              <span>{draft.length}/2000</span>
-            </div>
-            <div className="flex items-center justify-end gap-2 pt-1">
-              <button
-                type="button"
-                onClick={() => setPanelOpen(false)}
-                className="text-xs px-2.5 py-1.5 rounded-md border border-border text-muted-foreground hover:text-foreground"
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                onClick={() => void handleSubmit()}
-                className="text-xs px-2.5 py-1.5 rounded-md border border-foreground bg-foreground text-background hover:opacity-90"
-              >
-                Start
-              </button>
-            </div>
-          </div>
-        </div>
-      ) : null}
+function ChatEmptyTickerState() {
+  return (
+    <div className="flex-1 min-h-0 flex flex-col items-center justify-center px-6 py-8 text-center gap-2">
+      <Bot className="w-7 h-7 text-muted-foreground/40" />
+      <p className="text-[12px] text-muted-foreground/80 leading-relaxed max-w-[18rem]">
+        Pick a ticker on the left to chat about it, or switch to{" "}
+        <span className="font-medium text-foreground/80">All tickers</span>{" "}
+        to run a bulk analysis across the whole screening.
+      </p>
     </div>
   );
 }

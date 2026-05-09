@@ -9,6 +9,8 @@ interface MobileAiChatSheetProps {
   onClose: () => void;
   title: string;
   hasIndicator?: boolean;
+  /** Render the floating action button trigger. Set false when the host page provides its own trigger. */
+  showTrigger?: boolean;
   children: ReactNode;
 }
 
@@ -18,26 +20,29 @@ export function MobileAiChatSheet({
   onClose,
   title,
   hasIndicator = false,
+  showTrigger = true,
   children,
 }: MobileAiChatSheetProps) {
   return (
     <>
-      <button
-        type="button"
-        onClick={onOpen}
-        className={`sm:hidden fixed right-4 z-30 flex items-center justify-center w-14 h-14 rounded-full shadow-lg border border-border transition-colors ${
-          hasIndicator
-            ? "bg-foreground text-background"
-            : "bg-background text-foreground hover:bg-muted"
-        }`}
-        style={{ bottom: "calc(1.5rem + env(safe-area-inset-bottom, 0px))" }}
-        aria-label="Open AI chat"
-      >
-        <Bot className="w-6 h-6" />
-        {hasIndicator && (
-          <span className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-emerald-500 border-2 border-background" />
-        )}
-      </button>
+      {showTrigger && (
+        <button
+          type="button"
+          onClick={onOpen}
+          className={`sm:hidden fixed right-4 z-30 flex items-center justify-center w-14 h-14 rounded-full shadow-lg border border-border transition-colors ${
+            hasIndicator
+              ? "bg-foreground text-background"
+              : "bg-background text-foreground hover:bg-muted"
+          }`}
+          style={{ bottom: "calc(1.5rem + env(safe-area-inset-bottom, 0px))" }}
+          aria-label="Open AI chat"
+        >
+          <Bot className="w-6 h-6" />
+          {hasIndicator && (
+            <span className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-emerald-500 border-2 border-background" />
+          )}
+        </button>
+      )}
 
       {open && (
         <div className="sm:hidden fixed inset-0 z-40 bg-black/50" onClick={onClose} />

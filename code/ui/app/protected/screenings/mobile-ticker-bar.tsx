@@ -5,6 +5,7 @@ import {
   ChevronLeft,
   ChevronRight,
   AlignJustify,
+  Bot,
   X,
   MoreHorizontal,
   StickyNote,
@@ -31,6 +32,10 @@ interface MobileTickerBarProps {
   hiddenDismissedCount?: number;
   showDismissed?: boolean;
   onToggleShowDismissed?: () => void;
+  /** Open the AI chat sheet. When provided, a Bot button is rendered next to the ticker list button. */
+  onOpenChat?: () => void;
+  /** Show a green dot on the chat button to indicate unread / existing messages. */
+  chatHasIndicator?: boolean;
 }
 
 export function MobileTickerBar({
@@ -49,6 +54,8 @@ export function MobileTickerBar({
   hiddenDismissedCount = 0,
   showDismissed = false,
   onToggleShowDismissed,
+  onOpenChat,
+  chatHasIndicator = false,
 }: MobileTickerBarProps) {
   const [sheetOpen, setSheetOpen] = useState(false);
 
@@ -86,6 +93,67 @@ export function MobileTickerBar({
     <>
       {/* Sticky nav bar — mobile only, pinned at the bottom of the screenings layout */}
       <div className="sm:hidden flex flex-col border-t border-border bg-background shrink-0">
+        {/* Selected-ticker action strip: note + dismiss / restore — sits above the nav row */}
+        {selectedTicker && (
+          <button
+            type="button"
+            onClick={() => onEditNote?.(selectedTicker)}
+            className="group flex items-center gap-2 px-3 py-1.5 border-b border-border/60 text-left active:bg-muted/40 transition-colors"
+          >
+            <StickyNote
+              className={`w-3.5 h-3.5 shrink-0 ${selectedNote ? "text-amber-500" : "text-muted-foreground/50"}`}
+            />
+            <span
+              className={`flex-1 min-w-0 truncate text-[12px] leading-tight ${selectedNote ? "text-foreground/90 italic" : "text-muted-foreground"}`}
+            >
+              {selectedNote ?? "Add a note"}
+            </span>
+            {selectedDismissed ? (
+              <span
+                role="button"
+                tabIndex={0}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onRestore?.(selectedTicker);
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    onRestore?.(selectedTicker);
+                  }
+                }}
+                className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-[11px] font-mono uppercase tracking-[0.1em] text-emerald-600 dark:text-emerald-400 hover:bg-emerald-500/10 transition-colors"
+                aria-label={`Restore ${selectedTicker}`}
+              >
+                <RotateCcw className="w-3 h-3" />
+                Restore
+              </span>
+            ) : (
+              <span
+                role="button"
+                tabIndex={0}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onDismiss?.(selectedTicker);
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    onDismiss?.(selectedTicker);
+                  }
+                }}
+                className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-[11px] font-mono uppercase tracking-[0.1em] text-rose-500 hover:bg-rose-500/10 transition-colors"
+                aria-label={`Dismiss ${selectedTicker}`}
+              >
+                <Trash2 className="w-3 h-3" />
+                Dismiss
+              </span>
+            )}
+          </button>
+        )}
+
         <div className="flex items-center h-12 px-1 gap-0.5">
           <button
             type="button"
@@ -145,68 +213,25 @@ export function MobileTickerBar({
           >
             <AlignJustify className="w-4 h-4" />
           </button>
-        </div>
 
-        {/* Selected-ticker action strip: note + dismiss / restore */}
-        {selectedTicker && (
-          <button
-            type="button"
-            onClick={() => onEditNote?.(selectedTicker)}
-            className="group flex items-center gap-2 px-3 py-1.5 border-t border-border/60 text-left active:bg-muted/40 transition-colors"
-          >
-            <StickyNote
-              className={`w-3.5 h-3.5 shrink-0 ${selectedNote ? "text-amber-500" : "text-muted-foreground/50"}`}
-            />
-            <span
-              className={`flex-1 min-w-0 truncate text-[12px] leading-tight ${selectedNote ? "text-foreground/90 italic" : "text-muted-foreground"}`}
+          {onOpenChat && (
+            <button
+              type="button"
+              onClick={onOpenChat}
+              className={`relative flex items-center justify-center w-11 h-11 rounded-md transition-colors ${
+                chatHasIndicator
+                  ? "text-foreground"
+                  : "text-muted-foreground hover:text-foreground"
+              }`}
+              aria-label="Open AI chat"
             >
-              {selectedNote ?? "Add a note"}
-            </span>
-            {selectedDismissed ? (
-              <span
-                role="button"
-                tabIndex={0}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onRestore?.(selectedTicker);
-                }}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter" || e.key === " ") {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    onRestore?.(selectedTicker);
-                  }
-                }}
-                className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-[11px] font-mono uppercase tracking-[0.1em] text-emerald-600 dark:text-emerald-400 hover:bg-emerald-500/10 transition-colors"
-                aria-label={`Restore ${selectedTicker}`}
-              >
-                <RotateCcw className="w-3 h-3" />
-                Restore
-              </span>
-            ) : (
-              <span
-                role="button"
-                tabIndex={0}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onDismiss?.(selectedTicker);
-                }}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter" || e.key === " ") {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    onDismiss?.(selectedTicker);
-                  }
-                }}
-                className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-[11px] font-mono uppercase tracking-[0.1em] text-rose-500 hover:bg-rose-500/10 transition-colors"
-                aria-label={`Dismiss ${selectedTicker}`}
-              >
-                <Trash2 className="w-3 h-3" />
-                Dismiss
-              </span>
-            )}
-          </button>
-        )}
+              <Bot className="w-5 h-5" />
+              {chatHasIndicator && (
+                <span className="absolute top-2 right-2 w-2 h-2 rounded-full bg-emerald-500 border border-background" />
+              )}
+            </button>
+          )}
+        </div>
       </div>
 
       {/* Backdrop */}
