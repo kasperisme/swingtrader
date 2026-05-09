@@ -12,7 +12,7 @@ import type { ScreeningsPrimaryTabDef } from "./screenings-types";
 
 /** Tabs that apply to the whole filtered symbol list. */
 export const SCREENINGS_MULTI_SYMBOL_TABS: ScreeningsPrimaryTabDef[] = [
-  { id: "results", label: "Results", icon: <List className="w-3.5 h-3.5" /> },
+  { id: "results", label: "Custom Data", icon: <List className="w-3.5 h-3.5" /> },
   {
     id: "quotes",
     label: "Quotes",

@@ -982,6 +982,21 @@ export function ScreeningsUI({
     );
   }, [rows.length, dataColumnKeys, sortKey]);
 
+  const hasCustomData = dataColumnKeys.length > 0;
+  const visibleMultiSymbolTabs = useMemo(
+    () =>
+      hasCustomData
+        ? SCREENINGS_MULTI_SYMBOL_TABS
+        : SCREENINGS_MULTI_SYMBOL_TABS.filter((t) => t.id !== "results"),
+    [hasCustomData],
+  );
+
+  useEffect(() => {
+    if (activeView === "results" && !hasCustomData) {
+      setActiveView(visibleMultiSymbolTabs[0]?.id ?? "quotes");
+    }
+  }, [activeView, hasCustomData, visibleMultiSymbolTabs]);
+
   function selectRun(id: number) {
     router.push(`/protected/screenings?run=${id}`);
   }
@@ -1462,7 +1477,7 @@ export function ScreeningsUI({
                     <span className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground px-2 pb-2 shrink-0 hidden sm:inline">
                       Multi-symbol
                     </span>
-                    {SCREENINGS_MULTI_SYMBOL_TABS.map((tab) => (
+                    {visibleMultiSymbolTabs.map((tab) => (
                       <button
                         key={tab.id}
                         type="button"
@@ -1564,27 +1579,6 @@ export function ScreeningsUI({
           </div>
         ) : isDeepDiveView(activeView) && filteredSymbols.length > 0 ? (
           <div className="flex flex-col h-full min-h-0">
-            {/* Mobile ticker nav bar — hidden on sm+ */}
-            <MobileTickerBar
-              symbols={deepDiveListSymbols}
-              selectedTicker={selectedTicker}
-              onSelect={setSelectedTicker}
-              quotes={quotes}
-              getStatus={getTickerStatus}
-              dismissedSymbols={dismissedSymbols}
-              highlightedSymbols={highlightedSymbols}
-              getNote={getTickerComment}
-              onOpenActions={(ticker, anchorEl) => {
-                const rect = anchorEl.getBoundingClientRect();
-                openTickerActionsMenu(ticker, rect.left + rect.width / 2, rect.bottom + 4);
-              }}
-              onEditNote={editTickerComment}
-              onDismiss={dismissTicker}
-              onRestore={restoreTicker}
-              hiddenDismissedCount={hiddenDismissedInListCount}
-              showDismissed={showDismissedInList}
-              onToggleShowDismissed={toggleShowDismissedInList}
-            />
             <div className="flex min-h-0 flex-1 items-stretch gap-0">
               <div className="hidden min-h-0 w-56 shrink-0 self-stretch border-r border-border sm:flex sm:flex-col sm:overflow-hidden xl:w-64">
                 <TickerSidebar
@@ -1879,6 +1873,27 @@ export function ScreeningsUI({
                 )}
               </div>
             </div>
+            {/* Mobile ticker nav bar — pinned at bottom on mobile, hidden on sm+ */}
+            <MobileTickerBar
+              symbols={deepDiveListSymbols}
+              selectedTicker={selectedTicker}
+              onSelect={setSelectedTicker}
+              quotes={quotes}
+              getStatus={getTickerStatus}
+              dismissedSymbols={dismissedSymbols}
+              highlightedSymbols={highlightedSymbols}
+              getNote={getTickerComment}
+              onOpenActions={(ticker, anchorEl) => {
+                const rect = anchorEl.getBoundingClientRect();
+                openTickerActionsMenu(ticker, rect.left + rect.width / 2, rect.bottom + 4);
+              }}
+              onEditNote={editTickerComment}
+              onDismiss={dismissTicker}
+              onRestore={restoreTicker}
+              hiddenDismissedCount={hiddenDismissedInListCount}
+              showDismissed={showDismissedInList}
+              onToggleShowDismissed={toggleShowDismissedInList}
+            />
           </div>
         ) : activeView === "results" ? (
           <>

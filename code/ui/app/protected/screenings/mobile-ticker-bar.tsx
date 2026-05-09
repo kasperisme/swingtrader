@@ -84,8 +84,8 @@ export function MobileTickerBar({
 
   return (
     <>
-      {/* Sticky nav bar — mobile only */}
-      <div className="sm:hidden flex flex-col border-b border-border bg-background shrink-0">
+      {/* Sticky nav bar — mobile only, pinned at the bottom of the screenings layout */}
+      <div className="sm:hidden flex flex-col border-t border-border bg-background shrink-0">
         <div className="flex items-center h-12 px-1 gap-0.5">
           <button
             type="button"
