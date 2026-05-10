@@ -1519,6 +1519,13 @@ function CreateForm({ onClose, atLimit, suggestionTickers }: { onClose: () => vo
       onClose();
       window.location.reload();
     } else {
+      if (/active screenings/i.test(res.error)) {
+        track("paywall_hit", {
+          surface: "screenings_create",
+          user_plan: "unknown",
+          reason: "screenings_active_limit",
+        });
+      }
       setErr(res.error);
       setSaving(false);
     }

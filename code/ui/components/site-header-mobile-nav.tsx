@@ -5,7 +5,6 @@ import { createPortal } from "react-dom";
 import Link from "next/link";
 import { Menu, X, LogOut } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
-import { useRouter } from "next/navigation";
 import { cn } from "@/lib/utils";
 import { CavemanToggle } from "@/components/caveman-toggle";
 import { HelpChatTrigger } from "@/components/help-chat";
@@ -61,7 +60,6 @@ export function SiteHeaderMobileNav({ isAuthed, userEmail }: Props) {
   const [isLoggedIn, setIsLoggedIn] = useState(isAuthed);
   const [email, setEmail] = useState(userEmail);
   const panelId = useId();
-  const router = useRouter();
 
   const close = () => setOpen(false);
 
@@ -101,7 +99,7 @@ export function SiteHeaderMobileNav({ isAuthed, userEmail }: Props) {
     close();
     const supabase = createClient();
     await supabase.auth.signOut();
-    router.push("/auth/login");
+    window.location.href = "/auth/login";
   };
 
   return (

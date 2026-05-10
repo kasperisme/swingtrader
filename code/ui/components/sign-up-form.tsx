@@ -63,6 +63,23 @@ export function SignUpForm({
     }
   };
 
+  const handleGoogleSignUp = async () => {
+    const supabase = createClient();
+    setError(null);
+    setIsLoading(true);
+    track("signup_completed", { method: "oauth" });
+    const { error } = await supabase.auth.signInWithOAuth({
+      provider: "google",
+      options: {
+        redirectTo: `${window.location.origin}/auth/callback?next=/protected`,
+      },
+    });
+    if (error) {
+      setError(error.message);
+      setIsLoading(false);
+    }
+  };
+
   return (
     <div className={cn("flex flex-col gap-6", className)} {...props}>
       <Card>
@@ -73,6 +90,21 @@ export function SignUpForm({
         <CardContent>
           <form onSubmit={handleSignUp}>
             <div className="flex flex-col gap-6">
+              <Button
+                type="button"
+                variant="outline"
+                className="w-full"
+                onClick={handleGoogleSignUp}
+                disabled={isLoading}
+              >
+                Continue with Google
+              </Button>
+              <div className="relative text-center text-sm">
+                <span className="bg-card text-muted-foreground relative z-10 px-2">
+                  Or sign up with email
+                </span>
+                <div className="absolute inset-0 top-1/2 -z-0 h-px bg-border" />
+              </div>
               <div className="grid gap-2">
                 <Label htmlFor="email">Email</Label>
                 <Input

@@ -1,6 +1,7 @@
 import Link from "next/link";
 import Image from "next/image";
 import { Suspense } from "react";
+import { redirect } from "next/navigation";
 import { unstable_noStore as noStore } from "next/cache";
 import { createServiceClient } from "@/lib/supabase/service";
 import {
@@ -325,6 +326,15 @@ async function getSignupCount(): Promise<number> {
 
 export default async function Home() {
   noStore(); // pricing section shows live signup count — never serve stale
+
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (user) {
+    redirect("/protected");
+  }
+
   let cms: LandingPage | null = null;
   if (isSanityConfigured) {
     try {

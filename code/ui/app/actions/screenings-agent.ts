@@ -4,6 +4,8 @@ import { createClient } from "@/lib/supabase/server";
 import { getUserPlanTier } from "./plan-gate";
 import { hasPlan, type PlanTier } from "@/lib/plans";
 import type { ScreeningsFilters } from "@/app/protected/screenings/screenings-filters-model";
+import { captureServer } from "@/lib/analytics/server";
+import { PRELAUNCH_OPEN_ACCESS } from "@/lib/launch";
 
 type ActionResult<T> = Promise<{ ok: true; data: T } | { ok: false; error: string }>;
 
@@ -104,11 +106,37 @@ export async function createScheduledScreening(input: {
     .eq("is_active", true);
 
   if (countErr) return { ok: false, error: countErr.message };
-  if ((count ?? 0) >= limit)
-    return {
-      ok: false,
-      error: `${plan} plan allows ${limit} active screenings. Upgrade for more.`,
-    };
+  if ((count ?? 0) >= limit) {
+    if (PRELAUNCH_OPEN_ACCESS) {
+      captureServer(user.id, "would_plan_limit_reached", {
+        limit_type: "screenings_active",
+        user_plan: plan,
+        used: count ?? 0,
+        limit,
+      });
+      captureServer(user.id, "would_paywall_hit", {
+        surface: "screenings_create",
+        user_plan: plan,
+        reason: "screenings_active_limit",
+      });
+    } else {
+      captureServer(user.id, "plan_limit_reached", {
+        limit_type: "screenings_active",
+        user_plan: plan,
+        used: count ?? 0,
+        limit,
+      });
+      captureServer(user.id, "paywall_hit", {
+        surface: "screenings_create",
+        user_plan: plan,
+        reason: "screenings_active_limit",
+      });
+      return {
+        ok: false,
+        error: `${plan} plan allows ${limit} active screenings. Upgrade for more.`,
+      };
+    }
+  }
 
   const { data, error } = await supabase
     .schema(SCHEMA)
@@ -255,10 +283,12 @@ export async function getScreeningLimits(): ActionResult<{
   return {
     ok: true,
     data: {
-      limit: SCREENING_LIMITS[plan],
+      limit: PRELAUNCH_OPEN_ACCESS ? 999 : SCREENING_LIMITS[plan],
       used: count ?? 0,
       plan,
-      minSchedule: SCHEDULE_GATES[plan],
+      minSchedule: PRELAUNCH_OPEN_ACCESS
+        ? SCHEDULE_GATES.trader
+        : SCHEDULE_GATES[plan],
     },
   };
 }

@@ -13,6 +13,21 @@ export async function updateSession(request: NextRequest) {
     return supabaseResponse;
   }
 
+  // Defensive: if Supabase's redirect URL allowlist isn't configured for
+  // /auth/callback, the OAuth `code` lands on /. Forward it so the proper
+  // callback handler can do the code → session exchange.
+  if (
+    request.nextUrl.pathname === "/" &&
+    request.nextUrl.searchParams.has("code")
+  ) {
+    const url = request.nextUrl.clone();
+    url.pathname = "/auth/callback";
+    if (!url.searchParams.has("next")) {
+      url.searchParams.set("next", "/protected");
+    }
+    return NextResponse.redirect(url);
+  }
+
   // With Fluid compute, don't put this client in a global environment
   // variable. Always create a new one on each request.
   const supabase = createServerClient(
@@ -48,6 +63,13 @@ export async function updateSession(request: NextRequest) {
   const user = data?.claims;
 
   const pathname = request.nextUrl.pathname;
+
+  // Authed users hitting the marketing root → ops center.
+  if (user && pathname === "/") {
+    const url = request.nextUrl.clone();
+    url.pathname = "/protected";
+    return NextResponse.redirect(url);
+  }
   // /docs and /blog are public marketing/reference; do not require Supabase session.
   const isPublicPath =
     pathname === "/" ||

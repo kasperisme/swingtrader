@@ -1,20 +1,33 @@
 "use client";
 
+import { useEffect } from "react";
 import Link from "next/link";
 import { Lock, ArrowRight } from "lucide-react";
 import type { PlanTier } from "@/lib/plans";
 import { PLAN_GATE } from "@/lib/plans";
+import { track } from "@/lib/analytics/events";
 
 interface UpgradePromptProps {
   requiredPlan: PlanTier;
   userPlan: PlanTier;
   /** Explicit message to show. If omitted, a default is generated from the gate settings. */
   message?: string;
+  /** Surface identifier for analytics, e.g. "news_trends", "screenings_create". */
+  surface?: string;
 }
 
-export function UpgradePrompt({ requiredPlan, userPlan, message }: UpgradePromptProps) {
+export function UpgradePrompt({ requiredPlan, userPlan, message, surface }: UpgradePromptProps) {
   const requiredLabel = PLAN_GATE[requiredPlan].label;
   const userLabel = PLAN_GATE[userPlan].label;
+  const trackSurface = surface ?? "unknown";
+
+  useEffect(() => {
+    track("paywall_viewed", {
+      surface: trackSurface,
+      user_plan: userPlan,
+      required_plan: requiredPlan,
+    });
+  }, [trackSurface, userPlan, requiredPlan]);
 
   const defaultMessage =
     userPlan === "observer"
@@ -29,6 +42,13 @@ export function UpgradePrompt({ requiredPlan, userPlan, message }: UpgradePrompt
       </p>
       <Link
         href="/pricing"
+        onClick={() =>
+          track("upgrade_clicked", {
+            from_plan: userPlan,
+            to_plan: requiredPlan,
+            surface: trackSurface,
+          })
+        }
         className="inline-flex items-center gap-1 rounded-lg bg-amber-500/20 px-3 py-1.5 text-xs font-semibold text-amber-300 transition-colors hover:bg-amber-500/30"
       >
         Upgrade

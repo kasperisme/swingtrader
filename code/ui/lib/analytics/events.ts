@@ -35,6 +35,63 @@ type EventMap = {
   onboarding_collapsed_toggled: { collapsed: boolean };
   onboarding_restarted: { completed_steps: number; total_steps: number };
   ask_ai_reminder_clicked: Record<string, never>;
+
+  paywall_viewed: {
+    surface: string;
+    user_plan: string;
+    required_plan: string;
+    reason?: string;
+  };
+  paywall_hit: {
+    surface: string;
+    user_plan: string;
+    required_plan?: string;
+    reason: string;
+  };
+  plan_limit_reached: {
+    limit_type: "screenings_active" | "api_keys" | string;
+    user_plan: string;
+    used: number;
+    limit: number;
+  };
+  schedule_frequency_blocked: {
+    user_plan: string;
+    requested_schedule: string;
+    allowed_schedule: string;
+  };
+  news_trends_gate_applied: {
+    user_plan: string;
+    upgrade_plan: string;
+    restriction_days: number;
+    part: string;
+  };
+  watchlist_alert_attempted: {
+    user_plan: string;
+    blocked: boolean;
+  };
+  api_quota_exceeded: {
+    user_plan: string;
+    scope?: string;
+  };
+
+  would_paywall_hit: {
+    surface: string;
+    user_plan: string;
+    required_plan?: string;
+    reason: string;
+  };
+  would_plan_limit_reached: {
+    limit_type: "screenings_active" | "api_keys" | string;
+    user_plan: string;
+    used: number;
+    limit: number;
+  };
+  would_news_trends_gate_applied: {
+    user_plan: string;
+    upgrade_plan: string;
+    restriction_days: number;
+    part: string;
+  };
 };
 
 export function track<K extends keyof EventMap>(

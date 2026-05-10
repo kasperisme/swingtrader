@@ -13,7 +13,6 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { track } from "@/lib/analytics/events";
 import { getPosthog } from "@/lib/analytics/posthog";
@@ -26,7 +25,6 @@ export function LoginForm({
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
-  const router = useRouter();
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -45,11 +43,28 @@ export function LoginForm({
         ph?.identify(data.user.id, { email: data.user.email ?? undefined });
       }
       track("login", { method: "email" });
-      router.push("/protected");
-      router.refresh();
+      window.location.href = "/protected";
+      return;
     } catch (error: unknown) {
       setError(error instanceof Error ? error.message : "An error occurred");
     } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleGoogleLogin = async () => {
+    const supabase = createClient();
+    setError(null);
+    setIsLoading(true);
+    track("login", { method: "oauth" });
+    const { error } = await supabase.auth.signInWithOAuth({
+      provider: "google",
+      options: {
+        redirectTo: `${window.location.origin}/auth/callback?next=/protected`,
+      },
+    });
+    if (error) {
+      setError(error.message);
       setIsLoading(false);
     }
   };
@@ -66,6 +81,15 @@ export function LoginForm({
         <CardContent>
           <form onSubmit={handleLogin}>
             <div className="flex flex-col gap-6">
+              <Button
+                type="button"
+                variant="outline"
+                className="w-full"
+                onClick={handleGoogleLogin}
+                disabled={isLoading}
+              >
+                Continue with Google
+              </Button>
               <Button asChild variant="outline" className="w-full">
                 <Link href="/auth/x">Continue with X</Link>
               </Button>

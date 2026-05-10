@@ -51,3 +51,11 @@ Inspiration:
 
 How to use Claude To Gain a Huge Day Trading Edge (https://www.youtube.com/watch?v=Rqmdw4xyIMM):
 [ ] Custom alarms for charts e.g. agents that users can deploy to their charts
+
+MVP Scope:
+[x] Pay gates are implemented
+[x] Google Auth is implemented
+[ ] X auth is implemented
+[ ] Article search refined
+[ ] News trend graph refined (narrative generation)
+[ ] Gennemgå platformen og sikre at det er så simpelt og intuitivt som muligt

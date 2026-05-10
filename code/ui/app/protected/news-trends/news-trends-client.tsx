@@ -273,6 +273,7 @@ export function NewsTrendsClient({
           <UpgradePrompt
             requiredPlan={gate.upgradePlan}
             userPlan={tier}
+            surface="news_trends"
             message={
               tier === "observer"
                 ? `Observer: last 24 hours. Upgrade to Investor (30 days) or Trader (full).`

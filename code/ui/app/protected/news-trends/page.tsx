@@ -7,6 +7,8 @@ import { NewsTrendsClient } from "./news-trends-client";
 import type { TimeGate } from "@/lib/gate";
 import { getOnboardingTours } from "@/app/actions/onboarding";
 import { PageTour } from "@/app/protected/_components/page-tour";
+import { captureServer } from "@/lib/analytics/server";
+import { PRELAUNCH_OPEN_ACCESS } from "@/lib/launch";
 
 async function NewsTrendsTourMount() {
   const tours = await getOnboardingTours();
@@ -15,9 +17,31 @@ async function NewsTrendsTourMount() {
 
 export default async function NewsTrendsPage() {
   const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
 
   const tier = await getUserSubscriptionTier(supabase);
-  const gate: TimeGate = computeNewsTrendsGate(tier);
+  const intendedGate: TimeGate = computeNewsTrendsGate(tier);
+
+  if (intendedGate.enabled && user) {
+    captureServer(
+      user.id,
+      PRELAUNCH_OPEN_ACCESS
+        ? "would_news_trends_gate_applied"
+        : "news_trends_gate_applied",
+      {
+        user_plan: tier,
+        upgrade_plan: intendedGate.upgradePlan,
+        restriction_days: intendedGate.restrictionDays,
+        part: "page_load",
+      },
+    );
+  }
+
+  const gate: TimeGate = PRELAUNCH_OPEN_ACCESS
+    ? { ...intendedGate, enabled: false, fromGte: null }
+    : intendedGate;
 
   // Pass gate window so only the allowed date range is fetched from the DB.
   const clusterDaily = await loadClusterDailyTrends(supabase, gate.fromGte);

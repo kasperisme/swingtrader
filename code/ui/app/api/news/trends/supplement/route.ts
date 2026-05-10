@@ -11,6 +11,8 @@ import {
   getUserSubscriptionTier,
 } from "@/lib/subscription";
 import { computeNewsTrendsGate } from "@/lib/gate";
+import { captureServer } from "@/lib/analytics/server";
+import { PRELAUNCH_OPEN_ACCESS } from "@/lib/launch";
 
 const PART_VALUES = [
   "daily",
@@ -40,7 +42,26 @@ export async function GET(request: NextRequest) {
   }
 
   const tier = await getUserSubscriptionTier(supabase);
-  const gate = computeNewsTrendsGate(tier);
+  const intendedGate = computeNewsTrendsGate(tier);
+
+  if (intendedGate.enabled) {
+    captureServer(
+      user.id,
+      PRELAUNCH_OPEN_ACCESS
+        ? "would_news_trends_gate_applied"
+        : "news_trends_gate_applied",
+      {
+        user_plan: tier,
+        upgrade_plan: intendedGate.upgradePlan,
+        restriction_days: intendedGate.restrictionDays,
+        part,
+      },
+    );
+  }
+
+  const gate = PRELAUNCH_OPEN_ACCESS
+    ? { ...intendedGate, enabled: false, fromGte: null }
+    : intendedGate;
   const fromGte = gate.enabled ? gate.fromGte : null;
 
   const body =
