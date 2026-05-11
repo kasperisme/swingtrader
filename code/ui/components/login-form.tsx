@@ -90,9 +90,10 @@ export function LoginForm({
               >
                 Continue with Google
               </Button>
-              <Button asChild variant="outline" className="w-full">
+              {/* X login temporarily disabled — flow not working. Re-enable when fixed. */}
+              {/* <Button asChild variant="outline" className="w-full">
                 <Link href="/auth/x">Continue with X</Link>
-              </Button>
+              </Button> */}
               <div className="relative text-center text-sm">
                 <span className="bg-card text-muted-foreground relative z-10 px-2">
                   Or continue with email
