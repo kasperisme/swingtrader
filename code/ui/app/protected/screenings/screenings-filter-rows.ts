@@ -3,7 +3,7 @@ import {
   getRowDataValue,
   stringifyRowDataValueForFilter,
 } from "./screenings-row-data";
-import { NOTE_STAGE_NONE, type ScreeningsFilters } from "./screenings-filters-model";
+import type { ScreeningsFilters } from "./screenings-filters-model";
 import type { ScreeningRow, ScanRowNote } from "./screenings-types";
 
 /**
@@ -31,7 +31,18 @@ export function filterAndSortScreeningRows(
     if (filters.hasRowNote === "no" && hasSavedNote) return false;
 
     const status = note?.status ?? "active";
-    if (filters.status !== "all" && status !== filters.status) return false;
+    if (
+      filters.statusIn.length > 0 &&
+      !filters.statusIn.includes(status as never)
+    ) {
+      return false;
+    }
+    if (
+      filters.statusNotIn.length > 0 &&
+      filters.statusNotIn.includes(status as never)
+    ) {
+      return false;
+    }
 
     const highlighted = note?.highlighted ?? false;
     if (filters.noteHighlighted === "yes" && !highlighted) return false;
@@ -45,13 +56,14 @@ export function filterAndSortScreeningRows(
     if (filters.noteComment === "with" && !commentTrim) return false;
     if (filters.noteComment === "without" && commentTrim) return false;
 
-    if (filters.noteStage) {
-      const st = note?.stage?.trim() ?? "";
-      if (filters.noteStage === NOTE_STAGE_NONE) {
-        if (st) return false;
-      } else if (st !== filters.noteStage) {
-        return false;
-      }
+    const stageStr = note?.stage?.trim() ?? "";
+    if (filters.noteStageEmpty === "yes" && stageStr) return false;
+    if (filters.noteStageEmpty === "no" && !stageStr) return false;
+    if (filters.noteStageIn.length > 0) {
+      if (!stageStr || !filters.noteStageIn.includes(stageStr)) return false;
+    }
+    if (filters.noteStageNotIn.length > 0) {
+      if (stageStr && filters.noteStageNotIn.includes(stageStr)) return false;
     }
 
     const pminStr = filters.notePriorityMin.trim();
@@ -95,12 +107,22 @@ export function filterAndSortScreeningRows(
       }
     }
 
-    if (filters.noteTagsAny.length > 0) {
+    if (filters.noteTagsAny.length > 0 || filters.noteTagsNone.length > 0) {
       const rowTags = new Set(
         (note?.tags ?? []).map((t) => String(t).trim()).filter(Boolean),
       );
-      const any = filters.noteTagsAny.some((t) => rowTags.has(t));
-      if (!any) return false;
+      if (
+        filters.noteTagsAny.length > 0 &&
+        !filters.noteTagsAny.some((t) => rowTags.has(t))
+      ) {
+        return false;
+      }
+      if (
+        filters.noteTagsNone.length > 0 &&
+        filters.noteTagsNone.some((t) => rowTags.has(t))
+      ) {
+        return false;
+      }
     }
 
     for (const [k, on] of Object.entries(filters.boolRequire)) {

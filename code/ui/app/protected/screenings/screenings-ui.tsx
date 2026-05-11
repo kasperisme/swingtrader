@@ -63,6 +63,7 @@ import {
   DEFAULT_SCREENINGS_FILTERS,
   type ScreeningsFilters,
   countScreeningsFilterRules,
+  normalizeScreeningsFilters,
 } from "./screenings-filters-model";
 import { TickerSidebar } from "./ticker-sidebar";
 import { MobileTickerBar } from "./mobile-ticker-bar";
@@ -412,107 +413,24 @@ export function ScreeningsUI({
       const storedFilters = localStorage.getItem("screenings-filters");
       if (storedFilters) {
         const parsed = JSON.parse(storedFilters) as Record<string, unknown>;
+        // Legacy keys (dynamicTruthys, dynamicNumericMins) merged into the
+        // new shape via normalizeScreeningsFilters below, but we still want
+        // to honor them if present in old persisted blobs.
         const legacy = parsed as {
           dynamicTruthys?: Record<string, boolean>;
           dynamicNumericMins?: Record<string, string>;
         };
-        const statusRaw = parsed.status;
-        const hrn = parsed.hasRowNote;
-        const nh = parsed.noteHighlighted;
-        const nc = parsed.noteComment;
-        const ap = parsed.activePosition;
-        const tagsRaw = parsed.noteTagsAny;
-        setFiltersState({
-          ...DEFAULT_FILTERS,
-          ...(typeof statusRaw === "string"
-            ? {
-                status:
-                  statusRaw === "active"
-                    ? "all"
-                    : (statusRaw as Filters["status"]),
-              }
-            : {}),
-          ...(hrn === "any" || hrn === "yes" || hrn === "no"
-            ? { hasRowNote: hrn }
-            : {}),
-          ...(nh === "any" || nh === "yes" || nh === "no"
-            ? { noteHighlighted: nh }
-            : {}),
-          ...(nc === "any" || nc === "with" || nc === "without"
-            ? { noteComment: nc }
-            : {}),
-          ...(ap === "any" || ap === "yes" || ap === "no"
-            ? { activePosition: ap }
-            : {}),
-          ...(typeof parsed.noteStage === "string"
-            ? { noteStage: parsed.noteStage }
-            : {}),
-          ...(typeof parsed.notePriorityMin === "string"
-            ? { notePriorityMin: parsed.notePriorityMin }
-            : {}),
-          ...(typeof parsed.notePriorityMax === "string"
-            ? { notePriorityMax: parsed.notePriorityMax }
-            : {}),
-          ...(typeof parsed.notePriorityGt === "string"
-            ? { notePriorityGt: parsed.notePriorityGt }
-            : {}),
-          ...(typeof parsed.notePriorityLt === "string"
-            ? { notePriorityLt: parsed.notePriorityLt }
-            : {}),
-          ...(typeof parsed.notePriorityEq === "string"
-            ? { notePriorityEq: parsed.notePriorityEq }
-            : {}),
-          ...(Array.isArray(tagsRaw)
-            ? {
-                noteTagsAny: tagsRaw.filter(
-                  (t): t is string => typeof t === "string",
-                ),
-              }
-            : {}),
-          boolRequire: {
-            ...DEFAULT_FILTERS.boolRequire,
-            ...((parsed.boolRequire as Record<string, boolean> | undefined) ??
-              {}),
-            ...(legacy.dynamicTruthys ?? {}),
-          },
-          boolReject: {
-            ...DEFAULT_FILTERS.boolReject,
-            ...((parsed.boolReject as Record<string, boolean> | undefined) ??
-              {}),
-          },
-          numMin: {
-            ...DEFAULT_FILTERS.numMin,
-            ...((parsed.numMin as Record<string, string> | undefined) ?? {}),
-            ...(legacy.dynamicNumericMins ?? {}),
-          },
-          numMax: {
-            ...DEFAULT_FILTERS.numMax,
-            ...((parsed.numMax as Record<string, string> | undefined) ?? {}),
-          },
-          numGt: {
-            ...DEFAULT_FILTERS.numGt,
-            ...((parsed.numGt as Record<string, string> | undefined) ?? {}),
-          },
-          numLt: {
-            ...DEFAULT_FILTERS.numLt,
-            ...((parsed.numLt as Record<string, string> | undefined) ?? {}),
-          },
-          stringOneOf: {
-            ...DEFAULT_FILTERS.stringOneOf,
-            ...((parsed.stringOneOf as Record<string, string[]> | undefined) ??
-              {}),
-          },
-          stringContains: {
-            ...DEFAULT_FILTERS.stringContains,
-            ...((parsed.stringContains as Record<string, string> | undefined) ??
-              {}),
-          },
-          stringEquals: {
-            ...DEFAULT_FILTERS.stringEquals,
-            ...((parsed.stringEquals as Record<string, string> | undefined) ??
-              {}),
-          },
-        });
+        const normalized = normalizeScreeningsFilters(parsed);
+        if (legacy.dynamicTruthys) {
+          normalized.boolRequire = {
+            ...normalized.boolRequire,
+            ...legacy.dynamicTruthys,
+          };
+        }
+        if (legacy.dynamicNumericMins) {
+          normalized.numMin = { ...normalized.numMin, ...legacy.dynamicNumericMins };
+        }
+        setFiltersState(normalized);
       }
     } catch {
       // ignore malformed storage
@@ -1528,25 +1446,31 @@ export function ScreeningsUI({
               </div>
             ) : null}
           </div>
-          {dismissedCount > 0 && (
+          {dismissedCount > 0 && (() => {
+            const showingDismissed =
+              filters.statusIn.length === 1 && filters.statusIn[0] === "dismissed";
+            return (
             <button
               onClick={() =>
                 setFilters((prev) => ({
                   ...prev,
-                  status: prev.status === "dismissed" ? "active" : "dismissed",
+                  statusIn:
+                    prev.statusIn.length === 1 && prev.statusIn[0] === "dismissed"
+                      ? ["active"]
+                      : ["dismissed"],
+                  statusNotIn: [],
                 }))
               }
-              className={`flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded-md border transition-colors ${filters.status === "dismissed" ? "bg-foreground text-background border-foreground" : "border-border text-muted-foreground hover:text-foreground hover:border-foreground/40"}`}
+              className={`flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded-md border transition-colors ${showingDismissed ? "bg-foreground text-background border-foreground" : "border-border text-muted-foreground hover:text-foreground hover:border-foreground/40"}`}
               title={
-                filters.status === "dismissed"
-                  ? "Switch to active"
-                  : "Show dismissed"
+                showingDismissed ? "Switch to active" : "Show dismissed"
               }
             >
               <Trash2 className="w-3.5 h-3.5" />
               {dismissedCount} dismissed
             </button>
-          )}
+            );
+          })()}
           <span className="text-sm text-muted-foreground ml-auto">
             {filtered.length} shown
             {rows.length > 0 && ` / ${rows.length} screened`}

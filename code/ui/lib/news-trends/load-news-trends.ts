@@ -4,6 +4,8 @@ import type { ClusterTrendRow, DimensionTrendRow } from "@/app/protected/news-tr
 
 /** Max UI range is 1y; add buffer for timezone / custom brush. */
 export const NEWS_TRENDS_LOOKBACK_DAYS = 400;
+/** Hourly views are bounded internally to last 60d (see migration 20260511000000); match it client-side. */
+const NEWS_TRENDS_HOURLY_LOOKBACK_DAYS = 60;
 /** PostgREST `max-rows` cap — requesting more still returns at most this many. */
 const PAGE_SIZE = 1000;
 /**
@@ -121,15 +123,16 @@ async function fetchSegmentedTrendTable<Row>(
   keyFormat: "day" | "timestamp",
   segmentDays: number,
   fromGte?: string | null,
+  maxLookbackDays: number = NEWS_TRENDS_LOOKBACK_DAYS,
 ): Promise<Row[]> {
   // Limit segment count to the actual gate window so restricted tiers don't
   // build 8 segments and fire 8 queries when they only need 1-2.
   const effectiveLookback = fromGte
     ? Math.min(
         Math.ceil((Date.now() - new Date(fromGte).getTime()) / 86_400_000) + 1,
-        NEWS_TRENDS_LOOKBACK_DAYS,
+        maxLookbackDays,
       )
-    : NEWS_TRENDS_LOOKBACK_DAYS;
+    : maxLookbackDays;
 
   const segments = buildUtcHalfOpenSegments(
     effectiveLookback,
@@ -216,6 +219,7 @@ export async function loadNewsTrendsDimensionHourly(
     "timestamp",
     SEGMENT_DAYS_HOURLY,
     fromGte,
+    NEWS_TRENDS_HOURLY_LOOKBACK_DAYS,
   );
   return { dimensionHourly };
 }
@@ -232,6 +236,7 @@ export async function loadNewsTrendsHourlySupplement(
     "timestamp",
     SEGMENT_DAYS_HOURLY,
     fromGte,
+    NEWS_TRENDS_HOURLY_LOOKBACK_DAYS,
   );
   return { clusterHourly };
 }

@@ -112,46 +112,70 @@ export type ScreeningNewsImpactArticle = {
   ticker_sentiment: Record<string, number>;
 };
 
+const NEWS_IMPACT_PAGE_SIZE = 1000;
+
+async function fetchAllPaged<Row>(
+  query: (from: number, to: number) => PromiseLike<{
+    data: Row[] | null;
+    error: { message: string } | null;
+  }>,
+): Promise<{ data: Row[]; error: string | null }> {
+  const out: Row[] = [];
+  let from = 0;
+  while (true) {
+    const to = from + NEWS_IMPACT_PAGE_SIZE - 1;
+    const { data, error } = await query(from, to);
+    if (error) return { data: out, error: error.message };
+    const rows = data ?? [];
+    out.push(...rows);
+    if (rows.length < NEWS_IMPACT_PAGE_SIZE) break;
+    from += NEWS_IMPACT_PAGE_SIZE;
+  }
+  return { data: out, error: null };
+}
+
 export async function screeningsGetNewsImpacts(): Promise<
   ScreeningActionSuccess<ScreeningNewsImpactArticle[]> | ScreeningActionError
 > {
   const supabase = await createClient();
   const [vectorsRes, headsRes] = await Promise.all([
-    supabase
-      .schema("swingtrader")
-      .from("news_trends_article_base_v")
-      .select("article_id, impact_jsonb, published_at")
-      .order("published_at", { ascending: true }),
-    supabase
-      .schema("swingtrader")
-      .from("news_impact_heads")
-      .select("article_id, scores_json")
-      .eq("cluster", "TICKER_SENTIMENT"),
-  ]);
-
-  if (vectorsRes.error) {
-    return { ok: false, error: vectorsRes.error.message };
-  }
-  if (headsRes.error) {
-    return { ok: false, error: headsRes.error.message };
-  }
-
-  const tickerSentimentByArticleId = new Map<number, Record<string, number>>();
-  for (const row of headsRes.data ?? []) {
-    const articleId = Number((row as { article_id?: unknown }).article_id);
-    if (!Number.isFinite(articleId)) continue;
-    tickerSentimentByArticleId.set(
-      articleId,
-      asNumberMap((row as { scores_json?: unknown }).scores_json),
-    );
-  }
-
-  const articles = (vectorsRes.data ?? []).map((row) => {
-    const r = row as {
+    fetchAllPaged<{
       article_id: unknown;
       impact_jsonb?: unknown;
       published_at?: unknown;
-    };
+    }>((from, to) =>
+      supabase
+        .schema("swingtrader")
+        .from("news_trends_article_base_v")
+        .select("article_id, impact_jsonb, published_at")
+        .order("published_at", { ascending: true })
+        .range(from, to),
+    ),
+    fetchAllPaged<{ article_id?: unknown; scores_json?: unknown }>((from, to) =>
+      supabase
+        .schema("swingtrader")
+        .from("news_impact_heads")
+        .select("article_id, scores_json")
+        .eq("cluster", "TICKER_SENTIMENT")
+        .range(from, to),
+    ),
+  ]);
+
+  if (vectorsRes.error) {
+    return { ok: false, error: vectorsRes.error };
+  }
+  if (headsRes.error) {
+    return { ok: false, error: headsRes.error };
+  }
+
+  const tickerSentimentByArticleId = new Map<number, Record<string, number>>();
+  for (const row of headsRes.data) {
+    const articleId = Number(row.article_id);
+    if (!Number.isFinite(articleId)) continue;
+    tickerSentimentByArticleId.set(articleId, asNumberMap(row.scores_json));
+  }
+
+  const articles = vectorsRes.data.map((r) => {
     const parsedImpact =
       r.impact_jsonb && typeof r.impact_jsonb === "object"
         ? (r.impact_jsonb as Record<string, number>)

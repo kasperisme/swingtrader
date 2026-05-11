@@ -25,10 +25,18 @@ export function applyRowDataFilters(
       return false;
     }
 
-    // Workflow: status
-    if (filters.status !== "all" && filters.status !== undefined) {
+    // Workflow: status (multi-select equal / not-equal)
+    if (filters.statusIn.length > 0) {
       const s = r.rowData.__note_status;
-      if (s !== filters.status) return false;
+      if (typeof s !== "string" || !filters.statusIn.includes(s as never)) {
+        return false;
+      }
+    }
+    if (filters.statusNotIn.length > 0) {
+      const s = r.rowData.__note_status;
+      if (typeof s === "string" && filters.statusNotIn.includes(s as never)) {
+        return false;
+      }
     }
 
     // Workflow: has row note
@@ -59,11 +67,17 @@ export function applyRowDataFilters(
       if (r.rowData.__note_comment) return false;
     }
 
-    // Workflow: stage
-    if (filters.noteStage === "__none__") {
-      if (r.rowData.__note_stage) return false;
-    } else if (filters.noteStage) {
-      if (r.rowData.__note_stage !== filters.noteStage) return false;
+    // Workflow: stage (empty / non-empty / multi eq / multi neq)
+    const stageRaw = r.rowData.__note_stage;
+    const stageStr =
+      typeof stageRaw === "string" ? stageRaw.trim() : stageRaw == null ? "" : String(stageRaw);
+    if (filters.noteStageEmpty === "yes" && stageStr) return false;
+    if (filters.noteStageEmpty === "no" && !stageStr) return false;
+    if (filters.noteStageIn.length > 0) {
+      if (!stageStr || !filters.noteStageIn.includes(stageStr)) return false;
+    }
+    if (filters.noteStageNotIn.length > 0) {
+      if (stageStr && filters.noteStageNotIn.includes(stageStr)) return false;
     }
 
     // Workflow: priority
@@ -98,13 +112,25 @@ export function applyRowDataFilters(
         const n = typeof v === "number" ? v : parseFloat(String(v));
         if (!Number.isFinite(n) || n > b) return false;
       }
+      if (pq(filters.notePriorityNeq ?? "")) {
+        const b = parseFloat(pq(filters.notePriorityNeq));
+        const v = r.rowData.__note_priority;
+        const n = typeof v === "number" ? v : parseFloat(String(v));
+        if (Number.isFinite(n) && n === b) return false;
+      }
     }
 
-    // Workflow: tags
+    // Workflow: tags include any
     if (filters.noteTagsAny.length > 0) {
       const tags = r.rowData.__note_tags;
       const arr = Array.isArray(tags) ? tags : [];
       if (!filters.noteTagsAny.some((t) => arr.includes(t))) return false;
+    }
+    // Workflow: tags exclude any (reject if row has any of these tags)
+    if (filters.noteTagsNone.length > 0) {
+      const tags = r.rowData.__note_tags;
+      const arr = Array.isArray(tags) ? tags : [];
+      if (filters.noteTagsNone.some((t) => arr.includes(t))) return false;
     }
 
     // Boolean require / reject
@@ -152,12 +178,27 @@ export function applyRowDataFilters(
       const v = typeof raw === "number" ? raw : parseFloat(String(raw));
       if (!Number.isFinite(v) || v >= b) return false;
     }
+    // Reject only when the row value parses AND equals the bound — missing /
+    // non-numeric values pass (mirrors screenings-filter-rows.ts).
+    for (const [key, bound] of Object.entries(filters.numNeq ?? {})) {
+      if (!bound?.trim()) continue;
+      const b = parseFloat(bound);
+      if (!Number.isFinite(b)) continue;
+      const raw = r.rowData[key];
+      const v = typeof raw === "number" ? raw : parseFloat(String(raw));
+      if (Number.isFinite(v) && v === b) return false;
+    }
 
-    // String one-of
+    // String one-of / none-of (categorical)
     for (const [key, allowed] of Object.entries(filters.stringOneOf)) {
       if (!allowed?.length) continue;
       const s = stringifyRowDataValueForFilter(r.rowData[key]);
       if (!allowed.includes(s)) return false;
+    }
+    for (const [key, denied] of Object.entries(filters.stringNoneOf ?? {})) {
+      if (!denied?.length) continue;
+      const s = stringifyRowDataValueForFilter(r.rowData[key]);
+      if (denied.includes(s)) return false;
     }
 
     // String contains
@@ -167,11 +208,16 @@ export function applyRowDataFilters(
       if (!s.includes(needle.trim().toLowerCase())) return false;
     }
 
-    // String equals
+    // String equals / not-equals (free text)
     for (const [key, expected] of Object.entries(filters.stringEquals)) {
       if (!expected?.trim()) continue;
       const s = stringifyRowDataValueForFilter(r.rowData[key]);
       if (s !== expected.trim()) return false;
+    }
+    for (const [key, banned] of Object.entries(filters.stringNotEquals ?? {})) {
+      if (!banned?.trim()) continue;
+      const s = stringifyRowDataValueForFilter(r.rowData[key]);
+      if (s === banned.trim()) return false;
     }
 
     return true;

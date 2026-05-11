@@ -151,6 +151,68 @@ def test_note_tags_any_match():
     assert set(out) == {"A", "B"}
 
 
+# ── new multi-select shape ─────────────────────────────────────────────────
+
+def test_status_in_multi_keeps_matches():
+    rows = [
+        _row_with_note("A", status="active"),
+        _row_with_note("B", status="dismissed"),
+        _row_with_note("C", status="watchlist"),
+    ]
+    out = apply_scan_filters(rows, _f(statusIn=["active", "watchlist"]))
+    assert out == ["A", "C"]
+
+
+def test_status_not_in_rejects_matches():
+    rows = [
+        _row_with_note("A", status="active"),
+        _row_with_note("B", status="dismissed"),
+        _row_with_note("C", status="watchlist"),
+    ]
+    out = apply_scan_filters(rows, _f(statusNotIn=["dismissed"]))
+    assert out == ["A", "C"]
+
+
+def test_note_stage_in_multi():
+    rows = [
+        _row_with_note("A", stage="entry"),
+        _row_with_note("B", stage="exit"),
+        _row_with_note("C", stage="plan"),
+    ]
+    out = apply_scan_filters(rows, _f(noteStageIn=["entry", "exit"]))
+    assert out == ["A", "B"]
+
+
+def test_note_stage_not_in_multi():
+    rows = [
+        _row_with_note("A", stage="entry"),
+        _row_with_note("B", stage="exit"),
+        _row_with_note("C", stage="plan"),
+    ]
+    out = apply_scan_filters(rows, _f(noteStageNotIn=["entry"]))
+    assert out == ["B", "C"]
+
+
+def test_note_stage_empty_yes():
+    rows = [_row_with_note("A", stage="entry"), _row_with_note("B", stage=None)]
+    assert apply_scan_filters(rows, _f(noteStageEmpty="yes")) == ["B"]
+
+
+def test_note_stage_empty_no():
+    rows = [_row_with_note("A", stage="entry"), _row_with_note("B", stage=None)]
+    assert apply_scan_filters(rows, _f(noteStageEmpty="no")) == ["A"]
+
+
+def test_note_tags_none_excludes_matches():
+    rows = [
+        _row_with_note("A", tags=["alpha", "beta"]),
+        _row_with_note("B", tags=["gamma"]),
+        _row_with_note("C", tags=[]),
+    ]
+    out = apply_scan_filters(rows, _f(noteTagsNone=["alpha"]))
+    assert out == ["B", "C"]
+
+
 def test_combined_workflow_and_row_filters():
     rows = [
         {"symbol": "A", "row_data": {"rs": 90, "__note_status": "active", "__note_highlighted": True}},

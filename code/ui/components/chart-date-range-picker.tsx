@@ -101,13 +101,10 @@ export function ChartDateRangePicker({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [autoApplyDefaultRange]);
 
-  useEffect(() => {
-    onGranularityChange?.(granularity);
-  }, [granularity, onGranularityChange]);
-
   const handleGranularityChange = (g: ChartGranularity) => {
     const prev = granularity;
     setGranularity(g);
+    if (prev !== g) onGranularityChange?.(g);
 
     const config = RANGE_BY_GRANULARITY[g];
     if (quickRange === "custom") {

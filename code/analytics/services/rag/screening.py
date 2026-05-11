@@ -53,12 +53,32 @@ def apply_scan_filters(rows: list[dict], filters: dict) -> list[str]:
     str_equals: dict[str, str] = filters.get("stringEquals") or {}
     str_not_equals: dict[str, str] = filters.get("stringNotEquals") or {}
 
-    wf_status = filters.get("status") or "all"
+    # Multi-select status: new shape uses statusIn/statusNotIn arrays.
+    # Legacy fallback: single `status` string ("all" = no filter).
+    status_in: list[str] = list(filters.get("statusIn") or [])
+    status_not_in: list[str] = list(filters.get("statusNotIn") or [])
+    if not status_in:
+        legacy_status = filters.get("status") or "all"
+        if legacy_status and legacy_status != "all":
+            status_in = [str(legacy_status)]
+
     wf_has_row_note = filters.get("hasRowNote") or "any"
     wf_highlighted = filters.get("noteHighlighted") or "any"
     wf_active_position = filters.get("activePosition") or "any"
     wf_comment = filters.get("noteComment") or "any"
-    wf_stage = filters.get("noteStage") or ""
+
+    # Multi-select stage: new shape uses noteStageIn/noteStageNotIn arrays +
+    # noteStageEmpty ("any" / "yes" / "no"). Legacy: single `noteStage` field
+    # with "__none__" sentinel meaning "stage is empty".
+    stage_in: list[str] = list(filters.get("noteStageIn") or [])
+    stage_not_in: list[str] = list(filters.get("noteStageNotIn") or [])
+    stage_empty: str = filters.get("noteStageEmpty") or "any"
+    legacy_stage = (filters.get("noteStage") or "").strip()
+    if not stage_in and legacy_stage and legacy_stage != "__none__":
+        stage_in = [legacy_stage]
+    if stage_empty == "any" and legacy_stage == "__none__":
+        stage_empty = "yes"
+
     wf_priority_eq = (filters.get("notePriorityEq") or "").strip()
     wf_priority_neq = (filters.get("notePriorityNeq") or "").strip()
     wf_priority_gt = (filters.get("notePriorityGt") or "").strip()
@@ -66,6 +86,7 @@ def apply_scan_filters(rows: list[dict], filters: dict) -> list[str]:
     wf_priority_min = (filters.get("notePriorityMin") or "").strip()
     wf_priority_max = (filters.get("notePriorityMax") or "").strip()
     wf_tags_any: list[str] = filters.get("noteTagsAny") or []
+    wf_tags_none: list[str] = filters.get("noteTagsNone") or []
 
     seen: set[str] = set()
     out: list[str] = []
@@ -86,8 +107,11 @@ def apply_scan_filters(rows: list[dict], filters: dict) -> list[str]:
             continue
 
         # ── Workflow filters ──────────────────────────────────────────────────
-        if wf_status != "all":
-            if str(rd.get("__note_status")) != wf_status:
+        if status_in:
+            if str(rd.get("__note_status") or "") not in status_in:
+                continue
+        if status_not_in:
+            if str(rd.get("__note_status") or "") in status_not_in:
                 continue
         if wf_has_row_note == "yes" and not rd.get("__note_hasRowNote"):
             continue
@@ -105,11 +129,16 @@ def apply_scan_filters(rows: list[dict], filters: dict) -> list[str]:
             continue
         elif wf_comment == "without" and rd.get("__note_comment"):
             continue
-        if wf_stage == "__none__":
-            if rd.get("__note_stage"):
+        stage_val = str(rd.get("__note_stage") or "").strip()
+        if stage_empty == "yes" and stage_val:
+            continue
+        if stage_empty == "no" and not stage_val:
+            continue
+        if stage_in:
+            if not stage_val or stage_val not in stage_in:
                 continue
-        elif wf_stage:
-            if str(rd.get("__note_stage") or "") != wf_stage:
+        if stage_not_in:
+            if stage_val and stage_val in stage_not_in:
                 continue
 
         if wf_priority_eq:
@@ -140,9 +169,11 @@ def apply_scan_filters(rows: list[dict], filters: dict) -> list[str]:
                 if pv is not None and pv == float(wf_priority_neq):
                     continue
 
-        if wf_tags_any:
+        if wf_tags_any or wf_tags_none:
             note_tags: list[str] = rd.get("__note_tags") or []
-            if not any(t in note_tags for t in wf_tags_any):
+            if wf_tags_any and not any(t in note_tags for t in wf_tags_any):
+                continue
+            if wf_tags_none and any(t in note_tags for t in wf_tags_none):
                 continue
 
         # ── Row-data filters ─────────────────────────────────────────────────

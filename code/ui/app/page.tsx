@@ -442,6 +442,10 @@ export default async function Home() {
               />
 
               <div className="mt-4 flex flex-wrap items-center gap-x-4 gap-y-2 text-xs">
+                <span className="inline-flex items-center gap-2 font-semibold text-emerald-400">
+                  <Check className="h-3.5 w-3.5" />
+                  Free to explore until launch — no card required
+                </span>
                 {heroSpotsLeft != null && heroSpotLimit != null && (
                   <span className="inline-flex items-center gap-2 font-semibold text-amber-400">
                     <span className="relative flex h-2 w-2">
@@ -665,6 +669,20 @@ export default async function Home() {
               {pricingSubheading}
             </p>
           )}
+
+          {/* Free-until-launch callout */}
+          <div className="mt-6 flex items-start gap-3 rounded-xl border border-emerald-500/30 bg-emerald-500/5 p-4">
+            <span className="mt-0.5 inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-emerald-500/15">
+              <Check className="h-3.5 w-3.5 text-emerald-400" />
+            </span>
+            <div className="text-sm leading-6">
+              <span className="font-semibold text-emerald-300">Free to explore until launch.</span>{" "}
+              <span className="text-muted-foreground">
+                The full platform is free of charge while we&apos;re in early access. The rates
+                below only kick in at launch — and founders who sign up now lock theirs in for life.
+              </span>
+            </div>
+          </div>
 
           {/* Current phase — pill-switched tier card */}
           <PricingTierSwitcher

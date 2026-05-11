@@ -9,23 +9,39 @@ export type NoteHighlightedFilter = "any" | "yes" | "no";
 export type HasRowNoteFilter = "any" | "yes" | "no";
 export type NoteCommentFilter = "any" | "with" | "without";
 export type ActivePositionFilter = "any" | "yes" | "no";
+/** Whether to constrain `note.stage` to being empty or non-empty. */
+export type NoteStageEmptyFilter = "any" | "yes" | "no";
 
-/** Matches `ScanRowNote.status` plus "all". */
-export type ScreeningStatusFilter =
+/** Concrete `ScanRowNote.status` values (no synthetic "all"). */
+export type ScreeningStatusValue =
   | "active"
   | "dismissed"
   | "watchlist"
-  | "pipeline"
-  | "all";
+  | "pipeline";
+
+export const SCREENING_STATUS_VALUES: ScreeningStatusValue[] = [
+  "active",
+  "dismissed",
+  "watchlist",
+  "pipeline",
+];
 
 export interface ScreeningsFilters {
-  status: ScreeningStatusFilter;
   symbolContains: string;
+  /** Allowed statuses; empty array = no constraint. Multi-select Equals. */
+  statusIn: ScreeningStatusValue[];
+  /** Rejected statuses; empty array = no constraint. Multi-select Not-equal. */
+  statusNotIn: ScreeningStatusValue[];
   hasRowNote: HasRowNoteFilter;
   noteHighlighted: NoteHighlightedFilter;
   noteComment: NoteCommentFilter;
   activePosition: ActivePositionFilter;
-  noteStage: string;
+  /** Allowed stages; empty array = no constraint. */
+  noteStageIn: string[];
+  /** Rejected stages; empty array = no constraint. */
+  noteStageNotIn: string[];
+  /** Constrain whether the stage is empty (no value) — independent of in/notIn. */
+  noteStageEmpty: NoteStageEmptyFilter;
   notePriorityMin: string;
   notePriorityMax: string;
   notePriorityGt: string;
@@ -33,7 +49,10 @@ export interface ScreeningsFilters {
   notePriorityEq: string;
   /** Reject rows where note priority equals this value. */
   notePriorityNeq: string;
+  /** Include rows whose tags contain ANY of these (OR-match). */
   noteTagsAny: string[];
+  /** Reject rows whose tags contain ANY of these (OR-match). */
+  noteTagsNone: string[];
   boolRequire: Record<string, boolean>;
   /** When true, row value must be falsy (boolean columns). */
   boolReject: Record<string, boolean>;
@@ -54,13 +73,16 @@ export interface ScreeningsFilters {
 }
 
 export const DEFAULT_SCREENINGS_FILTERS: ScreeningsFilters = {
-  status: "all",
   symbolContains: "",
+  statusIn: [],
+  statusNotIn: [],
   hasRowNote: "any",
   noteHighlighted: "any",
   noteComment: "any",
   activePosition: "any",
-  noteStage: "",
+  noteStageIn: [],
+  noteStageNotIn: [],
+  noteStageEmpty: "any",
   notePriorityMin: "",
   notePriorityMax: "",
   notePriorityGt: "",
@@ -68,6 +90,7 @@ export const DEFAULT_SCREENINGS_FILTERS: ScreeningsFilters = {
   notePriorityEq: "",
   notePriorityNeq: "",
   noteTagsAny: [],
+  noteTagsNone: [],
   boolRequire: {},
   boolReject: {},
   numMin: {},
@@ -82,15 +105,138 @@ export const DEFAULT_SCREENINGS_FILTERS: ScreeningsFilters = {
   stringNotEquals: {},
 };
 
+/**
+ * Normalize a raw (possibly legacy) filters payload into the current shape.
+ * Handles localStorage and `user_scheduled_screenings.scan_filters` rows
+ * that were written before the multi-select model.
+ */
+export function normalizeScreeningsFilters(
+  raw: unknown,
+): ScreeningsFilters {
+  const r = (raw && typeof raw === "object" ? (raw as Record<string, unknown>) : {});
+  const out: ScreeningsFilters = { ...DEFAULT_SCREENINGS_FILTERS };
+
+  const str = (v: unknown): string => (typeof v === "string" ? v : "");
+  const strArr = (v: unknown): string[] =>
+    Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : [];
+  const strRec = (v: unknown): Record<string, string> => {
+    if (!v || typeof v !== "object") return {};
+    const out: Record<string, string> = {};
+    for (const [k, val] of Object.entries(v as Record<string, unknown>)) {
+      if (typeof val === "string") out[k] = val;
+    }
+    return out;
+  };
+  const boolRec = (v: unknown): Record<string, boolean> => {
+    if (!v || typeof v !== "object") return {};
+    const out: Record<string, boolean> = {};
+    for (const [k, val] of Object.entries(v as Record<string, unknown>)) {
+      if (typeof val === "boolean") out[k] = val;
+    }
+    return out;
+  };
+  const strArrRec = (v: unknown): Record<string, string[]> => {
+    if (!v || typeof v !== "object") return {};
+    const out: Record<string, string[]> = {};
+    for (const [k, val] of Object.entries(v as Record<string, unknown>)) {
+      const arr = strArr(val);
+      if (arr.length) out[k] = arr;
+    }
+    return out;
+  };
+
+  out.symbolContains = str(r.symbolContains);
+
+  // Legacy: single `status` field with optional "all" sentinel.
+  const legacyStatus = str(r.status);
+  const statusIn = strArr(r.statusIn).filter((s): s is ScreeningStatusValue =>
+    SCREENING_STATUS_VALUES.includes(s as ScreeningStatusValue),
+  );
+  if (statusIn.length) {
+    out.statusIn = statusIn;
+  } else if (
+    legacyStatus &&
+    legacyStatus !== "all" &&
+    SCREENING_STATUS_VALUES.includes(legacyStatus as ScreeningStatusValue)
+  ) {
+    out.statusIn = [legacyStatus as ScreeningStatusValue];
+  }
+  out.statusNotIn = strArr(r.statusNotIn).filter((s): s is ScreeningStatusValue =>
+    SCREENING_STATUS_VALUES.includes(s as ScreeningStatusValue),
+  );
+
+  out.hasRowNote =
+    r.hasRowNote === "yes" || r.hasRowNote === "no" ? r.hasRowNote : "any";
+  out.noteHighlighted =
+    r.noteHighlighted === "yes" || r.noteHighlighted === "no"
+      ? r.noteHighlighted
+      : "any";
+  out.noteComment =
+    r.noteComment === "with" || r.noteComment === "without"
+      ? r.noteComment
+      : "any";
+  out.activePosition =
+    r.activePosition === "yes" || r.activePosition === "no"
+      ? r.activePosition
+      : "any";
+
+  // Legacy: single `noteStage` (or NOTE_STAGE_NONE sentinel for "is empty").
+  const legacyStage = str(r.noteStage);
+  const stageIn = strArr(r.noteStageIn);
+  if (stageIn.length) {
+    out.noteStageIn = stageIn;
+  } else if (legacyStage && legacyStage !== NOTE_STAGE_NONE) {
+    out.noteStageIn = [legacyStage];
+  }
+  out.noteStageNotIn = strArr(r.noteStageNotIn);
+  if (
+    r.noteStageEmpty === "yes" ||
+    r.noteStageEmpty === "no" ||
+    r.noteStageEmpty === "any"
+  ) {
+    out.noteStageEmpty = r.noteStageEmpty;
+  } else if (legacyStage === NOTE_STAGE_NONE) {
+    out.noteStageEmpty = "yes";
+  }
+
+  out.notePriorityMin = str(r.notePriorityMin);
+  out.notePriorityMax = str(r.notePriorityMax);
+  out.notePriorityGt = str(r.notePriorityGt);
+  out.notePriorityLt = str(r.notePriorityLt);
+  out.notePriorityEq = str(r.notePriorityEq);
+  out.notePriorityNeq = str(r.notePriorityNeq);
+
+  out.noteTagsAny = strArr(r.noteTagsAny);
+  out.noteTagsNone = strArr(r.noteTagsNone);
+
+  out.boolRequire = boolRec(r.boolRequire);
+  out.boolReject = boolRec(r.boolReject);
+  out.numMin = strRec(r.numMin);
+  out.numMax = strRec(r.numMax);
+  out.numGt = strRec(r.numGt);
+  out.numLt = strRec(r.numLt);
+  out.numNeq = strRec(r.numNeq);
+  out.stringOneOf = strArrRec(r.stringOneOf);
+  out.stringNoneOf = strArrRec(r.stringNoneOf);
+  out.stringContains = strRec(r.stringContains);
+  out.stringEquals = strRec(r.stringEquals);
+  out.stringNotEquals = strRec(r.stringNotEquals);
+
+  return out;
+}
+
 export function countScreeningsFilterRules(f: ScreeningsFilters): number {
   let n = 0;
-  if (f.status !== "all") n++;
   if (f.symbolContains?.trim()) n++;
+  if (f.statusIn.length > 0) n++;
+  if (f.statusNotIn.length > 0) n++;
   if (f.hasRowNote !== "any") n++;
   if (f.noteHighlighted !== "any") n++;
   if (f.noteComment !== "any") n++;
   if (f.activePosition !== "any") n++;
-  if (f.noteStage) n++;
+  if (f.noteStageIn.length > 0) n++;
+  if (f.noteStageNotIn.length > 0) n++;
+  if (f.noteStageEmpty !== "any") n++;
   if (f.notePriorityMin.trim()) n++;
   if (f.notePriorityMax.trim()) n++;
   if (f.notePriorityGt.trim()) n++;
@@ -98,6 +244,7 @@ export function countScreeningsFilterRules(f: ScreeningsFilters): number {
   if (f.notePriorityEq.trim()) n++;
   if (f.notePriorityNeq?.trim()) n++;
   if (f.noteTagsAny.length > 0) n++;
+  if (f.noteTagsNone.length > 0) n++;
   for (const on of Object.values(f.boolRequire)) {
     if (on) n++;
   }
