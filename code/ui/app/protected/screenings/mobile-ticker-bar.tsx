@@ -4,7 +4,6 @@ import { useState } from "react";
 import {
   ChevronLeft,
   ChevronRight,
-  AlignJustify,
   Bot,
   X,
   MoreHorizontal,
@@ -203,15 +202,6 @@ export function MobileTickerBar({
             aria-label="Next ticker"
           >
             <ChevronRight className="w-5 h-5" />
-          </button>
-
-          <button
-            type="button"
-            onClick={() => setSheetOpen(true)}
-            className="flex items-center justify-center w-11 h-11 rounded-md text-muted-foreground hover:text-foreground transition-colors"
-            aria-label="All tickers"
-          >
-            <AlignJustify className="w-4 h-4" />
           </button>
 
           {onOpenChat && (
