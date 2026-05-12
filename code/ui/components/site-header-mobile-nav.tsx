@@ -28,6 +28,7 @@ const operationsLinks = [
 ] as const;
 
 const publicLinks = [
+  { href: "/screenings", label: "Screenings" },
   { href: "/pricing", label: "Pricing" },
   { href: "/docs", label: "Docs" },
   { href: "/blog", label: "Blog" },

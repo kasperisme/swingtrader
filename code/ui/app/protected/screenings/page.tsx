@@ -104,7 +104,10 @@ function parseRow(
   };
 }
 
-async function fetchRows(runId: number, userId: string): Promise<ScreeningRow[]> {
+async function fetchRows(
+  runId: number,
+  userId: string,
+): Promise<ScreeningRow[]> {
   const supabase = await createClient();
 
   const { data: ownedRun, error: runErr } = await supabase
@@ -128,8 +131,7 @@ async function fetchRows(runId: number, userId: string): Promise<ScreeningRow[]>
       .schema("swingtrader")
       .from("user_scan_rows")
       .select("id, run_id, symbol, row_data")
-      .eq("run_id", runId)
-      .eq("dataset", "trend_template"),
+      .eq("run_id", runId),
     supabase
       .schema("swingtrader")
       .from("user_scan_rows")

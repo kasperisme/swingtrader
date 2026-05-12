@@ -44,6 +44,7 @@ export function SiteHeaderFallback() {
         <Logo />
       </div>
       <div className="flex shrink-0 items-center gap-2">
+        <Link href="/screenings" className={`${navLinkClass} hidden md:inline`}>Screenings</Link>
         <Link href="/pricing" className={`${navLinkClass} hidden md:inline`}>Pricing</Link>
         <Link href="/docs" className={`${navLinkClass} hidden md:inline`}>Docs</Link>
         <Link href="/blog" className={`${navLinkClass} hidden md:inline`}>Blog</Link>
@@ -80,6 +81,7 @@ export async function SiteHeader() {
       {isAuthed ? (
         <div className="flex shrink-0 items-center gap-3">
           <HelpChatTrigger className={`${navLinkClass} hidden md:inline-flex items-center gap-1.5`} />
+          <Link href="/screenings" className={`${navLinkClass} hidden md:inline`}>Screenings</Link>
           <Link href="/pricing" className={`${navLinkClass} hidden md:inline`}>Pricing</Link>
           <Link href="/docs" className={`${navLinkClass} hidden md:inline`}>Docs</Link>
           <Link href="/blog" className={`${navLinkClass} hidden md:inline`}>Blog</Link>
@@ -96,6 +98,7 @@ export async function SiteHeader() {
         </div>
       ) : (
         <div className="flex shrink-0 items-center gap-2">
+          <Link href="/screenings" className={`${navLinkClass} hidden md:inline`}>Screenings</Link>
           <Link href="/pricing" className={`${navLinkClass} hidden md:inline`}>Pricing</Link>
           <Link href="/docs" className={`${navLinkClass} hidden md:inline`}>Docs</Link>
           <Link href="/blog" className={`${navLinkClass} hidden md:inline`}>Blog</Link>
