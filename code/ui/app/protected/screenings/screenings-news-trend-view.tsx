@@ -1,42 +1,30 @@
 "use client";
 
-import React, { useState, useMemo, useEffect, useRef } from "react";
+import { useEffect, useState } from "react";
 import { Loader2 } from "lucide-react";
+import { NewsImpactHeatmap } from "@/components/news-impact-heatmap";
+import { CompanyFingerprint } from "@/components/company-fingerprint";
+import { getNewsImpactHeatmapData } from "@/app/actions/news-impact-heatmap";
 import {
-  NewsTrendsUI,
-  type ArticleImpact,
-} from "../news-trends/news-trends-ui";
-import { screeningsGetNewsImpacts } from "@/app/actions/screenings";
+  getCompanyFingerprint,
+  type CompanySnapshot,
+} from "@/app/actions/company-fingerprint";
+import {
+  defaultGranularityForRange,
+  isCombinationViable,
+  rangeToSinceIso,
+  type HeatmapGranularity,
+  type HeatmapInputRow,
+  type HeatmapRange,
+} from "@/lib/news-impact-heatmap/aggregate";
 import type { NoteStatus } from "./screenings-types";
 
-function applyCompanyVector(
-  articles: ArticleImpact[],
-  companyDims: Record<string, number>,
-): ArticleImpact[] {
-  return articles.map((a) => ({
-    ...a,
-    impact_json: Object.fromEntries(
-      Object.entries(a.impact_json).map(([k, v]) => [
-        k,
-        v * (companyDims[k] ?? 0),
-      ]),
-    ),
-  }));
-}
-
-export function StockNewsTrendView({
-  symbols,
-  companyVectorDimensions,
-  selectedTicker,
-  dismissed,
-  onDismiss,
-  onRestore,
-  getStatus,
-  onSetStatus,
-  hasComment,
-  onEditComment,
-  getTickerMeta,
-}: {
+/**
+ * News tab in the screenings deep-dive. Stacks a per-ticker factor-exposure
+ * fingerprint (when a ticker is selected) above the market-wide news-impact
+ * heatmap. Other props are kept for call-site compatibility.
+ */
+export function StockNewsTrendView(props: {
   symbols: string[];
   companyVectorDimensions: Record<string, Record<string, number>>;
   selectedTicker: string | null;
@@ -54,117 +42,135 @@ export function StockNewsTrendView({
     subSector: string;
   };
 }) {
-  const [articles, setArticles] = useState<ArticleImpact[]>([]);
-  const [loading, setLoading] = useState(false);
+  const { selectedTicker } = props;
+
+  const [rows, setRows] = useState<HeatmapInputRow[] | null>(null);
+  const [nowIso, setNowIso] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-
-  const containerRef = useRef<HTMLDivElement>(null);
-  const [chartHeight, setChartHeight] = useState(436);
-  useEffect(() => {
-    const el = containerRef.current;
-    if (!el) return;
-    const ro = new ResizeObserver(([entry]) => {
-      const w = entry.contentRect.width;
-      setChartHeight(Math.max(260, Math.round(w * (436 / 900))));
-    });
-    ro.observe(el);
-    return () => ro.disconnect();
-  }, []);
-
-  const eligible = useMemo(
-    () =>
-      symbols.filter((s) => {
-        const d = companyVectorDimensions[s];
-        return d && Object.keys(d).length > 0;
-      }),
-    [symbols, companyVectorDimensions],
+  const [range, setRange] = useState<HeatmapRange>("24h");
+  const [granularity, setGranularity] = useState<HeatmapGranularity>(() =>
+    defaultGranularityForRange("24h"),
   );
 
-  const symbol = useMemo(() => {
-    if (eligible.length === 0) return null;
-    if (selectedTicker == null) return eligible[0] ?? null;
-    if (eligible.includes(selectedTicker)) return selectedTicker;
-    if (symbols.includes(selectedTicker)) return null;
-    return eligible[0] ?? null;
-  }, [eligible, symbols, selectedTicker]);
+  function handleRangeChange(next: HeatmapRange) {
+    setRange(next);
+    // Keep the user's granularity sticky across range changes. Only fall back
+    // to the range default if the current combo would be invalid (e.g. 24h × 1d).
+    if (!isCombinationViable(next, granularity)) {
+      setGranularity(defaultGranularityForRange(next));
+    }
+  }
 
   useEffect(() => {
+    let cancelled = false;
     setLoading(true);
     setError(null);
-    screeningsGetNewsImpacts()
+    const since = rangeToSinceIso(range, granularity, new Date());
+    getNewsImpactHeatmapData(since)
       .then((res) => {
+        if (cancelled) return;
         if (!res.ok) {
-          setError("Failed to load news data");
+          setError(res.error);
           return;
         }
-        setArticles(res.data);
+        setRows(res.data.rows);
+        setNowIso(res.data.nowIso);
       })
-      .catch(() => setError("Failed to load news data"))
-      .finally(() => setLoading(false));
-  }, []);
-
-  const weightedArticles = useMemo(() => {
-    if (!symbol || articles.length === 0) return [];
-    const dims = companyVectorDimensions[symbol] ?? {};
-    return applyCompanyVector(articles, dims);
-  }, [symbol, articles, companyVectorDimensions]);
-
-  if (loading) {
-    return (
-      <div className="flex items-center gap-2 text-sm text-muted-foreground py-8">
-        <Loader2 className="w-4 h-4 animate-spin" />
-        Loading news data…
-      </div>
-    );
-  }
-  if (error) return <p className="text-sm text-rose-500 py-4">{error}</p>;
-  if (eligible.length === 0) {
-    return (
-      <p className="text-sm text-muted-foreground py-8 text-center">
-        None of the filtered stocks have a company vector. Run the vector
-        builder first.
-      </p>
-    );
-  }
-
-  if (
-    symbol == null &&
-    selectedTicker != null &&
-    symbols.includes(selectedTicker)
-  ) {
-    return (
-      <p className="text-sm text-muted-foreground py-8 text-center">
-        No company vector for {selectedTicker}. News trend weighting is
-        unavailable for this symbol.
-      </p>
-    );
-  }
+      .catch(() => {
+        if (!cancelled) setError("Failed to load news impact data.");
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [range, granularity]);
 
   return (
     <div className="flex flex-col gap-4">
-      <div ref={containerRef} className="w-full">
-        {symbol && weightedArticles.length > 0 && (
-          <NewsTrendsUI
-            key={symbol}
-            articles={weightedArticles}
-            chartHeight={chartHeight}
-            showMainChartFrame={false}
-          />
-        )}
-      </div>
-      {symbol && weightedArticles.length === 0 && articles.length > 0 && (
-        <p className="text-sm text-muted-foreground py-8 text-center">
-          No news data available.
-        </p>
+      {selectedTicker && (
+        <CompanyFingerprintSection
+          ticker={selectedTicker}
+          newsRows={rows ?? undefined}
+        />
       )}
-
-      {symbols.length > eligible.length && (
-        <p className="text-xs text-muted-foreground">
-          {symbols.length - eligible.length} stock
-          {symbols.length - eligible.length !== 1 ? "s" : ""} skipped — no
-          company vector.
-        </p>
-      )}
+      <NewsImpactHeatmap
+        rows={rows}
+        nowIso={nowIso}
+        loading={loading}
+        error={error}
+        range={range}
+        onRangeChange={handleRangeChange}
+        granularity={granularity}
+        onGranularityChange={setGranularity}
+      />
     </div>
+  );
+}
+
+function CompanyFingerprintSection({
+  ticker,
+  newsRows,
+}: {
+  ticker: string;
+  newsRows: HeatmapInputRow[] | undefined;
+}) {
+  const [snapshot, setSnapshot] = useState<CompanySnapshot | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    setError(null);
+    setSnapshot(null);
+    getCompanyFingerprint(ticker)
+      .then((res) => {
+        if (cancelled) return;
+        if (!res.ok) {
+          setError(res.error);
+          return;
+        }
+        setSnapshot(res.data);
+      })
+      .catch(() => {
+        if (!cancelled) setError("Failed to load company fingerprint.");
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [ticker]);
+
+  if (loading) {
+    return (
+      <div className="flex items-center gap-2 rounded-lg border bg-card px-4 py-6 text-xs text-muted-foreground">
+        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+        Loading {ticker} fingerprint…
+      </div>
+    );
+  }
+  if (error) {
+    return (
+      <div className="rounded-lg border bg-card px-4 py-3 text-xs text-rose-500">
+        {error}
+      </div>
+    );
+  }
+  if (!snapshot) return null;
+
+  return (
+    <CompanyFingerprint
+      ticker={snapshot.ticker}
+      vectorDate={snapshot.vectorDate}
+      dimensions={snapshot.dimensions}
+      raw={snapshot.raw}
+      metadata={snapshot.metadata}
+      newsRows={newsRows}
+    />
   );
 }

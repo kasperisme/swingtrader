@@ -153,6 +153,85 @@ def _queue_due_screenings(client, screenings: list[dict], now_utc: datetime, sch
     return queued
 
 
+# ── Phase 1b: Queue public screenings ────────────────────────────────────────
+
+def _queue_due_public_screenings(client, screenings: list[dict], now_utc: datetime, schema: str) -> int:
+    """Mirror of _queue_due_screenings for the shared `public_screenings` table.
+
+    Differences from the user variant:
+      - Writes to `public_screening_results` (no user_id).
+      - Advances `next_run_at` on `public_screenings`.
+      - Only processes rows where `is_published = TRUE` (caller filters).
+    """
+    queued = 0
+
+    for s in screenings:
+        sid = s["id"]
+        schedule, tz = _parse_schedule(s)
+        next_run_at = _to_utc(s.get("next_run_at"))
+
+        if next_run_at is None:
+            last = _to_utc(s.get("last_run_at") or s.get("created_at"))
+            start = last or now_utc
+            first_next = _next_run_after(schedule, tz, start)
+            client.schema(schema).table("public_screenings").update(
+                {"next_run_at": first_next.isoformat()}
+            ).eq("id", sid).execute()
+            log.info("Initialized next_run_at for public screening %s → %s", sid, first_next.isoformat())
+            continue
+
+        if next_run_at > now_utc:
+            continue
+
+        try:
+            client.schema(schema).table("public_screening_results").insert({
+                "public_screening_id": sid,
+                "run_at": next_run_at.isoformat(),
+                "status": "due",
+                "triggered": False,
+                "is_test": False,
+            }).execute()
+            queued += 1
+            log.info("Queued public screening %s (scheduled %s)", sid, next_run_at.isoformat())
+        except Exception as exc:
+            log.warning("Failed to queue public screening %s: %s", sid, exc)
+
+        new_next = _next_run_after(schedule, tz, next_run_at)
+        client.schema(schema).table("public_screenings").update(
+            {"next_run_at": new_next.isoformat()}
+        ).eq("id", sid).execute()
+
+    # Manual triggers (admin clicked "test run").
+    for s in screenings:
+        if not s.get("run_requested_at"):
+            continue
+        sid = s["id"]
+        existing = (
+            client.schema(schema)
+            .table("public_screening_results")
+            .select("id", count="exact")
+            .eq("public_screening_id", sid)
+            .in_("status", ["due", "running"])
+            .execute()
+        )
+        if (existing.count or 0) > 0:
+            continue
+        try:
+            client.schema(schema).table("public_screening_results").insert({
+                "public_screening_id": sid,
+                "run_at": now_utc.isoformat(),
+                "status": "due",
+                "triggered": False,
+                "is_test": True,
+            }).execute()
+            queued += 1
+            log.info("Queued manual trigger for public screening %s", sid)
+        except Exception as exc:
+            log.warning("Failed to queue manual trigger for public %s: %s", sid, exc)
+
+    return queued
+
+
 # ── Phase 2: Dispatch ─────────────────────────────────────────────────────────
 
 def _dispatch_due(client, available: int, now_utc: datetime, schema: str) -> int:
@@ -199,6 +278,47 @@ def _dispatch_due(client, available: int, now_utc: datetime, schema: str) -> int
     return launched
 
 
+def _dispatch_due_public(client, available: int, now_utc: datetime, schema: str) -> int:
+    """Pick oldest due public_screening_results, flip to running, launch run-public subprocesses."""
+    if available <= 0:
+        return 0
+
+    due_res = (
+        client.schema(schema)
+        .table("public_screening_results")
+        .select("id, public_screening_id, is_test")
+        .eq("status", "due")
+        .order("run_at", desc=False)
+        .limit(available)
+        .execute()
+    )
+    due_rows = due_res.data or []
+    launched = 0
+
+    for row in due_rows:
+        result_id = row["id"]
+        screening_id = row["public_screening_id"]
+
+        client.schema(schema).table("public_screening_results").update({
+            "status": "running",
+            "started_at": now_utc.isoformat(),
+        }).eq("id", result_id).execute()
+
+        cmd = [
+            _VENV_PYTHON, "-m", "services.agent.cli",
+            "run-public", screening_id,
+            "--result-id", result_id,
+        ]
+        if row.get("is_test"):
+            cmd.append("--is-test")
+
+        subprocess.Popen(cmd, cwd=str(_ANALYTICS))
+        log.info("Dispatched public screening %s (result %s)", screening_id, result_id)
+        launched += 1
+
+    return launched
+
+
 # ── Main tick ─────────────────────────────────────────────────────────────────
 
 def run_tick(max_concurrent: int | None = None) -> dict:
@@ -210,41 +330,59 @@ def run_tick(max_concurrent: int | None = None) -> dict:
     limit = max_concurrent if max_concurrent is not None else MAX_CONCURRENT
     now_utc = datetime.now(timezone.utc)
 
-    # Expire stuck running jobs.
+    # Expire stuck running jobs (both kinds).
     stuck_cutoff = (now_utc - timedelta(minutes=STUCK_TIMEOUT_MINUTES)).isoformat()
-    try:
-        client.schema(schema).table("user_screening_results").update(
-            {"status": "error", "summary": "Job timed out (stuck detection)"}
-        ).eq("status", "running").lt("started_at", stuck_cutoff).execute()
-    except Exception as exc:
-        log.warning("Stuck-job cleanup failed: %s", exc)
+    for table in ("user_screening_results", "public_screening_results"):
+        try:
+            client.schema(schema).table(table).update(
+                {"status": "error", "summary": "Job timed out (stuck detection)"}
+            ).eq("status", "running").lt("started_at", stuck_cutoff).execute()
+        except Exception as exc:
+            log.warning("Stuck-job cleanup failed for %s: %s", table, exc)
 
-    # Count currently running jobs.
-    running_res = (
-        client.schema(schema)
-        .table("user_screening_results")
-        .select("id", count="exact")
-        .eq("status", "running")
-        .execute()
-    )
-    running_count = running_res.count or 0
+    # Count currently running jobs across both queues.
+    running_user = (
+        client.schema(schema).table("user_screening_results")
+        .select("id", count="exact").eq("status", "running").execute()
+    ).count or 0
+    running_public = (
+        client.schema(schema).table("public_screening_results")
+        .select("id", count="exact").eq("status", "running").execute()
+    ).count or 0
+    running_count = running_user + running_public
     available = limit - running_count
 
-    # Fetch active screenings.
-    screenings_res = (
-        client.schema(schema)
-        .table("user_scheduled_screenings")
-        .select("*")
-        .eq("is_active", True)
-        .execute()
-    )
-    screenings = screenings_res.data or []
+    # Fetch active screenings of both kinds.
+    user_screenings = (
+        client.schema(schema).table("user_scheduled_screenings")
+        .select("*").eq("is_active", True).execute()
+    ).data or []
+    public_screenings = (
+        client.schema(schema).table("public_screenings")
+        .select("*").eq("is_active", True).eq("is_published", True).execute()
+    ).data or []
 
-    # Phase 1: queue due screenings.
-    queued = _queue_due_screenings(client, screenings, now_utc, schema)
+    # Phase 1: queue due screenings (both kinds).
+    queued_user = _queue_due_screenings(client, user_screenings, now_utc, schema)
+    queued_public = _queue_due_public_screenings(client, public_screenings, now_utc, schema)
 
     # Phase 2: dispatch oldest due rows up to available slots.
-    launched = _dispatch_due(client, available, now_utc, schema)
+    # Drain user queue first, then public, with shared concurrency budget.
+    launched_user = _dispatch_due(client, available, now_utc, schema)
+    available_after = max(0, available - launched_user)
+    launched_public = _dispatch_due_public(client, available_after, now_utc, schema)
 
-    log.info("Tick done: queued=%d launched=%d running_before=%d", queued, launched, running_count)
-    return {"queued": queued, "launched": launched, "running_before": running_count, "available_slots": available}
+    log.info(
+        "Tick done: queued_user=%d queued_public=%d launched_user=%d launched_public=%d running_before=%d",
+        queued_user, queued_public, launched_user, launched_public, running_count,
+    )
+    return {
+        "queued": queued_user + queued_public,
+        "queued_user": queued_user,
+        "queued_public": queued_public,
+        "launched": launched_user + launched_public,
+        "launched_user": launched_user,
+        "launched_public": launched_public,
+        "running_before": running_count,
+        "available_slots": available,
+    }

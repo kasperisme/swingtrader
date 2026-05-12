@@ -15,12 +15,13 @@ async function ScreeningsTourMount() {
   return <PageTour tourKey="screenings" autoStart={!tours.screenings} />;
 }
 
-async function fetchRuns(): Promise<ScanRun[]> {
+async function fetchRuns(userId: string): Promise<ScanRun[]> {
   const supabase = await createClient();
   const { data, error } = await supabase
     .schema("swingtrader")
     .from("user_scan_runs")
     .select("id, created_at, scan_date, source")
+    .eq("user_id", userId)
     .or("status.eq.active,status.is.null")
     .order("created_at", { ascending: false })
     .limit(50);
@@ -103,8 +104,23 @@ function parseRow(
   };
 }
 
-async function fetchRows(runId: number): Promise<ScreeningRow[]> {
+async function fetchRows(runId: number, userId: string): Promise<ScreeningRow[]> {
   const supabase = await createClient();
+
+  const { data: ownedRun, error: runErr } = await supabase
+    .schema("swingtrader")
+    .from("user_scan_runs")
+    .select("id")
+    .eq("id", runId)
+    .eq("user_id", userId)
+    .or("status.eq.active,status.is.null")
+    .maybeSingle();
+
+  if (runErr) {
+    console.error("Failed to verify scan run:", runErr);
+    return [];
+  }
+  if (!ownedRun) return [];
 
   // trend_template + passed_stocks from screeners; charts_page = manual adds (Charts / Screenings UI)
   const [ttRes, psRes, cpRes] = await Promise.all([
@@ -153,7 +169,10 @@ async function fetchRows(runId: number): Promise<ScreeningRow[]> {
   });
 }
 
-async function fetchRowNotes(runId: number): Promise<ScanRowNote[]> {
+async function fetchRowNotes(
+  runId: number,
+  userId: string,
+): Promise<ScanRowNote[]> {
   const supabase = await createClient();
   const { data } = await supabase
     .schema("swingtrader")
@@ -162,6 +181,7 @@ async function fetchRowNotes(runId: number): Promise<ScanRowNote[]> {
       "scan_row_id, run_id, ticker, user_id, status, highlighted, comment, stage, priority, tags, metadata_json, created_at, updated_at",
     )
     .eq("run_id", runId)
+    .eq("user_id", userId)
     .order("updated_at", { ascending: false });
   return (data ?? []) as ScanRowNote[];
 }
@@ -211,18 +231,44 @@ async function ScreeningsData({
 }: {
   searchParams: Promise<{ run?: string }>;
 }) {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
   const params = await searchParams;
-  const runId = params.run ? parseInt(params.run, 10) : null;
+  const runIdParam = params.run ? parseInt(params.run, 10) : null;
+  const requestedRunId =
+    runIdParam != null && Number.isFinite(runIdParam) ? runIdParam : null;
+
+  if (!user) {
+    return (
+      <ScreeningsUI
+        runs={[]}
+        rows={[]}
+        selectedRunId={null}
+        vectorTickers={new Set()}
+        companyVectorDimensions={{}}
+        initialNotes={[]}
+      />
+    );
+  }
 
   const [
     runs,
     { tickers: vectorTickers, dimensions: companyVectorDimensions },
-  ] = await Promise.all([fetchRuns(), fetchCompanyVectors()]);
-  const effectiveRunId = runId ?? runs[0]?.id ?? null;
+  ] = await Promise.all([fetchRuns(user.id), fetchCompanyVectors()]);
+
+  const runIds = new Set(runs.map((r) => Number(r.id)));
+  const effectiveRunId =
+    requestedRunId != null && runIds.has(requestedRunId)
+      ? requestedRunId
+      : (runs[0]?.id ?? null);
+
   const [rows, initialNotes] = effectiveRunId
     ? await Promise.all([
-        fetchRows(effectiveRunId),
-        fetchRowNotes(effectiveRunId),
+        fetchRows(effectiveRunId, user.id),
+        fetchRowNotes(effectiveRunId, user.id),
       ])
     : [[], []];
 

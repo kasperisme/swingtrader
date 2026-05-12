@@ -1,6 +1,7 @@
 "use server";
 
 import { createClient } from "@/lib/supabase/server";
+import { fetchAllPaged } from "@/lib/supabase/paginate";
 
 type ScreeningActionError = { ok: false; error: string };
 type ScreeningActionSuccess<T> = { ok: true; data: T };
@@ -111,28 +112,6 @@ export type ScreeningNewsImpactArticle = {
   published_at: string;
   ticker_sentiment: Record<string, number>;
 };
-
-const NEWS_IMPACT_PAGE_SIZE = 1000;
-
-async function fetchAllPaged<Row>(
-  query: (from: number, to: number) => PromiseLike<{
-    data: Row[] | null;
-    error: { message: string } | null;
-  }>,
-): Promise<{ data: Row[]; error: string | null }> {
-  const out: Row[] = [];
-  let from = 0;
-  while (true) {
-    const to = from + NEWS_IMPACT_PAGE_SIZE - 1;
-    const { data, error } = await query(from, to);
-    if (error) return { data: out, error: error.message };
-    const rows = data ?? [];
-    out.push(...rows);
-    if (rows.length < NEWS_IMPACT_PAGE_SIZE) break;
-    from += NEWS_IMPACT_PAGE_SIZE;
-  }
-  return { data: out, error: null };
-}
 
 export async function screeningsGetNewsImpacts(): Promise<
   ScreeningActionSuccess<ScreeningNewsImpactArticle[]> | ScreeningActionError

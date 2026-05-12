@@ -20,7 +20,7 @@ impact_scorer (8 parallel LLM heads, one per cluster)
         ▼
 embeddings_cli (chunk + vector)
         │
-        └──▶ news_chunk_embeddings (pgvector, gte-small)
+        └──▶ news_article_embeddings (pgvector)
                                                  │
                                                  ▼
                                        semantic_retrieval
@@ -44,7 +44,7 @@ embeddings_cli (chunk + vector)
 | Subpackage | Role |
 |---|---|
 | `scoring/` | Impact scorer + ingester. 8-cluster parallel LLM scoring → `news_articles` + `news_impact_vectors`. |
-| `embeddings/` | Vector pipeline: chunk articles, embed via gte-small, write to `news_chunk_embeddings`. Also the semantic retrieval helper used by every search-the-news caller. |
+| `embeddings/` | Vector pipeline: chunk articles, embed via Ollama, write to `news_article_embeddings`. Semantic retrieval helper; optional time-bucket clustering (`cluster_news_embedding_buckets.py`). |
 | `narrative/` | Daily narrative generator. Per-user pre-market briefing assembled from open positions, active screen tickers, alerts, and recent news. |
 | `llm/` | LLM client wrappers — `ollama_client`, `anthropic_client`, `do_agent_client`. All three share the `chat() -> (text, latency_ms)` signature; `ollama_client` now delegates to `services.agent_core.simple_chat`. |
 | `company/` | Company factor-vector builder. Computes per-ticker dimension exposures (macro sensitivity, sector rotation, etc.) used to score news against companies. |
@@ -68,15 +68,63 @@ Each cluster head is independent — one head failing never blocks the others. O
 ## embeddings/
 
 ```
-embeddings.py            ─▶ chunk + embed articles → news_chunk_embeddings (pgvector)
-gte_backfill.py          ─▶ one-shot backfill for the gte-small migration
-embeddings_cli.py        ─▶ batched job runner (consumes the queue from scoring)
-semantic_retrieval.py    ─▶ search_news_embeddings(query, lookback_hours, tickers, limit)
+embeddings.py                 ─▶ chunk + embed articles → news_article_embeddings (pgvector)
+gte_backfill.py               ─▶ one-shot backfill for the gte-small migration
+embeddings_cli.py             ─▶ batched job runner (consumes the queue from scoring)
+semantic_retrieval.py         ─▶ search_news_embeddings(query, lookback_hours, tickers, limit)
+time_bucket_clustering.py    ─▶ hourly/daily K-means over embeddings (see clustering below)
 ```
 
 `semantic_retrieval.search_news_embeddings` is the single entry point for "find recent articles that match this query / are about these tickers." Used by the blog generator, podcast research agent, and the RAG `search_news` tool.
 
-Embedding model: gte-small via Ollama (`/api/embeddings`). Calls are sub-second so streaming isn't relevant.
+Embedding model: primary pipeline uses Ollama (`OLLAMA_EMBED_MODEL`, default `mxbai-embed-large` in code paths that reference it). `gte_backfill.py` targets `news_article_embeddings_gte`.
+
+### Time-bucket embedding clusters (hourly / daily)
+
+K-means clusters over `news_article_embeddings` in **UTC** windows: each **hour** `[bucket, bucket+1h)` or each **calendar day** `[midnight, midnight+1d)`. For each cluster, **Ollama** (`/api/chat`, non-streaming) reads numbered excerpts from member chunks in that bucket and writes a short **theme label** into `reverse_embedding_text`. `reverse_embedding_article_id` / `reverse_embedding_chunk_index` point at the chunk **nearest the centroid** within the cluster (anchor, not the full label source). If Ollama errors, the label falls back to that nearest chunk’s text.
+
+**1. Apply the migration** (creates hourly + daily table families; drops legacy `news_embedding_time_cluster_*` if present):
+
+```bash
+# From repo root or analytics — use your usual Supabase workflow, e.g.
+cd code/analytics && supabase db push
+# or apply: supabase/migrations/20260512140000_news_embedding_time_clusters.sql
+```
+
+**2. Configure `code/analytics/.env`** (same as other DB scripts):
+
+- `SUPABASE_DB_DIRECT_URL` **or** `SUPABASE_URL` + `SUPABASE_DB_PWD` (direct Postgres for `psycopg2`)
+- Optional: `SUPABASE_SCHEMA` (default `swingtrader`)
+- Optional: `OLLAMA_EMBED_MODEL` — must match `news_article_embeddings.embedding_model` for the rows you cluster (default in script: `mxbai-embed-large`)
+- **Ollama for labels:** `OLLAMA_BASE_URL` (default `http://localhost:11434`), `OLLAMA_CLUSTER_LABEL_MODEL` or fallbacks `OLLAMA_IMPACT_MODEL` → `OLLAMA_NARRATIVE_MODEL` → `llama3.2` (see `default_label_model()` in `time_bucket_clustering.py`).
+
+**3. Run the CLI** from `code/analytics` (bootstrap matches `scripts/generate_blog_post.py`). **Ollama must be reachable** unless you only use `--dry-run` (no labels written).
+
+```bash
+cd code/analytics
+
+# Hourly buckets in a UTC half-open range [since, until)
+python scripts/cluster_news_embedding_buckets.py --granularity hour --since 2026-05-10 --until 2026-05-12
+
+# Daily buckets (UTC calendar days)
+python scripts/cluster_news_embedding_buckets.py --granularity day --since 2026-05-01 --until 2026-05-13
+
+# Dry run (no DB writes; no Ollama calls; prints JSON summary per bucket)
+python scripts/cluster_news_embedding_buckets.py --granularity day --since 2026-05-01 --dry-run
+
+# Explicit embedding + chat models
+python scripts/cluster_news_embedding_buckets.py --granularity hour --since 2026-05-10 --until 2026-05-11 --embed-model mxbai-embed-large --label-model llama3.2
+
+# Tunables: --max-k, --min-per-cluster, --random-state, --ollama-timeout (per cluster),
+#   --max-cluster-chars (excerpt budget per cluster prompt), --ollama-base-url, -v
+```
+
+**Notes**
+
+- `--since` / `--until` accept `YYYY-MM-DD` (interpreted as **UTC midnight**) or full ISO datetimes. **`until` is exclusive**: to include all of `2026-05-12` for daily runs, pass `--until 2026-05-13`.
+- Run **twice** (once `--granularity hour`, once `--granularity day`) to populate both table sets.
+- Writes go to `news_embedding_hourly_cluster_{runs,centroids,articles}` and `news_embedding_daily_cluster_{runs,centroids,articles}`. Re-running the same `(bucket_start, embedding_model)` replaces that bucket’s rows.
+- Cost: **one Ollama `/api/chat` per cluster** after K-means (e.g. 20 clusters ⇒ 20 calls per bucket).
 
 ---
 

@@ -1,0 +1,30 @@
+"""Registry mapping script_key → callable.
+
+To add a new public screening:
+  1. Write `scripts/<key>.py` exporting `def run(client, screening) -> ScreeningResult`
+  2. Register it below.
+  3. Insert a row in public_screenings with script_key = "<key>" via the admin UI.
+"""
+
+from __future__ import annotations
+
+from typing import Callable
+
+from .scripts import stage_2
+from .types import ScreeningResult
+
+
+ScriptFn = Callable[[object, dict], ScreeningResult]
+
+
+SCRIPTS: dict[str, ScriptFn] = {
+    "stage_2": stage_2.run,
+}
+
+
+def get_script(script_key: str) -> ScriptFn | None:
+    return SCRIPTS.get(script_key)
+
+
+def list_script_keys() -> list[str]:
+    return sorted(SCRIPTS.keys())
