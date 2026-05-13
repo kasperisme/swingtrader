@@ -1,4 +1,4 @@
-"""Core Screen — proprietary stock screening developed by newsimpactscreener.
+"""NIS Momentum — proprietary stock screening developed by newsimpactscreener.
 
 Multi-stage technical + growth-fundamental screen across NYSE + NASDAQ:
   1. Pull NYSE + NASDAQ tickers from FMP
@@ -51,9 +51,9 @@ def run(
     df_tickers = pd.concat(df_col, axis=0).dropna(subset=["symbol"])
     if _TESTING_TICKER_CAP:
         df_tickers = df_tickers.head(_TESTING_TICKER_CAP)
-        log.warning("[core_screen] TESTING cap active: %d tickers", _TESTING_TICKER_CAP)
+        log.warning("[nis_momentum] TESTING cap active: %d tickers", _TESTING_TICKER_CAP)
     tickers = df_tickers["symbol"].to_list()
-    log.info("[core_screen] universe: %d tickers", len(tickers))
+    log.info("[nis_momentum] universe: %d tickers", len(tickers))
 
     # ── Step 2: quote + RS pre-screen ──────────────────────────────────────
     df_quote = tech.get_quote_prices(tickers).sort_values("symbol")
@@ -63,7 +63,7 @@ def run(
     pre_mask = (df_quote["SCREENER"] == 1) & (df_quote["RS"] > 80)
     candidates = df_quote[pre_mask]["symbol"].tolist()
     log.info(
-        "[core_screen] after pre-screen (SCREENER==1 AND RS>80): %d candidates",
+        "[nis_momentum] after pre-screen (SCREENER==1 AND RS>80): %d candidates",
         len(candidates),
     )
 
@@ -72,7 +72,7 @@ def run(
     for i, symbol in enumerate(candidates, 1):
         if i % 25 == 0:
             log.info(
-                "[core_screen] screening %d/%d (%s)", i, len(candidates), symbol
+                "[nis_momentum] screening %d/%d (%s)", i, len(candidates), symbol
             )
         try:
             _df, tt, error = tech.get_screening(
@@ -100,7 +100,7 @@ def run(
 
             rows.append(tt)
         except Exception as exc:
-            log.warning("[core_screen] %s failed: %s", symbol, exc)
+            log.warning("[nis_momentum] %s failed: %s", symbol, exc)
 
     # ── Step 4: filter passers (technical AND fundamental) ─────────────────
     passed = [
@@ -112,7 +112,7 @@ def run(
     passed.sort(key=lambda r: (r.get("RS_Rank") is None, r.get("RS_Rank") or 9999))
 
     log.info(
-        "[core_screen] passed full Core Screen: %d / %d screened",
+        "[nis_momentum] passed full NIS Momentum: %d / %d screened",
         len(passed), len(rows),
     )
 
@@ -194,7 +194,7 @@ def _serialize_row(r: dict) -> dict:
 def _format_summary(passed: list[dict], total_candidates: int) -> str:
     n = len(passed)
     head = (
-        f"<b>Core Screen</b>\n"
+        f"<b>NIS Momentum</b>\n"
         f"{n} stock{'s' if n != 1 else ''} passed (from {total_candidates} candidates)\n"
     )
     shown = passed[:_SUMMARY_TOP_N]

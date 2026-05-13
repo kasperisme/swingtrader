@@ -18,6 +18,7 @@ import {
   ScreeningResultsTable,
   type BasicScreeningRow,
 } from "@/components/screening-results-table";
+import { ScreeningDescription } from "@/components/screening-description";
 import { SubscribeButton } from "../_components/subscribe-button";
 
 type Props = { params: Promise<{ slug: string }> };
@@ -148,9 +149,9 @@ export default async function PublicScreeningDetailPage({ params }: Props) {
             </h1>
 
             {screening.description && (
-              <p className="mt-6 max-w-[62ch] text-base leading-7 text-muted-foreground">
-                {screening.description}
-              </p>
+              <div className="mt-6">
+                <ScreeningDescription source={screening.description} />
+              </div>
             )}
           </div>
 

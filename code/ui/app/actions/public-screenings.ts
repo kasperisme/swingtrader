@@ -19,6 +19,7 @@ export type PublicScreening = {
   last_run_at: string | null;
   last_triggered: boolean | null;
   created_at: string;
+  download_count: number;
 };
 
 export type PublicScreeningResult = {
@@ -40,46 +41,105 @@ export type PublicScreeningResultRow = {
 
 type ActionResult<T> = Promise<{ ok: true; data: T } | { ok: false; error: string }>;
 
-const PUBLIC_FIELDS =
+// Fields known to exist after every migration is applied. download_count was
+// added in 20260513010000 and we degrade gracefully if a deployment is ahead
+// of the DB (column-missing error code 42703).
+const PUBLIC_FIELDS_FULL =
+  "id, slug, name, description, category, schedule, timezone, last_run_at, last_triggered, created_at, download_count";
+const PUBLIC_FIELDS_LEGACY =
   "id, slug, name, description, category, schedule, timezone, last_run_at, last_triggered, created_at";
+
+// supabase-js puts error fields on a class instance whose own props aren't
+// enumerable, so `console.error(error)` prints `{}`. Project to a plain object.
+function describePgError(error: unknown): Record<string, unknown> {
+  if (!error || typeof error !== "object") return { value: String(error) };
+  const e = error as Record<string, unknown>;
+  return {
+    code: e.code,
+    message: e.message,
+    details: e.details,
+    hint: e.hint,
+  };
+}
+
+function isMissingColumnError(error: unknown): boolean {
+  const e = error as { code?: string; message?: string } | null | undefined;
+  return (
+    e?.code === "42703" || /column .* does not exist/i.test(e?.message ?? "")
+  );
+}
 
 const validEmail = (raw: string): boolean =>
   /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(raw.trim().toLowerCase());
 
 // ── Reads (server-side, public) ─────────────────────────────────────────────
 
+async function selectPublicScreeningsWithFallback(
+  builder: (fields: string) => Promise<{ data: unknown; error: unknown }>,
+): Promise<{ data: unknown; error: unknown }> {
+  const first = await builder(PUBLIC_FIELDS_FULL);
+  if (first.error && isMissingColumnError(first.error)) {
+    console.warn(
+      "[public-screenings] download_count missing — falling back. Apply migration 20260513010000.",
+    );
+    return builder(PUBLIC_FIELDS_LEGACY);
+  }
+  return first;
+}
+
 export async function listPublicScreenings(): Promise<PublicScreening[]> {
   const client = createServiceClient();
-  const { data, error } = await client
-    .schema(SCHEMA)
-    .from("public_screenings")
-    .select(PUBLIC_FIELDS)
-    .eq("is_published", true)
-    .order("created_at", { ascending: false });
+  const { data, error } = await selectPublicScreeningsWithFallback(
+    (fields) =>
+      client
+        .schema(SCHEMA)
+        .from("public_screenings")
+        .select(fields)
+        .eq("is_published", true)
+        .order("created_at", { ascending: false }) as unknown as Promise<{
+        data: unknown;
+        error: unknown;
+      }>,
+  );
+
   if (error) {
-    console.error("[public-screenings] list failed", error);
+    console.error("[public-screenings] list failed", describePgError(error));
     return [];
   }
-  return (data ?? []) as PublicScreening[];
+  return ((data ?? []) as Partial<PublicScreening>[]).map((r) => ({
+    download_count: 0,
+    ...r,
+  })) as PublicScreening[];
 }
 
 export async function getPublicScreeningBySlug(
   slug: string,
 ): Promise<PublicScreening | null> {
   const client = createServiceClient();
-  const { data, error } = await client
-    .schema(SCHEMA)
-    .from("public_screenings")
-    .select(PUBLIC_FIELDS)
-    .eq("slug", slug)
-    .eq("is_published", true)
-    .limit(1)
-    .maybeSingle();
+  const { data, error } = await selectPublicScreeningsWithFallback(
+    (fields) =>
+      client
+        .schema(SCHEMA)
+        .from("public_screenings")
+        .select(fields)
+        .eq("slug", slug)
+        .eq("is_published", true)
+        .limit(1)
+        .maybeSingle() as unknown as Promise<{
+        data: unknown;
+        error: unknown;
+      }>,
+  );
+
   if (error) {
-    console.error("[public-screenings] getBySlug failed", error);
+    console.error("[public-screenings] getBySlug failed", describePgError(error));
     return null;
   }
-  return (data ?? null) as PublicScreening | null;
+  if (!data) return null;
+  return {
+    download_count: 0,
+    ...(data as Partial<PublicScreening>),
+  } as PublicScreening;
 }
 
 function normalizeRowDataForTable(raw: unknown): Record<string, unknown> {
@@ -285,6 +345,63 @@ export async function submitEarlyAccessSignup(input: {
   });
 
   return { ok: true, data: { alreadySignedUp: false } };
+}
+
+// ── Download metric ─────────────────────────────────────────────────────────
+
+/**
+ * Atomically bumps `download_count` for the screening and emits a PostHog
+ * event. Called from the CSV export route. Best-effort: any failure is logged
+ * but never blocks the download response.
+ */
+export async function recordPublicScreeningDownload(input: {
+  screeningId: string;
+  screeningSlug: string;
+  screeningName: string;
+}): Promise<void> {
+  // Identify the caller (anonymous downloads are fine — we still want the
+  // count + an anonymous PH event keyed by slug).
+  let userId: string | null = null;
+  try {
+    const supabase = await createClient();
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    userId = user?.id ?? null;
+  } catch {
+    userId = null;
+  }
+
+  const service = createServiceClient();
+  try {
+    const { error } = await service
+      .schema(SCHEMA)
+      .rpc("increment_public_screening_download", {
+        p_id: input.screeningId,
+      });
+    if (error) {
+      console.error("[public-screenings] increment download failed", error);
+    }
+  } catch (e) {
+    console.error("[public-screenings] increment download threw", e);
+  }
+
+  let referrer: string | null = null;
+  try {
+    const headerList = await headers();
+    referrer = headerList.get("referer");
+  } catch {
+    referrer = null;
+  }
+
+  captureServer(userId ?? `anon:${input.screeningSlug}`, "public_screening_downloaded", {
+    screening_id: input.screeningId,
+    screening_slug: input.screeningSlug,
+    screening_name: input.screeningName,
+    format: "csv",
+    authenticated: Boolean(userId),
+    referrer,
+  });
 }
 
 // ── Real subscriptions (authed users) ───────────────────────────────────────

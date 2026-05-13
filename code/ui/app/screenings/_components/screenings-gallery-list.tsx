@@ -3,6 +3,7 @@
 import { useMemo, useState } from "react";
 import Link from "next/link";
 import {
+  ArrowUpDown,
   ArrowUpRight,
   Code as CodeIcon,
   Download as DownloadIcon,
@@ -13,6 +14,14 @@ import { humanizeCron } from "@/lib/cron-format";
 import type { PublicScreening } from "@/app/actions/public-screenings";
 
 type Props = { screenings: PublicScreening[] };
+
+type SortKey = "latest" | "downloads";
+
+function formatCount(n: number): string {
+  if (n < 1000) return n.toString();
+  if (n < 10_000) return `${(n / 1000).toFixed(1).replace(/\.0$/, "")}k`;
+  return `${Math.round(n / 1000)}k`;
+}
 
 function formatRelative(iso: string | null): string {
   if (!iso) return "Not run yet";
@@ -30,6 +39,7 @@ function formatRelative(iso: string | null): string {
 export function ScreeningsGalleryList({ screenings }: Props) {
   const [query, setQuery] = useState("");
   const [activeCategory, setActiveCategory] = useState<string | null>(null);
+  const [sortKey, setSortKey] = useState<SortKey>("latest");
 
   const categories = useMemo(() => {
     const set = new Set<string>();
@@ -39,7 +49,7 @@ export function ScreeningsGalleryList({ screenings }: Props) {
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
-    return screenings.filter((s) => {
+    const base = screenings.filter((s) => {
       if (activeCategory && s.category !== activeCategory) return false;
       if (!q) return true;
       const hay = [s.name, s.category ?? "", s.description ?? "", s.slug]
@@ -47,20 +57,31 @@ export function ScreeningsGalleryList({ screenings }: Props) {
         .toLowerCase();
       return hay.includes(q);
     });
-  }, [screenings, query, activeCategory]);
+    if (sortKey === "downloads") {
+      return [...base].sort(
+        (a, b) =>
+          (b.download_count ?? 0) - (a.download_count ?? 0) ||
+          new Date(b.created_at).getTime() - new Date(a.created_at).getTime(),
+      );
+    }
+    return base;
+  }, [screenings, query, activeCategory, sortKey]);
 
   return (
     <>
-      {/* Filter strip — search left, category pills right. */}
+      {/* Filter strip — search + sort left, category pills right. */}
       <div className="mt-10 flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
-        <div className="relative w-full max-w-sm">
-          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-          <Input
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            placeholder="Search screenings…"
-            className="h-10 bg-background pl-9 font-medium placeholder:font-normal"
-          />
+        <div className="flex w-full max-w-xl items-center gap-2">
+          <div className="relative flex-1">
+            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+            <Input
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="Search screenings…"
+              className="h-10 bg-background pl-9 font-medium placeholder:font-normal"
+            />
+          </div>
+          <SortToggle value={sortKey} onChange={setSortKey} />
         </div>
 
         {categories.length > 0 && (
@@ -103,11 +124,38 @@ export function ScreeningsGalleryList({ screenings }: Props) {
       ) : (
         <ol className="mt-8 border-t border-border/70">
           {filtered.map((s, index) => (
-            <ScreeningRow key={s.id} screening={s} index={index} />
+            <ScreeningRow
+              key={s.id}
+              screening={s}
+              index={index}
+              sortKey={sortKey}
+            />
           ))}
         </ol>
       )}
     </>
+  );
+}
+
+function SortToggle({
+  value,
+  onChange,
+}: {
+  value: SortKey;
+  onChange: (next: SortKey) => void;
+}) {
+  const next: SortKey = value === "latest" ? "downloads" : "latest";
+  const label = value === "latest" ? "Latest" : "Most downloaded";
+  return (
+    <button
+      type="button"
+      onClick={() => onChange(next)}
+      aria-label={`Sort: ${label}. Click to switch.`}
+      className="inline-flex h-10 shrink-0 cursor-pointer items-center gap-1.5 rounded-md border border-border/70 bg-background px-3 text-xs font-medium text-muted-foreground transition-colors hover:border-border hover:text-foreground"
+    >
+      <ArrowUpDown className="h-3.5 w-3.5" />
+      <span className="hidden sm:inline">{label}</span>
+    </button>
   );
 }
 
@@ -149,9 +197,11 @@ function CategoryPill({
 function ScreeningRow({
   screening,
   index,
+  sortKey,
 }: {
   screening: PublicScreening;
   index: number;
+  sortKey: SortKey;
 }) {
   const ranToday = Boolean(
     screening.last_run_at &&
@@ -173,9 +223,16 @@ function ScreeningRow({
       />
 
       <div className="relative z-10 grid grid-cols-12 items-start gap-x-6 gap-y-3 px-1 py-7 pointer-events-none">
-        {/* Index */}
+        {/* Index — turns amber for the top 3 when sorted by downloads. */}
         <div className="col-span-2 md:col-span-1">
-          <span className="font-mono text-xs tabular-nums text-muted-foreground/70">
+          <span
+            className={
+              "font-mono text-xs tabular-nums " +
+              (sortKey === "downloads" && index < 3
+                ? "text-primary"
+                : "text-muted-foreground/70")
+            }
+          >
             {(index + 1).toString().padStart(2, "0")}
           </span>
         </div>
@@ -214,13 +271,24 @@ function ScreeningRow({
           </div>
 
           <div className="pointer-events-auto flex items-center gap-1">
-            <SecondaryAction
+            <a
               href={`/screenings/${screening.slug}/export`}
-              title="Download latest results as CSV"
               download
+              title={`Download latest results as CSV — ${screening.download_count} download${screening.download_count === 1 ? "" : "s"}`}
+              aria-label="Download latest results as CSV"
+              className="group/dl inline-flex cursor-pointer items-center gap-1.5 rounded-md border border-transparent px-1.5 py-1 text-[11px] font-mono tabular-nums text-muted-foreground transition-colors hover:border-border hover:bg-background hover:text-foreground"
             >
               <DownloadIcon className="h-3.5 w-3.5" />
-            </SecondaryAction>
+              <span
+                className={
+                  screening.download_count > 0
+                    ? "text-foreground/80 group-hover/dl:text-foreground"
+                    : "text-muted-foreground/60"
+                }
+              >
+                {formatCount(screening.download_count ?? 0)}
+              </span>
+            </a>
             <SecondaryAction
               href={`/api/public-screenings/${screening.slug}`}
               title="Fetch latest results as JSON"

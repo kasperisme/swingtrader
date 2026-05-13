@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import {
   getLatestPublicScreeningResultRows,
   getPublicScreeningBySlug,
+  recordPublicScreeningDownload,
 } from "@/app/actions/public-screenings";
 import {
   collectAllRowDataKeys,
@@ -73,6 +74,15 @@ export async function GET(
 
   // BOM + CSV so Excel opens UTF-8 cleanly.
   const body = "﻿" + lines.join("\r\n") + "\r\n";
+
+  // Best-effort: bump the DB counter and fire a PostHog event. Awaited so
+  // the increment is durable before we close the response; recorder swallows
+  // its own errors so a slow PH or RPC never breaks the download.
+  await recordPublicScreeningDownload({
+    screeningId: screening.id,
+    screeningSlug: screening.slug,
+    screeningName: screening.name,
+  });
 
   return new NextResponse(body, {
     status: 200,

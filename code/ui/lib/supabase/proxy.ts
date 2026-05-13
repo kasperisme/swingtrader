@@ -87,6 +87,7 @@ export async function updateSession(request: NextRequest) {
     pathname.startsWith("/api/stripe/checkout") ||  // creates checkout session (has own auth check)
     pathname === "/pricing" ||  // public pricing page
     pathname.startsWith("/screenings") ||  // public screenings gallery + detail + CSV export
+    pathname.startsWith("/changelog") ||  // public release notes
     pathname.startsWith("/podcast");  // public RSS feed + episode pages
 
   if (!user && !isPublicPath) {
