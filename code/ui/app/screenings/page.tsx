@@ -1,86 +1,143 @@
-import Link from "next/link";
 import type { Metadata } from "next";
 import { listPublicScreenings } from "@/app/actions/public-screenings";
-import { humanizeCron } from "@/lib/cron-format";
+import { ScreeningsGalleryList } from "./_components/screenings-gallery-list";
+
+const GALLERY_DESCRIPTION =
+  "Curated swing-trading screenings — Stage 2, technicals, fundamentals — delivered on a schedule. Subscribe to get results in your inbox.";
 
 export const metadata: Metadata = {
   title: "Public Screenings | News Impact Screener",
-  description:
-    "Curated swing-trading screenings — Stage 2, technicals, fundamentals — delivered on a schedule. Subscribe to get results in your inbox.",
+  description: GALLERY_DESCRIPTION,
+  alternates: { canonical: "/screenings" },
+  openGraph: {
+    type: "website",
+    title: "Public Screenings",
+    description: GALLERY_DESCRIPTION,
+    url: "/screenings",
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: "Public Screenings",
+    description: GALLERY_DESCRIPTION,
+  },
 };
 
 function formatRelative(iso: string | null): string {
-  if (!iso) return "Not run yet";
+  if (!iso) return "—";
   const ms = Date.now() - new Date(iso).getTime();
   if (Number.isNaN(ms)) return "—";
   const minutes = Math.floor(ms / 60_000);
-  if (minutes < 60) return `${Math.max(1, minutes)}m ago`;
+  if (minutes < 60) return `${Math.max(1, minutes)}m`;
   const hours = Math.floor(minutes / 60);
-  if (hours < 24) return `${hours}h ago`;
+  if (hours < 24) return `${hours}h`;
   const days = Math.floor(hours / 24);
-  if (days < 30) return `${days}d ago`;
+  if (days < 30) return `${days}d`;
   return new Date(iso).toLocaleDateString();
 }
 
 export default async function ScreeningsGalleryPage() {
   const screenings = await listPublicScreenings();
 
+  const lastUpdated = screenings.reduce<string | null>((acc, s) => {
+    if (!s.last_run_at) return acc;
+    if (!acc) return s.last_run_at;
+    return new Date(s.last_run_at) > new Date(acc) ? s.last_run_at : acc;
+  }, null);
+
+  const triggeredCount = screenings.filter((s) => s.last_triggered).length;
+
   return (
-    <div className="mx-auto max-w-4xl px-4 py-12 sm:px-6 md:py-20">
-      <div className="mb-12">
-        <h1 className="text-4xl font-bold tracking-tight">Public Screenings</h1>
-        <p className="mt-3 text-base text-muted-foreground">
-          Curated screenings that run on a schedule. Subscribe to receive results in
-          your inbox and via Telegram.
-        </p>
+    <div className="relative isolate">
+      {/* Decorative grid backdrop — pointer-events safe, sits behind everything. */}
+      <div
+        aria-hidden
+        className="pointer-events-none absolute inset-x-0 top-0 -z-10 h-[420px] bg-terminal-grid opacity-[0.35] [mask-image:linear-gradient(to_bottom,black,transparent)]"
+      />
+
+      <div className="mx-auto max-w-6xl px-4 pt-12 pb-20 sm:px-6 md:pt-20">
+        {/* Editorial header — 12 column asymmetric split. */}
+        <header className="grid grid-cols-12 gap-x-6 gap-y-8 border-b border-border/70 pb-10">
+          <div className="col-span-12 md:col-span-8">
+            <div className="flex items-center gap-2 font-mono text-[11px] uppercase tracking-[0.22em] text-muted-foreground">
+              <span className="inline-block h-[1px] w-6 bg-primary" />
+              <span>Gallery</span>
+              <span className="text-border">/</span>
+              <span className="text-foreground/70">
+                {screenings.length.toString().padStart(2, "0")} screenings
+              </span>
+            </div>
+
+            <h1 className="mt-5 text-5xl font-bold leading-[0.95] tracking-tight md:text-6xl">
+              Public
+              <br />
+              <span className="text-foreground/60">screenings.</span>
+            </h1>
+
+            <p className="mt-6 max-w-[58ch] text-base leading-7 text-muted-foreground">
+              Curated, opinionated filters that run on a cron — Stage&nbsp;2, trend
+              templates, fundamentals. Subscribe to receive results in your inbox
+              and via Telegram, or pull them through the JSON API.
+            </p>
+          </div>
+
+          {/* Stats column — sits to the right on desktop, stacks below on mobile. */}
+          <aside className="col-span-12 md:col-span-4 md:pt-1">
+            <dl className="grid grid-cols-3 gap-px overflow-hidden rounded-lg border border-border/70 bg-border/70 md:grid-cols-1">
+              <Stat
+                label="Last run"
+                value={formatRelative(lastUpdated)}
+                hint={lastUpdated ? "ago" : null}
+              />
+              <Stat
+                label="Triggered"
+                value={triggeredCount.toString()}
+                hint="last cycle"
+                accent={triggeredCount > 0}
+              />
+              <Stat
+                label="Tracking"
+                value={screenings.length.toString()}
+                hint="published"
+              />
+            </dl>
+          </aside>
+        </header>
+
+        <ScreeningsGalleryList screenings={screenings} />
       </div>
+    </div>
+  );
+}
 
-      {screenings.length === 0 ? (
-        <p className="text-sm text-muted-foreground">
-          No public screenings published yet — check back soon.
-        </p>
-      ) : (
-        <div className="divide-y divide-border">
-          {screenings.map((s, index) => (
-            <article key={s.id} className={index === 0 ? "pb-10" : "py-10"}>
-              <div className="flex items-center gap-3 text-xs text-muted-foreground">
-                {s.category && (
-                  <span className="rounded-full border border-border px-2 py-0.5">
-                    {s.category}
-                  </span>
-                )}
-                <span>{humanizeCron(s.schedule, s.timezone)}</span>
-                <span aria-hidden>·</span>
-                <span>Last run: {formatRelative(s.last_run_at)}</span>
-              </div>
-
-              <h2 className="mt-3 text-2xl font-semibold tracking-tight leading-snug">
-                <Link
-                  href={`/screenings/${s.slug}`}
-                  className="hover:text-primary transition-colors"
-                >
-                  {s.name}
-                </Link>
-              </h2>
-
-              {s.description && (
-                <p className="mt-3 text-sm leading-6 text-muted-foreground">
-                  {s.description}
-                </p>
-              )}
-
-              <div className="mt-4">
-                <Link
-                  href={`/screenings/${s.slug}`}
-                  className="text-sm font-medium text-primary hover:underline"
-                >
-                  View screening →
-                </Link>
-              </div>
-            </article>
-          ))}
-        </div>
-      )}
+function Stat({
+  label,
+  value,
+  hint,
+  accent = false,
+}: {
+  label: string;
+  value: string;
+  hint?: string | null;
+  accent?: boolean;
+}) {
+  return (
+    <div className="bg-background/70 px-4 py-3.5">
+      <dt className="font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground">
+        {label}
+      </dt>
+      <dd className="mt-1 flex items-baseline gap-1.5">
+        <span
+          className={
+            "text-2xl font-semibold tabular-nums " +
+            (accent ? "text-primary" : "text-foreground")
+          }
+        >
+          {value}
+        </span>
+        {hint && (
+          <span className="text-xs text-muted-foreground">{hint}</span>
+        )}
+      </dd>
     </div>
   );
 }

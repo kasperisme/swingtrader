@@ -29,6 +29,15 @@ export type PublicScreeningResult = {
   status: string;
 };
 
+export type PublicScreeningResultRow = {
+  id: number;
+  symbol: string | null;
+  dataset: string;
+  rowData: Record<string, unknown>;
+  run_at: string;
+  scan_date: string;
+};
+
 type ActionResult<T> = Promise<{ ok: true; data: T } | { ok: false; error: string }>;
 
 const PUBLIC_FIELDS =
@@ -71,6 +80,107 @@ export async function getPublicScreeningBySlug(
     return null;
   }
   return (data ?? null) as PublicScreening | null;
+}
+
+function normalizeRowDataForTable(raw: unknown): Record<string, unknown> {
+  if (raw && typeof raw === "object" && !Array.isArray(raw)) {
+    return raw as Record<string, unknown>;
+  }
+  if (typeof raw === "string") {
+    try {
+      const p = JSON.parse(raw);
+      if (p && typeof p === "object" && !Array.isArray(p)) {
+        return p as Record<string, unknown>;
+      }
+    } catch {
+      /* ignore */
+    }
+  }
+  return {};
+}
+
+export async function getLatestPublicScreeningResultRows(
+  screeningId: string,
+): Promise<{
+  resultId: string | null;
+  runAt: string | null;
+  rows: PublicScreeningResultRow[];
+}> {
+  const client = createServiceClient();
+
+  // Latest done result for this screening.
+  const { data: latestResult } = await client
+    .schema(SCHEMA)
+    .from("public_screening_results")
+    .select("id, run_at, data_used")
+    .eq("public_screening_id", screeningId)
+    .eq("status", "done")
+    .order("run_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (!latestResult) {
+    return { resultId: null, runAt: null, rows: [] };
+  }
+
+  // Primary path: read from public_screening_result_rows (the canonical
+  // per-ticker table). May not exist yet for runs that pre-date that
+  // migration — we fall back to data_used.symbols below.
+  let parsed: PublicScreeningResultRow[] = [];
+  try {
+    const { data: rows, error } = await client
+      .schema(SCHEMA)
+      .from("public_screening_result_rows")
+      .select("id, symbol, dataset, row_data, run_at, scan_date")
+      .eq("result_id", latestResult.id)
+      .order("id", { ascending: true });
+
+    if (error) throw error;
+
+    parsed = (rows ?? []).map((r) => ({
+      id: Number((r as { id: number }).id),
+      symbol: (r as { symbol: string | null }).symbol,
+      dataset: String((r as { dataset: string }).dataset ?? ""),
+      rowData: normalizeRowDataForTable((r as { row_data: unknown }).row_data),
+      run_at: String((r as { run_at: string }).run_at ?? ""),
+      scan_date: String((r as { scan_date: string }).scan_date ?? ""),
+    }));
+  } catch (e) {
+    console.warn(
+      "[public-screenings] public_screening_result_rows read failed, falling back",
+      e,
+    );
+  }
+
+  // Fallback: legacy runs stored the symbols list inside data_used. Project
+  // those into the same shape so the UI doesn't have to special-case.
+  if (parsed.length === 0) {
+    const du = (latestResult as { data_used: unknown }).data_used;
+    const duObj = normalizeRowDataForTable(du);
+    const sym = duObj.symbols;
+    if (Array.isArray(sym)) {
+      parsed = sym.map((s, i) => {
+        const obj = normalizeRowDataForTable(s);
+        return {
+          id: i + 1,
+          symbol:
+            (typeof obj.symbol === "string" && obj.symbol) ||
+            (typeof obj.ticker === "string" && obj.ticker) ||
+            null,
+          dataset: "trend_template",
+          rowData: obj,
+          run_at: String(latestResult.run_at ?? ""),
+          scan_date: String(latestResult.run_at ?? "").slice(0, 10),
+        };
+      });
+    }
+  }
+
+  return {
+    resultId: latestResult.id,
+    runAt: latestResult.run_at,
+    rows: parsed,
+  };
 }
 
 export async function getPublicScreeningResults(

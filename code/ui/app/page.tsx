@@ -30,6 +30,8 @@ import { PricingTierSwitcher } from "@/components/pricing-tier-switcher";
 import { isSanityConfigured, sanityFetch } from "@/lib/sanity/client";
 import { newsPublishersQuery, landingPageQuery } from "@/lib/sanity/queries";
 import type { NewsPublisher, LandingPage, LandingCardItem, LandingStep, LandingPricingPlan } from "@/lib/sanity/types";
+import { listPublicScreenings } from "@/app/actions/public-screenings";
+import { humanizeCron } from "@/lib/cron-format";
 
 // ── Icon mapping ──────────────────────────────────────────────────────────────
 
@@ -412,6 +414,15 @@ export default async function Home() {
   const tickerThemes = cms?.tickerThemes?.length ? cms.tickerThemes : DEFAULT_TICKER_THEMES;
   const doubledTicker = [...tickerThemes, ...tickerThemes];
 
+  // Public screenings preview — up to 3 to highlight on the landing page.
+  let publicScreeningsPreview: Awaited<ReturnType<typeof listPublicScreenings>> = [];
+  try {
+    const all = await listPublicScreenings();
+    publicScreeningsPreview = all.slice(0, 3);
+  } catch {
+    publicScreeningsPreview = [];
+  }
+
   return (
     <main className="min-h-screen bg-background text-foreground">
       {/* ── HERO ─────────────────────────────────────────────────── */}
@@ -622,6 +633,68 @@ export default async function Home() {
                 </article>
               );
             })}
+          </div>
+        </div>
+      </section>
+
+      {/* ── PUBLIC SCREENINGS ────────────────────────────────────── */}
+      <section id="public-screenings" className="border-t border-border py-16 md:py-24">
+        <div className="mx-auto max-w-6xl px-4 sm:px-6 lg:px-8">
+          <p className="text-xs font-semibold uppercase tracking-widest text-amber-500">
+            Free public screenings
+          </p>
+          <h2 className="mt-3 text-2xl font-bold tracking-tight sm:text-3xl">
+            Curated screenings, free to subscribe
+          </h2>
+          <p className="mt-3 max-w-xl text-sm leading-6 text-muted-foreground">
+            Platform-managed screenings — Stage 2 setups, technicals, fundamentals — run on a schedule. Subscribe once and the results land in your inbox and Telegram, no setup required.
+          </p>
+
+          {publicScreeningsPreview.length > 0 ? (
+            <div className="mt-10 grid gap-4 sm:grid-cols-2 md:grid-cols-3">
+              {publicScreeningsPreview.map((s) => (
+                <Link
+                  key={s.id}
+                  href={`/screenings/${s.slug}`}
+                  className="group flex flex-col rounded-2xl border border-border bg-background/60 p-5 transition-colors hover:border-amber-400/60 hover:bg-amber-500/5"
+                >
+                  <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                    {s.category && (
+                      <span className="rounded-full border border-border px-2 py-0.5">
+                        {s.category}
+                      </span>
+                    )}
+                    <span className="truncate">
+                      {humanizeCron(s.schedule, s.timezone)}
+                    </span>
+                  </div>
+                  <h3 className="mt-3 text-base font-semibold leading-snug group-hover:text-amber-400">
+                    {s.name}
+                  </h3>
+                  {s.description && (
+                    <p className="mt-2 line-clamp-3 text-sm leading-6 text-muted-foreground">
+                      {s.description}
+                    </p>
+                  )}
+                  <span className="mt-4 text-xs font-medium text-amber-400">
+                    View screening →
+                  </span>
+                </Link>
+              ))}
+            </div>
+          ) : (
+            <p className="mt-8 text-sm text-muted-foreground">
+              New screenings publishing soon.
+            </p>
+          )}
+
+          <div className="mt-10">
+            <Link
+              href="/screenings"
+              className="inline-flex items-center gap-1.5 text-sm font-medium text-amber-400 hover:underline"
+            >
+              Browse all public screenings →
+            </Link>
           </div>
         </div>
       </section>

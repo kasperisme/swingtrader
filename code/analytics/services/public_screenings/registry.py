@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from typing import Callable
 
-from .scripts import stage_2, test_aapl
+from .scripts import core_screen, stage_2, test_aapl
 from .types import ScreeningResult
 
 
@@ -18,6 +18,7 @@ ScriptFn = Callable[[object, dict], ScreeningResult]
 
 
 SCRIPTS: dict[str, ScriptFn] = {
+    "core_screen": core_screen.run,
     "stage_2": stage_2.run,
     "test_aapl": test_aapl.run,
 }

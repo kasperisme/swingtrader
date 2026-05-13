@@ -109,17 +109,71 @@ def run_public_screening(
 # ── Persistence + Telegram fan-out ──────────────────────────────────────────
 
 
+def _split_symbols_from_data_used(
+    data_used: dict[str, Any] | None,
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    """Pop `symbols` out of `data_used` so the per-ticker payload can be
+    persisted in public_screening_result_rows instead of bloating the JSONB
+    on public_screening_results. Returns (symbols, lean_data_used).
+    """
+    src = data_used or {}
+    symbols_raw = src.get("symbols")
+    symbols = symbols_raw if isinstance(symbols_raw, list) else []
+    lean = {k: v for k, v in src.items() if k != "symbols"}
+    return symbols, lean
+
+
+def _write_public_screening_result_rows(
+    client,
+    *,
+    public_screening_id: str,
+    result_id: str,
+    scan_date_str: str,
+    dataset: str,
+    symbols: list[dict[str, Any]],
+) -> int:
+    """Insert one public_screening_result_rows row per ticker. Returns inserted count."""
+    if not result_id or not symbols:
+        return 0
+    rows = [
+        {
+            "public_screening_id": public_screening_id,
+            "result_id": result_id,
+            "scan_date": scan_date_str,
+            "dataset": dataset,
+            "symbol": s.get("symbol") if isinstance(s, dict) else None,
+            "row_data": s if isinstance(s, dict) else {"value": s},
+        }
+        for s in symbols
+    ]
+    try:
+        client.schema(_SCHEMA).table("public_screening_result_rows").insert(rows).execute()
+        return len(rows)
+    except Exception as exc:
+        log.warning(
+            "Failed to insert public_screening_result_rows for result=%s: %s",
+            result_id, exc,
+        )
+        return 0
+
+
 def persist_and_deliver_public(
     result: dict[str, Any], result_id: str | None = None
 ) -> None:
     """Update the shared result row, then deliver to every subscriber with notifications on."""
     client = get_supabase_client()
     now = datetime.now(timezone.utc).isoformat()
+    scan_date_str = date.today().isoformat()
 
     is_test = bool(result.get("is_test"))
     triggered = bool(result.get("triggered"))
     error = bool(result.get("error"))
     status = "error" if error else "done"
+
+    # Split the per-ticker symbols out of data_used. Symbols go to the
+    # public_screening_result_rows table; data_used keeps only summary stats.
+    symbols, lean_data_used = _split_symbols_from_data_used(result.get("data_used"))
+    dataset = "trend_template"  # matches the convention used by user_scan_rows
 
     if result_id:
         try:
@@ -127,7 +181,7 @@ def persist_and_deliver_public(
                 {
                     "triggered": triggered,
                     "summary": result.get("summary"),
-                    "data_used": result.get("data_used", {}),
+                    "data_used": lean_data_used,
                     "status": status,
                     "error": result.get("summary") if error else None,
                 }
@@ -144,7 +198,7 @@ def persist_and_deliver_public(
             "started_at": now,
             "triggered": triggered,
             "summary": result.get("summary"),
-            "data_used": result.get("data_used", {}),
+            "data_used": lean_data_used,
             "is_test": is_test,
             "status": status,
             "error": result.get("summary") if error else None,
@@ -161,6 +215,21 @@ def persist_and_deliver_public(
             log.error("Failed to persist public_screening_results: %s", exc)
             return
 
+    # Persist the per-ticker rows into the canonical table.
+    if result_id:
+        inserted = _write_public_screening_result_rows(
+            client,
+            public_screening_id=result["screening_id"],
+            result_id=result_id,
+            scan_date_str=scan_date_str,
+            dataset=dataset,
+            symbols=symbols,
+        )
+        log.info(
+            "Public screening %s: persisted %d/%d row(s) into public_screening_result_rows",
+            result["screening_id"], inserted, len(symbols),
+        )
+
     # Update parent screening tracking columns.
     update_fields: dict[str, Any] = {
         "last_run_at": now,
@@ -172,10 +241,9 @@ def persist_and_deliver_public(
         update_fields,
     ).eq("id", result["screening_id"]).execute()
 
-    # Fan out to subscribers: write a user_screening_results row for each
-    # subscriber's operational user_scheduled_screenings copy, then deliver
-    # Telegram. Always fans out (even on no-trigger / error) so subscribers'
-    # in-app history stays complete and matches private screening behaviour.
+    # Fan out to subscribers (writes user_scan_jobs + user_scan_runs +
+    # user_scan_rows + Telegram). The fan-out still uses the in-memory
+    # `result` dict, which retains the full symbols list.
     _fan_out_to_subscribers(result)
 
 
