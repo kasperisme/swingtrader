@@ -6,6 +6,7 @@ import { createServiceClient } from "@/lib/supabase/service";
 import {
   ArrowRight,
   BarChart3,
+  Bell,
   Check,
   Compass,
   Filter,
@@ -401,15 +402,19 @@ export default async function Home() {
               <div className="mt-4 flex flex-wrap items-center gap-x-4 gap-y-2 text-xs">
                 <span className="inline-flex items-center gap-2 font-semibold text-emerald-400">
                   <Check className="h-3.5 w-3.5" />
-                  Free to explore until launch — no card required
+                  Free until launch — no card required
                 </span>
-                {heroSpotsLeft != null && heroSpotLimit != null && (
+                <span className="inline-flex items-center gap-2 font-semibold text-foreground/80">
+                  <Bell className="h-3.5 w-3.5" />
+                  Telegram &amp; email delivery
+                </span>
+                {heroSpotsLeft != null && heroSpotsLeft > 0 && (
                   <span className="inline-flex items-center gap-2 font-semibold text-amber-400">
                     <span className="relative flex h-2 w-2">
                       <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-amber-400 opacity-75" />
                       <span className="relative inline-flex h-2 w-2 rounded-full bg-amber-400" />
                     </span>
-                    Only {heroSpotsLeft} of {heroSpotLimit} founder spots left
+                    {heroSpotsLeft} founder spot{heroSpotsLeft === 1 ? "" : "s"} remaining
                   </span>
                 )}
                 <Link

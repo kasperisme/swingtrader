@@ -14,26 +14,49 @@ import { SiteHeader, SiteHeaderFallback } from "@/components/site-header";
 import { CavemanModeProvider } from "@/lib/caveman-mode";
 import { AnalyticsProvider } from "@/lib/analytics/AnalyticsProvider";
 
-const defaultUrl = process.env.VERCEL_URL
+// Always anchor metadataBase to the canonical production URL. Vercel preview
+// deployments set VERCEL_URL to a hashed `*.vercel.app` host — using that as
+// metadataBase leaks the preview URL into every OG/Twitter card and breaks
+// social-share previews for the production site.
+const canonicalSite =
+  process.env.NEXT_PUBLIC_SITE_URL ?? "https://www.newsimpactscreener.com";
+const previewSite = process.env.VERCEL_URL
   ? `https://${process.env.VERCEL_URL}`
   : "http://localhost:3000";
+const metadataBase = new URL(
+  process.env.VERCEL_ENV === "production" || !process.env.VERCEL_URL
+    ? canonicalSite
+    : previewSite,
+);
+
+const SITE_TITLE_PRIMARY =
+  "News Impact Screener — Catch market-moving news before the crowd";
+const SITE_DESCRIPTION =
+  "News Impact Screener maps every breaking story to the tickers and sectors it touches — within minutes, not hours. Built for retail investors who want signal, not noise.";
 
 export const metadata: Metadata = {
-  metadataBase: new URL(defaultUrl),
-  title: "newsimpactscreener",
-  description:
-    "News Impact Screener connects headlines to stocks and sectors for retail investors—themes, exposure, and screening without terminal noise.",
+  metadataBase,
+  title: {
+    default: SITE_TITLE_PRIMARY,
+    template: "%s · News Impact Screener",
+  },
+  description: SITE_DESCRIPTION,
+  applicationName: "News Impact Screener",
+  authors: [{ name: "News Impact Screener" }],
+  alternates: { canonical: "/" },
   twitter: {
-    card: "summary",
+    card: "summary_large_image",
     site: "@newsimpactscrnr",
     creator: "@newsimpactscrnr",
+    title: SITE_TITLE_PRIMARY,
+    description: SITE_DESCRIPTION,
   },
   openGraph: {
     type: "website",
-    url: defaultUrl,
-    title: "newsimpactscreener",
-    description:
-      "News Impact Screener connects headlines to stocks and sectors for retail investors—themes, exposure, and screening without terminal noise.",
+    url: "/",
+    siteName: "News Impact Screener",
+    title: SITE_TITLE_PRIMARY,
+    description: SITE_DESCRIPTION,
   },
   other: {
     "social:x": SITE_X_PROFILE_URL,
