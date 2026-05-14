@@ -7,8 +7,9 @@ Multi-stage technical + growth-fundamental screen across NYSE + NASDAQ:
      proximity to 52-week extremes, RS > 70
   4. Growth fundamentals overlay — increasing EPS direction AND
      3 consecutive quarterly earnings beats
-  5. A ticker is reported only if it passes every technical AND
-     fundamental gate.
+  5. Persisted output (``data_used.symbols``, DB rows, subscriber fan-out) includes
+     **only** tickers that pass every technical and fundamental gate — same
+     subset ``ibd_screener`` uploads via ``persist_market_wide_scan_via_api``.
 
 Runtime note: hits FMP for every ticker that survives the RS pre-screen
 and for earnings data on each candidate. Expect 5–15 minutes for a full
@@ -30,6 +31,11 @@ _LOOKBACK_DAYS = 365
 _DATE_FMT = "%Y-%m-%d"
 _SUMMARY_TOP_N = 25  # cap symbols listed in summary (Telegram readability)
 _TESTING_TICKER_CAP = 0  # 0 = no cap; set to a small number while iterating
+
+
+def _passed_full_gates(tt: dict) -> bool:
+    """Match ibd_screener: technical ``Passed`` and ``PASSED_FUNDAMENTALS`` (numpy-safe)."""
+    return bool(tt.get("Passed")) and bool(tt.get("PASSED_FUNDAMENTALS"))
 
 
 def run(
@@ -68,7 +74,11 @@ def run(
     )
 
     # ── Step 3: per-ticker technical + fundamentals ────────────────────────
-    rows: list[dict] = []
+    # Only retain rows that pass BOTH gates (same subset ibd_screener sends to
+    # persist_market_wide_scan_via_api). We still deep-screen every candidate
+    # for counting; failures never enter `passed`.
+    deep_screened = 0
+    passed: list[dict] = []
     for i, symbol in enumerate(candidates, 1):
         if i % 25 == 0:
             log.info(
@@ -90,30 +100,28 @@ def run(
                 tt["increasing_eps"] and tt["beat_estimate"]
             )
 
-            try:
-                meta = df_tickers[df_tickers["symbol"] == symbol].iloc[0]
-                tt["sector"] = meta.get("sector", "N/A")
-                tt["subSector"] = meta.get("subSector", meta.get("industry", "N/A"))
-            except Exception:
-                tt["sector"] = "N/A"
-                tt["subSector"] = "N/A"
+            deep_screened += 1
+            if _passed_full_gates(tt):
+                try:
+                    meta = df_tickers[df_tickers["symbol"] == symbol].iloc[0]
+                    tt["sector"] = meta.get("sector", "N/A")
+                    tt["subSector"] = meta.get("subSector", meta.get("industry", "N/A"))
+                except Exception:
+                    tt["sector"] = "N/A"
+                    tt["subSector"] = "N/A"
 
-            rows.append(tt)
+                passed.append(tt)
         except Exception as exc:
             log.warning("[nis_momentum] %s failed: %s", symbol, exc)
 
-    # ── Step 4: filter passers (technical AND fundamental) ─────────────────
-    passed = [
-        r
-        for r in rows
-        if r.get("Passed") is True and r.get("PASSED_FUNDAMENTALS") is True
-    ]
+    # ── Step 4: sort passers (list already = ibd API subset only) ───────────
     # Lower RS_Rank = higher percentile.
     passed.sort(key=lambda r: (r.get("RS_Rank") is None, r.get("RS_Rank") or 9999))
 
     log.info(
-        "[nis_momentum] passed full NIS Momentum: %d / %d screened",
-        len(passed), len(rows),
+        "[nis_momentum] passed full NIS Momentum: %d / %d deep-screened",
+        len(passed),
+        deep_screened,
     )
 
     if not passed:
@@ -124,7 +132,7 @@ def run(
             data_used={
                 "universe_size": len(tickers),
                 "pre_screen_candidates": len(candidates),
-                "screened": len(rows),
+                "screened": deep_screened,
                 "passed": 0,
             },
         )
@@ -134,7 +142,7 @@ def run(
     data_used = {
         "universe_size": len(tickers),
         "pre_screen_candidates": len(candidates),
-        "screened": len(rows),
+        "screened": deep_screened,
         "passed": len(passed),
         "symbols": symbols_serialized,
     }
