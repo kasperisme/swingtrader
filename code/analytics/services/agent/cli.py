@@ -1,14 +1,14 @@
 """
 screen_agent.cli — command-line interface for the scheduled screening agent.
 
-A single OpenClaw cron calls `tick` every minute; it evaluates due screenings
-and launches individual `run` subprocesses to execute them.
+A single OpenClaw cron calls `tick` every minute; it evaluates due user
+screenings and launches individual `run` subprocesses. Public script
+screenings use a separate OpenClaw cron → `services.public_screenings.cli tick`.
 
 Usage:
     python -m services.agent.cli tick [--max-concurrent N]
     python -m services.agent.cli run <screening-id> [--result-id UUID] [--is-test] [--dry-run]
-    python -m services.agent.cli run-public <public-screening-id> [--result-id UUID] [--is-test] [--dry-run]
-    python -m services.agent.cli setup-cron        # register the single tick cron in OpenClaw
+    python -m services.agent.cli setup-cron        # register screening-tick + public-screening-tick in OpenClaw
     python -m services.agent.cli fmp-test
 """
 
@@ -52,19 +52,6 @@ def _get_screening(screening_id: str) -> dict | None:
     return (res.data or [None])[0]
 
 
-def _get_public_screening(screening_id: str) -> dict | None:
-    client = get_supabase_client()
-    res = (
-        client.schema("swingtrader")
-        .table("public_screenings")
-        .select("*")
-        .eq("id", screening_id)
-        .limit(1)
-        .execute()
-    )
-    return (res.data or [None])[0]
-
-
 def cmd_tick(args):
     from .scheduler import run_tick
     stats = run_tick(max_concurrent=args.max_concurrent)
@@ -85,24 +72,6 @@ def cmd_run(args):
         result = run_screening(screening, dry_run=args.dry_run, is_test=is_test)
         if not args.dry_run:
             persist_and_deliver(result, result_id=args.result_id)
-
-    print(json.dumps(result, indent=2, default=str))
-
-
-def cmd_run_public(args):
-    from services.public_screenings.runner import run_public_screening, persist_and_deliver_public
-
-    screening = _get_public_screening(args.screening_id)
-    if not screening:
-        print(f"Public screening {args.screening_id} not found", file=sys.stderr)
-        sys.exit(1)
-
-    is_test = args.is_test or bool(screening.get("run_requested_at"))
-
-    with JobHeartbeat("public_screening_run", expected_interval=0.25):
-        result = run_public_screening(screening, dry_run=args.dry_run, is_test=is_test)
-        if not args.dry_run:
-            persist_and_deliver_public(result, result_id=args.result_id)
 
     print(json.dumps(result, indent=2, default=str))
 
@@ -135,15 +104,10 @@ def main():
                        help="Mark this run as a test (clears run_requested_at)")
     p_run.add_argument("--dry-run", action="store_true")
 
-    p_run_public = sub.add_parser("run-public", help="Run a specific public screening (script-based)")
-    p_run_public.add_argument("screening_id")
-    p_run_public.add_argument("--result-id", default=None,
-                              help="UUID of a pre-inserted public_screening_results row to update")
-    p_run_public.add_argument("--is-test", action="store_true",
-                              help="Mark this run as a test (clears run_requested_at)")
-    p_run_public.add_argument("--dry-run", action="store_true")
-
-    sub.add_parser("setup-cron", help="Register the single tick cron in OpenClaw")
+    sub.add_parser(
+        "setup-cron",
+        help="Register OpenClaw crons: screening-tick (agent) + public-screening-tick",
+    )
     sub.add_parser("fmp-test", help="Test FMP MCP connectivity and list available tools")
 
     args = parser.parse_args()
@@ -151,8 +115,6 @@ def main():
         cmd_tick(args)
     elif args.command == "run":
         cmd_run(args)
-    elif args.command == "run-public":
-        cmd_run_public(args)
     elif args.command == "setup-cron":
         cmd_setup_cron(args)
     elif args.command == "fmp-test":

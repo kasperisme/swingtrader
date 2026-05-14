@@ -1,11 +1,10 @@
 """
-sync_crons.py — Register the single scheduler tick cron in OpenClaw.
+sync_crons.py — Register OpenClaw minute crons for screening schedulers.
 
-The old model (one OpenClaw cron per screening) caused rate-limit issues.
-The new model is a single cron that fires every minute and calls `cli tick`,
-which evaluates due screenings internally using croniter.
+Registers ``screening-tick`` (LLM user screenings → ``services.agent.cli tick``)
+and ensures ``public-screening-tick`` exists (→ ``services.public_screenings.cli tick``).
 
-Run once to set up:
+Run once (or after infra changes):
     python -m services.agent.cli setup-cron
 """
 
@@ -70,40 +69,58 @@ def _remove_old_per_screening_crons() -> int:
 
 
 def setup_tick_cron() -> dict:
-    """Ensure exactly one 'screening-tick' cron exists, firing every minute."""
-    existing = _get_tick_job()
+    """Ensure ``screening-tick`` and ``public-screening-tick`` OpenClaw crons exist."""
     removed = _remove_old_per_screening_crons()
-
+    existing = _get_tick_job()
     tick_command = f"{_VENV_PYTHON} -m services.agent.cli tick"
 
     if existing:
         log.info("Tick cron already registered (id=%s)", existing.get("id"))
-        return {"status": "already_exists", "job": existing, "old_crons_removed": removed}
+        agent_result: dict = {"status": "already_exists", "job": existing}
+    else:
+        r = subprocess.run(
+            [
+                "openclaw", "cron", "add",
+                "--name", _TICK_JOB_NAME,
+                "--cron", "* * * * *",
+                "--tz", "UTC",
+                "--session", "isolated",
+                "--no-deliver",
+                "--timeout", str(int(os.environ.get("SCREENING_TIMEOUT_MS", 600_000))),
+                "--message", tick_command,
+            ],
+            capture_output=True, text=True, timeout=30,
+        )
+        if r.returncode != 0:
+            log.error("Failed to register tick cron: %s", r.stderr[:300])
+            agent_result = {"status": "error", "detail": r.stderr[:300]}
+        else:
+            try:
+                result = json.loads(r.stdout)
+            except json.JSONDecodeError:
+                result = {}
+            log.info(
+                "Registered tick cron (id=%s), removed %d old crons",
+                result.get("id"),
+                removed,
+            )
+            agent_result = {"status": "created", "job": result}
 
-    r = subprocess.run(
-        [
-            "openclaw", "cron", "add",
-            "--name", _TICK_JOB_NAME,
-            "--cron", "* * * * *",
-            "--tz", "UTC",
-            "--session", "isolated",
-            "--no-deliver",
-            "--timeout", str(int(os.environ.get("SCREENING_TIMEOUT_MS", 600_000))),
-            "--message", tick_command,
-        ],
-        capture_output=True, text=True, timeout=30,
-    )
-    if r.returncode != 0:
-        log.error("Failed to register tick cron: %s", r.stderr[:300])
-        return {"status": "error", "detail": r.stderr[:300], "old_crons_removed": removed}
-
+    public_tick: dict = {}
     try:
-        result = json.loads(r.stdout)
-    except json.JSONDecodeError:
-        result = {}
+        from services.public_screenings.sync_crons import setup_public_screening_tick_cron
 
-    log.info("Registered tick cron (id=%s), removed %d old crons", result.get("id"), removed)
-    return {"status": "created", "job": result, "old_crons_removed": removed}
+        public_tick = setup_public_screening_tick_cron()
+    except Exception as exc:
+        log.warning("Public screening tick registration failed: %s", exc)
+        public_tick = {"status": "error", "detail": str(exc)}
+
+    out = {
+        **agent_result,
+        "old_crons_removed": removed,
+        "public_screening_tick": public_tick,
+    }
+    return out
 
 
 if __name__ == "__main__":

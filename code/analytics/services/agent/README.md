@@ -5,17 +5,25 @@ LLM-driven scheduled screening service. Analyzes market data against user-define
 ## Architecture
 
 ```
-OpenClaw (one cron, every minute)
-  └─ cli.py tick
-       ├─ croniter: which screenings are due?
-       ├─ DB: count running jobs (concurrency gate)
-       ├─ DB: insert result row (status=running)
-       └─ subprocess: cli.py run <id> --result-id <uuid>
+OpenClaw: screening-tick (every minute, UTC)
+  └─ services.agent.cli tick
+       ├─ croniter + next_run_at: which user screenings are due?
+       ├─ DB: count running user_screening_results (concurrency gate)
+       └─ subprocess: services.agent.cli run <id> --result-id <uuid>
                            └─ engine.py: LLM agent loop
                            └─ engine.py: persist_and_deliver → Telegram
 ```
 
-Single OpenClaw cron replaces per-screening crons to avoid rate limits.
+```
+OpenClaw: public-screening-tick (every minute, UTC)   ← separate cron
+  └─ services.public_screenings.cli tick
+       └─ subprocess: services.public_screenings.cli run <id> --result-id <uuid>
+                           └─ public_screenings/runner.py (scripts + fan-out)
+```
+
+Both schedulers import **`shared.screening_schedule`** for the same `next_run_at` semantics. `python -m services.agent.cli setup-cron` registers **both** OpenClaw jobs when missing.
+
+Single **user** tick replaces per-screening crons to avoid rate limits; **public** screenings use their own tick for isolation.
 
 ---
 
@@ -25,7 +33,7 @@ Single OpenClaw cron replaces per-screening crons to avoid rate limits.
 # Install dependencies
 pip install -r requirements.txt
 
-# Register the tick cron in OpenClaw (run once)
+# Register OpenClaw crons (screening-tick + public-screening-tick) — run once
 python -m services.agent.cli setup-cron
 ```
 
@@ -46,12 +54,16 @@ python -m services.agent.cli tick [--max-concurrent N]
 # Run a specific screening directly
 python -m services.agent.cli run <screening-id> [--dry-run]
 
-# Register/repair the single tick cron in OpenClaw
+# Register OpenClaw crons (user + public ticks)
 python -m services.agent.cli setup-cron
 
 # Test FMP connectivity
 python -m services.agent.cli fmp-test
 ```
+
+**Public script screenings** are scheduled by [`../public_screenings/scheduler.py`](../public_screenings/scheduler.py) (`public_screenings.cli tick`), not this CLI. After upgrading, run `setup-cron` once if `public-screening-tick` is missing.
+
+See [`../public_screenings/README.md`](../public_screenings/README.md).
 
 ---
 
@@ -150,7 +162,8 @@ DB row status:  running → done | error
 
 | File | Purpose |
 |------|---------|
-| `scheduler.py` | Tick logic: due-check, concurrency, subprocess launch |
+| `scheduler.py` | User queue + dispatch only (`user_screening_results`). |
+| `sync_crons.py` | OpenClaw: `screening-tick` + ensures `public-screening-tick` exists |
 | `engine.py` | LLM agent loop (Ollama), `run_screening`, `persist_and_deliver` |
 | `cli.py` | CLI entrypoint |
 | `sync_crons.py` | One-time OpenClaw tick cron setup + old cron cleanup |
