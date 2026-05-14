@@ -20,6 +20,7 @@ export type PublicScreening = {
   last_triggered: boolean | null;
   created_at: string;
   download_count: number;
+  llm_prompt: string | null;
 };
 
 export type PublicScreeningResult = {
@@ -45,7 +46,7 @@ type ActionResult<T> = Promise<{ ok: true; data: T } | { ok: false; error: strin
 // added in 20260513010000 and we degrade gracefully if a deployment is ahead
 // of the DB (column-missing error code 42703).
 const PUBLIC_FIELDS_FULL =
-  "id, slug, name, description, category, schedule, timezone, last_run_at, last_triggered, created_at, download_count";
+  "id, slug, name, description, category, schedule, timezone, last_run_at, last_triggered, created_at, download_count, llm_prompt";
 const PUBLIC_FIELDS_LEGACY =
   "id, slug, name, description, category, schedule, timezone, last_run_at, last_triggered, created_at";
 
@@ -108,6 +109,7 @@ export async function listPublicScreenings(): Promise<PublicScreening[]> {
   }
   return ((data ?? []) as Partial<PublicScreening>[]).map((r) => ({
     download_count: 0,
+    llm_prompt: null,
     ...r,
   })) as PublicScreening[];
 }
@@ -138,6 +140,7 @@ export async function getPublicScreeningBySlug(
   if (!data) return null;
   return {
     download_count: 0,
+    llm_prompt: null,
     ...(data as Partial<PublicScreening>),
   } as PublicScreening;
 }
@@ -405,6 +408,31 @@ export async function recordPublicScreeningDownload(input: {
 }
 
 // ── Real subscriptions (authed users) ───────────────────────────────────────
+
+export async function getMySubscriptionIds(): Promise<string[]> {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return [];
+
+  const { data, error } = await supabase
+    .schema(SCHEMA)
+    .from("public_screening_subscriptions")
+    .select("public_screening_id")
+    .eq("user_id", user.id);
+
+  if (error) {
+    console.error(
+      "[public-screenings] getMySubscriptionIds failed",
+      describePgError(error),
+    );
+    return [];
+  }
+  return (data ?? []).map(
+    (r: { public_screening_id: string }) => r.public_screening_id,
+  );
+}
 
 export async function getMySubscription(
   screeningId: string,

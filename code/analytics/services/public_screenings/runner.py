@@ -103,6 +103,7 @@ def run_public_screening(
         "ticker_count": result.ticker_count,
         "error": bool(result.error),
         "is_test": is_test,
+        "llm_prompt": screening.get("llm_prompt"),
     }
 
 
@@ -241,10 +242,99 @@ def persist_and_deliver_public(
         update_fields,
     ).eq("id", result["screening_id"]).execute()
 
-    # Fan out to subscribers (writes user_scan_jobs + user_scan_runs +
-    # user_scan_rows + Telegram). The fan-out still uses the in-memory
-    # `result` dict, which retains the full symbols list.
-    _fan_out_to_subscribers(result)
+    # If an LLM bulk-analysis pass is configured AND the screening produced
+    # tickers AND the run didn't error out, defer fan-out: queue the result
+    # for the bulk-analytics worker, which will enrich the per-ticker rows
+    # then trigger fan-out from the enriched data. Otherwise fan out now.
+    llm_prompt = (result.get("llm_prompt") or "").strip()
+    should_queue_bulk = (
+        bool(llm_prompt) and bool(symbols) and not error and bool(result_id)
+    )
+    if should_queue_bulk:
+        try:
+            client.schema(_SCHEMA).table("public_screening_results").update(
+                {"bulk_analysis_status": "queued"}
+            ).eq("id", result_id).execute()
+            log.info(
+                "Public screening %s: queued result %s for LLM bulk-analysis (%d tickers); fan-out deferred",
+                result["screening_id"], result_id, len(symbols),
+            )
+        except Exception as exc:
+            log.exception(
+                "Failed to queue bulk-analysis for result %s; falling back to immediate fan-out: %s",
+                result_id, exc,
+            )
+            fan_out_to_subscribers(result)
+        return
+
+    fan_out_to_subscribers(result)
+
+
+# ── Fan-out reconstruction (called by bulk-analytics worker) ────────────────
+
+
+def fan_out_from_db(result_id: str) -> None:
+    """Rebuild the fan-out payload from persisted rows and deliver to subscribers.
+
+    Called by the public_screening_bulk_analytics worker after it has enriched
+    the per-ticker `row_data` with LLM analysis. Subscribers get the enriched
+    rows copied into their `user_scan_rows`, so they only see (and get notified
+    about) results that include the analysis.
+    """
+    client = get_supabase_client()
+
+    res_row = (
+        client.schema(_SCHEMA)
+        .table("public_screening_results")
+        .select(
+            "id, public_screening_id, triggered, summary, data_used, status, is_test"
+        )
+        .eq("id", result_id)
+        .limit(1)
+        .execute()
+    )
+    result_row = (res_row.data or [None])[0]
+    if not result_row:
+        log.warning("fan_out_from_db: result %s not found", result_id)
+        return
+
+    rows_res = (
+        client.schema(_SCHEMA)
+        .table("public_screening_result_rows")
+        .select("symbol, row_data")
+        .eq("result_id", result_id)
+        .execute()
+    )
+    symbols = [
+        (r.get("row_data") if isinstance(r.get("row_data"), dict) else {"value": r.get("row_data")})
+        for r in (rows_res.data or [])
+    ]
+
+    ps_res = (
+        client.schema(_SCHEMA)
+        .table("public_screenings")
+        .select("name, script_key")
+        .eq("id", result_row["public_screening_id"])
+        .limit(1)
+        .execute()
+    )
+    ps_meta = (ps_res.data or [{}])[0]
+
+    data_used = dict(result_row.get("data_used") or {})
+    data_used["symbols"] = symbols
+
+    payload = {
+        "screening_id": result_row["public_screening_id"],
+        "name": ps_meta.get("name") or "Public screening",
+        "script_key": ps_meta.get("script_key"),
+        "triggered": bool(result_row.get("triggered")),
+        "summary": result_row.get("summary"),
+        "data_used": data_used,
+        "ticker_count": len(symbols),
+        "error": result_row.get("status") == "error",
+        "is_test": bool(result_row.get("is_test")),
+    }
+    fan_out_to_subscribers(payload)
 
 
 def _write_scan_artefacts_for_subscriber(
@@ -363,7 +453,7 @@ def _write_scan_artefacts_for_subscriber(
     return job_id, run_id, row_count
 
 
-def _fan_out_to_subscribers(result: dict[str, Any]) -> None:
+def fan_out_to_subscribers(result: dict[str, Any]) -> None:
     client = get_supabase_client()
     screening_id = result["screening_id"]
     name = result.get("name") or "Public screening"

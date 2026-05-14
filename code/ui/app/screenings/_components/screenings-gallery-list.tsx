@@ -5,15 +5,20 @@ import Link from "next/link";
 import {
   ArrowUpDown,
   ArrowUpRight,
+  BellRing,
   Code as CodeIcon,
   Download as DownloadIcon,
   Search,
+  Sparkles,
 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { humanizeCron } from "@/lib/cron-format";
 import type { PublicScreening } from "@/app/actions/public-screenings";
 
-type Props = { screenings: PublicScreening[] };
+type Props = {
+  screenings: PublicScreening[];
+  subscribedIds: string[];
+};
 
 type SortKey = "latest" | "downloads";
 
@@ -36,10 +41,14 @@ function formatRelative(iso: string | null): string {
   return new Date(iso).toLocaleDateString();
 }
 
-export function ScreeningsGalleryList({ screenings }: Props) {
+export function ScreeningsGalleryList({ screenings, subscribedIds }: Props) {
   const [query, setQuery] = useState("");
   const [activeCategory, setActiveCategory] = useState<string | null>(null);
   const [sortKey, setSortKey] = useState<SortKey>("latest");
+  const [showOnlySubscribed, setShowOnlySubscribed] = useState(false);
+
+  const subscribedSet = useMemo(() => new Set(subscribedIds), [subscribedIds]);
+  const subscribedCount = subscribedSet.size;
 
   const categories = useMemo(() => {
     const set = new Set<string>();
@@ -50,6 +59,7 @@ export function ScreeningsGalleryList({ screenings }: Props) {
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
     const base = screenings.filter((s) => {
+      if (showOnlySubscribed && !subscribedSet.has(s.id)) return false;
       if (activeCategory && s.category !== activeCategory) return false;
       if (!q) return true;
       const hay = [s.name, s.category ?? "", s.description ?? "", s.slug]
@@ -65,7 +75,7 @@ export function ScreeningsGalleryList({ screenings }: Props) {
       );
     }
     return base;
-  }, [screenings, query, activeCategory, sortKey]);
+  }, [screenings, query, activeCategory, sortKey, showOnlySubscribed, subscribedSet]);
 
   return (
     <>
@@ -84,17 +94,29 @@ export function ScreeningsGalleryList({ screenings }: Props) {
           <SortToggle value={sortKey} onChange={setSortKey} />
         </div>
 
-        {categories.length > 0 && (
+        {(categories.length > 0 || subscribedCount > 0) && (
           <nav
             aria-label="Filter by category"
             className="-mx-1 flex flex-wrap gap-1.5 md:mx-0"
           >
             <CategoryPill
               label="All"
-              active={activeCategory === null}
-              onClick={() => setActiveCategory(null)}
+              active={activeCategory === null && !showOnlySubscribed}
+              onClick={() => {
+                setActiveCategory(null);
+                setShowOnlySubscribed(false);
+              }}
               count={screenings.length}
             />
+            {subscribedCount > 0 && (
+              <CategoryPill
+                label="Subscribed"
+                active={showOnlySubscribed}
+                onClick={() => setShowOnlySubscribed((v) => !v)}
+                count={subscribedCount}
+                accent
+              />
+            )}
             {categories.map((c) => (
               <CategoryPill
                 key={c}
@@ -129,6 +151,7 @@ export function ScreeningsGalleryList({ screenings }: Props) {
               screening={s}
               index={index}
               sortKey={sortKey}
+              isSubscribed={subscribedSet.has(s.id)}
             />
           ))}
         </ol>
@@ -164,11 +187,13 @@ function CategoryPill({
   active,
   onClick,
   count,
+  accent = false,
 }: {
   label: string;
   active: boolean;
   onClick: () => void;
   count: number;
+  accent?: boolean;
 }) {
   return (
     <button
@@ -178,14 +203,21 @@ function CategoryPill({
         "group inline-flex cursor-pointer items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium transition-colors " +
         (active
           ? "border-primary/60 bg-primary/10 text-primary"
-          : "border-border/70 bg-background text-muted-foreground hover:border-border hover:text-foreground")
+          : accent
+            ? "border-primary/40 bg-background text-primary/80 hover:border-primary/60 hover:text-primary"
+            : "border-border/70 bg-background text-muted-foreground hover:border-border hover:text-foreground")
       }
     >
+      {accent && <BellRing className="h-3 w-3" />}
       {label}
       <span
         className={
           "tabular-nums " +
-          (active ? "text-primary/80" : "text-muted-foreground/70")
+          (active
+            ? "text-primary/80"
+            : accent
+              ? "text-primary/60"
+              : "text-muted-foreground/70")
         }
       >
         {count}
@@ -198,10 +230,12 @@ function ScreeningRow({
   screening,
   index,
   sortKey,
+  isSubscribed,
 }: {
   screening: PublicScreening;
   index: number;
   sortKey: SortKey;
+  isSubscribed: boolean;
 }) {
   const ranToday = Boolean(
     screening.last_run_at &&
@@ -249,10 +283,33 @@ function ScreeningRow({
               </span>
             )}
             <span>{humanizeCron(screening.schedule, screening.timezone)}</span>
+            {screening.llm_prompt && (
+              <>
+                <span aria-hidden className="text-border">
+                  ·
+                </span>
+                <span
+                  title="Each ticker gets an LLM analysis with notes and entry levels"
+                  className="inline-flex items-center gap-1 text-primary/80"
+                >
+                  <Sparkles className="h-3 w-3" />
+                  AI analysis
+                </span>
+              </>
+            )}
           </div>
 
-          <h2 className="mt-2 text-2xl font-semibold leading-tight tracking-tight text-foreground transition-colors group-hover:text-primary">
-            {screening.name}
+          <h2 className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1.5 text-2xl font-semibold leading-tight tracking-tight text-foreground transition-colors group-hover:text-primary">
+            <span>{screening.name}</span>
+            {isSubscribed && (
+              <span
+                title="You are subscribed"
+                className="pointer-events-auto inline-flex items-center gap-1 rounded-full border border-primary/40 bg-primary/10 px-2 py-0.5 font-mono text-[10px] uppercase tracking-[0.18em] text-primary"
+              >
+                <BellRing className="h-2.5 w-2.5" />
+                Subscribed
+              </span>
+            )}
           </h2>
 
           {screening.description && (

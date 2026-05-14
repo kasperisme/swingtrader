@@ -1,5 +1,8 @@
 import type { Metadata } from "next";
-import { listPublicScreenings } from "@/app/actions/public-screenings";
+import {
+  getMySubscriptionIds,
+  listPublicScreenings,
+} from "@/app/actions/public-screenings";
 import { ScreeningsGalleryList } from "./_components/screenings-gallery-list";
 
 const GALLERY_DESCRIPTION =
@@ -36,7 +39,10 @@ function formatRelative(iso: string | null): string {
 }
 
 export default async function ScreeningsGalleryPage() {
-  const screenings = await listPublicScreenings();
+  const [screenings, subscribedIds] = await Promise.all([
+    listPublicScreenings(),
+    getMySubscriptionIds(),
+  ]);
 
   const lastUpdated = screenings.reduce<string | null>((acc, s) => {
     if (!s.last_run_at) return acc;
@@ -103,7 +109,10 @@ export default async function ScreeningsGalleryPage() {
           </aside>
         </header>
 
-        <ScreeningsGalleryList screenings={screenings} />
+        <ScreeningsGalleryList
+          screenings={screenings}
+          subscribedIds={subscribedIds}
+        />
       </div>
     </div>
   );

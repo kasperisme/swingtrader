@@ -5,6 +5,7 @@ import {
   ArrowLeft,
   Code as CodeIcon,
   Download as DownloadIcon,
+  Sparkles,
 } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import {
@@ -174,6 +175,25 @@ export default async function PublicScreeningDetailPage({ params }: Props) {
             </div>
           </aside>
         </header>
+
+        {screening.llm_prompt && (
+          <section className="mt-12">
+            <div className="rounded-xl border border-primary/30 bg-primary/[0.04] p-5">
+              <div className="flex items-center gap-2 font-mono text-[10px] uppercase tracking-[0.18em] text-primary/80">
+                <Sparkles className="h-3.5 w-3.5" />
+                <span>AI analysis prompt</span>
+              </div>
+              <p className="mt-2 text-xs leading-5 text-muted-foreground">
+                After this screening produces tickers, an LLM runs this prompt
+                against each ticker&rsquo;s 6-month price action and attaches
+                notes and entry levels to the result.
+              </p>
+              <blockquote className="mt-4 whitespace-pre-wrap border-l-2 border-primary/40 pl-4 font-mono text-[13px] leading-6 text-foreground/90">
+                {screening.llm_prompt}
+              </blockquote>
+            </div>
+          </section>
+        )}
 
         {/* Stats strip — 4 cells, hairline-separated, no card-overuse. */}
         <dl className="mt-12 grid grid-cols-2 gap-px overflow-hidden rounded-lg border border-border/70 bg-border/70 md:grid-cols-4">
