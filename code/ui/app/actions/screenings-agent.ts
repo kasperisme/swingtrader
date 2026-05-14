@@ -71,7 +71,6 @@ export async function listScheduledScreenings(): Promise<
     .from("user_scheduled_screenings")
     .select("*")
     .eq("user_id", user.id)
-    .is("source_public_screening_id", null)
     .order("created_at", { ascending: false });
 
   if (error) return { ok: false, error: error.message };
@@ -104,8 +103,7 @@ export async function createScheduledScreening(input: {
     .from("user_scheduled_screenings")
     .select("*", { count: "exact", head: true })
     .eq("user_id", user.id)
-    .eq("is_active", true)
-    .is("source_public_screening_id", null);
+    .eq("is_active", true);
 
   if (countErr) return { ok: false, error: countErr.message };
   if ((count ?? 0) >= limit) {
@@ -280,8 +278,7 @@ export async function getScreeningLimits(): ActionResult<{
     .from("user_scheduled_screenings")
     .select("*", { count: "exact", head: true })
     .eq("user_id", user.id)
-    .eq("is_active", true)
-    .is("source_public_screening_id", null);
+    .eq("is_active", true);
 
   return {
     ok: true,

@@ -352,13 +352,13 @@ def run_tick(max_concurrent: int | None = None) -> dict:
     running_count = running_user + running_public
     available = limit - running_count
 
-    # Fetch active screenings of both kinds. Subscribed rows (those whose
-    # source_public_screening_id is set) are operational copies driven by the
-    # public_screenings schedule, not their own — skip them here so we don't
-    # double-fire on the public schedule via the user path.
+    # Fetch active screenings of both kinds. Public screenings are platform-
+    # managed and run on their own schedule; they do not have operational
+    # copies in user_scheduled_screenings, so a straight is_active filter is
+    # all that's needed here.
     user_screenings = (
         client.schema(schema).table("user_scheduled_screenings")
-        .select("*").eq("is_active", True).is_("source_public_screening_id", "null").execute()
+        .select("*").eq("is_active", True).execute()
     ).data or []
     public_screenings = (
         client.schema(schema).table("public_screenings")
