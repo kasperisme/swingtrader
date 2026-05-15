@@ -193,10 +193,14 @@ export type UserTradeRow = {
   broker: string | null;
   account_label: string | null;
   notes: string | null;
+  /** False (default) = real money. True = paper trading book. */
+  is_paper: boolean;
   metadata_json: Record<string, unknown>;
   created_at: string;
   updated_at: string;
 };
+
+type BookFilter = "all" | "real" | "paper";
 
 function num(v: number | string): string {
   const n = typeof v === "number" ? v : parseFloat(String(v));
@@ -441,6 +445,8 @@ export function TradesUI({ initialTrades }: { initialTrades: UserTradeRow[] }) {
   const [ticker, setTicker] = useState("");
   const [side, setSide] = useState<"buy" | "sell">("buy");
   const [positionSide, setPositionSide] = useState<"long" | "short">("long");
+  const [isPaper, setIsPaper] = useState(false);
+  const [bookFilter, setBookFilter] = useState<BookFilter>("all");
   const [quantity, setQuantity] = useState("");
   const [pricePerUnit, setPricePerUnit] = useState("");
   const [currency, setCurrency] = useState("USD");
@@ -519,10 +525,25 @@ export function TradesUI({ initialTrades }: { initialTrades: UserTradeRow[] }) {
     };
   }, [ticker, executedAtLocal]);
 
+  const filteredTrades = useMemo(() => {
+    if (bookFilter === "all") return trades;
+    const wantPaper = bookFilter === "paper";
+    return trades.filter((t) => Boolean(t.is_paper) === wantPaper);
+  }, [trades, bookFilter]);
+
   const sorted = useMemo(
-    () => [...trades].sort((a, b) => new Date(b.executed_at).getTime() - new Date(a.executed_at).getTime()),
+    () =>
+      [...filteredTrades].sort(
+        (a, b) => new Date(b.executed_at).getTime() - new Date(a.executed_at).getTime(),
+      ),
+    [filteredTrades],
+  );
+
+  const paperCount = useMemo(
+    () => trades.reduce((n, t) => (t.is_paper ? n + 1 : n), 0),
     [trades],
   );
+  const realCount = trades.length - paperCount;
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -571,6 +592,7 @@ export function TradesUI({ initialTrades }: { initialTrades: UserTradeRow[] }) {
         broker: broker.trim() || null,
         account_label: accountLabel.trim() || null,
         notes: notes.trim() || null,
+        is_paper: isPaper,
       })
       .select()
       .single();
@@ -581,7 +603,11 @@ export function TradesUI({ initialTrades }: { initialTrades: UserTradeRow[] }) {
       return;
     }
     if (data) {
-      track("trade_logged", { trade_id: String(data.id), ticker: data.ticker, side: data.side });
+      track("trade_logged", {
+        trade_id: String(data.id),
+        ticker: data.ticker,
+        side: data.side,
+      });
       setTicker("");
       setQuantity("");
       setPricePerUnit("");
@@ -644,6 +670,20 @@ export function TradesUI({ initialTrades }: { initialTrades: UserTradeRow[] }) {
               <option value="long">Long</option>
               <option value="short">Short</option>
             </select>
+          </label>
+          <label className="flex flex-col gap-1 text-sm">
+            <span className="text-muted-foreground">Book</span>
+            <select
+              value={isPaper ? "paper" : "real"}
+              onChange={(e) => setIsPaper(e.target.value === "paper")}
+              className="rounded-md border border-input bg-background px-3 py-2 text-sm"
+            >
+              <option value="real">Real</option>
+              <option value="paper">Paper</option>
+            </select>
+            <span className="text-[11px] text-muted-foreground">
+              Paper trades stay separate in the portfolio view.
+            </span>
           </label>
           <label className="flex flex-col gap-1 text-sm">
             <span className="text-muted-foreground">Executed (local)</span>
@@ -747,7 +787,43 @@ export function TradesUI({ initialTrades }: { initialTrades: UserTradeRow[] }) {
         </button>
       </form>
 
-      <PortfolioSection trades={trades} />
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="inline-flex items-center gap-1 rounded-lg border border-border bg-card p-1 text-xs">
+          {(
+            [
+              { key: "all", label: `All (${trades.length})` },
+              { key: "real", label: `Real (${realCount})` },
+              { key: "paper", label: `Paper (${paperCount})` },
+            ] as { key: BookFilter; label: string }[]
+          ).map((opt) => {
+            const active = bookFilter === opt.key;
+            return (
+              <button
+                key={opt.key}
+                type="button"
+                onClick={() => setBookFilter(opt.key)}
+                className={
+                  "rounded-md px-3 py-1.5 font-medium transition " +
+                  (active
+                    ? "bg-foreground text-background"
+                    : "text-muted-foreground hover:text-foreground")
+                }
+                aria-pressed={active}
+              >
+                {opt.label}
+              </button>
+            );
+          })}
+        </div>
+        {bookFilter !== "all" ? (
+          <p className="text-[11px] text-muted-foreground">
+            Showing {bookFilter === "paper" ? "paper" : "real"} trades only.
+            Portfolio is recomputed from the visible subset.
+          </p>
+        ) : null}
+      </div>
+
+      <PortfolioSection trades={filteredTrades} />
 
       <div data-tour="trade-list">
         <h2 className="text-lg font-semibold mb-3">Your trades</h2>
@@ -777,7 +853,19 @@ export function TradesUI({ initialTrades }: { initialTrades: UserTradeRow[] }) {
                     <td className="px-3 py-2 whitespace-nowrap text-muted-foreground text-xs">
                       {formatExecuted(row.executed_at)}
                     </td>
-                    <td className="px-3 py-2 font-mono font-semibold">{row.ticker}</td>
+                    <td className="px-3 py-2 font-mono font-semibold">
+                      <span className="inline-flex items-center gap-2">
+                        {row.ticker}
+                        {row.is_paper ? (
+                          <span
+                            className="rounded-sm bg-amber-500/15 px-1.5 py-0.5 font-sans text-[10px] font-semibold uppercase tracking-wide text-amber-700 dark:text-amber-400"
+                            title="Paper trade — not real money"
+                          >
+                            Paper
+                          </span>
+                        ) : null}
+                      </span>
+                    </td>
                     <td className="px-3 py-2 capitalize">{row.side}</td>
                     <td className="px-3 py-2 capitalize">{row.position_side}</td>
                     <td className="px-3 py-2 text-right tabular-nums">{num(row.quantity)}</td>
