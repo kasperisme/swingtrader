@@ -15,6 +15,7 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 import {
+  importLatestPublicScreeningResultForMe,
   submitEarlyAccessSignup,
   subscribeToPublicScreening,
   unsubscribeFromPublicScreening,
@@ -51,6 +52,18 @@ export function SubscribeButton({
 
 // ── Authed: one-click subscribe / unsubscribe ───────────────────────────────
 
+type ImportStatus =
+  | { kind: "idle" }
+  | { kind: "pending" }
+  | {
+      kind: "done";
+      rowCount: number;
+      chatTurns: number;
+      runAt: string | null;
+    }
+  | { kind: "no_results" }
+  | { kind: "error"; message: string };
+
 function AuthedSubscribeButton({
   screeningSlug,
   initialSubscribed,
@@ -61,6 +74,10 @@ function AuthedSubscribeButton({
   const [subscribed, setSubscribed] = useState(initialSubscribed);
   const [error, setError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
+  const [importPromptOpen, setImportPromptOpen] = useState(false);
+  const [importStatus, setImportStatus] = useState<ImportStatus>({
+    kind: "idle",
+  });
 
   const toggle = () => {
     setError(null);
@@ -68,13 +85,48 @@ function AuthedSubscribeButton({
     const next = !subscribed;
     setSubscribed(next);
     startTransition(async () => {
-      const res = next
-        ? await subscribeToPublicScreening(screeningSlug)
-        : await unsubscribeFromPublicScreening(screeningSlug);
-      if (!res.ok) {
-        setSubscribed(!next);
-        setError(res.error);
+      if (next) {
+        const res = await subscribeToPublicScreening(screeningSlug);
+        if (!res.ok) {
+          setSubscribed(false);
+          setError(res.error);
+          return;
+        }
+        // Only prompt to import after a fresh subscribe (not a duplicate).
+        // Re-subscribers see the prompt again on purpose — accepting writes
+        // a new scan_run and chat turns.
+        if (!res.data.alreadySubscribed) {
+          setImportStatus({ kind: "idle" });
+          setImportPromptOpen(true);
+        }
+      } else {
+        const res = await unsubscribeFromPublicScreening(screeningSlug);
+        if (!res.ok) {
+          setSubscribed(true);
+          setError(res.error);
+        }
       }
+    });
+  };
+
+  const confirmImport = () => {
+    setImportStatus({ kind: "pending" });
+    startTransition(async () => {
+      const res = await importLatestPublicScreeningResultForMe(screeningSlug);
+      if (!res.ok) {
+        setImportStatus({ kind: "error", message: res.error });
+        return;
+      }
+      if (!res.data.imported) {
+        setImportStatus({ kind: "no_results" });
+        return;
+      }
+      setImportStatus({
+        kind: "done",
+        rowCount: res.data.rowCount,
+        chatTurns: res.data.chatTurns,
+        runAt: res.data.runAt,
+      });
     });
   };
 
@@ -102,6 +154,95 @@ function AuthedSubscribeButton({
         </p>
       )}
       {error && <p className="text-sm text-destructive">{error}</p>}
+
+      <Dialog
+        open={importPromptOpen}
+        onOpenChange={(next) => {
+          setImportPromptOpen(next);
+          if (!next) setImportStatus({ kind: "idle" });
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Add the latest results to your screenings?</DialogTitle>
+            <DialogDescription>
+              You can import the most recent run of this screening into your
+              screenings view (and AI chat where analysis is available) so
+              you’re caught up immediately. Otherwise you’ll get the next
+              scheduled run automatically.
+            </DialogDescription>
+          </DialogHeader>
+
+          {importStatus.kind === "idle" && (
+            <DialogFooter className="gap-2 sm:gap-2">
+              <Button
+                variant="secondary"
+                onClick={() => setImportPromptOpen(false)}
+                disabled={isPending}
+              >
+                No thanks
+              </Button>
+              <Button onClick={confirmImport} disabled={isPending}>
+                Yes, import latest
+              </Button>
+            </DialogFooter>
+          )}
+
+          {importStatus.kind === "pending" && (
+            <p className="py-2 text-sm text-muted-foreground">
+              Importing the latest run…
+            </p>
+          )}
+
+          {importStatus.kind === "done" && (
+            <div className="space-y-3 py-2">
+              <p className="text-sm">
+                Imported {importStatus.rowCount} ticker
+                {importStatus.rowCount === 1 ? "" : "s"}
+                {importStatus.chatTurns > 0
+                  ? ` and ${importStatus.chatTurns} AI chat update${importStatus.chatTurns === 1 ? "" : "s"}`
+                  : ""}
+                {importStatus.runAt
+                  ? ` from ${new Date(importStatus.runAt).toLocaleString()}`
+                  : ""}
+                .
+              </p>
+              <DialogFooter>
+                <Button onClick={() => setImportPromptOpen(false)}>Done</Button>
+              </DialogFooter>
+            </div>
+          )}
+
+          {importStatus.kind === "no_results" && (
+            <div className="space-y-3 py-2">
+              <p className="text-sm">
+                No completed runs yet — you’ll receive the next scheduled run
+                automatically.
+              </p>
+              <DialogFooter>
+                <Button onClick={() => setImportPromptOpen(false)}>OK</Button>
+              </DialogFooter>
+            </div>
+          )}
+
+          {importStatus.kind === "error" && (
+            <div className="space-y-3 py-2">
+              <p className="text-sm text-destructive">{importStatus.message}</p>
+              <DialogFooter className="gap-2 sm:gap-2">
+                <Button
+                  variant="secondary"
+                  onClick={() => setImportPromptOpen(false)}
+                >
+                  Close
+                </Button>
+                <Button onClick={confirmImport} disabled={isPending}>
+                  Retry
+                </Button>
+              </DialogFooter>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

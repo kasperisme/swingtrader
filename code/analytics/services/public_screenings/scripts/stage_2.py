@@ -26,7 +26,6 @@ log = logging.getLogger(__name__)
 _LOOKBACK_DAYS = 365
 _DATE_FMT = "%Y-%m-%d"
 _SUMMARY_TOP_N = 25  # cap symbols listed in summary (Telegram readability)
-_TESTING_TICKER_CAP = 200  # TEMP: cap universe size for dev testing. Remove for prod.
 
 
 def run(
@@ -45,9 +44,7 @@ def run(
     import pandas as pd
 
     df_tickers = pd.concat(df_col, axis=0).dropna(subset=["symbol"])
-    if _TESTING_TICKER_CAP:
-        df_tickers = df_tickers.head(_TESTING_TICKER_CAP)
-        log.warning("[stage_2] TESTING cap active: %d tickers", _TESTING_TICKER_CAP)
+
     tickers = df_tickers["symbol"].to_list()
     log.info("[stage_2] universe: %d tickers", len(tickers))
 

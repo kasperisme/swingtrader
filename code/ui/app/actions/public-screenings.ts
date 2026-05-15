@@ -518,6 +518,314 @@ export async function subscribeToPublicScreening(
   return { ok: true, data: { alreadySubscribed: false } };
 }
 
+/**
+ * Mirror the Python public-screening fan-out for a single user. Used by the
+ * post-subscribe "import latest results" prompt so a brand-new subscriber can
+ * see the current state of the screening immediately instead of waiting for
+ * the next scheduled run.
+ *
+ * Writes: user_scan_jobs + user_scan_runs + user_scan_rows. For every ticker
+ * whose row_data has llm_analysis.analysis_markdown, also read-modify-write
+ * upserts user_ticker_chart_workspace with a user+assistant pair tagged
+ * source: "public_screening" (matches services/public_screenings/runner.py).
+ */
+export async function importLatestPublicScreeningResultForMe(
+  screeningSlug: string,
+): ActionResult<{
+  imported: boolean;
+  reason?: "no_results";
+  runId: number | null;
+  rowCount: number;
+  chatTurns: number;
+  runAt: string | null;
+}> {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) {
+    return { ok: false, error: "You must be signed in." };
+  }
+
+  const service = createServiceClient();
+  const { data: screening } = await service
+    .schema(SCHEMA)
+    .from("public_screenings")
+    .select("id, name, slug, script_key, llm_prompt")
+    .eq("slug", screeningSlug)
+    .eq("is_published", true)
+    .limit(1)
+    .maybeSingle();
+
+  if (!screening) {
+    return { ok: false, error: "Screening not found." };
+  }
+
+  const screeningId = (screening as { id: string }).id;
+  const scriptKey =
+    (screening as { script_key: string | null }).script_key || "public_screening";
+  const llmPrompt = (
+    (screening as { llm_prompt: string | null }).llm_prompt || ""
+  ).trim();
+
+  // Latest done result for this screening.
+  const { data: latestResult } = await service
+    .schema(SCHEMA)
+    .from("public_screening_results")
+    .select("id, run_at, data_used, summary, triggered, status, is_test")
+    .eq("public_screening_id", screeningId)
+    .eq("status", "done")
+    .order("run_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (!latestResult) {
+    return {
+      ok: true,
+      data: {
+        imported: false,
+        reason: "no_results",
+        runId: null,
+        rowCount: 0,
+        chatTurns: 0,
+        runAt: null,
+      },
+    };
+  }
+
+  const resultId = (latestResult as { id: string }).id;
+  const runAt = (latestResult as { run_at: string | null }).run_at;
+  const dataUsedRaw = (latestResult as { data_used: unknown }).data_used;
+  const dataUsed = normalizeRowDataForTable(dataUsedRaw);
+
+  // Per-ticker rows. Canonical source is public_screening_result_rows; we
+  // fall back to data_used.symbols for legacy result rows that pre-date
+  // that table.
+  type RowPayload = { symbol: string | null; rowData: Record<string, unknown> };
+  let rowPayloads: RowPayload[] = [];
+
+  const { data: dbRows, error: dbRowsErr } = await service
+    .schema(SCHEMA)
+    .from("public_screening_result_rows")
+    .select("symbol, row_data")
+    .eq("result_id", resultId)
+    .order("id", { ascending: true });
+
+  if (dbRowsErr) {
+    console.warn(
+      "[public-screenings] import: result_rows read failed, falling back",
+      describePgError(dbRowsErr),
+    );
+  } else if (dbRows && dbRows.length > 0) {
+    rowPayloads = dbRows.map((r) => ({
+      symbol: (r as { symbol: string | null }).symbol,
+      rowData: normalizeRowDataForTable((r as { row_data: unknown }).row_data),
+    }));
+  }
+
+  if (rowPayloads.length === 0) {
+    const sym = dataUsed.symbols;
+    if (Array.isArray(sym)) {
+      rowPayloads = sym
+        .map((s) => normalizeRowDataForTable(s))
+        .map((obj) => ({
+          symbol:
+            (typeof obj.symbol === "string" && obj.symbol) ||
+            (typeof obj.ticker === "string" && obj.ticker) ||
+            null,
+          rowData: obj,
+        }));
+    }
+  }
+
+  const nowIso = new Date().toISOString();
+  const scanDateStr = nowIso.slice(0, 10);
+  const sourceLabel = `public_screening:${screeningSlug}`;
+  const scriptRel = `services/public_screenings/scripts/${scriptKey}.py`;
+
+  // 1. user_scan_jobs — job metadata. RLS expects auth.uid() = user_id.
+  await supabase
+    .schema(SCHEMA)
+    .from("user_scan_jobs")
+    .insert({
+      started_at: nowIso,
+      finished_at: nowIso,
+      status: "completed",
+      scan_source: scriptKey,
+      script_rel: scriptRel,
+      args_json: JSON.stringify([]),
+      stdout_log: "",
+      stderr_log: "",
+      exit_code: 0,
+      error_message: null,
+      user_id: user.id,
+    });
+
+  // 2. user_scan_runs — scan instance. Surfaces in /protected/screenings.
+  const dataUsedWithSymbols: Record<string, unknown> = { ...dataUsed };
+  if (!Array.isArray(dataUsedWithSymbols.symbols)) {
+    dataUsedWithSymbols.symbols = rowPayloads.map((p) => p.rowData);
+  }
+  const { data: runIns, error: runErr } = await supabase
+    .schema(SCHEMA)
+    .from("user_scan_runs")
+    .insert({
+      scan_date: scanDateStr,
+      source: sourceLabel,
+      status: "active",
+      market_json: null,
+      result_json: JSON.stringify(dataUsedWithSymbols),
+      user_id: user.id,
+    })
+    .select("id")
+    .limit(1)
+    .maybeSingle();
+
+  if (runErr || !runIns) {
+    console.error(
+      "[public-screenings] import: user_scan_runs insert failed",
+      describePgError(runErr),
+    );
+    return { ok: false, error: "Could not import results. Please try again." };
+  }
+
+  const runId = (runIns as { id: number }).id;
+
+  // 3. user_scan_rows — per-ticker payload (dataset = script_key matches the
+  // /protected/screenings filter).
+  let rowCount = 0;
+  if (rowPayloads.length > 0) {
+    const rowsToInsert = rowPayloads.map((p) => ({
+      run_id: runId,
+      scan_date: scanDateStr,
+      dataset: scriptKey,
+      symbol: p.symbol,
+      row_data: p.rowData,
+      user_id: user.id,
+    }));
+    const { error: rowsErr } = await supabase
+      .schema(SCHEMA)
+      .from("user_scan_rows")
+      .insert(rowsToInsert);
+    if (rowsErr) {
+      console.error(
+        "[public-screenings] import: user_scan_rows insert failed",
+        describePgError(rowsErr),
+      );
+    } else {
+      rowCount = rowsToInsert.length;
+    }
+  }
+
+  // 4. Chart workspace chat turns. Per ticker, append one user+assistant pair
+  // tagged source: "public_screening", mirroring runner.py's fan-out.
+  let chatTurns = 0;
+  if (llmPrompt) {
+    const userMessage = llmPrompt || "Run a technical analysis.";
+    for (const { symbol, rowData } of rowPayloads) {
+      const sym = (symbol || "").trim().toUpperCase();
+      if (!sym) continue;
+      const llm = rowData.llm_analysis;
+      const analysisMarkdown =
+        llm && typeof llm === "object" && !Array.isArray(llm)
+          ? (llm as Record<string, unknown>).analysis_markdown
+          : null;
+      if (typeof analysisMarkdown !== "string" || !analysisMarkdown.trim()) {
+        continue;
+      }
+
+      try {
+        const { data: existing } = await supabase
+          .schema(SCHEMA)
+          .from("user_ticker_chart_workspace")
+          .select("ai_chat_messages, annotations")
+          .eq("user_id", user.id)
+          .eq("ticker", sym)
+          .limit(1)
+          .maybeSingle();
+
+        const messages: unknown[] = Array.isArray(
+          (existing as { ai_chat_messages?: unknown })?.ai_chat_messages,
+        )
+          ? [
+              ...((existing as { ai_chat_messages: unknown[] }).ai_chat_messages),
+            ]
+          : [];
+        const annotations: unknown[] = Array.isArray(
+          (existing as { annotations?: unknown })?.annotations,
+        )
+          ? [...((existing as { annotations: unknown[] }).annotations)]
+          : [];
+
+        messages.push({
+          role: "user",
+          content: userMessage,
+          source: "public_screening",
+        });
+        messages.push({
+          role: "assistant",
+          content: analysisMarkdown,
+          chartAnnotations: [],
+          personaReports: [],
+          source: "public_screening",
+        });
+
+        const { error: wsErr } = await supabase
+          .schema(SCHEMA)
+          .from("user_ticker_chart_workspace")
+          .upsert(
+            {
+              user_id: user.id,
+              ticker: sym,
+              annotations,
+              ai_chat_messages: messages,
+              updated_at: nowIso,
+            },
+            { onConflict: "user_id,ticker" },
+          );
+        if (wsErr) {
+          console.warn(
+            "[public-screenings] import: chart workspace upsert failed",
+            sym,
+            describePgError(wsErr),
+          );
+        } else {
+          chatTurns += 1;
+        }
+      } catch (e) {
+        console.warn(
+          "[public-screenings] import: chart workspace threw",
+          sym,
+          e,
+        );
+      }
+    }
+  }
+
+  captureServer(user.id, "public_screening_imported_latest", {
+    screening_id: screeningId,
+    screening_slug: screeningSlug,
+    screening_name: (screening as { name: string }).name,
+    result_id: resultId,
+    row_count: rowCount,
+    chat_turns: chatTurns,
+  });
+
+  revalidatePath(`/screenings/${screeningSlug}`);
+  revalidatePath("/protected/screenings");
+
+  return {
+    ok: true,
+    data: {
+      imported: true,
+      runId,
+      rowCount,
+      chatTurns,
+      runAt,
+    },
+  };
+}
+
 export async function unsubscribeFromPublicScreening(
   screeningSlug: string,
 ): ActionResult<{ removed: boolean }> {
