@@ -7,9 +7,14 @@ A ticker passes if and only if ALL of:
 
 No RS pre-screen, no fundamentals, no other filters — by design.
 
-Runtime note: every ticker in the universe is deep-screened (no
-pre-filtering). Expect this to scale linearly with universe size; tune
-`_TESTING_TICKER_CAP` while iterating and remove it before going wide.
+Runtime: the full ~5k NYSE+NASDAQ universe is first reduced via FMP's bulk
+quote endpoint (one call per 400 tickers), which precomputes three of the
+stage-2 ladder/range conditions: close > SMA200, SMA50 > SMA200, and the
+within-25%-of-52w-high check. Only the survivors are deep-screened to
+verify the remaining gates: the SMA150 rung of the ladder (FMP `/quote`
+doesn't expose `priceAvg150`) and the rising-SMA200 slope (needs daily
+history). This typically collapses ~5,000 tickers to a few hundred
+candidates and turns a 25–45 min run into a ~2–3 min run.
 """
 
 from __future__ import annotations
@@ -48,18 +53,45 @@ def run(
     tickers = df_tickers["symbol"].to_list()
     log.info("[stage_2] universe: %d tickers", len(tickers))
 
-    # Prime the technical module's RS dataframe in one batch call.
-    # `minervini_trend_template` reads `self.df_rs` internally for the RS
-    # fields it always computes; without this it raises 'NoneType' object is
-    # not subscriptable. We do NOT use the return value for filtering — RS is
-    # not part of the stage-2 pass criteria.
-    tech.get_change_prices(tickers)
+    # ── Step 2: bulk pre-screen via FMP /quote ────────────────────────────
+    # `get_quote_prices` batches the universe into `/api/v3/quote/<csv>` calls
+    # and derives boolean flags from the returned price/priceAvg50/
+    # priceAvg200/yearHigh fields. Three of those flags match stage-2's
+    # exact semantics:
+    #   PRICE_OVER_SMA200        → close > SMA200
+    #   SMA50_OVER_SMA200        → SMA50  > SMA200
+    #   PRICE_25PCT_WITHIN_HIGH  → close within 25% of 52-week high (exclusive of new highs)
+    # We pre-filter on those three so the expensive per-ticker daily-chart
+    # call only runs for tickers that already satisfy them. The two stage-2
+    # gates the bulk quote can't decide are still verified per-ticker below
+    # (SMA150 rung of the ladder, rising SMA200 slope).
+    df_quote = tech.get_quote_prices(tickers)
+    pre_mask = (
+        (df_quote["PRICE_OVER_SMA200"] == 1)
+        & (df_quote["SMA50_OVER_SMA200"] == 1)
+        & (df_quote["PRICE_25PCT_WITHIN_HIGH"] == 1)
+    )
+    candidates = df_quote.loc[pre_mask, "symbol"].dropna().tolist()
+    log.info(
+        "[stage_2] bulk pre-screen: %d / %d tickers (close>SMA200, SMA50>SMA200, within 25%% of 52w high)",
+        len(candidates),
+        len(tickers),
+    )
 
-    # ── Step 2: per-ticker stage 2 check ──────────────────────────────────
+    # Prime the technical module's RS dataframe — `minervini_trend_template`
+    # reads `self.df_rs` for the RS fields it always computes; without this
+    # it raises 'NoneType' is not subscriptable. RS is not used in stage-2
+    # filtering, so prime on the candidate subset only (smaller payload).
+    if candidates:
+        tech.get_change_prices(candidates)
+
+    # ── Step 3: per-ticker deep-screen on survivors only ──────────────────
     rows: list[dict] = []
-    for i, symbol in enumerate(tickers, 1):
+    for i, symbol in enumerate(candidates, 1):
         if i % 25 == 0:
-            log.info("[stage_2] screening %d/%d (%s)", i, len(tickers), symbol)
+            log.info(
+                "[stage_2] deep-screening %d/%d (%s)", i, len(candidates), symbol
+            )
         try:
             df_data, tt, error = tech.get_screening(
                 symbol,
@@ -122,6 +154,7 @@ def run(
             ticker_count=0,
             data_used={
                 "universe_size": len(tickers),
+                "pre_screen_candidates": len(candidates),
                 "screened": len(rows),
                 "passed": 0,
             },
@@ -130,6 +163,7 @@ def run(
     summary = _format_summary(passed, total_screened=len(rows))
     data_used = {
         "universe_size": len(tickers),
+        "pre_screen_candidates": len(candidates),
         "screened": len(rows),
         "passed": len(passed),
         "symbols": [

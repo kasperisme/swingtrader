@@ -7,11 +7,12 @@
       "Bash(gh api *)",
       "Bash(npx tsc *)",
       "Skill(claude-api)",
-      "Bash(python3 *)"
+      "Bash(python3 *)",
+      "WebFetch(domain:site.financialmodelingprep.com)"
     ]
   },
+  "enableAllProjectMcpServers": true,
   "enabledMcpjsonServers": [
     "supabase"
-  ],
-  "enableAllProjectMcpServers": true
+  ]
 }
