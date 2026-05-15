@@ -21,9 +21,15 @@ from typing import Any
 from shared.db import get_supabase_client
 from shared.llm import client as llm_client
 
-# Reuse the existing single-pass technical-analysis pipeline.
-from services.bulk_analysis import fetch, prompt
+# Reuse the existing single-pass technical-analysis pipeline. The parser
+# and user-prompt builder are shared with services.bulk_analysis; the
+# SYSTEM prompt is screening-specific (no baked-in status semantics) so
+# each public screening's `llm_prompt` can define its own status rubric
+# (e.g. momentum screenings using statuses as a breakout timeline).
+from services.bulk_analysis import fetch, prompt as bulk_prompt
 from services.public_screenings.runner import fan_out_from_db
+
+from . import prompt as ps_prompt
 
 log = logging.getLogger(__name__)
 
@@ -103,14 +109,32 @@ def _set_result(result_id: str, **fields: Any) -> None:
 # ── Per-ticker enrichment ────────────────────────────────────────────────────
 
 
-def _merge_analysis_into_row(row_data: dict, parsed: dict) -> dict:
-    """Return a new dict with LLM analysis merged under a stable namespace."""
+def _merge_analysis_into_row(
+    row_data: dict, parsed: dict, snapshot: dict | None = None
+) -> dict:
+    """Return a new dict with LLM analysis merged under a stable namespace.
+
+    When `entry` is present, also stash the snapshot's last bar as the
+    anchor (`entry_bar_idx`, `entry_date`) so the fan-out can populate
+    user_scan_row_notes.metadata_json.entry in the same shape
+    services.bulk_analysis writes (the chart UI resolves the marker by
+    `date` first, with `barIdx` as a fallback).
+    """
     merged = dict(row_data)
+    entry = parsed.get("entry")
+    entry_bar_idx: int | None = None
+    entry_date: str | None = None
+    if entry and snapshot:
+        bars_total = int(snapshot.get("bars_total") or 0)
+        entry_bar_idx = max(0, bars_total - 1)
+        entry_date = str(snapshot.get("last_date") or "") or None
     merged["llm_analysis"] = {
         "status": parsed["status"],
         "comment": parsed["comment"],
         "analysis_markdown": parsed["analysis_markdown"],
-        "entry": parsed.get("entry"),
+        "entry": entry,
+        "entry_bar_idx": entry_bar_idx,
+        "entry_date": entry_date,
         "generated_at": _now(),
     }
     return merged
@@ -138,15 +162,15 @@ async def _process_ticker(
             raise RuntimeError("no candles returned")
 
         text, _latency = await llm_client.chat(
-            prompt=prompt.build_user_prompt(ticker, snapshot, llm_prompt),
-            system=prompt.SYSTEM,
+            prompt=bulk_prompt.build_user_prompt(ticker, snapshot, llm_prompt),
+            system=ps_prompt.SYSTEM,
             backend=DEFAULT_BACKEND,
             model=DEFAULT_MODEL,
             timeout=DEFAULT_PER_TICKER_TIMEOUT,
         )
-        parsed = prompt.parse_response(text)
+        parsed = bulk_prompt.parse_response(text)
 
-        merged = _merge_analysis_into_row(row_data, parsed)
+        merged = _merge_analysis_into_row(row_data, parsed, snapshot=snapshot)
         await asyncio.to_thread(_write_row_data, row_id, merged)
         log.info("[%s] %s → %s", result_id[:8], ticker, parsed["status"])
         return True

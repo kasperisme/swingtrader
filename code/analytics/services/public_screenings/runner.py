@@ -407,13 +407,19 @@ def _write_scan_artefacts_for_subscriber(
     status: str,
     error_message: str | None,
     data_used: dict[str, Any] | None,
-) -> tuple[int | None, int | None, int]:
+) -> tuple[int | None, int | None, int, int]:
     """Write the full scan artefacts for one subscriber.
 
     Inserts one user_scan_jobs row (job metadata), one user_scan_runs row
-    (scan instance + payload), and N user_scan_rows (per-ticker). Returns
-    (job_id, run_id, row_count). Any individual insert failure is logged but
-    does not abort the others — best-effort delivery.
+    (scan instance + payload), and N user_scan_rows (per-ticker). For any
+    ticker whose row_data carries `llm_analysis` (the bulk-analytics pass
+    has run), also upserts a user_scan_row_notes row carrying the LLM's
+    status (active/watchlist/pipeline/dismissed), comment, and entry
+    metadata — same shape services.bulk_analysis writes for its own jobs.
+
+    Returns (job_id, run_id, row_count, notes_written). Any individual
+    insert failure is logged but does not abort the others — best-effort
+    delivery.
     """
     payload = data_used or {}
     symbols = payload.get("symbols") if isinstance(payload.get("symbols"), list) else []
@@ -474,8 +480,11 @@ def _write_scan_artefacts_for_subscriber(
             "[fan-out] user=%s: failed to insert user_scan_runs: %s", user_id, exc
         )
 
-    # 3. user_scan_rows — per-ticker payload
+    # 3. user_scan_rows — per-ticker payload. .select() returns the inserted
+    # rows in the same order they were sent so we can map each ticker back
+    # to its scan_row_id for the note write below.
     row_count = 0
+    inserted_rows: list[dict] = []
     if run_id and symbols:
         # The /protected/screenings UI filters user_scan_rows by
         # dataset IN ('public_screening', 'passed_stocks', 'charts_page').
@@ -494,21 +503,96 @@ def _write_scan_artefacts_for_subscriber(
             for s in symbols
         ]
         try:
-            client.schema(_SCHEMA).table("user_scan_rows").insert(rows).execute()
-            row_count = len(rows)
+            ins_rows = (
+                client.schema(_SCHEMA)
+                .table("user_scan_rows")
+                .insert(rows)
+                .execute()
+            )
+            inserted_rows = list(ins_rows.data or [])
+            row_count = len(inserted_rows) or len(rows)
         except Exception as exc:
             log.warning(
                 "[fan-out] user=%s: failed to insert user_scan_rows: %s", user_id, exc
             )
 
+    # 4. user_scan_row_notes — copy the LLM's verdict into the workflow
+    # state for tickers the bulk-analytics worker enriched. The status
+    # comes straight from llm_analysis.status (active/watchlist/pipeline/
+    # dismissed), which the parser validated against the same CHECK
+    # constraint scan_row_notes carries.
+    notes_written = 0
+    if inserted_rows and run_id:
+        notes_to_upsert: list[dict[str, Any]] = []
+        for idx, payload in enumerate(symbols):
+            if idx >= len(inserted_rows):
+                break
+            if not isinstance(payload, dict):
+                continue
+            llm = payload.get("llm_analysis")
+            if not isinstance(llm, dict):
+                continue
+            llm_status = llm.get("status")
+            if llm_status not in ("active", "watchlist", "pipeline", "dismissed"):
+                continue
+            scan_row_id = inserted_rows[idx].get("id")
+            ticker = (
+                payload.get("symbol")
+                or inserted_rows[idx].get("symbol")
+                or ""
+            )
+            if not scan_row_id or not ticker:
+                continue
+            note: dict[str, Any] = {
+                "scan_row_id": scan_row_id,
+                "run_id": run_id,
+                "ticker": ticker,
+                "user_id": user_id,
+                "status": llm_status,
+                "comment": ((llm.get("comment") or "").strip()[:400] or None),
+                "updated_at": finished_at_iso,
+            }
+            entry = llm.get("entry")
+            if isinstance(entry, dict) and entry.get("price") is not None:
+                # Match services.bulk_analysis.worker._upsert_note's entry
+                # shape so the chart UI's setTickerEntryMarker resolves it
+                # the same way (by date first, then barIdx fallback).
+                entry_block: dict[str, Any] = {
+                    "barIdx": int(llm.get("entry_bar_idx") or 0),
+                    "date": str(llm.get("entry_date") or ""),
+                    "price": entry.get("price"),
+                    "direction": entry.get("direction"),
+                }
+                if "take_profit" in entry:
+                    entry_block["take_profit"] = entry["take_profit"]
+                if "stop_loss" in entry:
+                    entry_block["stop_loss"] = entry["stop_loss"]
+                note["metadata_json"] = {"entry": entry_block}
+            notes_to_upsert.append(note)
+
+        if notes_to_upsert:
+            try:
+                client.schema(_SCHEMA).table("user_scan_row_notes").upsert(
+                    notes_to_upsert,
+                    on_conflict="scan_row_id,user_id",
+                ).execute()
+                notes_written = len(notes_to_upsert)
+            except Exception as exc:
+                log.warning(
+                    "[fan-out] user=%s: failed to upsert user_scan_row_notes: %s",
+                    user_id,
+                    exc,
+                )
+
     log.info(
-        "[fan-out] user=%s: job=%s run=%s rows=%d",
+        "[fan-out] user=%s: job=%s run=%s rows=%d notes=%d",
         user_id,
         job_id,
         run_id,
         row_count,
+        notes_written,
     )
-    return job_id, run_id, row_count
+    return job_id, run_id, row_count, notes_written
 
 
 def fan_out_to_subscribers(result: dict[str, Any]) -> None:
@@ -583,6 +667,7 @@ def fan_out_to_subscribers(result: dict[str, Any]) -> None:
 
     scan_jobs_written = 0
     scan_runs_written = 0
+    notes_written_total = 0
     chat_turns_written = 0
     delivered = 0
     skipped = 0
@@ -605,22 +690,25 @@ def fan_out_to_subscribers(result: dict[str, Any]) -> None:
             # 1. Write the scan artefacts: user_scan_jobs + user_scan_runs +
             #    user_scan_rows. This is the only persistence path for public
             #    screenings — no user_screening_results write.
-            job_id, run_id, _row_count = _write_scan_artefacts_for_subscriber(
-                client,
-                user_id=user_id,
-                source_label=source_label,
-                script_key=dataset_key,
-                scan_date_str=scan_date_str,
-                started_at_iso=now,
-                finished_at_iso=now,
-                status=status,
-                error_message=summary if error else None,
-                data_used=data_used,
+            job_id, run_id, _row_count, notes_written = (
+                _write_scan_artefacts_for_subscriber(
+                    client,
+                    user_id=user_id,
+                    source_label=source_label,
+                    script_key=dataset_key,
+                    scan_date_str=scan_date_str,
+                    started_at_iso=now,
+                    finished_at_iso=now,
+                    status=status,
+                    error_message=summary if error else None,
+                    data_used=data_used,
+                )
             )
             if job_id:
                 scan_jobs_written += 1
             if run_id:
                 scan_runs_written += 1
+            notes_written_total += notes_written
 
             # 2. Per-ticker chat turn — for every symbol the bulk-analytics
             #    worker enriched with LLM analysis, append a synthetic chat
@@ -695,11 +783,12 @@ def fan_out_to_subscribers(result: dict[str, Any]) -> None:
             )
 
     log.info(
-        "Public screening %s fan-out done: subscribers=%d scan_jobs=%d scan_runs=%d chat_turns=%d telegram_delivered=%d telegram_skipped=%d telegram_failed=%d",
+        "Public screening %s fan-out done: subscribers=%d scan_jobs=%d scan_runs=%d notes=%d chat_turns=%d telegram_delivered=%d telegram_skipped=%d telegram_failed=%d",
         screening_id,
         len(subscribers),
         scan_jobs_written,
         scan_runs_written,
+        notes_written_total,
         chat_turns_written,
         delivered,
         skipped,

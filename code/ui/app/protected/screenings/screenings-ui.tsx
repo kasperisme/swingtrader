@@ -2027,7 +2027,7 @@ export function ScreeningsUI({
 
         {/* Desktop: AI chat side panel (always available, regardless of view) */}
         {chartAiOpen && (
-          <div className="hidden sm:flex w-[320px] shrink-0 flex-col border-l border-border">
+          <div className="hidden sm:flex w-[320px] shrink-0 flex-col border-l border-border min-h-0">
             {chatModeTabs}
             {renderChatBody("desktop")}
           </div>

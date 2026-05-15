@@ -145,3 +145,15 @@ body.screenings-fullscreen.hide-site-header main > div {
   padding-top: 0 !important;
   padding-bottom: 0 !important;
 }
+
+/* iOS Safari auto-zooms when the user taps any input whose font-size is
+   smaller than 16px. Force form controls to 16px at mobile widths so the
+   browser never decides the field needs magnifying. Preserves pinch-zoom
+   for accessibility — only disables the focus-driven auto-zoom. */
+@media (max-width: 640px) {
+  input,
+  select,
+  textarea {
+    font-size: 16px;
+  }
+}
