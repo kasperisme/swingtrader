@@ -17,6 +17,16 @@ export type PersonaReport = {
   scores?: PersonaScores;
 };
 
+/**
+ * Where a message originated. Absent = manual AI chat (legacy rows pre-dating
+ * the field also fall here). Set by automated writers so the UI can render a
+ * provenance badge and so subscribers can tell synthetic turns apart.
+ */
+export type ChartAiChatMessageSource =
+  | "ai_chat"
+  | "bulk_analysis"
+  | "public_screening";
+
 export type ChartAiChatMessage = {
   role: "user" | "assistant";
   content: string;
@@ -24,6 +34,8 @@ export type ChartAiChatMessage = {
   chartAnnotations?: ChartAnnotation[];
   /** Individual persona reports from this assistant turn. */
   personaReports?: PersonaReport[];
+  /** Origin of this turn. Omitted on manual chat for backward compat. */
+  source?: ChartAiChatMessageSource;
 };
 
 type WorkspaceRow = {
@@ -70,6 +82,13 @@ function parseMessages(raw: unknown): ChartAiChatMessage[] {
     }
     if (Array.isArray(o.personaReports)) {
       msg.personaReports = o.personaReports as PersonaReport[];
+    }
+    if (
+      o.source === "ai_chat" ||
+      o.source === "bulk_analysis" ||
+      o.source === "public_screening"
+    ) {
+      msg.source = o.source;
     }
     out.push(msg);
   }

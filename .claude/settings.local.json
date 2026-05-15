@@ -9,5 +9,9 @@
       "Skill(claude-api)",
       "Bash(python3 *)"
     ]
-  }
+  },
+  "enabledMcpjsonServers": [
+    "supabase"
+  ],
+  "enableAllProjectMcpServers": true
 }

@@ -337,6 +337,64 @@ def fan_out_from_db(result_id: str) -> None:
     fan_out_to_subscribers(payload)
 
 
+def _append_public_screening_chat_turn(
+    client,
+    *,
+    user_id: str,
+    ticker: str,
+    llm_prompt: str,
+    analysis_markdown: str,
+) -> None:
+    """Append one user+assistant chat turn to a subscriber's chart workspace,
+    tagged as a public-screening result.
+
+    Mirrors the bulk-analysis pattern in
+    `services.bulk_analysis.worker._append_chat_turn`. Race conditions with a
+    user actively chatting on the same ticker are accepted.
+    """
+    sym = ticker.upper().strip()
+    if not sym:
+        return
+    user_message = llm_prompt.strip() or "Run a technical analysis."
+
+    res = (
+        client.schema(_SCHEMA)
+        .table("user_ticker_chart_workspace")
+        .select("ai_chat_messages, annotations")
+        .eq("user_id", user_id)
+        .eq("ticker", sym)
+        .limit(1)
+        .execute()
+    )
+    existing = (res.data or [None])[0]
+    messages = list((existing or {}).get("ai_chat_messages") or [])
+    annotations = list((existing or {}).get("annotations") or [])
+
+    messages.append(
+        {"role": "user", "content": user_message, "source": "public_screening"}
+    )
+    messages.append(
+        {
+            "role": "assistant",
+            "content": analysis_markdown,
+            "chartAnnotations": [],
+            "personaReports": [],
+            "source": "public_screening",
+        }
+    )
+
+    payload = {
+        "user_id": user_id,
+        "ticker": sym,
+        "annotations": annotations,
+        "ai_chat_messages": messages,
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+    }
+    client.schema(_SCHEMA).table("user_ticker_chart_workspace").upsert(
+        payload, on_conflict="user_id,ticker"
+    ).execute()
+
+
 def _write_scan_artefacts_for_subscriber(
     client,
     *,
@@ -481,7 +539,7 @@ def fan_out_to_subscribers(result: dict[str, Any]) -> None:
     ps_res = (
         client.schema(_SCHEMA)
         .table("public_screenings")
-        .select("name, slug, script_key")
+        .select("name, slug, script_key, llm_prompt")
         .eq("id", screening_id)
         .limit(1)
         .execute()
@@ -489,6 +547,27 @@ def fan_out_to_subscribers(result: dict[str, Any]) -> None:
     public_meta = (ps_res.data or [{}])[0]
     source_label = f"public_screening:{public_meta.get('slug') or screening_id}"
     dataset_key = public_meta.get("script_key") or "public_screening"
+    llm_prompt = (public_meta.get("llm_prompt") or "").strip()
+
+    # Pre-extract symbols enriched with LLM analysis so we can fan them out
+    # into each subscriber's chart-workspace chat. Symbols without
+    # llm_analysis.analysis_markdown are skipped — those subscribers still
+    # get the scan_rows + Telegram, just no synthetic chat turn.
+    raw_symbols = data_used.get("symbols") if isinstance(data_used, dict) else None
+    symbols_for_chat: list[tuple[str, str]] = []
+    if llm_prompt and isinstance(raw_symbols, list):
+        for s in raw_symbols:
+            if not isinstance(s, dict):
+                continue
+            sym = (s.get("symbol") or "").strip().upper() if isinstance(s.get("symbol"), str) else ""
+            llm = s.get("llm_analysis")
+            md = (
+                llm.get("analysis_markdown")
+                if isinstance(llm, dict)
+                else None
+            )
+            if sym and isinstance(md, str) and md.strip():
+                symbols_for_chat.append((sym, md))
 
     html = _format_telegram_message(
         name,
@@ -504,6 +583,7 @@ def fan_out_to_subscribers(result: dict[str, Any]) -> None:
 
     scan_jobs_written = 0
     scan_runs_written = 0
+    chat_turns_written = 0
     delivered = 0
     skipped = 0
     failed = 0
@@ -542,7 +622,31 @@ def fan_out_to_subscribers(result: dict[str, Any]) -> None:
             if run_id:
                 scan_runs_written += 1
 
-            # 2. Telegram delivery — fires on every run so subscribers know
+            # 2. Per-ticker chat turn — for every symbol the bulk-analytics
+            #    worker enriched with LLM analysis, append a synthetic chat
+            #    turn (tagged source="public_screening") to this subscriber's
+            #    user_ticker_chart_workspace so the analysis shows up in their
+            #    chat the next time they open that ticker. Mirrors the
+            #    services.bulk_analysis pattern. Best-effort per ticker.
+            for sym, analysis_markdown in symbols_for_chat:
+                try:
+                    _append_public_screening_chat_turn(
+                        client,
+                        user_id=user_id,
+                        ticker=sym,
+                        llm_prompt=llm_prompt,
+                        analysis_markdown=analysis_markdown,
+                    )
+                    chat_turns_written += 1
+                except Exception as exc:
+                    log.warning(
+                        "[fan-out] user=%s ticker=%s: chat append failed: %s",
+                        user_id,
+                        sym,
+                        exc,
+                    )
+
+            # 3. Telegram delivery — fires on every run so subscribers know
             #    fresh results are available, matching private screenings.
             if not notif_enabled:
                 log.info(
@@ -591,11 +695,12 @@ def fan_out_to_subscribers(result: dict[str, Any]) -> None:
             )
 
     log.info(
-        "Public screening %s fan-out done: subscribers=%d scan_jobs=%d scan_runs=%d telegram_delivered=%d telegram_skipped=%d telegram_failed=%d",
+        "Public screening %s fan-out done: subscribers=%d scan_jobs=%d scan_runs=%d chat_turns=%d telegram_delivered=%d telegram_skipped=%d telegram_failed=%d",
         screening_id,
         len(subscribers),
         scan_jobs_written,
         scan_runs_written,
+        chat_turns_written,
         delivered,
         skipped,
         failed,

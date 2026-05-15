@@ -112,7 +112,9 @@ If you use crontab for public screenings, **do not** also register OpenClaw `pub
 | `public_screening_result_rows` | Canonical **per-ticker** rows for the public run (symbol + `row_data`), keyed by `result_id`. Used by the Next.js app for tables/exports without bloating `data_used`. The bulk-analytics worker enriches `row_data` in place by adding a top-level `llm_analysis` object: `{ status, comment, analysis_markdown, entry, generated_at }`. |
 | `public_screening_subscriptions` | User opted in: `user_id`, `public_screening_id`, `notifications_enabled`. |
 
-Migrations: `20260512150000_public_screenings.sql`, `20260513000000_public_screening_result_rows.sql`, `20260513010000_public_screening_download_counter.sql`, `20260514000000_public_screenings_llm_analysis.sql`.
+Migrations: `20260512150000_public_screenings.sql`, `20260513000000_public_screening_result_rows.sql`, `20260513010000_public_screening_download_counter.sql`, `20260514000000_public_screenings_llm_analysis.sql`, `20260514120000_public_screenings_schedule_recompute_trigger.sql`.
+
+> **Schedule edits auto-recompute `next_run_at`.** A `BEFORE UPDATE OF schedule, timezone` trigger on `public_screenings` sets `next_run_at = NULL` whenever either field actually changes. The next scheduler tick re-initializes it from `last_run_at`. Without this, the scheduler keeps advancing the *old* `next_run_at` by one step from its previous value, leaving the new cadence anchored to a stale time.
 
 ---
 

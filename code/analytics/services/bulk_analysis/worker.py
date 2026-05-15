@@ -148,13 +148,16 @@ def _append_chat_turn(
     messages = list((existing or {}).get("ai_chat_messages") or [])
     annotations = list((existing or {}).get("annotations") or [])
 
-    messages.append({"role": "user", "content": user_message})
+    messages.append(
+        {"role": "user", "content": user_message, "source": "bulk_analysis"}
+    )
     messages.append(
         {
             "role": "assistant",
             "content": analysis_markdown,
             "chartAnnotations": [],
             "personaReports": [],
+            "source": "bulk_analysis",
         }
     )
 
