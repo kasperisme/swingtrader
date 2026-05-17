@@ -7,17 +7,15 @@ export const metadata = { title: "API Keys" };
 
 async function ApiKeysContent() {
   const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-
-  if (!user) redirect("/auth/login");
+  const { data: claims } = await supabase.auth.getClaims();
+  const userId = claims?.claims?.sub;
+  if (!userId) redirect("/auth/login");
 
   const { data: keys } = await supabase
     .schema("swingtrader")
     .from("user_api_keys")
     .select("id, name, key_prefix, scopes, created_at, last_used_at, expires_at, revoked_at")
-    .eq("user_id", user.id)
+    .eq("user_id", userId)
     .order("created_at", { ascending: false });
 
   return (

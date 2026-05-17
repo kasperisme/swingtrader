@@ -6,8 +6,8 @@ export const metadata = { title: "Operations · SwingTrader" };
 
 export default async function OpsPage() {
   const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) redirect("/sign-in");
+  const { data: claims } = await supabase.auth.getClaims();
+  if (!claims?.claims?.sub) redirect("/sign-in");
 
   return <OpsUI />;
 }

@@ -298,10 +298,8 @@ export async function submitEarlyAccessSignup(input: {
   let userId: string | null = null;
   try {
     const supabase = await createClient();
-    const {
-      data: { user },
-    } = await supabase.auth.getUser();
-    userId = user?.id ?? null;
+    const { data: claims } = await supabase.auth.getClaims();
+    userId = claims?.claims?.sub ?? null;
   } catch {
     userId = null;
   }
@@ -367,10 +365,8 @@ export async function recordPublicScreeningDownload(input: {
   let userId: string | null = null;
   try {
     const supabase = await createClient();
-    const {
-      data: { user },
-    } = await supabase.auth.getUser();
-    userId = user?.id ?? null;
+    const { data: claims } = await supabase.auth.getClaims();
+    userId = claims?.claims?.sub ?? null;
   } catch {
     userId = null;
   }
@@ -411,16 +407,15 @@ export async function recordPublicScreeningDownload(input: {
 
 export async function getMySubscriptionIds(): Promise<string[]> {
   const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) return [];
+  const { data: claims } = await supabase.auth.getClaims();
+  const userId = claims?.claims?.sub;
+  if (!userId) return [];
 
   const { data, error } = await supabase
     .schema(SCHEMA)
     .from("public_screening_subscriptions")
     .select("public_screening_id")
-    .eq("user_id", user.id);
+    .eq("user_id", userId);
 
   if (error) {
     console.error(
@@ -438,16 +433,15 @@ export async function getMySubscription(
   screeningId: string,
 ): Promise<{ isSubscribed: boolean; notificationsEnabled: boolean }> {
   const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) return { isSubscribed: false, notificationsEnabled: false };
+  const { data: claims } = await supabase.auth.getClaims();
+  const userId = claims?.claims?.sub;
+  if (!userId) return { isSubscribed: false, notificationsEnabled: false };
 
   const { data } = await supabase
     .schema(SCHEMA)
     .from("public_screening_subscriptions")
     .select("notifications_enabled")
-    .eq("user_id", user.id)
+    .eq("user_id", userId)
     .eq("public_screening_id", screeningId)
     .limit(1)
     .maybeSingle();
@@ -463,10 +457,9 @@ export async function subscribeToPublicScreening(
   screeningSlug: string,
 ): ActionResult<{ alreadySubscribed: boolean }> {
   const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) {
+  const { data: claims } = await supabase.auth.getClaims();
+  const userId = claims?.claims?.sub;
+  if (!userId) {
     return { ok: false, error: "You must be signed in to subscribe." };
   }
 
@@ -492,7 +485,7 @@ export async function subscribeToPublicScreening(
     .schema(SCHEMA)
     .from("public_screening_subscriptions")
     .insert({
-      user_id: user.id,
+      user_id: userId,
       public_screening_id: screening.id,
     });
 
@@ -508,7 +501,7 @@ export async function subscribeToPublicScreening(
     return { ok: true, data: { alreadySubscribed: true } };
   }
 
-  captureServer(user.id, "public_screening_subscribed", {
+  captureServer(userId, "public_screening_subscribed", {
     screening_id: screening.id,
     screening_slug: screeningSlug,
     screening_name: screening.name,
@@ -540,10 +533,9 @@ export async function importLatestPublicScreeningResultForMe(
   runAt: string | null;
 }> {
   const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) {
+  const { data: claims } = await supabase.auth.getClaims();
+  const userId = claims?.claims?.sub;
+  if (!userId) {
     return { ok: false, error: "You must be signed in." };
   }
 
@@ -658,7 +650,7 @@ export async function importLatestPublicScreeningResultForMe(
       stderr_log: "",
       exit_code: 0,
       error_message: null,
-      user_id: user.id,
+      user_id: userId,
     });
 
   // 2. user_scan_runs — scan instance. Surfaces in /protected/screenings.
@@ -675,7 +667,7 @@ export async function importLatestPublicScreeningResultForMe(
       status: "active",
       market_json: null,
       result_json: JSON.stringify(dataUsedWithSymbols),
-      user_id: user.id,
+      user_id: userId,
     })
     .select("id")
     .limit(1)
@@ -701,7 +693,7 @@ export async function importLatestPublicScreeningResultForMe(
       dataset: scriptKey,
       symbol: p.symbol,
       row_data: p.rowData,
-      user_id: user.id,
+      user_id: userId,
     }));
     const { error: rowsErr } = await supabase
       .schema(SCHEMA)
@@ -739,7 +731,7 @@ export async function importLatestPublicScreeningResultForMe(
           .schema(SCHEMA)
           .from("user_ticker_chart_workspace")
           .select("ai_chat_messages, annotations")
-          .eq("user_id", user.id)
+          .eq("user_id", userId)
           .eq("ticker", sym)
           .limit(1)
           .maybeSingle();
@@ -775,7 +767,7 @@ export async function importLatestPublicScreeningResultForMe(
           .from("user_ticker_chart_workspace")
           .upsert(
             {
-              user_id: user.id,
+              user_id: userId,
               ticker: sym,
               annotations,
               ai_chat_messages: messages,
@@ -802,7 +794,7 @@ export async function importLatestPublicScreeningResultForMe(
     }
   }
 
-  captureServer(user.id, "public_screening_imported_latest", {
+  captureServer(userId, "public_screening_imported_latest", {
     screening_id: screeningId,
     screening_slug: screeningSlug,
     screening_name: (screening as { name: string }).name,
@@ -830,10 +822,9 @@ export async function unsubscribeFromPublicScreening(
   screeningSlug: string,
 ): ActionResult<{ removed: boolean }> {
   const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) {
+  const { data: claims } = await supabase.auth.getClaims();
+  const userId = claims?.claims?.sub;
+  if (!userId) {
     return { ok: false, error: "You must be signed in." };
   }
 
@@ -854,7 +845,7 @@ export async function unsubscribeFromPublicScreening(
     .schema(SCHEMA)
     .from("public_screening_subscriptions")
     .delete()
-    .eq("user_id", user.id)
+    .eq("user_id", userId)
     .eq("public_screening_id", screening.id);
 
   if (del.error) {
@@ -862,7 +853,7 @@ export async function unsubscribeFromPublicScreening(
     return { ok: false, error: "Could not unsubscribe. Please try again." };
   }
 
-  captureServer(user.id, "public_screening_unsubscribed", {
+  captureServer(userId, "public_screening_unsubscribed", {
     screening_id: screening.id,
     screening_slug: screeningSlug,
   });

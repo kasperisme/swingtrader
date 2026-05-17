@@ -256,11 +256,9 @@ export async function screeningsUpsertDismissNote(input: {
   }
 
   const supabase = await createClient();
-  const {
-    data: { user },
-    error: authError,
-  } = await supabase.auth.getUser();
-  if (authError || !user) {
+  const { data: claims } = await supabase.auth.getClaims();
+  const userId = claims?.claims?.sub;
+  if (!userId) {
     return { ok: false, error: "Unauthorized" };
   }
 
@@ -272,7 +270,7 @@ export async function screeningsUpsertDismissNote(input: {
         scan_row_id: scanRowId,
         run_id: runId,
         ticker,
-        user_id: user.id,
+        user_id: userId,
         status: status ?? "active",
         highlighted: highlighted ?? false,
         comment: comment ?? null,
@@ -295,11 +293,9 @@ export async function screeningsSoftDeleteRun(
   }
 
   const supabase = await createClient();
-  const {
-    data: { user },
-    error: authError,
-  } = await supabase.auth.getUser();
-  if (authError || !user) {
+  const { data: claims } = await supabase.auth.getClaims();
+  const userId = claims?.claims?.sub;
+  if (!userId) {
     return { ok: false, error: "Unauthorized" };
   }
 
@@ -308,7 +304,7 @@ export async function screeningsSoftDeleteRun(
     .from("user_scan_runs")
     .update({ status: "deleted" })
     .eq("id", runId)
-    .eq("user_id", user.id)
+    .eq("user_id", userId)
     .eq("status", "active")
     .select("id");
 
@@ -329,14 +325,15 @@ export async function screeningsListRuns(): Promise<
   ScreeningActionSuccess<ScreeningRunSummary[]> | ScreeningActionError
 > {
   const supabase = await createClient();
-  const { data: { user }, error: authError } = await supabase.auth.getUser();
-  if (authError || !user) return { ok: false, error: "Unauthorized" };
+  const { data: claims } = await supabase.auth.getClaims();
+  const userId = claims?.claims?.sub;
+  if (!userId) return { ok: false, error: "Unauthorized" };
 
   const { data, error } = await supabase
     .schema("swingtrader")
     .from("user_scan_runs")
     .select("id, scan_date, source")
-    .eq("user_id", user.id)
+    .eq("user_id", userId)
     .eq("status", "active")
     .order("scan_date", { ascending: false })
     .limit(50);
@@ -359,8 +356,9 @@ export async function screeningsCreateRun(
   if (!trimmed) return { ok: false, error: "Name required" };
 
   const supabase = await createClient();
-  const { data: { user }, error: authError } = await supabase.auth.getUser();
-  if (authError || !user) return { ok: false, error: "Unauthorized" };
+  const { data: claims } = await supabase.auth.getClaims();
+  const userId = claims?.claims?.sub;
+  if (!userId) return { ok: false, error: "Unauthorized" };
 
   const scanDate = new Date().toISOString().slice(0, 10);
 
@@ -373,7 +371,7 @@ export async function screeningsCreateRun(
       status: "active",
       market_json: null,
       result_json: null,
-      user_id: user.id,
+      user_id: userId,
     })
     .select("id, scan_date, source")
     .single();
@@ -403,14 +401,15 @@ export async function screeningsGetUserTrades(): Promise<
   ScreeningActionSuccess<LoggedTrade[]> | ScreeningActionError
 > {
   const supabase = await createClient();
-  const { data: { user }, error: authError } = await supabase.auth.getUser();
-  if (authError || !user) return { ok: false, error: "Unauthorized" };
+  const { data: claims } = await supabase.auth.getClaims();
+  const userId = claims?.claims?.sub;
+  if (!userId) return { ok: false, error: "Unauthorized" };
 
   const { data, error } = await supabase
     .schema("swingtrader")
     .from("user_trades")
     .select("id, side, position_side, ticker, quantity, price_per_unit, executed_at")
-    .eq("user_id", user.id)
+    .eq("user_id", userId)
     .order("executed_at", { ascending: true });
 
   if (error) return { ok: false, error: error.message };
@@ -522,11 +521,9 @@ export async function bulkAnalyzeScanRun(
   }
 
   const supabase = await createClient();
-  const {
-    data: { user },
-    error: authError,
-  } = await supabase.auth.getUser();
-  if (authError || !user) return { ok: false, error: "Unauthorized" };
+  const { data: claims } = await supabase.auth.getClaims();
+  const userId = claims?.claims?.sub;
+  if (!userId) return { ok: false, error: "Unauthorized" };
 
   // Confirm the run belongs to the caller.
   const { data: run, error: runErr } = await supabase
@@ -534,7 +531,7 @@ export async function bulkAnalyzeScanRun(
     .from("user_scan_runs")
     .select("id, status")
     .eq("id", runId)
-    .eq("user_id", user.id)
+    .eq("user_id", userId)
     .maybeSingle();
   if (runErr) return { ok: false, error: runErr.message };
   if (!run) return { ok: false, error: "Screening not found" };
@@ -547,7 +544,7 @@ export async function bulkAnalyzeScanRun(
     .schema("swingtrader")
     .from("user_bulk_analysis_jobs")
     .select(BULK_JOB_COLUMNS)
-    .eq("user_id", user.id)
+    .eq("user_id", userId)
     .eq("scan_run_id", runId)
     .in("status", ["queued", "running"])
     .order("created_at", { ascending: false })
@@ -560,7 +557,7 @@ export async function bulkAnalyzeScanRun(
     .schema("swingtrader")
     .from("user_bulk_analysis_jobs")
     .insert({
-      user_id: user.id,
+      user_id: userId,
       scan_run_id: runId,
       status: "queued",
       user_prompt: trimmedPrompt,
@@ -585,17 +582,15 @@ export async function getBulkAnalysisJob(
   }
 
   const supabase = await createClient();
-  const {
-    data: { user },
-    error: authError,
-  } = await supabase.auth.getUser();
-  if (authError || !user) return { ok: false, error: "Unauthorized" };
+  const { data: claims } = await supabase.auth.getClaims();
+  const userId = claims?.claims?.sub;
+  if (!userId) return { ok: false, error: "Unauthorized" };
 
   const { data, error } = await supabase
     .schema("swingtrader")
     .from("user_bulk_analysis_jobs")
     .select(BULK_JOB_COLUMNS)
-    .eq("user_id", user.id)
+    .eq("user_id", userId)
     .eq("scan_run_id", runId)
     .order("created_at", { ascending: false })
     .limit(1)
@@ -614,15 +609,16 @@ export async function screeningsAddTicker(
   if (!sym) return { ok: false, error: "Ticker required" };
 
   const supabase = await createClient();
-  const { data: { user }, error: authError } = await supabase.auth.getUser();
-  if (authError || !user) return { ok: false, error: "Unauthorized" };
+  const { data: claims } = await supabase.auth.getClaims();
+  const userId = claims?.claims?.sub;
+  if (!userId) return { ok: false, error: "Unauthorized" };
 
   const { data: run, error: runErr } = await supabase
     .schema("swingtrader")
     .from("user_scan_runs")
     .select("id, scan_date, status")
     .eq("id", runId)
-    .eq("user_id", user.id)
+    .eq("user_id", userId)
     .maybeSingle();
 
   if (runErr) return { ok: false, error: runErr.message };
@@ -640,7 +636,7 @@ export async function screeningsAddTicker(
       dataset: "charts_page",
       symbol: sym,
       row_data: {},
-      user_id: user.id,
+      user_id: userId,
     })
     .select("id")
     .single();

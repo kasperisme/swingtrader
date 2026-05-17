@@ -3,8 +3,8 @@ import { getAnthropicClient, DEFAULT_MODEL, splitSystemMessages, type ChatMessag
 
 export async function POST(req: Request) {
   const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return new Response("Unauthorized", { status: 401 });
+  const { data: claims } = await supabase.auth.getClaims();
+  if (!claims?.claims?.sub) return new Response("Unauthorized", { status: 401 });
 
   const rawText = await req.text();
   if (!rawText) return new Response("Empty request body", { status: 400 });

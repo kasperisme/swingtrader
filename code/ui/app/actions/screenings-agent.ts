@@ -61,16 +61,15 @@ export async function listScheduledScreenings(): Promise<
   ActionResult<ScheduledScreening[]>
 > {
   const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) return { ok: false, error: "Not authenticated" };
+  const { data: claims } = await supabase.auth.getClaims();
+  const userId = claims?.claims?.sub;
+  if (!userId) return { ok: false, error: "Not authenticated" };
 
   const { data, error } = await supabase
     .schema(SCHEMA)
     .from("user_scheduled_screenings")
     .select("*")
-    .eq("user_id", user.id)
+    .eq("user_id", userId)
     .order("created_at", { ascending: false });
 
   if (error) return { ok: false, error: error.message };
@@ -90,10 +89,9 @@ export async function createScheduledScreening(input: {
   trigger_condition?: string | null;
 }): ActionResult<ScheduledScreening> {
   const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) return { ok: false, error: "Not authenticated" };
+  const { data: claims } = await supabase.auth.getClaims();
+  const userId = claims?.claims?.sub;
+  if (!userId) return { ok: false, error: "Not authenticated" };
 
   const plan = await getUserPlanTier();
   const limit = SCREENING_LIMITS[plan];
@@ -102,31 +100,31 @@ export async function createScheduledScreening(input: {
     .schema(SCHEMA)
     .from("user_scheduled_screenings")
     .select("*", { count: "exact", head: true })
-    .eq("user_id", user.id)
+    .eq("user_id", userId)
     .eq("is_active", true);
 
   if (countErr) return { ok: false, error: countErr.message };
   if ((count ?? 0) >= limit) {
     if (PRELAUNCH_OPEN_ACCESS) {
-      captureServer(user.id, "would_plan_limit_reached", {
+      captureServer(userId, "would_plan_limit_reached", {
         limit_type: "screenings_active",
         user_plan: plan,
         used: count ?? 0,
         limit,
       });
-      captureServer(user.id, "would_paywall_hit", {
+      captureServer(userId, "would_paywall_hit", {
         surface: "screenings_create",
         user_plan: plan,
         reason: "screenings_active_limit",
       });
     } else {
-      captureServer(user.id, "plan_limit_reached", {
+      captureServer(userId, "plan_limit_reached", {
         limit_type: "screenings_active",
         user_plan: plan,
         used: count ?? 0,
         limit,
       });
-      captureServer(user.id, "paywall_hit", {
+      captureServer(userId, "paywall_hit", {
         surface: "screenings_create",
         user_plan: plan,
         reason: "screenings_active_limit",
@@ -142,7 +140,7 @@ export async function createScheduledScreening(input: {
     .schema(SCHEMA)
     .from("user_scheduled_screenings")
     .insert({
-      user_id: user.id,
+      user_id: userId,
       name: input.name,
       prompt: input.prompt,
       schedule: input.schedule,
@@ -180,10 +178,9 @@ export async function updateScheduledScreening(
   }
 ): ActionResult<ScheduledScreening> {
   const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) return { ok: false, error: "Not authenticated" };
+  const { data: claims } = await supabase.auth.getClaims();
+  const userId = claims?.claims?.sub;
+  if (!userId) return { ok: false, error: "Not authenticated" };
 
   const patch: Record<string, unknown> = { ...input };
   if (input.condition_enabled !== undefined) {
@@ -202,7 +199,7 @@ export async function updateScheduledScreening(
     .from("user_scheduled_screenings")
     .update(patch)
     .eq("id", id)
-    .eq("user_id", user.id)
+    .eq("user_id", userId)
     .select("*")
     .single();
 
@@ -221,17 +218,16 @@ export async function deleteScheduledScreening(
   id: string
 ): ActionResult<{ deleted: true }> {
   const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) return { ok: false, error: "Not authenticated" };
+  const { data: claims } = await supabase.auth.getClaims();
+  const userId = claims?.claims?.sub;
+  if (!userId) return { ok: false, error: "Not authenticated" };
 
   const { error } = await supabase
     .schema(SCHEMA)
     .from("user_scheduled_screenings")
     .delete()
     .eq("id", id)
-    .eq("user_id", user.id);
+    .eq("user_id", userId);
 
   if (error) return { ok: false, error: error.message };
   return { ok: true, data: { deleted: true } };
@@ -242,17 +238,16 @@ export async function getScreeningResults(
   limit = 20
 ): ActionResult<ScreeningResult[]> {
   const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) return { ok: false, error: "Not authenticated" };
+  const { data: claims } = await supabase.auth.getClaims();
+  const userId = claims?.claims?.sub;
+  if (!userId) return { ok: false, error: "Not authenticated" };
 
   const { data, error } = await supabase
     .schema(SCHEMA)
     .from("user_screening_results")
     .select("*")
     .eq("screening_id", screeningId)
-    .eq("user_id", user.id)
+    .eq("user_id", userId)
     .order("run_at", { ascending: false })
     .limit(limit);
 
@@ -267,17 +262,16 @@ export async function getScreeningLimits(): ActionResult<{
   minSchedule: string;
 }> {
   const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) return { ok: false, error: "Not authenticated" };
+  const { data: claims } = await supabase.auth.getClaims();
+  const userId = claims?.claims?.sub;
+  if (!userId) return { ok: false, error: "Not authenticated" };
 
   const plan = await getUserPlanTier();
   const { count } = await supabase
     .schema(SCHEMA)
     .from("user_scheduled_screenings")
     .select("*", { count: "exact", head: true })
-    .eq("user_id", user.id)
+    .eq("user_id", userId)
     .eq("is_active", true);
 
   return {
@@ -297,17 +291,16 @@ export async function testRunScreening(
   screeningId: string
 ): Promise<{ ok: true; data: { requested: true } } | { ok: false; error: string }> {
   const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) return { ok: false, error: "Not authenticated" };
+  const { data: claims } = await supabase.auth.getClaims();
+  const userId = claims?.claims?.sub;
+  if (!userId) return { ok: false, error: "Not authenticated" };
 
   const { error } = await supabase
     .schema(SCHEMA)
     .from("user_scheduled_screenings")
     .update({ run_requested_at: new Date().toISOString() })
     .eq("id", screeningId)
-    .eq("user_id", user.id);
+    .eq("user_id", userId);
 
   if (error) return { ok: false, error: error.message };
   return { ok: true, data: { requested: true } };
@@ -319,17 +312,16 @@ export async function pollTestResult(
   { ok: true; data: ScreeningResult | null } | { ok: false; error: string }
 > {
   const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) return { ok: false, error: "Not authenticated" };
+  const { data: claims } = await supabase.auth.getClaims();
+  const userId = claims?.claims?.sub;
+  if (!userId) return { ok: false, error: "Not authenticated" };
 
   const { data, error } = await supabase
     .schema(SCHEMA)
     .from("user_screening_results")
     .select("*")
     .eq("screening_id", screeningId)
-    .eq("user_id", user.id)
+    .eq("user_id", userId)
     .eq("is_test", true)
     .order("run_at", { ascending: false })
     .limit(1)
@@ -349,16 +341,15 @@ export async function listScanRuns(): Promise<
   { ok: true; data: ScanRunSummary[] } | { ok: false; error: string }
 > {
   const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) return { ok: false, error: "Not authenticated" };
+  const { data: claims } = await supabase.auth.getClaims();
+  const userId = claims?.claims?.sub;
+  if (!userId) return { ok: false, error: "Not authenticated" };
 
   const { data, error } = await supabase
     .schema(SCHEMA)
     .from("user_scan_runs")
     .select("id, scan_date, source")
-    .eq("user_id", user.id)
+    .eq("user_id", userId)
     .eq("status", "active")
     .order("scan_date", { ascending: false })
     .limit(50);
@@ -385,10 +376,9 @@ export async function listScanRowsForRuns(
   if (runIds.length === 0) return { ok: true, data: [] };
 
   const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) return { ok: false, error: "Not authenticated" };
+  const { data: claims } = await supabase.auth.getClaims();
+  const userId = claims?.claims?.sub;
+  if (!userId) return { ok: false, error: "Not authenticated" };
 
   const [rowsResult, notesResult] = await Promise.all([
     supabase
@@ -396,13 +386,13 @@ export async function listScanRowsForRuns(
       .from("user_scan_rows")
       .select("id, symbol, row_data")
       .in("run_id", runIds)
-      .eq("user_id", user.id),
+      .eq("user_id", userId),
     supabase
       .schema(SCHEMA)
       .from("user_scan_row_notes")
       .select("scan_row_id, status, highlighted, comment, stage, priority, tags, metadata_json")
       .in("run_id", runIds)
-      .eq("user_id", user.id),
+      .eq("user_id", userId),
   ]);
 
   if (rowsResult.error) return { ok: false, error: rowsResult.error.message };

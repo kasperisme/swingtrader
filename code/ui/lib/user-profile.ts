@@ -16,16 +16,15 @@ export type UserProfile = {
  */
 export async function getOrCreateUserProfile(): Promise<UserProfile | null> {
   const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) return null;
+  const { data: claims } = await supabase.auth.getClaims();
+  const userId = claims?.claims?.sub;
+  if (!userId) return null;
 
   const { data: existing, error: fetchError } = await supabase
     .schema("swingtrader")
     .from("user_profiles")
     .select("*")
-    .eq("user_id", user.id)
+    .eq("user_id", userId)
     .maybeSingle();
 
   if (fetchError) {
@@ -37,7 +36,7 @@ export async function getOrCreateUserProfile(): Promise<UserProfile | null> {
   const { data: inserted, error: insertError } = await supabase
     .schema("swingtrader")
     .from("user_profiles")
-    .insert({ user_id: user.id })
+    .insert({ user_id: userId })
     .select("*")
     .single();
 
@@ -49,7 +48,7 @@ export async function getOrCreateUserProfile(): Promise<UserProfile | null> {
         .schema("swingtrader")
         .from("user_profiles")
         .select("*")
-        .eq("user_id", user.id)
+        .eq("user_id", userId)
         .single();
       return (retry as UserProfile) ?? null;
     }

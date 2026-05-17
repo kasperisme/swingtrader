@@ -86,10 +86,8 @@ export default async function PublicScreeningDetailPage({ params }: Props) {
   if (!screening) notFound();
 
   const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  const isAuthed = Boolean(user);
+  const { data: claims } = await supabase.auth.getClaims();
+  const isAuthed = Boolean(claims?.claims?.sub);
 
   const [results, subscription, latestRows] = await Promise.all([
     getPublicScreeningResults(screening.id, 10),

@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
-import { InferenceClient } from "@huggingface/inference";
 import { createClient } from "@/lib/supabase/server";
+import { embedQuery } from "@/lib/embeddings/query-embedding";
 
 type SemanticSearchRow = {
   article_id: number;
@@ -15,15 +15,12 @@ type SemanticSearchRow = {
   similarity: number;
 };
 
-const hfClient = new InferenceClient(process.env.HF_TOKEN!);
-
 export async function POST(req: Request) {
   const supabase = await createClient();
-  const {
-    data: { user },
-    error: authErr,
-  } = await supabase.auth.getUser();
-  if (authErr || !user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const { data: claims, error: claimsError } = await supabase.auth.getClaims();
+  if (claimsError || !claims?.claims) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
 
   const body = await req.json().catch(() => ({}));
   const query = String(body?.query ?? "").trim();
@@ -36,13 +33,8 @@ export async function POST(req: Request) {
   }
 
   try {
-    const embedding = (await hfClient.featureExtraction({
-      model: "mixedbread-ai/mxbai-embed-large-v1",
-      inputs: query,
-      provider: "hf-inference",
-    })) as number[];
-
-    if (!Array.isArray(embedding) || embedding.length === 0) {
+    const embedding = await embedQuery(query);
+    if (!embedding) {
       return NextResponse.json({ results: [], note: "embedding_failed" });
     }
 

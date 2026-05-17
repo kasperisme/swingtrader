@@ -275,14 +275,15 @@ async function callPersona(
 export async function POST(req: Request) {
   const tTotal = performance.now();
   const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return new Response("Unauthorized", { status: 401 });
+  const { data: claims } = await supabase.auth.getClaims();
+  const userId = claims?.claims?.sub;
+  if (!userId) return new Response("Unauthorized", { status: 401 });
 
   const { data: strategyRow } = await supabase
     .schema("swingtrader")
     .from("user_trading_strategy")
     .select("strategy")
-    .eq("user_id", user.id)
+    .eq("user_id", userId)
     .maybeSingle();
   const tradingStrategy = strategyRow?.strategy ?? "";
 

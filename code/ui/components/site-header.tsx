@@ -64,10 +64,10 @@ export function SiteHeaderFallback() {
 
 export async function SiteHeader() {
   const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  const isAuthed = Boolean(user);
+  const { data: claims } = await supabase.auth.getClaims();
+  const userEmail =
+    typeof claims?.claims?.email === "string" ? claims.claims.email : undefined;
+  const isAuthed = Boolean(claims?.claims?.sub);
 
   return (
     <HeaderShell>
@@ -94,7 +94,7 @@ export async function SiteHeader() {
           >
             <UserCircle className="h-4 w-4" />
           </Link>
-          <SiteHeaderMobileNav isAuthed={isAuthed} userEmail={user?.email} />
+          <SiteHeaderMobileNav isAuthed={isAuthed} userEmail={userEmail} />
         </div>
       ) : (
         <div className="flex shrink-0 items-center gap-2">
@@ -110,7 +110,7 @@ export async function SiteHeader() {
           <Button asChild size="sm" className="hidden md:inline-flex">
             <Link href="/auth/sign-up">Sign up</Link>
           </Button>
-          <SiteHeaderMobileNav isAuthed={isAuthed} userEmail={user?.email} />
+          <SiteHeaderMobileNav isAuthed={isAuthed} userEmail={userEmail} />
         </div>
       )}
     </HeaderShell>

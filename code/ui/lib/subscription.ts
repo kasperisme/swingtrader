@@ -52,12 +52,10 @@ export function getCachedSubscriptionTier(userId: string): Promise<PlanTier> {
 export async function getUserSubscriptionTier(
   supabase: SupabaseClient,
 ): Promise<PlanTier> {
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-
-  if (!user) return "observer";
-  return getCachedSubscriptionTier(user.id);
+  const { data: claims } = await supabase.auth.getClaims();
+  const userId = claims?.claims?.sub;
+  if (!userId) return "observer";
+  return getCachedSubscriptionTier(userId);
 }
 
 export async function getUserSubscription(

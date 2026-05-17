@@ -47,16 +47,15 @@ async function fetchTelegramConnected(userId: string): Promise<boolean> {
 
 async function AgentsData() {
   const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) redirect("/auth/login");
+  const { data: claims } = await supabase.auth.getClaims();
+  const userId = claims?.claims?.sub;
+  if (!userId) redirect("/auth/login");
 
   const [screeningsRes, limitsRes, suggestionTickers, telegramConnected] = await Promise.all([
     listScheduledScreenings(),
     getScreeningLimits(),
     fetchVectorTickers(),
-    fetchTelegramConnected(user.id),
+    fetchTelegramConnected(userId),
   ]);
 
   return (

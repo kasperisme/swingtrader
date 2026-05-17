@@ -8,7 +8,8 @@
       "Bash(npx tsc *)",
       "Skill(claude-api)",
       "Bash(python3 *)",
-      "WebFetch(domain:site.financialmodelingprep.com)"
+      "WebFetch(domain:site.financialmodelingprep.com)",
+      "Skill(taste-skill)"
     ]
   },
   "enableAllProjectMcpServers": true,

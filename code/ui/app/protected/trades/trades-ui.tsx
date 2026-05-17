@@ -564,8 +564,9 @@ export function TradesUI({ initialTrades }: { initialTrades: UserTradeRow[] }) {
     }
 
     const supabase = createClient();
-    const { data: userData, error: userErr } = await supabase.auth.getUser();
-    if (userErr || !userData.user) {
+    const { data: claims } = await supabase.auth.getClaims();
+    const userId = claims?.claims?.sub;
+    if (!userId) {
       setFormError("You must be signed in to log a trade.");
       return;
     }
@@ -581,7 +582,7 @@ export function TradesUI({ initialTrades }: { initialTrades: UserTradeRow[] }) {
       .schema("swingtrader")
       .from("user_trades")
       .insert({
-        user_id: userData.user.id,
+        user_id: userId,
         side,
         position_side: positionSide,
         ticker: ticker.trim().toUpperCase(),

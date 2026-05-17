@@ -70,16 +70,15 @@ const TOUR_KEY_SET: ReadonlySet<string> = new Set(ALL_TOUR_KEYS);
  */
 export async function markWelcomed(): Promise<OnboardingActionResult> {
   const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) return { ok: false, error: "Not authenticated" };
+  const { data: claims } = await supabase.auth.getClaims();
+  const userId = claims?.claims?.sub;
+  if (!userId) return { ok: false, error: "Not authenticated" };
 
   const { error } = await supabase
     .schema("swingtrader")
     .from("user_profiles")
     .upsert(
-      { user_id: user.id, welcomed_at: new Date().toISOString() },
+      { user_id: userId, welcomed_at: new Date().toISOString() },
       { onConflict: "user_id" },
     );
 
@@ -96,16 +95,15 @@ export async function markWelcomed(): Promise<OnboardingActionResult> {
  */
 export async function dismissOnboardingChecklist(): Promise<OnboardingActionResult> {
   const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) return { ok: false, error: "Not authenticated" };
+  const { data: claims } = await supabase.auth.getClaims();
+  const userId = claims?.claims?.sub;
+  if (!userId) return { ok: false, error: "Not authenticated" };
 
   const { error } = await supabase
     .schema("swingtrader")
     .from("user_profiles")
     .upsert(
-      { user_id: user.id, onboarding_dismissed_at: new Date().toISOString() },
+      { user_id: userId, onboarding_dismissed_at: new Date().toISOString() },
       { onConflict: "user_id" },
     );
 
@@ -134,16 +132,15 @@ export async function dismissOnboardingChecklist(): Promise<OnboardingActionResu
  */
 export async function restartOnboardingChecklist(): Promise<OnboardingActionResult> {
   const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) return { ok: false, error: "Not authenticated" };
+  const { data: claims } = await supabase.auth.getClaims();
+  const userId = claims?.claims?.sub;
+  if (!userId) return { ok: false, error: "Not authenticated" };
 
   const { data: existing, error: fetchError } = await supabase
     .schema("swingtrader")
     .from("user_profiles")
     .select("metadata")
-    .eq("user_id", user.id)
+    .eq("user_id", userId)
     .maybeSingle();
 
   if (fetchError) {
@@ -163,7 +160,7 @@ export async function restartOnboardingChecklist(): Promise<OnboardingActionResu
     .from("user_profiles")
     .upsert(
       {
-        user_id: user.id,
+        user_id: userId,
         metadata: nextMetadata,
         onboarding_dismissed_at: null,
       },
@@ -187,16 +184,15 @@ export async function markOnboardingVisited(
   if (!VISIT_KEYS.has(step)) return { ok: false, error: "Invalid step" };
 
   const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) return { ok: false, error: "Not authenticated" };
+  const { data: claims } = await supabase.auth.getClaims();
+  const userId = claims?.claims?.sub;
+  if (!userId) return { ok: false, error: "Not authenticated" };
 
   const { data: existing, error: fetchError } = await supabase
     .schema("swingtrader")
     .from("user_profiles")
     .select("metadata")
-    .eq("user_id", user.id)
+    .eq("user_id", userId)
     .maybeSingle();
 
   if (fetchError) {
@@ -218,7 +214,7 @@ export async function markOnboardingVisited(
     .schema("swingtrader")
     .from("user_profiles")
     .upsert(
-      { user_id: user.id, metadata: nextMetadata },
+      { user_id: userId, metadata: nextMetadata },
       { onConflict: "user_id" },
     );
 
@@ -248,17 +244,16 @@ export async function getOnboardingProgress(): Promise<OnboardingProgress> {
   };
 
   const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) return empty;
+  const { data: claims } = await supabase.auth.getClaims();
+  const userId = claims?.claims?.sub;
+  if (!userId) return empty;
 
   const [profileRes, tradeRes, agentRes] = await Promise.all([
     supabase
       .schema("swingtrader")
       .from("user_profiles")
       .select("metadata")
-      .eq("user_id", user.id)
+      .eq("user_id", userId)
       .maybeSingle(),
     supabase
       .schema("swingtrader")
@@ -304,16 +299,15 @@ export async function getOnboardingTours(): Promise<ToursState> {
   };
 
   const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) return empty;
+  const { data: claims } = await supabase.auth.getClaims();
+  const userId = claims?.claims?.sub;
+  if (!userId) return empty;
 
   const { data, error } = await supabase
     .schema("swingtrader")
     .from("user_profiles")
     .select("metadata")
-    .eq("user_id", user.id)
+    .eq("user_id", userId)
     .maybeSingle();
 
   if (error) {
@@ -340,16 +334,15 @@ export async function markTourComplete(tour: TourKey): Promise<OnboardingActionR
   if (!TOUR_KEY_SET.has(tour)) return { ok: false, error: "Invalid tour key" };
 
   const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) return { ok: false, error: "Not authenticated" };
+  const { data: claims } = await supabase.auth.getClaims();
+  const userId = claims?.claims?.sub;
+  if (!userId) return { ok: false, error: "Not authenticated" };
 
   const { data: existing, error: fetchError } = await supabase
     .schema("swingtrader")
     .from("user_profiles")
     .select("metadata")
-    .eq("user_id", user.id)
+    .eq("user_id", userId)
     .maybeSingle();
 
   if (fetchError) {
@@ -379,7 +372,7 @@ export async function markTourComplete(tour: TourKey): Promise<OnboardingActionR
     .schema("swingtrader")
     .from("user_profiles")
     .upsert(
-      { user_id: user.id, metadata: nextMetadata },
+      { user_id: userId, metadata: nextMetadata },
       { onConflict: "user_id" },
     );
 

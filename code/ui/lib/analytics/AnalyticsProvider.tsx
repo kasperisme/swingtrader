@@ -44,7 +44,17 @@ function IdentityTracker() {
       }
     };
 
-    void supabase.auth.getUser().then(({ data }) => identify(data.user ?? null));
+    void supabase.auth.getClaims().then(({ data }) => {
+      const c = data?.claims;
+      if (!c?.sub) {
+        identify(null);
+        return;
+      }
+      identify({
+        id: c.sub,
+        email: typeof c.email === "string" ? c.email : null,
+      });
+    });
 
     const { data: sub } = supabase.auth.onAuthStateChange((event, session) => {
       if (event === "SIGNED_OUT") {

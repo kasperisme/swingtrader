@@ -104,17 +104,15 @@ export async function chartWorkspaceLoad(
   if (!sym) return { ok: false, error: "Missing ticker" };
 
   const supabase = await createClient();
-  const {
-    data: { user },
-    error: authError,
-  } = await supabase.auth.getUser();
-  if (authError || !user) return { ok: false, error: "Unauthorized" };
+  const { data: claims } = await supabase.auth.getClaims();
+  const userId = claims?.claims?.sub;
+  if (!userId) return { ok: false, error: "Unauthorized" };
 
   let { data, error } = await supabase
     .schema("swingtrader")
     .from("user_ticker_chart_workspace")
     .select("annotations, ai_chat_messages, note")
-    .eq("user_id", user.id)
+    .eq("user_id", userId)
     .eq("ticker", sym)
     .maybeSingle();
 
@@ -123,7 +121,7 @@ export async function chartWorkspaceLoad(
       .schema("swingtrader")
       .from("user_ticker_chart_workspace")
       .select("annotations, ai_chat_messages")
-      .eq("user_id", user.id)
+      .eq("user_id", userId)
       .eq("ticker", sym)
       .maybeSingle());
   }
@@ -153,18 +151,16 @@ export async function chartWorkspaceSave(
   if (!sym) return { ok: false, error: "Missing ticker" };
 
   const supabase = await createClient();
-  const {
-    data: { user },
-    error: authError,
-  } = await supabase.auth.getUser();
-  if (authError || !user) return { ok: false, error: "Unauthorized" };
+  const { data: claims } = await supabase.auth.getClaims();
+  const userId = claims?.claims?.sub;
+  if (!userId) return { ok: false, error: "Unauthorized" };
 
   const { error } = await supabase
     .schema("swingtrader")
     .from("user_ticker_chart_workspace")
     .upsert(
       {
-        user_id: user.id,
+        user_id: userId,
         ticker: sym,
         annotations: payload.annotations,
         ai_chat_messages: payload.aiChatMessages,
@@ -179,7 +175,7 @@ export async function chartWorkspaceSave(
       .from("user_ticker_chart_workspace")
       .upsert(
         {
-          user_id: user.id,
+          user_id: userId,
           ticker: sym,
           annotations: payload.annotations,
           ai_chat_messages: payload.aiChatMessages,
@@ -202,18 +198,16 @@ export async function chartWorkspaceNoteSave(
   if (!sym) return { ok: false, error: "Missing ticker" };
 
   const supabase = await createClient();
-  const {
-    data: { user },
-    error: authError,
-  } = await supabase.auth.getUser();
-  if (authError || !user) return { ok: false, error: "Unauthorized" };
+  const { data: claims } = await supabase.auth.getClaims();
+  const userId = claims?.claims?.sub;
+  if (!userId) return { ok: false, error: "Unauthorized" };
 
   const { error } = await supabase
     .schema("swingtrader")
     .from("user_ticker_chart_workspace")
     .upsert(
       {
-        user_id: user.id,
+        user_id: userId,
         ticker: sym,
         note: note || null,
       },

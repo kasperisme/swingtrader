@@ -234,16 +234,15 @@ async function ScreeningsData({
   searchParams: Promise<{ run?: string }>;
 }) {
   const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const { data: claims } = await supabase.auth.getClaims();
+  const userId = claims?.claims?.sub;
 
   const params = await searchParams;
   const runIdParam = params.run ? parseInt(params.run, 10) : null;
   const requestedRunId =
     runIdParam != null && Number.isFinite(runIdParam) ? runIdParam : null;
 
-  if (!user) {
+  if (!userId) {
     return (
       <ScreeningsUI
         runs={[]}
@@ -259,7 +258,7 @@ async function ScreeningsData({
   const [
     runs,
     { tickers: vectorTickers, dimensions: companyVectorDimensions },
-  ] = await Promise.all([fetchRuns(user.id), fetchCompanyVectors()]);
+  ] = await Promise.all([fetchRuns(userId), fetchCompanyVectors()]);
 
   const runIds = new Set(runs.map((r) => Number(r.id)));
   const effectiveRunId =
@@ -269,8 +268,8 @@ async function ScreeningsData({
 
   const [rows, initialNotes] = effectiveRunId
     ? await Promise.all([
-        fetchRows(effectiveRunId, user.id),
-        fetchRowNotes(effectiveRunId, user.id),
+        fetchRows(effectiveRunId, userId),
+        fetchRowNotes(effectiveRunId, userId),
       ])
     : [[], []];
 

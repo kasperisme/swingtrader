@@ -104,8 +104,9 @@ function LogTradeForm({
 
     setSaving(true);
     const supabase = createClient();
-    const { data: userData, error: userErr } = await supabase.auth.getUser();
-    if (userErr || !userData.user) {
+    const { data: claims } = await supabase.auth.getClaims();
+    const userId = claims?.claims?.sub;
+    if (!userId) {
       setFormError("Not signed in.");
       setSaving(false);
       return;
@@ -115,7 +116,7 @@ function LogTradeForm({
       .schema("swingtrader")
       .from("user_trades")
       .insert({
-        user_id: userData.user.id,
+        user_id: userId,
         side,
         position_side: positionSide,
         ticker,
