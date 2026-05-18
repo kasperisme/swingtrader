@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import Link from "next/link";
 import {
   ArrowUpRight,
@@ -298,6 +298,7 @@ export function ArticlesSearchPanel({
           results={dedupedResults}
           query={query}
           mode={mode}
+          onSwitchMode={switchMode}
         />
       ) : (
         <EditorialFeed articles={initialArticles} />
@@ -532,23 +533,45 @@ function QueryResults({
   results,
   query,
   mode,
+  onSwitchMode,
 }: {
   results: SemanticSearchItem[];
   query: string;
   mode: SearchMode;
+  onSwitchMode: (next: SearchMode) => void;
 }) {
   if (results.length === 0) {
+    const isTagMode = mode === "tags";
     return (
       <EmptyState
         title={
-          mode === "tags"
+          isTagMode
             ? `No articles tagged "${query.trim()}"`
             : `No semantic matches for "${query.trim()}"`
         }
         body={
-          mode === "tags"
-            ? "Try another tag or switch to semantic search. Lookback is 90 days."
+          isTagMode
+            ? "Tag search requires an exact ticker, theme, or event slug. Try a different keyword or switch to semantic search for free-form queries."
             : "Try a broader phrase or switch to tag search. Lookback is 90 days."
+        }
+        action={
+          <button
+            type="button"
+            onClick={() => onSwitchMode(isTagMode ? "semantic" : "tags")}
+            className="inline-flex items-center gap-1.5 rounded-sm border border-amber-500/40 px-2.5 py-1 font-mono text-[10px] uppercase tracking-[0.18em] text-amber-500 transition-colors hover:bg-amber-500/10"
+          >
+            {isTagMode ? (
+              <>
+                <Sparkles className="h-3 w-3" />
+                Try semantic search
+              </>
+            ) : (
+              <>
+                <Hash className="h-3 w-3" />
+                Try tag search
+              </>
+            )}
+          </button>
         }
       />
     );
@@ -663,7 +686,15 @@ function SimilarityBar({
 
 /* ------------------------------ Empty + skel ----------------------------- */
 
-function EmptyState({ title, body }: { title: string; body: string }) {
+function EmptyState({
+  title,
+  body,
+  action,
+}: {
+  title: string;
+  body: string;
+  action?: ReactNode;
+}) {
   return (
     <div className="flex flex-col items-start gap-3 border-l-2 border-amber-500/40 py-8 pl-6">
       <Newspaper className="h-5 w-5 text-amber-500/70" />
@@ -671,6 +702,7 @@ function EmptyState({ title, body }: { title: string; body: string }) {
       <p className="max-w-[55ch] text-sm leading-relaxed text-muted-foreground">
         {body}
       </p>
+      {action}
     </div>
   );
 }
