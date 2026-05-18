@@ -9,7 +9,7 @@ import {
 import { getOnboardingTours } from "@/app/actions/onboarding";
 import { PageTour } from "@/app/protected/_components/page-tour";
 
-async function ArticlesData() {
+async function ArticlesData({ initialTag }: { initialTag?: string }) {
   const supabase = await createClient();
   const { data: claims, error: claimsError } = await supabase.auth.getClaims();
 
@@ -33,7 +33,12 @@ async function ArticlesData() {
     );
   }
 
-  return <ArticlesSearchPanel initialArticles={(data ?? []) as ArticleGridItem[]} />;
+  return (
+    <ArticlesSearchPanel
+      initialArticles={(data ?? []) as ArticleGridItem[]}
+      initialTag={initialTag}
+    />
+  );
 }
 
 async function ArticlesTourMount() {
@@ -41,7 +46,15 @@ async function ArticlesTourMount() {
   return <PageTour tourKey="articles" autoStart={!tours.articles} />;
 }
 
-export default function ArticlesPage() {
+export default async function ArticlesPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ tag?: string }>;
+}) {
+  const params = await searchParams;
+  const initialTag =
+    typeof params.tag === "string" ? params.tag.trim() : undefined;
+
   return (
     <div className="flex w-full flex-1 flex-col gap-8">
       <header className="grid gap-6 border-b border-border/60 pb-6 md:grid-cols-[1fr_auto] md:items-end">
@@ -68,7 +81,7 @@ export default function ArticlesPage() {
       </header>
 
       <Suspense fallback={<EditorialSkeleton mode="feed" />}>
-        <ArticlesData />
+        <ArticlesData initialTag={initialTag} />
       </Suspense>
       <Suspense fallback={null}>
         <ArticlesTourMount />

@@ -8,7 +8,7 @@ CREATE INDEX IF NOT EXISTS idx_news_articles_search_tags_gin
     ON swingtrader.news_articles USING GIN (search_tags);
 
 COMMENT ON COLUMN swingtrader.news_articles.search_tags IS
-    'Lowercase theme slugs (taxonomy) plus uppercase tickers for indexed tag search.';
+    'Lowercase theme/event slugs plus uppercase tickers for indexed tag search.';
 
 -- Fast tag-only search (no embedding). Used when query tokens match known tags.
 CREATE OR REPLACE FUNCTION swingtrader.search_news_by_tags(

@@ -17,6 +17,7 @@ type ArticleRow = {
   published_at: string | null;
   created_at: string;
   image_url: string | null;
+  search_tags: string[] | null;
 };
 
 type CompanyVectorRow = {
@@ -414,6 +415,64 @@ function TickerSentimentList({
   );
 }
 
+function normalizeTagSlug(raw: string): string {
+  return raw
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "")
+    .slice(0, 48);
+}
+
+function buildSearchTagsFromHeads(heads: HeadRow[]): string[] {
+  const tags = new Set<string>();
+  for (const head of heads) {
+    if (head.cluster === "ARTICLE_TAGS") {
+      for (const [key, val] of Object.entries(asNumberMap(head.scores_json))) {
+        const slug = normalizeTagSlug(key);
+        if (slug && Number(val) > 0) tags.add(slug);
+      }
+    } else if (head.cluster === "TICKER_SENTIMENT") {
+      for (const [key, val] of Object.entries(asNumberMap(head.scores_json))) {
+        const ticker = String(key).toUpperCase().trim();
+        if (ticker && Math.abs(Number(val)) >= 0.05) tags.add(ticker);
+      }
+    }
+  }
+  return [...tags].sort();
+}
+
+function formatTagLabel(tag: string): string {
+  if (/^[A-Z]{1,6}$/.test(tag)) return tag;
+  return tag.replace(/_/g, " ");
+}
+
+function articleTagSearchHref(tag: string): string {
+  return `/protected/articles?tag=${encodeURIComponent(tag)}`;
+}
+
+function ArticleTagsRow({ tags }: { tags: string[] }) {
+  if (tags.length === 0) return null;
+  return (
+    <section className="mt-4">
+      <ul className="flex flex-wrap gap-2" aria-label="Article search tags">
+        {tags.map((tag) => (
+          <li key={tag}>
+            <Link
+              href={articleTagSearchHref(tag)}
+              className="inline-flex items-center rounded-md border border-border/70 bg-muted/25 px-2.5 py-1 font-mono text-xs text-foreground/90 transition-colors hover:border-amber-500/40 hover:bg-amber-500/10 hover:text-amber-400"
+            >
+              {formatTagLabel(tag)}
+            </Link>
+          </li>
+        ))}
+      </ul>
+      <p className="mt-3 font-mono text-[10px] uppercase tracking-[0.2em] text-muted-foreground">
+        Search tags
+      </p>
+    </section>
+  );
+}
+
 function KeyPointsList({
   rows,
 }: {
@@ -665,7 +724,7 @@ async function ArticleData({ params }: { params: Promise<{ slug?: string }> }) {
       .schema("swingtrader")
       .from("news_articles")
       .select(
-        "id, slug, title, url, source, published_at, created_at, image_url,publisher",
+        "id, slug, title, url, source, published_at, created_at, image_url, publisher, search_tags",
       )
       .eq("slug", slug)
       .single<ArticleRow>(),
@@ -767,6 +826,9 @@ async function ArticleData({ params }: { params: Promise<{ slug?: string }> }) {
     .slice(0, 16);
 
   const publishedIso = article.published_at ?? article.created_at;
+  const searchTags =
+    (article.search_tags?.length ? article.search_tags : null) ??
+    buildSearchTagsFromHeads(heads);
 
   return (
     <div className="mx-auto w-full max-w-5xl px-4 py-8 sm:px-6 sm:py-10">
@@ -800,19 +862,8 @@ async function ArticleData({ params }: { params: Promise<{ slug?: string }> }) {
           )}
         </h1>
 
-        {article.image_url ? (
-          <div className="relative mt-8 overflow-hidden rounded-xl border border-border/60 bg-muted">
-            <img
-              src={article.image_url}
-              alt=""
-              className="h-[240px] w-full object-cover md:h-[420px]"
-            />
-            <div className="pointer-events-none absolute inset-0 bg-gradient-to-t from-background/40 via-transparent to-transparent" />
-          </div>
-        ) : null}
-
         {article.url ? (
-          <div className="mt-6 flex flex-wrap items-center justify-between gap-3">
+          <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
             <p className="font-mono text-[10px] uppercase tracking-[0.2em] text-muted-foreground">
               Source · {article.source || article.publisher || "feed"}
             </p>
@@ -830,6 +881,36 @@ async function ArticleData({ params }: { params: Promise<{ slug?: string }> }) {
             </Link>
           </div>
         ) : null}
+
+        {article.image_url ? (
+          article.url ? (
+            <Link
+              href={article.url}
+              target="_blank"
+              rel="noreferrer"
+              aria-label={`Read source: ${article.title || "article"}`}
+              className="group relative mt-8 block overflow-hidden rounded-xl border border-border/60 bg-muted transition-colors hover:border-amber-500/40"
+            >
+              <img
+                src={article.image_url}
+                alt={article.title || "Article image"}
+                className="h-[240px] w-full object-cover transition-transform duration-200 group-hover:scale-[1.01] md:h-[420px]"
+              />
+              <div className="pointer-events-none absolute inset-0 bg-gradient-to-t from-background/40 via-transparent to-transparent" />
+            </Link>
+          ) : (
+            <div className="relative mt-8 overflow-hidden rounded-xl border border-border/60 bg-muted">
+              <img
+                src={article.image_url}
+                alt={article.title || "Article image"}
+                className="h-[240px] w-full object-cover md:h-[420px]"
+              />
+              <div className="pointer-events-none absolute inset-0 bg-gradient-to-t from-background/40 via-transparent to-transparent" />
+            </div>
+          )
+        ) : null}
+
+        <ArticleTagsRow tags={searchTags} />
       </article>
 
       <div className="mt-12">

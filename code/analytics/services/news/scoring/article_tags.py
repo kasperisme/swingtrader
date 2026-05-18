@@ -1,9 +1,8 @@
 """
-Search tags for news articles — taxonomy, normalization, and denormalized sync.
+Search tags for news articles — normalization, prompt guidance, and denormalized sync.
 
-The ARTICLE_TAGS LLM head picks theme/event slugs from ``TAG_TAXONOMY``.
-``build_search_tags`` merges those with tickers from TICKER_SENTIMENT so search
-does not need a separate ticker-extraction pass for filtering.
+The ARTICLE_TAGS LLM head invents short theme/event slugs (not a fixed allowlist).
+``build_search_tags`` merges those with tickers from TICKER_SENTIMENT.
 """
 
 from __future__ import annotations
@@ -14,62 +13,28 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from services.news.scoring.impact_scorer import HeadOutput
 
-# Controlled vocabulary — lowercase slugs, stable for GIN search and LLM picks.
-TAG_TAXONOMY: tuple[str, ...] = (
+# Examples only — the model may create other slugs following the same conventions.
+TAG_PROMPT_EXAMPLES: tuple[str, ...] = (
     "fed",
     "rates",
     "inflation",
-    "employment",
-    "recession",
-    "gdp",
-    "fiscal",
-    "banking",
-    "credit",
     "earnings",
     "guidance",
-    "revenue",
-    "profit_warning",
     "m_and_a",
     "ipo",
-    "buyback",
-    "dividend",
-    "default",
     "regulation",
-    "antitrust",
     "trade",
     "tariffs",
     "geopolitics",
-    "china",
-    "europe",
-    "middle_east",
-    "energy",
     "oil",
-    "gas",
-    "utilities",
-    "tech",
     "ai",
     "semiconductors",
-    "crypto",
-    "healthcare",
-    "pharma",
-    "defense",
-    "aerospace",
-    "autos",
-    "retail",
-    "housing",
-    "consumer",
-    "industrials",
-    "materials",
-    "supply_chain",
+    "banking",
     "layoffs",
-    "strike",
-    "legal",
-    "cyber",
-    "climate",
 )
 
-_TAXONOMY_SET = frozenset(TAG_TAXONOMY)
-_SLUG_RE = re.compile(r"^[a-z][a-z0-9_]{0,47}$")
+_MAX_ARTICLE_TAGS = 12
+_MIN_SLUG_LEN = 2
 
 
 def normalize_tag_slug(raw: str) -> str:
@@ -78,16 +43,22 @@ def normalize_tag_slug(raw: str) -> str:
     return s.strip("_")[:48]
 
 
-def filter_taxonomy_tags(slugs: list[str]) -> list[str]:
-    """Keep only slugs in ``TAG_TAXONOMY``, deduped, sorted."""
+def parse_article_tags(raw_tags: list) -> list[str]:
+    """
+    Normalize LLM tag strings: slugify, dedupe, drop empties, cap count.
+
+    No allowlist — any well-formed slug is kept.
+    """
     out: list[str] = []
     seen: set[str] = set()
-    for raw in slugs:
+    for raw in raw_tags:
         slug = normalize_tag_slug(raw)
-        if not slug or slug not in _TAXONOMY_SET or slug in seen:
+        if len(slug) < _MIN_SLUG_LEN or slug in seen:
             continue
         seen.add(slug)
         out.append(slug)
+        if len(out) >= _MAX_ARTICLE_TAGS:
+            break
     return sorted(out)
 
 
@@ -95,15 +66,15 @@ def build_search_tags(heads: list["HeadOutput"]) -> list[str]:
     """
     Denormalized tag list for ``news_articles.search_tags``.
 
-    - ARTICLE_TAGS head → taxonomy slugs (scores_json keys)
-    - TICKER_SENTIMENT → uppercase tickers (cheap, no extra LLM)
+    - ARTICLE_TAGS head → theme/event slugs (scores_json keys)
+    - TICKER_SENTIMENT → uppercase tickers (indexed separately)
     """
     tags: set[str] = set()
     for head in heads:
         if head.cluster == "ARTICLE_TAGS":
             for key, val in (head.scores or {}).items():
                 slug = normalize_tag_slug(key)
-                if slug and slug in _TAXONOMY_SET and float(val) > 0:
+                if slug and float(val) > 0:
                     tags.add(slug)
         elif head.cluster == "TICKER_SENTIMENT":
             for key, val in (head.scores or {}).items():
@@ -113,6 +84,23 @@ def build_search_tags(heads: list["HeadOutput"]) -> list[str]:
     return sorted(tags)
 
 
-def taxonomy_prompt_block() -> str:
-    """Compact comma-separated list for the LLM user prompt."""
-    return ", ".join(TAG_TAXONOMY)
+def tag_prompt_guidance() -> str:
+    """Direction + examples for the ARTICLE_TAGS LLM prompt (not an exhaustive list)."""
+    examples = ", ".join(TAG_PROMPT_EXAMPLES)
+    return f"""\
+Purpose — these tags power fast news refetch:
+- Each slug is stored on the article and indexed for search.
+- When a user later searches (e.g. "fed rates", "earnings warning", "middle east oil"),
+  the query is split into lowercase tokens and matched against stored tags.
+  Any overlap returns the article — no full-text or semantic pass required.
+- Tag for retrieval: ask "what short queries should surface this story again?"
+  Prefer stable, reusable concepts investors might type, not one-off headline phrases.
+
+Tagging rules:
+- Invent 4–12 short lowercase slugs (snake_case: rate_cut, profit_warning, ai_chips).
+- Use vocabulary users are likely to search: themes, events, sectors, policy, geographies.
+- Be specific when the article is specific; avoid vague slugs (news, market, stocks, update).
+- Prefer one clear slug per idea; do not duplicate the same concept under different names.
+- Do not output stock tickers here (tickers are indexed separately from sentiment).
+
+Example slugs (you may use these or create new ones in the same style): {examples}"""

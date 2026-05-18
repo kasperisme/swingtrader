@@ -15,6 +15,7 @@ from the merged head set.
 Usage (from code/analytics):
     python -m scripts.backfill_head                                     # default: STORY_KEY_POINTS
     python -m scripts.backfill_head --head key_points --limit 100
+    python -m scripts.backfill_head --head tags --rescore --limit 500   # re-run existing ARTICLE_TAGS rows
     python -m scripts.backfill_head --head STORY_KEY_POINTS --concurrency 8
     python -m scripts.backfill_head --dry-run --limit 5
 """
@@ -103,6 +104,37 @@ def _fetch_missing_ids(head_cluster: str) -> list[int]:
     return missing
 
 
+def _fetch_rescore_ids(head_cluster: str) -> list[int]:
+    """Articles that already have at least one row for ``head_cluster`` (newest id first)."""
+    console.print(
+        f"[dim]Scanning news_impact_heads for articles with existing {head_cluster}…[/dim]"
+    )
+    sql = """
+        select distinct article_id
+        from swingtrader.news_impact_heads
+        where cluster = %s
+        order by article_id desc
+    """
+    conn = get_pg_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(sql, (head_cluster,))
+            ids = [row[0] for row in cur.fetchall()]
+    finally:
+        conn.close()
+
+    console.print(
+        f"[dim]Articles to rescore for {head_cluster}: [bold]{len(ids)}[/bold][/dim]"
+    )
+    return ids
+
+
+def _delete_head_rows(client, article_id: int, head_cluster: str) -> None:
+    _tbl(client, "news_impact_heads").delete().eq("article_id", article_id).eq(
+        "cluster", head_cluster
+    ).execute()
+
+
 def _fetch_articles(client, ids: list[int]) -> list[dict]:
     res = (
         client.schema("swingtrader")
@@ -184,6 +216,7 @@ async def _backfill_one(
     index: int,
     total: int,
     dry_run: bool,
+    rescore: bool = False,
 ) -> bool:
     article_id = row["id"]
     title = row.get("title") or ""
@@ -229,6 +262,9 @@ async def _backfill_one(
     if dry_run:
         return True
 
+    if rescore:
+        _delete_head_rows(client, article_id, head_cluster)
+
     _insert_head_row(client, article_id, head)
 
     all_heads = _fetch_existing_heads(client, article_id)
@@ -252,12 +288,16 @@ async def main(args: argparse.Namespace) -> None:
     is_special = head_cluster in SPECIAL_HEAD_CLUSTERS
 
     console.print(
-        f"[bold]Backfilling head [cyan]{head_cluster}[/cyan]"
+        f"[bold]{'Rescoring' if args.rescore else 'Backfilling'} head [cyan]{head_cluster}[/cyan]"
         f" ({'special — no vector recompute' if is_special else 'dimension — vector will be recomputed'})[/bold]"
     )
 
     client = get_supabase_client()
-    ids = _fetch_missing_ids(head_cluster)
+    ids = (
+        _fetch_rescore_ids(head_cluster)
+        if args.rescore
+        else _fetch_missing_ids(head_cluster)
+    )
 
     if args.limit is not None and args.limit > 0:
         ids = ids[: args.limit]
@@ -265,11 +305,23 @@ async def main(args: argparse.Namespace) -> None:
 
     total = len(ids)
     if total == 0:
-        console.print("[green]Nothing to backfill — every scored article already has this head.[/green]")
+        if args.rescore:
+            console.print(
+                f"[green]Nothing to rescore — no articles have a {head_cluster} head yet.[/green]"
+            )
+        else:
+            console.print(
+                "[green]Nothing to backfill — every scored article already has this head.[/green]"
+            )
         return
 
     if args.dry_run:
         console.print("[yellow]DRY RUN — no DB writes[/yellow]")
+    if args.rescore:
+        console.print(
+            "[dim]--rescore: existing head rows will be replaced; "
+            "search_tags refreshed for ARTICLE_TAGS.[/dim]"
+        )
 
     try:
         ticker_alias_map, company_alias_map = _load_identity_alias_maps()
@@ -309,6 +361,7 @@ async def main(args: argparse.Namespace) -> None:
                     index=batch_start + offset + 1,
                     total=total,
                     dry_run=args.dry_run,
+                    rescore=args.rescore,
                 )
             )
 
@@ -352,6 +405,14 @@ def _build_parser() -> argparse.ArgumentParser:
         type=int,
         default=50,
         help="Articles fetched per DB query. Default: 50.",
+    )
+    p.add_argument(
+        "--rescore",
+        action="store_true",
+        help=(
+            "Re-run the head for articles that already have a row for this cluster "
+            "(replaces existing head rows). Default: only articles missing the head."
+        ),
     )
     p.add_argument(
         "--dry-run",

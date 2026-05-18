@@ -5,6 +5,7 @@ import Link from "next/link";
 import {
   ArrowUpRight,
   CornerDownLeft,
+  Hash,
   Loader2,
   Newspaper,
   Search,
@@ -12,6 +13,9 @@ import {
   X,
 } from "lucide-react";
 import type { ArticleGridItem } from "@/components/articles-grid";
+import { normalizeSearchTag } from "@/lib/news/search-tags";
+
+type SearchMode = "tags" | "semantic";
 
 type SemanticSearchItem = {
   article_id: number;
@@ -53,15 +57,22 @@ function sourceLabel(s: string | null | undefined): string {
 
 export function ArticlesSearchPanel({
   initialArticles,
+  initialTag,
 }: {
   initialArticles: ArticleGridItem[];
+  /** From `?tag=` — runs tag search on mount. */
+  initialTag?: string;
 }) {
-  const [query, setQuery] = useState("");
+  const seedTag = initialTag?.trim() ?? "";
+  const [query, setQuery] = useState(seedTag);
   const [loading, setLoading] = useState(false);
   const [note, setNote] = useState<string | null>(null);
   const [results, setResults] = useState<SemanticSearchItem[]>([]);
-  const [hasSearched, setHasSearched] = useState(false);
+  const [hasSearched, setHasSearched] = useState(Boolean(seedTag));
+  const [mode, setMode] = useState<SearchMode>("tags");
   const inputRef = useRef<HTMLInputElement>(null);
+  const embeddingWarmed = useRef(false);
+  const initialTagRan = useRef(false);
 
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
@@ -77,9 +88,11 @@ export function ArticlesSearchPanel({
     return () => window.removeEventListener("keydown", onKey);
   }, []);
 
-  // Warm the HF embedding pod as soon as the user lands on the page so the
-  // first real query doesn't pay the cold-start tail.
+  // Warm the HF embedding pod lazily — only once the user switches to semantic
+  // mode, so tag-only sessions don't pay for it.
   useEffect(() => {
+    if (mode !== "semantic" || embeddingWarmed.current) return;
+    embeddingWarmed.current = true;
     const controller = new AbortController();
     fetch("/api/news/semantic-search/warmup", {
       method: "POST",
@@ -88,16 +101,36 @@ export function ArticlesSearchPanel({
       /* fire-and-forget; warmup failure is silent */
     });
     return () => controller.abort();
-  }, []);
+  }, [mode]);
 
-  async function runSearch() {
-    const q = query.trim();
-    if (q.length < 3) {
+  useEffect(() => {
+    if (!seedTag || initialTagRan.current) return;
+    initialTagRan.current = true;
+    void runSearch("tags", { queryOverride: seedTag, tags: [normalizeSearchTag(seedTag)] });
+  }, [seedTag]);
+
+  async function runSearch(
+    searchMode: SearchMode = mode,
+    opts?: { queryOverride?: string; tags?: string[] },
+  ) {
+    const q = (opts?.queryOverride ?? query).trim();
+    const explicitTags = (opts?.tags ?? [])
+      .map(normalizeSearchTag)
+      .filter(Boolean);
+
+    if (searchMode === "semantic" && q.length < 3) {
       setHasSearched(true);
       setResults([]);
       setNote("Type at least 3 characters.");
       return;
     }
+    if (searchMode === "tags" && explicitTags.length === 0 && q.length < 2) {
+      setHasSearched(true);
+      setResults([]);
+      setNote("Enter a tag to search.");
+      return;
+    }
+
     setHasSearched(true);
     setLoading(true);
     setNote(null);
@@ -105,7 +138,13 @@ export function ArticlesSearchPanel({
       const r = await fetch("/api/news/semantic-search", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ query: q, limit: 20, lookback_days: 90 }),
+        body: JSON.stringify({
+          query: q.length >= 3 ? q : explicitTags.join(" ") || q,
+          tags: explicitTags.length > 0 ? explicitTags : undefined,
+          limit: 20,
+          lookback_days: 90,
+          mode: searchMode,
+        }),
       });
       const data = await r.json();
       if (!r.ok) throw new Error(data?.error ?? "Search failed");
@@ -127,6 +166,19 @@ export function ArticlesSearchPanel({
     inputRef.current?.focus();
   }
 
+  function switchMode(next: SearchMode) {
+    if (next === mode) return;
+    setMode(next);
+    const q = query.trim();
+    if (!hasSearched) return;
+    if (next === "semantic" && q.length < 3) return;
+    if (next === "tags" && q.length >= 2) {
+      void runSearch(next, { tags: [normalizeSearchTag(q)] });
+      return;
+    }
+    if (q.length >= 3) void runSearch(next);
+  }
+
   const dedupedResults = useMemo(() => {
     const seen = new Set<number>();
     return results.filter((r) => {
@@ -137,6 +189,15 @@ export function ArticlesSearchPanel({
   }, [results]);
 
   const resultCount = hasSearched ? dedupedResults.length : initialArticles.length;
+  const placeholder =
+    mode === "tags"
+      ? "Filter by tag — e.g. fed, rates, AAPL, earnings"
+      : "Ask the feed — e.g. tariff risk for semiconductor exporters";
+  const modeLabel = !hasSearched
+    ? "Latest Feed"
+    : mode === "tags"
+      ? "Tag Search"
+      : "Semantic Query";
 
   return (
     <div className="flex flex-col gap-6">
@@ -160,11 +221,18 @@ export function ArticlesSearchPanel({
             onKeyDown={(e) => {
               if (e.key === "Enter") {
                 e.preventDefault();
-                void runSearch();
+                const q = query.trim();
+                if (mode === "tags" && q.length >= 2) {
+                  void runSearch("tags", {
+                    tags: [normalizeSearchTag(q)],
+                  });
+                } else {
+                  void runSearch();
+                }
               }
             }}
-            placeholder="Ask the feed — e.g. tariff risk for semiconductor exporters"
-            aria-label="Semantic article search"
+            placeholder={placeholder}
+            aria-label="Article search"
             className="h-12 flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground/70"
           />
           {query && !loading && (
@@ -182,21 +250,26 @@ export function ArticlesSearchPanel({
             Enter
           </kbd>
         </div>
-        {note && (
-          <p className="mt-2 pl-4 text-xs text-muted-foreground">{note}</p>
-        )}
+        <div className="mt-2 flex flex-wrap items-center justify-between gap-2 pl-1">
+          <ModeToggle mode={mode} onChange={switchMode} />
+          {note && (
+            <p className="text-xs text-muted-foreground">{note}</p>
+          )}
+        </div>
       </div>
 
       {/* Mode strip */}
       <div className="flex items-center justify-between border-b border-border/60 pb-3">
         <div className="flex items-center gap-2 text-xs">
-          {hasSearched ? (
-            <Sparkles className="h-3 w-3 text-amber-500" />
-          ) : (
+          {!hasSearched ? (
             <Newspaper className="h-3 w-3 text-muted-foreground" />
+          ) : mode === "tags" ? (
+            <Hash className="h-3 w-3 text-amber-500" />
+          ) : (
+            <Sparkles className="h-3 w-3 text-amber-500" />
           )}
           <span className="font-mono uppercase tracking-[0.2em] text-muted-foreground">
-            {hasSearched ? "Semantic Query" : "Latest Feed"}
+            {modeLabel}
           </span>
           <span className="text-muted-foreground/40">/</span>
           <span className="text-muted-foreground">
@@ -221,10 +294,55 @@ export function ArticlesSearchPanel({
       {loading ? (
         <EditorialSkeleton mode={hasSearched ? "query" : "feed"} />
       ) : hasSearched ? (
-        <QueryResults results={dedupedResults} query={query} />
+        <QueryResults
+          results={dedupedResults}
+          query={query}
+          mode={mode}
+        />
       ) : (
         <EditorialFeed articles={initialArticles} />
       )}
+    </div>
+  );
+}
+
+function ModeToggle({
+  mode,
+  onChange,
+}: {
+  mode: SearchMode;
+  onChange: (next: SearchMode) => void;
+}) {
+  const base =
+    "inline-flex items-center gap-1.5 rounded-sm px-2 py-1 font-mono text-[10px] uppercase tracking-[0.18em] transition-colors";
+  const active = "bg-amber-500/15 text-amber-500";
+  const inactive = "text-muted-foreground hover:text-foreground";
+  return (
+    <div
+      role="tablist"
+      aria-label="Search mode"
+      className="inline-flex items-center gap-1 rounded-md border border-border/60 bg-background/40 p-0.5"
+    >
+      <button
+        role="tab"
+        aria-selected={mode === "tags"}
+        type="button"
+        onClick={() => onChange("tags")}
+        className={`${base} ${mode === "tags" ? active : inactive}`}
+      >
+        <Hash className="h-3 w-3" />
+        Tags
+      </button>
+      <button
+        role="tab"
+        aria-selected={mode === "semantic"}
+        type="button"
+        onClick={() => onChange("semantic")}
+        className={`${base} ${mode === "semantic" ? active : inactive}`}
+      >
+        <Sparkles className="h-3 w-3" />
+        Semantic
+      </button>
     </div>
   );
 }
@@ -413,15 +531,25 @@ function CompactList({ articles }: { articles: ArticleGridItem[] }) {
 function QueryResults({
   results,
   query,
+  mode,
 }: {
   results: SemanticSearchItem[];
   query: string;
+  mode: SearchMode;
 }) {
   if (results.length === 0) {
     return (
       <EmptyState
-        title={`No semantic matches for "${query.trim()}"`}
-        body="Try a broader phrase, fewer constraints, or a different timeframe. Lookback is 90 days."
+        title={
+          mode === "tags"
+            ? `No articles tagged "${query.trim()}"`
+            : `No semantic matches for "${query.trim()}"`
+        }
+        body={
+          mode === "tags"
+            ? "Try another tag or switch to semantic search. Lookback is 90 days."
+            : "Try a broader phrase or switch to tag search. Lookback is 90 days."
+        }
       />
     );
   }

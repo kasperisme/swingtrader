@@ -13,11 +13,7 @@ import re
 from dataclasses import dataclass
 from typing import Optional, Union
 
-from services.news.scoring.article_tags import (
-    filter_taxonomy_tags,
-    normalize_tag_slug,
-    taxonomy_prompt_block,
-)
+from services.news.scoring.article_tags import parse_article_tags, tag_prompt_guidance
 from services.news.scoring.dimensions import CLUSTERS, DIMENSION_MAP
 from shared.llm import chat as _chat, LLMError
 
@@ -759,37 +755,29 @@ async def _run_key_points_head(article_text: str) -> HeadOutput:
         )
 
 
-# ── Article tags head (search taxonomy) ───────────────────────────────────────
+# ── Article tags head (search slugs) ──────────────────────────────────────────
 
 _TAGS_SYSTEM = (
-    "You label financial news with search tags from a fixed taxonomy only. "
-    "Pick tags that would help someone find this article later. "
-    "Do not invent tags outside the list."
+    "You label financial news with search-index tags for fast refetch. "
+    "Tags are stored per article and matched when users search by topic later "
+    "(query tokens overlap stored slugs). "
+    "Follow the purpose and tagging rules exactly; invent new slugs when the story needs them."
 )
 
 _TAGS_USER = """\
-Choose 4–10 tags from this taxonomy that best describe the article's themes and events.
-Use taxonomy slugs exactly as written (lowercase).
-
-Taxonomy: {taxonomy}
-
-Rules:
-- Only tags from the taxonomy list above.
-- Prefer specific themes (e.g. rates, earnings, m_and_a) over vague labels.
-- Omit tags not clearly supported by the article.
-- Do not output ticker symbols here (they are indexed separately).
+{guidance}
 
 Article:
 {article}
 
 Return ONLY valid JSON:
 {{
-  "tags": ["fed", "rates", "banking"],
+  "tags": ["fed", "rate_cut", "banking"],
   "confidence": 0.85
 }}
 
-confidence = how well the taxonomy tags cover the article (0.0–1.0).
-Return {{"tags": [], "confidence": 0.0}} if nothing applies."""
+confidence = how well your tags would let someone refetch this article via topic search (0.0–1.0).
+Return {{"tags": [], "confidence": 0.0}} if nothing meaningful applies."""
 
 
 def _parse_tags_response(raw: str) -> tuple[dict[str, float], dict[str, str], float]:
@@ -799,9 +787,7 @@ def _parse_tags_response(raw: str) -> tuple[dict[str, float], dict[str, str], fl
         raise ValueError(f"Expected JSON object, got {type(data).__name__}")
 
     confidence = max(0.0, min(1.0, float(data.get("confidence", 0.0))))
-    slugs = filter_taxonomy_tags(
-        [normalize_tag_slug(t) for t in data.get("tags", []) if t]
-    )
+    slugs = parse_article_tags([t for t in data.get("tags", []) if t])
 
     scores = {slug: 1.0 for slug in slugs}
     reasoning = {slug: slug.replace("_", " ") for slug in slugs}
@@ -809,11 +795,11 @@ def _parse_tags_response(raw: str) -> tuple[dict[str, float], dict[str, str], fl
 
 
 async def _run_tags_head(article_text: str) -> HeadOutput:
-    """Run the article-tags head (controlled vocabulary for search)."""
+    """Run the article-tags head (free-form slugs for search)."""
     model = _default_model()
     timeout = _default_timeout()
     prompt = _TAGS_USER.format(
-        taxonomy=taxonomy_prompt_block(),
+        guidance=tag_prompt_guidance(),
         article=article_text[:5000],
     )
 

@@ -4,7 +4,11 @@ import json
 
 import pytest
 
-from services.news.scoring.article_tags import build_search_tags, filter_taxonomy_tags
+from services.news.scoring.article_tags import (
+    build_search_tags,
+    parse_article_tags,
+    tag_prompt_guidance,
+)
 from services.news.scoring.impact_scorer import (
     EXPECTED_HEAD_COUNT,
     SPECIAL_HEAD_CLUSTERS,
@@ -28,14 +32,30 @@ def test_normalize_head_clusters_aliases():
     ]
 
 
-def test_parse_tags_response_filters_taxonomy():
-    import json
-
-    raw = json.dumps({"tags": ["fed", "INVALID", "rates", "fed"], "confidence": 0.8})
+def test_parse_tags_response_keeps_custom_slugs():
+    raw = json.dumps({
+        "tags": ["fed", "Rate Cut", "nvidia_supply", "fed"],
+        "confidence": 0.8,
+    })
     scores, reasoning, confidence = _parse_tags_response(raw)
     assert confidence == 0.8
-    assert scores == {"fed": 1.0, "rates": 1.0}
-    assert "fed" in reasoning
+    assert scores == {
+        "fed": 1.0,
+        "rate_cut": 1.0,
+        "nvidia_supply": 1.0,
+    }
+    assert "rate_cut" in reasoning
+
+
+def test_parse_article_tags_normalizes():
+    assert parse_article_tags(["AI Chips", "ai_chips", ""]) == ["ai_chips"]
+
+
+def test_tag_prompt_guidance_describes_refetch_search():
+    text = tag_prompt_guidance()
+    assert "refetch" in text.lower()
+    assert "overlap" in text.lower()
+    assert "tickers" in text.lower()
 
 
 def test_build_search_tags_merges_tickers():
@@ -62,7 +82,7 @@ def test_build_search_tags_merges_tickers():
     tags = build_search_tags(heads)
     assert "fed" in tags and "rates" in tags and "AAPL" in tags
     assert "MSFT" not in tags
-    assert filter_taxonomy_tags(["oil", "not_a_tag"]) == ["oil"]
+    assert parse_article_tags(["oil", "opec_production"]) == ["oil", "opec_production"]
 
 
 def test_expected_head_count():

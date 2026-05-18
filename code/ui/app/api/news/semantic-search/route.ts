@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { embedQuery } from "@/lib/embeddings/query-embedding";
+import { normalizeSearchTag, tagsFromQuery } from "@/lib/news/search-tags";
 
 type SemanticSearchRow = {
   article_id: number;
@@ -15,23 +16,6 @@ type SemanticSearchRow = {
   similarity: number;
 };
 
-function slugifyToken(s: string): string {
-  return s
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "_")
-    .replace(/^_+|_+$/g, "")
-    .slice(0, 48);
-}
-
-/** Turn a short query into tag slugs for GIN overlap search (fed rates → fed, rates). */
-function tagTokensFromQuery(query: string): string[] {
-  const tokens = query
-    .split(/[\s,]+/)
-    .map(slugifyToken)
-    .filter((t) => t.length >= 2);
-  return [...new Set(tokens)];
-}
-
 export async function POST(req: Request) {
   const supabase = await createClient();
   const { data: claims, error: claimsError } = await supabase.auth.getClaims();
@@ -45,35 +29,53 @@ export async function POST(req: Request) {
   const lookbackDays = Math.max(1, Math.min(Number(body?.lookback_days ?? 30), 365));
   const streamFilter = body?.stream_filter ? String(body.stream_filter) : null;
   const lookbackHours = lookbackDays * 24;
+  const rawMode = body?.mode ? String(body.mode).toLowerCase() : "";
+  const mode: "tags" | "semantic" | "hybrid" =
+    rawMode === "tags" || rawMode === "semantic" ? rawMode : "hybrid";
 
-  if (!query || query.length < 3) {
+  const explicitTags = Array.isArray(body?.tags)
+    ? body.tags
+        .map((t: unknown) => normalizeSearchTag(String(t)))
+        .filter(Boolean)
+    : [];
+  const tagFilter =
+    explicitTags.length > 0 ? explicitTags : tagsFromQuery(query);
+
+  if (explicitTags.length === 0 && (!query || query.length < 3)) {
     return NextResponse.json({ results: [], note: "query_too_short" });
   }
 
-  const explicitTags = Array.isArray(body?.tags)
-    ? body.tags.map((t: unknown) => slugifyToken(String(t))).filter(Boolean)
-    : [];
-  const tagFilter =
-    explicitTags.length > 0 ? explicitTags : tagTokensFromQuery(query);
+  const searchQuery = query || tagFilter.join(" ");
 
   try {
-    // Fast path: indexed tag overlap (no embedding pod). Good for "fed rates", "#earnings", etc.
-    if (tagFilter.length > 0) {
+    // Tag path (forced or hybrid-first): indexed GIN overlap, no embedding pod.
+    if (mode !== "semantic" && tagFilter.length > 0) {
       const tagRpc = await supabase.schema("swingtrader").rpc("search_news_by_tags", {
         tag_filter: tagFilter,
         match_count: limit,
         lookback_hours: lookbackHours,
         stream_filter: streamFilter,
       });
-      if (!tagRpc.error && Array.isArray(tagRpc.data) && tagRpc.data.length > 0) {
+      if (tagRpc.error) {
+        console.error("[semantic-search] tag rpc failed:", tagRpc.error);
+      } else if (Array.isArray(tagRpc.data) && tagRpc.data.length > 0) {
         return NextResponse.json({
           results: tagRpc.data as SemanticSearchRow[],
           note: "tags",
+          tags: tagFilter,
+        });
+      }
+      if (mode === "tags") {
+        // Explicit tag mode: no fallback to semantic.
+        return NextResponse.json({
+          results: [],
+          note: "tags_no_match",
+          tags: tagFilter,
         });
       }
     }
 
-    const embedding = await embedQuery(query);
+    const embedding = await embedQuery(searchQuery);
     if (!embedding) {
       return NextResponse.json({ results: [], note: "embedding_failed" });
     }
