@@ -16,6 +16,7 @@ from postgrest.exceptions import APIError
 from supabase import Client
 
 from shared.db import get_supabase_client, _as_json, patch_news_article_image_if_missing
+from services.news.scoring.article_tags import build_search_tags
 from services.news.scoring.impact_scorer import score_article, aggregate_heads, top_dimensions, HeadOutput
 
 __all__ = ["ingest_article", "_sha256", "_normalize_url", "_check_existing", "_persist"]
@@ -107,6 +108,12 @@ def _check_existing(
 
     impact = _impact_for_article_id(client, article_id)
     return article_id, impact
+
+
+def sync_article_search_tags(client: Client, article_id: int, heads: list[HeadOutput]) -> None:
+    """Refresh ``news_articles.search_tags`` from scored heads (GIN-indexed search)."""
+    tags = build_search_tags(heads)
+    _tbl(client, "news_articles").update({"search_tags": tags}).eq("id", article_id).execute()
 
 
 def _delete_heads_and_vector(client: Client, article_id: int) -> None:
@@ -226,6 +233,8 @@ def _persist(
         "top_dimensions": top,
         "created_at": now,
     }).execute()
+
+    sync_article_search_tags(client, article_id, heads)
 
     return article_id
 

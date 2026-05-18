@@ -13,6 +13,11 @@ import re
 from dataclasses import dataclass
 from typing import Optional, Union
 
+from services.news.scoring.article_tags import (
+    filter_taxonomy_tags,
+    normalize_tag_slug,
+    taxonomy_prompt_block,
+)
 from services.news.scoring.dimensions import CLUSTERS, DIMENSION_MAP
 from shared.llm import chat as _chat, LLMError
 
@@ -77,9 +82,59 @@ SPECIAL_HEAD_CLUSTERS: frozenset[str] = frozenset({
     "TICKER_RELATIONSHIPS",
     "TICKER_SENTIMENT",
     "STORY_KEY_POINTS",
+    "ARTICLE_TAGS",
 })
 
 EXPECTED_HEAD_COUNT: int = len(CLUSTERS) + len(SPECIAL_HEAD_CLUSTERS)
+
+ALL_HEAD_CLUSTERS: tuple[str, ...] = tuple(CLUSTERS.keys()) + (
+    "TICKER_RELATIONSHIPS",
+    "TICKER_SENTIMENT",
+    "STORY_KEY_POINTS",
+    "ARTICLE_TAGS",
+)
+
+_HEAD_ALIASES: dict[str, str] = {
+    "key_points": "STORY_KEY_POINTS",
+    "keypoints": "STORY_KEY_POINTS",
+    "story_key_points": "STORY_KEY_POINTS",
+    "sentiment": "TICKER_SENTIMENT",
+    "ticker_sentiment": "TICKER_SENTIMENT",
+    "relationships": "TICKER_RELATIONSHIPS",
+    "ticker_relationships": "TICKER_RELATIONSHIPS",
+    "rels": "TICKER_RELATIONSHIPS",
+    "tags": "ARTICLE_TAGS",
+    "article_tags": "ARTICLE_TAGS",
+    "search_tags": "ARTICLE_TAGS",
+}
+
+
+def normalize_head_clusters(names: list[str]) -> list[str]:
+    """
+    Resolve CLI head names to canonical cluster ids.
+
+    Accepts aliases (e.g. ``key_points`` → ``STORY_KEY_POINTS``) and
+    dimension cluster keys (case-insensitive).
+    """
+    valid = set(ALL_HEAD_CLUSTERS)
+    out: list[str] = []
+    for raw in names:
+        token = str(raw).strip()
+        if not token:
+            continue
+        lowered = token.lower().replace("-", "_")
+        canonical = _HEAD_ALIASES.get(lowered, token.upper().replace("-", "_"))
+        if canonical not in valid:
+            raise ValueError(
+                f"Unknown head {raw!r}. Valid: {', '.join(sorted(valid))} "
+                f"(aliases: key_points, sentiment, relationships, …)"
+            )
+        if canonical not in out:
+            out.append(canonical)
+    if not out:
+        raise ValueError("At least one head cluster is required")
+    return out
+
 
 # Concurrency: Ollama defaults to 1 (single GPU); cloud backends allow higher defaults.
 _CONCURRENCY = 1
@@ -704,6 +759,100 @@ async def _run_key_points_head(article_text: str) -> HeadOutput:
         )
 
 
+# ── Article tags head (search taxonomy) ───────────────────────────────────────
+
+_TAGS_SYSTEM = (
+    "You label financial news with search tags from a fixed taxonomy only. "
+    "Pick tags that would help someone find this article later. "
+    "Do not invent tags outside the list."
+)
+
+_TAGS_USER = """\
+Choose 4–10 tags from this taxonomy that best describe the article's themes and events.
+Use taxonomy slugs exactly as written (lowercase).
+
+Taxonomy: {taxonomy}
+
+Rules:
+- Only tags from the taxonomy list above.
+- Prefer specific themes (e.g. rates, earnings, m_and_a) over vague labels.
+- Omit tags not clearly supported by the article.
+- Do not output ticker symbols here (they are indexed separately).
+
+Article:
+{article}
+
+Return ONLY valid JSON:
+{{
+  "tags": ["fed", "rates", "banking"],
+  "confidence": 0.85
+}}
+
+confidence = how well the taxonomy tags cover the article (0.0–1.0).
+Return {{"tags": [], "confidence": 0.0}} if nothing applies."""
+
+
+def _parse_tags_response(raw: str) -> tuple[dict[str, float], dict[str, str], float]:
+    cleaned = _extract_json_object(raw)
+    data = json.loads(cleaned)
+    if not isinstance(data, dict):
+        raise ValueError(f"Expected JSON object, got {type(data).__name__}")
+
+    confidence = max(0.0, min(1.0, float(data.get("confidence", 0.0))))
+    slugs = filter_taxonomy_tags(
+        [normalize_tag_slug(t) for t in data.get("tags", []) if t]
+    )
+
+    scores = {slug: 1.0 for slug in slugs}
+    reasoning = {slug: slug.replace("_", " ") for slug in slugs}
+    return scores, reasoning, confidence
+
+
+async def _run_tags_head(article_text: str) -> HeadOutput:
+    """Run the article-tags head (controlled vocabulary for search)."""
+    model = _default_model()
+    timeout = _default_timeout()
+    prompt = _TAGS_USER.format(
+        taxonomy=taxonomy_prompt_block(),
+        article=article_text[:5000],
+    )
+
+    async with _get_semaphore():
+        try:
+            raw, latency_ms = await _chat(
+                prompt=prompt, system=_TAGS_SYSTEM, model=model, timeout=timeout
+            )
+        except LLMError as exc:
+            logger.warning("[impact_scorer] ARTICLE_TAGS head failed: %s", exc)
+            return HeadOutput(
+                cluster="ARTICLE_TAGS", scores={}, reasoning={},
+                confidence=0.0, model=model, latency_ms=0,
+                raw_response="", error=str(exc),
+            )
+
+        try:
+            scores, reasoning, confidence = _parse_tags_response(raw)
+        except (json.JSONDecodeError, KeyError, ValueError) as exc:
+            logger.warning(
+                "[impact_scorer] ARTICLE_TAGS parse error: %s | raw=%r", exc, raw[:200]
+            )
+            return HeadOutput(
+                cluster="ARTICLE_TAGS", scores={}, reasoning={},
+                confidence=0.0, model=model, latency_ms=latency_ms,
+                raw_response=raw, error=f"parse error: {exc}",
+            )
+
+        return HeadOutput(
+            cluster="ARTICLE_TAGS",
+            scores=scores,
+            reasoning=reasoning,
+            confidence=confidence,
+            model=model,
+            latency_ms=latency_ms,
+            raw_response=raw,
+        )
+
+
 # ── Ticker extraction ─────────────────────────────────────────────────────────
 
 _EXTRACT_SYSTEM = (
@@ -749,29 +898,42 @@ async def extract_tickers(article_text: str) -> list[str]:
         return []
 
 
-async def score_article(article_text: str) -> list[HeadOutput]:
-    """
-    Run all cluster heads plus the ticker-relationship head in parallel.
+async def _run_cluster_head(article_text: str, cluster: str) -> HeadOutput:
+    """Dispatch a single head by canonical cluster name."""
+    if cluster in CLUSTERS:
+        return await _run_head(article_text, cluster)
+    if cluster == "TICKER_RELATIONSHIPS":
+        return await _run_relationship_head(article_text)
+    if cluster == "TICKER_SENTIMENT":
+        return await _run_sentiment_head(article_text)
+    if cluster == "STORY_KEY_POINTS":
+        return await _run_key_points_head(article_text)
+    if cluster == "ARTICLE_TAGS":
+        return await _run_tags_head(article_text)
+    raise ValueError(f"Unknown head cluster: {cluster}")
 
-    Always returns one HeadOutput per cluster (including TICKER_RELATIONSHIPS).
+
+async def score_article(
+    article_text: str,
+    clusters: Optional[list[str]] = None,
+) -> list[HeadOutput]:
+    """
+    Run LLM heads in parallel.
+
+    When ``clusters`` is None, runs every head (dimension clusters + special heads).
+    Otherwise runs only the requested canonical cluster names (see ``normalize_head_clusters``).
+
     Failed heads have error set and confidence=0.0 with empty scores.
     """
-    cluster_tasks = [_run_head(article_text, cluster) for cluster in CLUSTERS]
-    all_tasks = cluster_tasks + [
-        _run_relationship_head(article_text),
-        _run_sentiment_head(article_text),
-        _run_key_points_head(article_text),
-    ]
-    all_clusters = list(CLUSTERS.keys()) + [
-        "TICKER_RELATIONSHIPS",
-        "TICKER_SENTIMENT",
-        "STORY_KEY_POINTS",
-    ]
+    run_clusters = list(ALL_HEAD_CLUSTERS) if clusters is None else list(clusters)
 
-    results = await asyncio.gather(*all_tasks, return_exceptions=True)
+    results = await asyncio.gather(
+        *[_run_cluster_head(article_text, cluster) for cluster in run_clusters],
+        return_exceptions=True,
+    )
 
     outputs: list[HeadOutput] = []
-    for cluster, result in zip(all_clusters, results):
+    for cluster, result in zip(run_clusters, results):
         if isinstance(result, Exception):
             logger.error("[impact_scorer] unexpected exception in %s: %s", cluster, result)
             outputs.append(HeadOutput(

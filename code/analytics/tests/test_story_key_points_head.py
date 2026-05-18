@@ -4,19 +4,71 @@ import json
 
 import pytest
 
+from services.news.scoring.article_tags import build_search_tags, filter_taxonomy_tags
 from services.news.scoring.impact_scorer import (
     EXPECTED_HEAD_COUNT,
     SPECIAL_HEAD_CLUSTERS,
     _parse_key_points_response,
+    _parse_tags_response,
     aggregate_heads,
     HeadOutput,
+    normalize_head_clusters,
 )
 from services.news.scoring.dimensions import CLUSTERS
+
+
+def test_normalize_head_clusters_aliases():
+    assert normalize_head_clusters(["key_points", "sentiment"]) == [
+        "STORY_KEY_POINTS",
+        "TICKER_SENTIMENT",
+    ]
+    assert normalize_head_clusters(["tags", "MACRO_SENSITIVITY"]) == [
+        "ARTICLE_TAGS",
+        "MACRO_SENSITIVITY",
+    ]
+
+
+def test_parse_tags_response_filters_taxonomy():
+    import json
+
+    raw = json.dumps({"tags": ["fed", "INVALID", "rates", "fed"], "confidence": 0.8})
+    scores, reasoning, confidence = _parse_tags_response(raw)
+    assert confidence == 0.8
+    assert scores == {"fed": 1.0, "rates": 1.0}
+    assert "fed" in reasoning
+
+
+def test_build_search_tags_merges_tickers():
+    heads = [
+        HeadOutput(
+            cluster="ARTICLE_TAGS",
+            scores={"fed": 1.0, "rates": 1.0},
+            reasoning={},
+            confidence=0.9,
+            model="t",
+            latency_ms=1,
+            raw_response="",
+        ),
+        HeadOutput(
+            cluster="TICKER_SENTIMENT",
+            scores={"AAPL": 0.5, "MSFT": 0.0},
+            reasoning={},
+            confidence=0.9,
+            model="t",
+            latency_ms=1,
+            raw_response="",
+        ),
+    ]
+    tags = build_search_tags(heads)
+    assert "fed" in tags and "rates" in tags and "AAPL" in tags
+    assert "MSFT" not in tags
+    assert filter_taxonomy_tags(["oil", "not_a_tag"]) == ["oil"]
 
 
 def test_expected_head_count():
     assert len(CLUSTERS) == 9
     assert "STORY_KEY_POINTS" in SPECIAL_HEAD_CLUSTERS
+    assert "ARTICLE_TAGS" in SPECIAL_HEAD_CLUSTERS
     assert EXPECTED_HEAD_COUNT == len(CLUSTERS) + len(SPECIAL_HEAD_CLUSTERS)
 
 

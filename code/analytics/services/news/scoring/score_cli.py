@@ -39,6 +39,10 @@ Usage:
     python -m news_impact.score_news_cli --x-news --x-accounts realDonaldTrump elonmusk
     python -m news_impact.score_news_cli --x-news --tickers DJT --x-accounts realDonaldTrump
 
+    # Re-score only specific heads (merge into existing rows; CLI only)
+    python -m news_impact.score_news_cli --text "..." --heads STORY_KEY_POINTS
+    python -m news_impact.score_news_cli --rescore --heads key_points sentiment --rescore-limit 50
+
     # Re-score all articles with no non-empty impact heads (e.g. failed due to LLM errors)
     python -m news_impact.score_news_cli --rescore
     python -m news_impact.score_news_cli --rescore --rescore-concurrency 10 --rescore-batch-size 100
@@ -92,12 +96,16 @@ from services.news.scoring.impact_scorer import (
     top_dimensions,
     HeadOutput,
     extract_tickers,
+    normalize_head_clusters,
     set_news_impact_backend,
 )
 from services.news.scoring.news_ingester import (
     _check_existing,
     _delete_heads_and_vector,
+    _processing_status,
+    _tbl,
     ingest_article,
+    sync_article_search_tags,
     _normalize_url,
     _persist,
     _sha256,
@@ -115,6 +123,182 @@ from shared.db import (
     patch_news_article_image_if_missing,
     save_article_tickers,
 )
+
+
+def _merge_heads(
+    existing: list[HeadOutput],
+    updated: list[HeadOutput],
+) -> list[HeadOutput]:
+    """Replace matching clusters in ``existing`` with ``updated`` rows."""
+    updated_map = {h.cluster: h for h in updated}
+    merged: list[HeadOutput] = []
+    seen: set[str] = set()
+    for head in existing:
+        if head.cluster in updated_map:
+            merged.append(updated_map[head.cluster])
+            seen.add(head.cluster)
+        else:
+            merged.append(head)
+    for head in updated:
+        if head.cluster not in seen:
+            merged.append(head)
+    return merged
+
+
+def _delete_heads_for_clusters(client, article_id: int, clusters: list[str]) -> None:
+    if not clusters:
+        return
+    (
+        _tbl(client, "news_impact_heads")
+        .delete()
+        .eq("article_id", article_id)
+        .in_("cluster", clusters)
+        .execute()
+    )
+
+
+def _insert_head_rows(client, article_id: int, heads: list[HeadOutput]) -> None:
+    if not heads:
+        return
+    now = datetime.now(timezone.utc).isoformat()
+    head_rows = [
+        {
+            "article_id": article_id,
+            "cluster": head.cluster,
+            "scores_json": head.scores,
+            "reasoning_json": head.reasoning,
+            "confidence": head.confidence,
+            "model": head.model,
+            "latency_ms": head.latency_ms,
+            "created_at": now,
+        }
+        for head in heads
+    ]
+    _tbl(client, "news_impact_heads").insert(head_rows).execute()
+
+
+def _replace_impact_vector(client, article_id: int, impact: dict[str, float]) -> None:
+    now = datetime.now(timezone.utc).isoformat()
+    _tbl(client, "news_impact_vectors").delete().eq("article_id", article_id).execute()
+    top = top_dimensions(impact, n=5)
+    _tbl(client, "news_impact_vectors").insert({
+        "article_id": article_id,
+        "impact_json": impact,
+        "top_dimensions": top,
+        "created_at": now,
+    }).execute()
+
+
+def _persist_partial_head_update(
+    client,
+    article_id: int,
+    heads_new: list[HeadOutput],
+    merged_heads: list[HeadOutput],
+    impact: dict[str, float],
+    clusters_updated: list[str],
+) -> None:
+    """Merge selective head results into an existing article."""
+    _delete_heads_for_clusters(client, article_id, clusters_updated)
+    _insert_head_rows(client, article_id, heads_new)
+    _replace_impact_vector(client, article_id, impact)
+    _tbl(client, "news_articles").update({
+        "processing_status": _processing_status(merged_heads),
+    }).eq("id", article_id).execute()
+    sync_article_search_tags(client, article_id, merged_heads)
+
+
+def _resolve_heads_filter(raw: list[str] | None) -> list[str] | None:
+    if not raw:
+        return None
+    return normalize_head_clusters(raw)
+
+
+async def _score_merge_and_persist(
+    client,
+    *,
+    body: str,
+    article_hash: str,
+    existing: tuple[int, dict] | None,
+    heads_filter: list[str] | None,
+    refresh: bool,
+    ticker_alias_map: dict[str, str],
+    company_alias_map: dict[str, str],
+    persist_kwargs: dict,
+) -> tuple[int, list[HeadOutput], dict[str, float], list[str], bool]:
+    """
+    Score (optional subset of heads), merge with DB when needed, persist.
+
+    Returns (article_id, heads_for_display, impact, extracted_tickers, skip_llm_cache_hit).
+    """
+    skip_llm = existing is not None and not refresh and heads_filter is None
+    if skip_llm:
+        assert existing is not None
+        article_id, impact = existing
+        return (
+            article_id,
+            _heads_from_db(article_id),
+            impact,
+            load_article_tickers(client, article_id, source="extracted"),
+            True,
+        )
+
+    heads_new, extracted_tickers = await _score_article_heads(
+        body,
+        heads_filter=heads_filter,
+        ticker_alias_map=ticker_alias_map,
+        company_alias_map=company_alias_map,
+    )
+
+    if existing is not None and heads_filter is not None:
+        article_id = existing[0]
+        merged = _merge_heads(_heads_from_db(article_id), heads_new)
+        impact = aggregate_heads(merged)
+        _persist_partial_head_update(
+            client, article_id, heads_new, merged, impact, heads_filter
+        )
+        return article_id, merged, impact, extracted_tickers, False
+
+    heads = heads_new
+    impact = aggregate_heads(heads)
+    article_id = -1
+
+    pk = dict(persist_kwargs)
+    ex_id = existing[0] if existing else pk.pop("existing_article_id", None)
+    if existing is not None and refresh and heads_filter is None:
+        _delete_heads_and_vector(client, existing[0])
+        article_id = _persist(
+            client,
+            body,
+            article_hash,
+            pk["url"],
+            pk["title"],
+            pk["source"],
+            heads,
+            impact,
+            existing_article_id=existing[0],
+            published_at=pk.get("published_at"),
+            publisher=pk.get("publisher"),
+            image_url=pk.get("image_url"),
+            article_stream=pk.get("article_stream"),
+        )
+    else:
+        article_id = _persist(
+            client,
+            body,
+            article_hash,
+            pk["url"],
+            pk["title"],
+            pk["source"],
+            heads,
+            impact,
+            existing_article_id=ex_id,
+            published_at=pk.get("published_at"),
+            publisher=pk.get("publisher"),
+            image_url=pk.get("image_url"),
+            article_stream=pk.get("article_stream"),
+        )
+
+    return article_id, heads, impact, extracted_tickers, False
 
 
 def _heads_from_db(article_id: int) -> list[HeadOutput]:
@@ -240,6 +424,36 @@ def _canonicalize_ticker_token(
     if mapped_name:
         return mapped_name
     return ""
+
+
+async def _score_article_heads(
+    body: str,
+    *,
+    heads_filter: list[str] | None,
+    ticker_alias_map: dict[str, str],
+    company_alias_map: dict[str, str],
+) -> tuple[list[HeadOutput], list[str]]:
+    """Score article (optionally subset of heads) and canonicalize ticker outputs."""
+    if heads_filter is None:
+        heads, extracted = await asyncio.gather(
+            score_article(body),
+            extract_tickers(body),
+        )
+    else:
+        heads = await score_article(body, clusters=heads_filter)
+        extracted = []
+    _normalize_relationship_and_sentiment_heads(
+        heads, ticker_alias_map, company_alias_map
+    )
+    extracted = [
+        t
+        for t in (
+            _canonicalize_ticker_token(t, ticker_alias_map, company_alias_map)
+            for t in extracted
+        )
+        if t
+    ]
+    return heads, list(dict.fromkeys(extracted))
 
 
 def _normalize_relationship_and_sentiment_heads(
@@ -637,6 +851,14 @@ def _print_results(
                 f"  [{colour}]{ticker:<6}  {sign}{score:.2f}[/{colour}]  [dim]{reason}[/dim]"
             )
 
+    # Search tags
+    tags_head = next((h for h in heads if h.cluster == "ARTICLE_TAGS"), None)
+    if tags_head and tags_head.scores:
+        console.print(f"\n[bold]Search tags:[/bold]")
+        console.print(
+            f"  [dim]{', '.join(sorted(tags_head.scores.keys()))}[/dim]"
+        )
+
     # Story key points
     kp_head = next((h for h in heads if h.cluster == "STORY_KEY_POINTS"), None)
     if kp_head and kp_head.scores:
@@ -869,6 +1091,17 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="Re-score even if article is already in DB, overwriting stored heads and vector",
     )
     parser.add_argument(
+        "--heads",
+        nargs="+",
+        metavar="CLUSTER",
+        default=None,
+        help=(
+            "Run only these heads and merge into the DB (CLI only). "
+            "Use canonical names (e.g. STORY_KEY_POINTS, MACRO_SENSITIVITY) or "
+            "aliases: key_points, sentiment, relationships. Default: all heads."
+        ),
+    )
+    parser.add_argument(
         "--news-impact-backend",
         dest="news_impact_backend",
         choices=["ollama", "anthropic", "do_agent"],
@@ -980,6 +1213,14 @@ async def _main(args: argparse.Namespace) -> None:
         await _process_rescore(args)
         return
 
+    try:
+        heads_filter = _resolve_heads_filter(args.heads)
+    except ValueError as exc:
+        console.print(f"[red]{exc}[/red]")
+        sys.exit(1)
+    if heads_filter:
+        console.print(f"[dim]Heads filter:[/dim] {', '.join(heads_filter)}")
+
     # 1. Load article text
     if args.url:
         console.print(f"[dim]Fetching {args.url}…[/dim]")
@@ -1005,22 +1246,12 @@ async def _main(args: argparse.Namespace) -> None:
 
     if args.no_persist:
         console.print("[dim]Scoring article (no DB persist)…[/dim]")
-        heads, extracted_tickers = await asyncio.gather(
-            score_article(article_text),
-            extract_tickers(article_text),
+        heads, extracted_tickers = await _score_article_heads(
+            article_text,
+            heads_filter=heads_filter,
+            ticker_alias_map=ticker_alias_map,
+            company_alias_map=company_alias_map,
         )
-        _normalize_relationship_and_sentiment_heads(
-            heads, ticker_alias_map, company_alias_map
-        )
-        extracted_tickers = [
-            t
-            for t in (
-                _canonicalize_ticker_token(t, ticker_alias_map, company_alias_map)
-                for t in extracted_tickers
-            )
-            if t
-        ]
-        extracted_tickers = list(dict.fromkeys(extracted_tickers))
         impact = aggregate_heads(heads)
     else:
         # Check for existing article before showing status message
@@ -1028,46 +1259,81 @@ async def _main(args: argparse.Namespace) -> None:
         client = get_supabase_client()
         existing = _check_existing(client, article_hash, url=args.url)
 
-        if existing is not None and not args.refresh:
+        if existing is not None and not args.refresh and heads_filter is None:
             article_id, impact = existing
             console.print(
                 f"[dim]Article already in DB (id={article_id}) — using cached impact vector.[/dim]"
             )
-            # Load previously extracted tickers from DB (avoid extra LLM call)
             extracted_tickers = load_article_tickers(
                 client, article_id, source="extracted"
             )
-            # Reconstruct heads from DB for display
             heads = _heads_from_db(article_id)
-        else:
-            action = "Re-scoring" if (existing and args.refresh) else "Scoring"
-            console.print(f"[dim]{action} article…[/dim]")
-            heads, extracted_tickers = await asyncio.gather(
-                score_article(article_text),
-                extract_tickers(article_text),
+        elif existing is not None and heads_filter is not None:
+            article_id = existing[0]
+            console.print(
+                f"[dim]Updating {len(heads_filter)} head(s) on article id={article_id}…[/dim]"
             )
-            _normalize_relationship_and_sentiment_heads(
-                heads, ticker_alias_map, company_alias_map
+            heads_new, extracted_tickers = await _score_article_heads(
+                article_text,
+                heads_filter=heads_filter,
+                ticker_alias_map=ticker_alias_map,
+                company_alias_map=company_alias_map,
             )
-            extracted_tickers = [
-                t
-                for t in (
-                    _canonicalize_ticker_token(t, ticker_alias_map, company_alias_map)
-                    for t in extracted_tickers
-                )
-                if t
-            ]
-            extracted_tickers = list(dict.fromkeys(extracted_tickers))
-            impact = aggregate_heads(heads)
+            merged = _merge_heads(_heads_from_db(article_id), heads_new)
+            impact = aggregate_heads(merged)
+            _persist_partial_head_update(
+                client, article_id, heads_new, merged, impact, heads_filter
+            )
+            heads = merged
+        elif existing is not None and args.refresh:
+            console.print("[dim]Re-scoring article (all heads)…[/dim]")
             article_id, impact = await ingest_article(
                 body=article_text,
                 url=args.url,
                 title=args.title,
                 source=args.source,
-                refresh=args.refresh,
+                refresh=True,
                 published_at=args.published_at,
                 article_stream=_manual_stream_from_args(args),
             )
+            heads = _heads_from_db(article_id) if article_id >= 0 else []
+            extracted_tickers = (
+                load_article_tickers(client, article_id, source="extracted")
+                if article_id >= 0
+                else []
+            )
+        else:
+            console.print("[dim]Scoring article…[/dim]")
+            heads, extracted_tickers = await _score_article_heads(
+                article_text,
+                heads_filter=heads_filter,
+                ticker_alias_map=ticker_alias_map,
+                company_alias_map=company_alias_map,
+            )
+            impact = aggregate_heads(heads)
+            if heads_filter is not None:
+                article_id = _persist(
+                    client,
+                    article_text,
+                    article_hash,
+                    args.url,
+                    args.title,
+                    args.source,
+                    heads,
+                    impact,
+                    published_at=args.published_at,
+                    article_stream=_manual_stream_from_args(args),
+                )
+            else:
+                article_id, impact = await ingest_article(
+                    body=article_text,
+                    url=args.url,
+                    title=args.title,
+                    source=args.source,
+                    refresh=False,
+                    published_at=args.published_at,
+                    article_stream=_manual_stream_from_args(args),
+                )
             if article_id >= 0:
                 try:
                     enqueue_article_embedding_job(article_id)
@@ -1284,40 +1550,53 @@ async def _process_one_fmp_article(
     existing = (
         None if client is None else _check_existing(client, article_hash, url=url)
     )
-    from_cache = existing is not None and not args.refresh
+    heads_filter = _resolve_heads_filter(getattr(args, "heads", None))
 
     article_id = -1
-    heads: list[HeadOutput]
-    extracted_tickers: list[str]
-    impact: dict[str, float]
+    heads: list[HeadOutput] = []
+    extracted_tickers: list[str] = []
+    impact: dict[str, float] = {}
+    from_cache = False
 
-    if from_cache:
-        assert existing is not None
-        article_id, impact = existing
-        patch_news_article_image_if_missing(client, article_id, image_url)
-        heads = _heads_from_db(article_id)
-        extracted_tickers = load_article_tickers(client, article_id, source="extracted")
-        console.print(
-            f"  [dim]already in DB (id={article_id}) — skipped LLM scoring[/dim]",
+    if client is None:
+        heads, extracted_tickers = await _score_article_heads(
+            body,
+            heads_filter=heads_filter,
+            ticker_alias_map=ticker_alias_map,
+            company_alias_map=company_alias_map,
         )
-    else:
-        heads, extracted_tickers = await asyncio.gather(
-            score_article(body),
-            extract_tickers(body),
-        )
-        _normalize_relationship_and_sentiment_heads(
-            heads, ticker_alias_map, company_alias_map
-        )
-        extracted_tickers = [
-            t
-            for t in (
-                _canonicalize_ticker_token(t, ticker_alias_map, company_alias_map)
-                for t in extracted_tickers
-            )
-            if t
-        ]
-        extracted_tickers = list(dict.fromkeys(extracted_tickers))
         impact = aggregate_heads(heads)
+    else:
+        article_id, heads, impact, extracted_tickers, from_cache = (
+            await _score_merge_and_persist(
+                client,
+                body=body,
+                article_hash=article_hash,
+                existing=existing,
+                heads_filter=heads_filter,
+                refresh=args.refresh,
+                ticker_alias_map=ticker_alias_map,
+                company_alias_map=company_alias_map,
+                persist_kwargs={
+                    "url": url,
+                    "title": title,
+                    "source": source,
+                    "published_at": published_at,
+                    "publisher": publisher,
+                    "image_url": image_url,
+                    "article_stream": article_stream,
+                },
+            )
+        )
+        if from_cache:
+            patch_news_article_image_if_missing(client, article_id, image_url)
+            console.print(
+                f"  [dim]already in DB (id={article_id}) — skipped LLM scoring[/dim]",
+            )
+        elif heads_filter:
+            console.print(
+                f"  [dim]updated {len(heads_filter)} head(s) on id={article_id}[/dim]",
+            )
 
     symbol_canonical = (
         _canonicalize_ticker_token(symbol, ticker_alias_map, company_alias_map)
@@ -1326,40 +1605,6 @@ async def _process_one_fmp_article(
     )
     if symbol_canonical and symbol_canonical not in extracted_tickers:
         extracted_tickers = [symbol_canonical] + extracted_tickers
-
-    if client is not None and not from_cache:
-        if existing is not None and args.refresh:
-            _delete_heads_and_vector(client, existing[0])
-            article_id = _persist(
-                client,
-                body,
-                article_hash,
-                url,
-                title,
-                source,
-                heads,
-                impact,
-                existing_article_id=existing[0],
-                published_at=published_at,
-                publisher=publisher,
-                image_url=image_url,
-                article_stream=article_stream,
-            )
-        else:
-            article_id = _persist(
-                client,
-                body,
-                article_hash,
-                url,
-                title,
-                source,
-                heads,
-                impact,
-                published_at=published_at,
-                publisher=publisher,
-                image_url=image_url,
-                article_stream=article_stream,
-            )
 
     if article_id >= 0 and client is not None:
         try:
@@ -1482,39 +1727,51 @@ async def _process_one_x_post(
     existing = (
         None if client is None else _check_existing(client, article_hash, url=url)
     )
-    from_cache = existing is not None and not args.refresh
+    heads_filter = _resolve_heads_filter(getattr(args, "heads", None))
 
     article_id = -1
-    heads: list[HeadOutput]
-    extracted_tickers: list[str]
-    impact: dict[str, float]
+    heads: list[HeadOutput] = []
+    extracted_tickers: list[str] = []
+    impact: dict[str, float] = {}
+    from_cache = False
 
-    if from_cache:
-        assert existing is not None
-        article_id, impact = existing
-        heads = _heads_from_db(article_id)
-        extracted_tickers = load_article_tickers(client, article_id, source="extracted")
-        console.print(
-            f"  [dim]already in DB (id={article_id}) — skipped LLM scoring[/dim]"
+    if client is None:
+        heads, extracted_tickers = await _score_article_heads(
+            text,
+            heads_filter=heads_filter,
+            ticker_alias_map=ticker_alias_map,
+            company_alias_map=company_alias_map,
         )
-    else:
-        heads, extracted_tickers = await asyncio.gather(
-            score_article(text),
-            extract_tickers(text),
-        )
-        _normalize_relationship_and_sentiment_heads(
-            heads, ticker_alias_map, company_alias_map
-        )
-        extracted_tickers = [
-            t
-            for t in (
-                _canonicalize_ticker_token(t, ticker_alias_map, company_alias_map)
-                for t in extracted_tickers
-            )
-            if t
-        ]
-        extracted_tickers = list(dict.fromkeys(extracted_tickers))
         impact = aggregate_heads(heads)
+    else:
+        article_id, heads, impact, extracted_tickers, from_cache = (
+            await _score_merge_and_persist(
+                client,
+                body=text,
+                article_hash=article_hash,
+                existing=existing,
+                heads_filter=heads_filter,
+                refresh=args.refresh,
+                ticker_alias_map=ticker_alias_map,
+                company_alias_map=company_alias_map,
+                persist_kwargs={
+                    "url": url,
+                    "title": title,
+                    "source": "x.com",
+                    "published_at": published_at,
+                    "publisher": publisher,
+                    "article_stream": "x_post",
+                },
+            )
+        )
+        if from_cache:
+            console.print(
+                f"  [dim]already in DB (id={article_id}) — skipped LLM scoring[/dim]"
+            )
+        elif heads_filter:
+            console.print(
+                f"  [dim]updated {len(heads_filter)} head(s) on id={article_id}[/dim]",
+            )
 
     symbol_canonical = (
         _canonicalize_ticker_token(symbol, ticker_alias_map, company_alias_map)
@@ -1523,38 +1780,6 @@ async def _process_one_x_post(
     )
     if symbol_canonical and symbol_canonical not in extracted_tickers:
         extracted_tickers = [symbol_canonical] + extracted_tickers
-
-    if client is not None and not from_cache:
-        if existing is not None and args.refresh:
-            _delete_heads_and_vector(client, existing[0])
-            article_id = _persist(
-                client,
-                text,
-                article_hash,
-                url,
-                title,
-                "x.com",
-                heads,
-                impact,
-                existing_article_id=existing[0],
-                published_at=published_at,
-                publisher=publisher,
-                article_stream="x_post",
-            )
-        else:
-            article_id = _persist(
-                client,
-                text,
-                article_hash,
-                url,
-                title,
-                "x.com",
-                heads,
-                impact,
-                published_at=published_at,
-                publisher=publisher,
-                article_stream="x_post",
-            )
 
     if article_id >= 0 and client is not None:
         try:
@@ -1625,6 +1850,14 @@ async def _process_one_x_post(
 
 async def _process_x_news(args: argparse.Namespace) -> None:
     """Fetch recent X posts for the given tickers/accounts and run each through the pipeline."""
+    try:
+        heads_filter = _resolve_heads_filter(getattr(args, "heads", None))
+    except ValueError as exc:
+        console.print(f"[red]{exc}[/red]")
+        return
+    if heads_filter:
+        console.print(f"[dim]Heads filter:[/dim] {', '.join(heads_filter)}")
+
     tickers = [t.upper() for t in args.tickers] if args.tickers else []
     x_accounts = getattr(args, "x_accounts", None)
     x_limit = min(getattr(args, "x_limit", 50), 100)
@@ -1701,6 +1934,14 @@ async def _process_x_news(args: argparse.Namespace) -> None:
 
 async def _process_fmp_news(args: argparse.Namespace) -> None:
     """Fetch articles from FMP and run each through the full pipeline."""
+    try:
+        heads_filter = _resolve_heads_filter(getattr(args, "heads", None))
+    except ValueError as exc:
+        console.print(f"[red]{exc}[/red]")
+        return
+    if heads_filter:
+        console.print(f"[dim]Heads filter:[/dim] {', '.join(heads_filter)}")
+
     source_stream = _source_stream_for_args(args)
     dry_skip = getattr(args, "dry_skip", True)
 
@@ -2169,6 +2410,7 @@ async def _rescore_one_article(
     index: int,
     total: int,
     no_persist: bool = False,
+    heads_filter: list[str] | None = None,
 ) -> bool:
     """Score a single article and persist results. Returns True on success."""
     article_id = row["id"]
@@ -2183,6 +2425,7 @@ async def _rescore_one_article(
     needs_rescore = status in ("partial", "failed")
     if (
         not needs_rescore
+        and heads_filter is None
         and client is not None
         and _rescore_has_non_empty_heads(client, article_id)
     ):
@@ -2194,27 +2437,23 @@ async def _rescore_one_article(
             f"[bold cyan][{index}/{total}][/bold cyan] id={article_id}  {title[:65]}"
         )
         try:
-            heads, extracted_tickers = await asyncio.gather(
-                score_article(body),
-                extract_tickers(body),
+            heads_new, extracted_tickers = await _score_article_heads(
+                body,
+                heads_filter=heads_filter,
+                ticker_alias_map=ticker_alias_map,
+                company_alias_map=company_alias_map,
             )
         except Exception as exc:
             console.print(f"  [red]id={article_id} scoring failed: {exc}[/red]")
             return False
 
-    _normalize_relationship_and_sentiment_heads(
-        heads, ticker_alias_map, company_alias_map
-    )
-    extracted_tickers = [
-        t
-        for t in (
-            _canonicalize_ticker_token(t, ticker_alias_map, company_alias_map)
-            for t in extracted_tickers
-        )
-        if t
-    ]
-    extracted_tickers = list(dict.fromkeys(extracted_tickers))
-    impact = aggregate_heads(heads)
+    if heads_filter is not None:
+        merged = _merge_heads(_heads_from_db(article_id), heads_new)
+        heads = merged
+        impact = aggregate_heads(merged)
+    else:
+        heads = heads_new
+        impact = aggregate_heads(heads)
 
     top = top_dimensions(impact, n=3)
     top_str = "  ".join(f"{d} {s:+.2f}" for d, s in top) if top else "no signals"
@@ -2234,21 +2473,26 @@ async def _rescore_one_article(
         }
     ).eq("id", article_id).execute()
 
-    _delete_heads_and_vector(client, article_id)
-    _persist(
-        client,
-        body,
-        clean_hash,
-        row.get("url"),
-        title,
-        row.get("url"),
-        heads,
-        impact,
-        existing_article_id=article_id,
-        published_at=row.get("published_at"),
-        publisher=row.get("publisher"),
-        article_stream=row.get("article_stream"),
-    )
+    if heads_filter is not None:
+        _persist_partial_head_update(
+            client, article_id, heads_new, heads, impact, heads_filter
+        )
+    else:
+        _delete_heads_and_vector(client, article_id)
+        _persist(
+            client,
+            body,
+            clean_hash,
+            row.get("url"),
+            title,
+            row.get("url"),
+            heads,
+            impact,
+            existing_article_id=article_id,
+            published_at=row.get("published_at"),
+            publisher=row.get("publisher"),
+            article_stream=row.get("article_stream"),
+        )
 
     if extracted_tickers:
         save_article_tickers(client, article_id, extracted_tickers, source="extracted")
@@ -2258,6 +2502,17 @@ async def _rescore_one_article(
 
 async def _process_rescore(args: argparse.Namespace) -> None:
     """Re-score articles that are unscored, partial, or failed."""
+    try:
+        heads_filter = _resolve_heads_filter(getattr(args, "heads", None))
+    except ValueError as exc:
+        console.print(f"[red]{exc}[/red]")
+        return
+    if heads_filter:
+        console.print(
+            f"[dim]Rescore heads filter:[/dim] {', '.join(heads_filter)} "
+            "(merges into existing rows)"
+        )
+
     client = get_supabase_client()
     unscored_ids = _rescore_fetch_unscored_ids(client)
     incomplete_ids = _rescore_fetch_incomplete_ids(client)
@@ -2328,6 +2583,7 @@ async def _process_rescore(args: argparse.Namespace) -> None:
                     index=batch_start + i + 1,
                     total=total,
                     no_persist=args.no_persist,
+                    heads_filter=heads_filter,
                 )
             )
 

@@ -545,6 +545,17 @@ function AnalyticsRegion({
       >
         <section>
           <Eyebrow
+            label="Story key points"
+            meta={`${storyKeyPoints.length} claims · impact-rated`}
+          />
+          <h2 className="mb-5 text-base font-semibold tracking-tight text-foreground/90">
+            What matters in this story
+          </h2>
+          <KeyPointsList rows={storyKeyPoints} />
+        </section>
+
+        <section>
+          <Eyebrow
             label="Impact vectors"
             meta={`${topDimensions.length} dimensions · ${clusterProfile.length} clusters`}
           />
@@ -593,17 +604,6 @@ function AnalyticsRegion({
               <StockLedger rows={losers} tone="neg" />
             </div>
           </div>
-        </section>
-
-        <section>
-          <Eyebrow
-            label="Story key points"
-            meta={`${storyKeyPoints.length} claims · impact-rated`}
-          />
-          <h2 className="mb-5 text-base font-semibold tracking-tight text-foreground/90">
-            What matters in this story
-          </h2>
-          <KeyPointsList rows={storyKeyPoints} />
         </section>
 
         <section>
