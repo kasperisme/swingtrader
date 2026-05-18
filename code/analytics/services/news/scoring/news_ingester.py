@@ -1,7 +1,7 @@
 """
 News article ingestion pipeline.
 
-Full flow: article text → 8 LLM heads → aggregate → persist to Supabase.
+Full flow: article text → LLM heads (dimension clusters + special heads) → aggregate → persist to Supabase.
 Deduplicates by normalized URL when present, otherwise sha256(body).
 """
 
@@ -243,7 +243,7 @@ async def ingest_article(
     article_stream: Optional[str] = None,
 ) -> tuple[int, dict[str, float]]:
     """
-    Full pipeline: article → 8 LLM heads → aggregate → persist → return
+    Full pipeline: article → LLM heads → aggregate → persist → return
     (article_id, impact_vector).
 
     Deduplicates by normalized URL when present, otherwise sha256(body).

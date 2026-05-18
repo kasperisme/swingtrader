@@ -540,7 +540,14 @@ export function ScreeningsUI({
   const bulkScopeRef = useRef<{
     filteredSymbols: string[];
     filtersActive: boolean;
-  }>({ filteredSymbols: [], filtersActive: false });
+    chartGranularity: ChartGranularity;
+    chartDateRange: { from: string; to: string } | undefined;
+  }>({
+    filteredSymbols: [],
+    filtersActive: false,
+    chartGranularity: "1day",
+    chartDateRange: undefined,
+  });
 
   const handleBulkAnalyze = useCallback(async (userPrompt: string) => {
     if (selectedRunId == null || bulkStarting) return;
@@ -552,10 +559,18 @@ export function ScreeningsUI({
       // the rows the user is looking at — not every ticker in the scan run.
       // Pass null (no subset) when no filters are active so the legacy
       // "analyse everything" path stays the default for unfiltered views.
-      const { filtersActive, filteredSymbols: scopeSymbols } =
-        bulkScopeRef.current;
+      const {
+        filtersActive,
+        filteredSymbols: scopeSymbols,
+        chartGranularity,
+        chartDateRange,
+      } = bulkScopeRef.current;
       const subset = filtersActive ? scopeSymbols : null;
-      const res = await bulkAnalyzeScanRun(selectedRunId, userPrompt, subset);
+      const res = await bulkAnalyzeScanRun(selectedRunId, userPrompt, subset, {
+        granularity: chartGranularity,
+        dateFrom: chartDateRange?.from ?? null,
+        dateTo: chartDateRange?.to ?? null,
+      });
       if (res.ok) {
         setBulkJob(res.data);
       } else {
@@ -1113,8 +1128,10 @@ export function ScreeningsUI({
     bulkScopeRef.current = {
       filteredSymbols,
       filtersActive: countScreeningsFilterRules(filters) > 0,
+      chartGranularity,
+      chartDateRange,
     };
-  }, [filteredSymbols, filters]);
+  }, [filteredSymbols, filters, chartGranularity, chartDateRange]);
 
   /** Symbols visible in the deep-dive ticker list (sidebar + mobile sheet).
    * Dismissed symbols are hidden by default; user can toggle them back in. */
@@ -1194,6 +1211,8 @@ export function ScreeningsUI({
           onStart={handleBulkAnalyze}
           tickerCount={filteredSymbols.length}
           activeFilterCount={countScreeningsFilterRules(filters)}
+          chartGranularity={chartGranularity}
+          chartDateRange={chartDateRange}
           disabled={selectedRunId == null || rows.length === 0}
         />
       );

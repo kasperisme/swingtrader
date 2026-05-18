@@ -13,8 +13,10 @@ from typing import Any
 
 SYSTEM = (
     "You are a swing-trading technical analyst. You receive a compact "
-    "snapshot of a single ticker's last 6 months of daily price action "
-    "(closes, SMAs, volume) and return a short, structured assessment.\n\n"
+    "snapshot of a single ticker's recent OHLCV at the chart granularity "
+    "the user selected (1hour, 4hour, 1day, or 1week — see snapshot.granularity "
+    "and snapshot.bar_label). The snapshot includes closes, SMAs, and volume "
+    "summaries. Return a short, structured assessment.\n\n"
     "Always reply with a single JSON object — no prose, no code fences, no "
     "commentary outside the JSON. Schema:\n"
     '{\n'
@@ -55,6 +57,24 @@ SYSTEM = (
 DEFAULT_USER_INSTRUCTION = "Run a technical analysis."
 
 
+def with_trading_strategy(system_prompt: str, trading_strategy: str | None) -> str:
+    """Mirror chart AI: prepend saved profile strategy to the system prompt."""
+    text = (trading_strategy or "").strip()
+    if not text:
+        return system_prompt
+    return (
+        "## User's Trading Strategy\n"
+        f"{text}\n"
+        "Always align your analysis and recommendations to this strategy. "
+        "Only highlight setups, signals, and risks that are relevant to it.\n\n"
+        f"{system_prompt}"
+    )
+
+
+def build_system(trading_strategy: str | None = None) -> str:
+    return with_trading_strategy(SYSTEM, trading_strategy)
+
+
 def build_user_prompt(
     ticker: str,
     snapshot: dict[str, Any],
@@ -64,7 +84,9 @@ def build_user_prompt(
     return (
         f"Ticker: {ticker}\n\n"
         f"User request: {instruction}\n\n"
-        f"Snapshot (last 6 months of daily bars):\n"
+        f"Chart granularity: {snapshot.get('granularity', '1day')} "
+        f"({snapshot.get('bar_label', 'daily')} bars)\n\n"
+        f"Snapshot:\n"
         f"{json.dumps(snapshot, separators=(',', ':'))}\n\n"
         "Apply the user request when shaping your assessment. Return the JSON object only."
     )
@@ -133,3 +155,143 @@ def _parse_entry(raw: Any) -> dict[str, Any] | None:
             continue
         out[key] = round(f, 4)
     return out
+
+
+BULK_SUMMARY_SYSTEM = (
+    "You summarize a completed bulk technical-analysis run across many tickers "
+    "in a swing-trading screener. The user sees this in the 'All tickers' chat tab.\n\n"
+    "Reply with markdown only (no JSON). Structure:\n"
+    "1. First line: **Status:** Done | Error (match the run outcome)\n"
+    "2. One short paragraph: high-level read of the screening — themes, how many "
+    "names look actionable vs watch-only vs dismiss, anything surprising.\n"
+    "3. Bullet list: counts by row status (pipeline / watchlist / active / dismissed) "
+    "and note failed ticker count if any.\n"
+    "4. One sentence on what to do next (e.g. review pipeline names, widen filters).\n"
+    "Stay concise. Align with the user's trading strategy when provided."
+)
+
+
+def build_bulk_summary_prompt(
+    *,
+    job_status: str,
+    total: int,
+    succeeded: int,
+    failed: int,
+    status_counts: dict[str, int],
+    user_prompt: str | None,
+    chart_granularity: str,
+    chart_date_from: str | None,
+    chart_date_to: str | None,
+    error_message: str | None = None,
+) -> str:
+    return (
+        f"Run outcome: {job_status}\n"
+        f"Tickers: total={total}, analyzed_ok={succeeded}, failed={failed}\n"
+        f"Status breakdown: {json.dumps(status_counts, separators=(',', ':'))}\n"
+        f"Chart granularity: {chart_granularity}\n"
+        f"Date range: {chart_date_from or 'default'} to {chart_date_to or 'default'}\n"
+        f"User bulk prompt: {(user_prompt or '').strip() or DEFAULT_USER_INSTRUCTION}\n"
+        f"Error detail: {error_message or 'none'}\n"
+    )
+
+
+def format_bulk_summary_fallback(
+    *,
+    job_status: str,
+    total: int,
+    succeeded: int,
+    failed: int,
+    status_counts: dict[str, int],
+    chart_granularity: str,
+    error_message: str | None = None,
+) -> str:
+    label = "Done" if job_status == "done" else "Error"
+    lines = [
+        f"**Status:** {label}",
+        "",
+        (
+            f"Analyzed **{succeeded}** of **{total}** tickers at **{chart_granularity}** granularity."
+            + (f" **{failed}** could not be completed." if failed else "")
+            + (f" {error_message}" if error_message else "")
+        ),
+        "",
+        "**Row status counts:**",
+    ]
+    for key in ("pipeline", "watchlist", "active", "dismissed"):
+        n = status_counts.get(key, 0)
+        if n:
+            lines.append(f"- {key}: {n}")
+    if not any(status_counts.get(k, 0) for k in ("pipeline", "watchlist", "active", "dismissed")):
+        lines.append("- (no status rows recorded)")
+    lines.extend(["", "Open individual tickers in the list for full per-symbol write-ups."])
+    return "\n".join(lines)
+
+
+BULK_SUMMARY_SYSTEM = (
+    "You summarize a completed bulk technical-analysis run across many tickers "
+    "in a swing-trading screener. The user sees this in the 'All tickers' chat tab.\n\n"
+    "Reply with markdown only (no JSON). Structure:\n"
+    "1. First line: **Status:** Done | Error (match the run outcome)\n"
+    "2. One short paragraph: high-level read of the screening — themes, how many "
+    "names look actionable vs watch-only vs dismiss, anything surprising.\n"
+    "3. Bullet list: counts by row status (pipeline / watchlist / active / dismissed) "
+    "and note failed ticker count if any.\n"
+    "4. One sentence on what to do next (e.g. review pipeline names, widen filters).\n"
+    "Stay concise. Align with the user's trading strategy when provided."
+)
+
+
+def build_bulk_summary_prompt(
+    *,
+    job_status: str,
+    total: int,
+    succeeded: int,
+    failed: int,
+    status_counts: dict[str, int],
+    user_prompt: str | None,
+    chart_granularity: str,
+    chart_date_from: str | None,
+    chart_date_to: str | None,
+    error_message: str | None = None,
+) -> str:
+    return (
+        f"Run outcome: {job_status}\n"
+        f"Tickers: total={total}, analyzed_ok={succeeded}, failed={failed}\n"
+        f"Status breakdown: {json.dumps(status_counts, separators=(',', ':'))}\n"
+        f"Chart granularity: {chart_granularity}\n"
+        f"Date range: {chart_date_from or 'default'} to {chart_date_to or 'default'}\n"
+        f"User bulk prompt: {(user_prompt or '').strip() or DEFAULT_USER_INSTRUCTION}\n"
+        f"Error detail: {error_message or 'none'}\n"
+    )
+
+
+def format_bulk_summary_fallback(
+    *,
+    job_status: str,
+    total: int,
+    succeeded: int,
+    failed: int,
+    status_counts: dict[str, int],
+    chart_granularity: str,
+    error_message: str | None = None,
+) -> str:
+    label = "Done" if job_status == "done" else "Error"
+    lines = [
+        f"**Status:** {label}",
+        "",
+        (
+            f"Analyzed **{succeeded}** of **{total}** tickers at **{chart_granularity}** granularity."
+            + (f" **{failed}** could not be completed." if failed else "")
+            + (f" {error_message}" if error_message else "")
+        ),
+        "",
+        "**Row status counts:**",
+    ]
+    for key in ("pipeline", "watchlist", "active", "dismissed"):
+        n = status_counts.get(key, 0)
+        if n:
+            lines.append(f"- {key}: {n}")
+    if not any(status_counts.get(k, 0) for k in ("pipeline", "watchlist", "active", "dismissed")):
+        lines.append("- (no status rows recorded)")
+    lines.extend(["", "Open individual tickers in the list for full per-symbol write-ups."])
+    return "\n".join(lines)

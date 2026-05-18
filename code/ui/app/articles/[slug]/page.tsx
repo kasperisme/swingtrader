@@ -414,6 +414,41 @@ function TickerSentimentList({
   );
 }
 
+function KeyPointsList({
+  rows,
+}: {
+  rows: Array<{ id: string; impact: number; text: string }>;
+}) {
+  if (rows.length === 0) {
+    return (
+      <p className="text-sm text-muted-foreground/80">
+        No key-points head found for this article.
+      </p>
+    );
+  }
+  return (
+    <ol className="divide-y divide-border/40">
+      {rows.map((row, idx) => (
+        <li key={row.id} className="py-3 first:pt-0 last:pb-0">
+          <div className="flex items-start gap-3">
+            <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full border border-border/60 bg-muted/30 font-mono text-[10px] text-muted-foreground">
+              {idx + 1}
+            </span>
+            <div className="min-w-0 flex-1">
+              <div className="flex items-baseline justify-between gap-3">
+                <p className="text-sm leading-relaxed text-foreground/90">
+                  {row.text}
+                </p>
+                <ScoreText value={row.impact} digits={2} />
+              </div>
+            </div>
+          </div>
+        </li>
+      ))}
+    </ol>
+  );
+}
+
 function TickerRelationshipList({
   rows,
 }: {
@@ -472,6 +507,7 @@ function AnalyticsRegion({
   topDimensions,
   winners,
   losers,
+  storyKeyPoints,
   tickerSentiment,
   tickerRelationships,
   locked,
@@ -486,6 +522,7 @@ function AnalyticsRegion({
   topDimensions: Array<{ key: string; score: number }>;
   winners: RankedStock[];
   losers: RankedStock[];
+  storyKeyPoints: Array<{ id: string; impact: number; text: string }>;
   tickerSentiment: Array<{ ticker: string; score: number; reason: string }>;
   tickerRelationships: Array<{
     from: string;
@@ -556,6 +593,17 @@ function AnalyticsRegion({
               <StockLedger rows={losers} tone="neg" />
             </div>
           </div>
+        </section>
+
+        <section>
+          <Eyebrow
+            label="Story key points"
+            meta={`${storyKeyPoints.length} claims · impact-rated`}
+          />
+          <h2 className="mb-5 text-base font-semibold tracking-tight text-foreground/90">
+            What matters in this story
+          </h2>
+          <KeyPointsList rows={storyKeyPoints} />
         </section>
 
         <section>
@@ -670,10 +718,23 @@ async function ArticleData({ params }: { params: Promise<{ slug?: string }> }) {
   const clusterProfile = computeClusterProfile(impact);
   const { winners, losers } = await fetchRankedStocks(impact);
   const heads = (headsRes.data ?? []) as HeadRow[];
+  const keyPointsHead = heads.find((h) => h.cluster === "STORY_KEY_POINTS");
   const sentimentHead = heads.find((h) => h.cluster === "TICKER_SENTIMENT");
   const relationshipHead = heads.find(
     (h) => h.cluster === "TICKER_RELATIONSHIPS",
   );
+
+  const keyPointScores = asNumberMap(keyPointsHead?.scores_json ?? {});
+  const keyPointReasoning = asStringMap(keyPointsHead?.reasoning_json ?? {});
+  const storyKeyPoints = Object.entries(keyPointScores)
+    .map(([id, impact]) => ({
+      id,
+      impact,
+      text: keyPointReasoning[id] ?? "",
+    }))
+    .filter((r) => r.text)
+    .sort((a, b) => Math.abs(b.impact) - Math.abs(a.impact))
+    .slice(0, 10);
 
   const sentimentScores = asNumberMap(sentimentHead?.scores_json ?? {});
   const sentimentReasoning = asStringMap(sentimentHead?.reasoning_json ?? {});
@@ -777,6 +838,7 @@ async function ArticleData({ params }: { params: Promise<{ slug?: string }> }) {
           topDimensions={topDimensions}
           winners={winners}
           losers={losers}
+          storyKeyPoints={storyKeyPoints}
           tickerSentiment={tickerSentiment}
           tickerRelationships={tickerRelationships}
           locked={!isAuthed}

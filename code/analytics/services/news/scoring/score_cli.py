@@ -86,6 +86,7 @@ from services.news.company.company_vector import build_vectors, CompanyVector
 from services.news.company.fmp_fetcher import FMPFetcher
 from services.news.scoring.x_fetcher import XFetcher
 from services.news.scoring.impact_scorer import (
+    EXPECTED_HEAD_COUNT,
     score_article,
     aggregate_heads,
     top_dimensions,
@@ -177,8 +178,8 @@ _TICKER_TOKEN_RE = re.compile(r"^[A-Z0-9]{1,8}(?:\.[A-Z]{1,2})?$")
 _FMP_NEWS_MAX_LIMIT = 250
 # Rescore: rows fetched per PostgREST page when scanning the DB
 _RESCORE_PAGE_SIZE = 1000
-# Number of head clusters — used to detect articles where all heads returned empty scores
-_RESCORE_HEAD_COUNT = 11
+# Used to detect articles where all heads returned empty scores
+_RESCORE_HEAD_COUNT = EXPECTED_HEAD_COUNT
 # Sparse-fill (--sparse-fill): FMP returns date-filtered news sorted newest-first; total
 # pages unknown. Randomize start page (inclusive) for uniform coverage; then paginate
 # forward with no fixed page ceiling until a short/empty response or m_new is reached.
@@ -634,6 +635,20 @@ def _print_results(
             reason = sent_head.reasoning.get(ticker, "")
             console.print(
                 f"  [{colour}]{ticker:<6}  {sign}{score:.2f}[/{colour}]  [dim]{reason}[/dim]"
+            )
+
+    # Story key points
+    kp_head = next((h for h in heads if h.cluster == "STORY_KEY_POINTS"), None)
+    if kp_head and kp_head.scores:
+        console.print(f"\n[bold]Key points:[/bold]")
+        for kp_id, impact in sorted(
+            kp_head.scores.items(), key=lambda x: abs(x[1]), reverse=True
+        ):
+            colour = "green" if impact > 0 else ("red" if impact < 0 else "dim")
+            sign = "+" if impact > 0 else ""
+            note = kp_head.reasoning.get(kp_id, "")
+            console.print(
+                f"  [{colour}]{sign}{impact:.2f}[/{colour}]  [dim]{note}[/dim]"
             )
 
     # Ticker relationships
@@ -2048,7 +2063,7 @@ def _rescore_fetch_unscored_ids(client) -> list[int]:
     Equivalent to:
       SELECT article_id FROM news_impact_heads
       WHERE scores_json = '{}'
-      GROUP BY article_id HAVING count(*) = 11
+      GROUP BY article_id HAVING count(*) = <EXPECTED_HEAD_COUNT>
     PostgREST groups server-side via count() — one row per article_id.
     Covers articles that predate the processing_status column (NULL status).
     """

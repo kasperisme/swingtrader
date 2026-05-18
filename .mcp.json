@@ -3,6 +3,13 @@
     "supabase": {
       "type": "http",
       "url": "https://mcp.supabase.com/mcp"
+    },
+    "carousel": {
+      "type": "stdio",
+      "command": "/Users/kkr/projects/swingtrader/code/analytics/.venv/bin/python3",
+      "args": [
+        "/Users/kkr/projects/swingtrader/code/analytics/scripts/carousel_mcp_server.py"
+      ]
     }
   }
 }

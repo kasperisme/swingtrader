@@ -2,7 +2,20 @@
 
 import { useEffect, useRef, useState } from "react";
 import { Loader2, Sparkles, AlertCircle, Send, CheckCircle2 } from "lucide-react";
-import type { BulkAnalysisJob } from "@/app/actions/screenings";
+import ReactMarkdown from "react-markdown";
+import type {
+  BulkAnalysisJob,
+  BulkChartGranularity,
+} from "@/app/actions/screenings";
+import type { ChartAiChatMessage } from "@/app/actions/chart-workspace";
+import type { ChartGranularity } from "@/components/chart-date-range-picker";
+
+const GRANULARITY_LABELS: Record<BulkChartGranularity, string> = {
+  "1hour": "1H",
+  "4hour": "4H",
+  "1day": "1D",
+  "1week": "1W",
+};
 
 const BULK_DEFAULT_PROMPT =
   "Run a swing-trading technical analysis. Highlight setup quality, key levels, and any risks.";
@@ -20,6 +33,10 @@ interface BulkAiPanelProps {
    * time and stored on the job's ticker_subset).
    */
   activeFilterCount?: number;
+  /** Current chart bar size from the Charts tab (snapshotted at submit). */
+  chartGranularity?: ChartGranularity;
+  /** Custom range from the chart picker, when set. */
+  chartDateRange?: { from: string; to: string };
   /** Disabled when no run is selected (no rows to analyze). */
   disabled?: boolean;
 }
@@ -31,16 +48,26 @@ export function BulkAiPanel({
   onStart,
   tickerCount,
   activeFilterCount = 0,
+  chartGranularity = "1day",
+  chartDateRange,
   disabled = false,
 }: BulkAiPanelProps) {
   const inFlight = job?.status === "queued" || job?.status === "running";
   const [draft, setDraft] = useState("");
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const threadEndRef = useRef<HTMLDivElement | null>(null);
+
+  const messages = job?.bulk_chat_messages ?? [];
+  const hasAssistant = messages.some((m) => m.role === "assistant");
 
   // Seed the draft from the previous job's prompt when entering this view.
   useEffect(() => {
     setDraft((prev) => prev || job?.user_prompt || "");
   }, [job?.user_prompt]);
+
+  useEffect(() => {
+    threadEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messages.length, job?.status, job?.completed_tickers]);
 
   const canSubmit = !disabled && !starting && !inFlight;
 
@@ -52,44 +79,53 @@ export function BulkAiPanel({
 
   return (
     <div className="flex flex-col h-full min-h-0">
-      <div className="flex-1 min-h-0 overflow-y-auto px-3 py-3 space-y-3">
+      <div className="shrink-0 px-3 pt-3 pb-2 space-y-2 border-b border-border/60">
         <StatusBanner
           job={job}
           starting={starting}
           tickerCount={tickerCount}
           activeFilterCount={activeFilterCount}
+          chartGranularity={chartGranularity}
+          chartDateRange={chartDateRange}
         />
-
         {error ? (
           <div className="flex items-start gap-2 rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-[12px] text-destructive">
             <AlertCircle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
             <span className="min-w-0 break-words">{error}</span>
           </div>
         ) : null}
+      </div>
 
-        {job?.user_prompt ? (
-          <div className="rounded-md border border-border bg-muted/20 px-3 py-2">
-            <div className="text-[10px] uppercase tracking-widest text-muted-foreground/70 mb-1">
-              Last prompt
-            </div>
-            <p className="text-[12px] text-foreground/80 whitespace-pre-wrap break-words leading-relaxed">
-              {job.user_prompt}
-            </p>
+      <div className="flex-1 min-h-0 overflow-y-auto px-3 py-3">
+        {messages.length > 0 ? (
+          <div className="flex flex-col gap-3">
+            {messages.map((m, i) => (
+              <BulkChatBubble key={i} message={m} />
+            ))}
+            {inFlight ? (
+              <div className="flex items-center gap-2 text-[11px] text-muted-foreground/60 pl-1">
+                <Loader2 className="w-3 h-3 animate-spin" />
+                Analyzing tickers…
+              </div>
+            ) : null}
+            {(job?.status === "done" || job?.status === "error") && !hasAssistant ? (
+              <div className="flex items-center gap-2 text-[11px] text-muted-foreground/60 pl-1">
+                <Loader2 className="w-3 h-3 animate-spin" />
+                Writing summary…
+              </div>
+            ) : null}
+            <div ref={threadEndRef} />
           </div>
-        ) : null}
-
-        {!job && !starting && !error ? (
-          <p className="text-[12px] text-muted-foreground leading-relaxed">
-            Run the same prompt across{" "}
-            {activeFilterCount > 0 ? "the filtered" : "every"} ticker in this
-            screening. Each ticker gets its own per-ticker analysis written
-            back to its row, so you can review them in the regular chat
-            afterwards.
-            {activeFilterCount > 0
-              ? " Active filters are snapshotted at submit time — adding or removing filters after will not change a running job."
-              : null}
-          </p>
-        ) : null}
+        ) : (
+          <EmptyHint
+            tickerCount={tickerCount}
+            activeFilterCount={activeFilterCount}
+            chartGranularity={chartGranularity}
+            chartDateRange={chartDateRange}
+            starting={starting}
+            error={error}
+          />
+        )}
       </div>
 
       <div className="border-t border-border px-3 py-2 space-y-2 shrink-0 bg-background">
@@ -134,6 +170,81 @@ export function BulkAiPanel({
   );
 }
 
+function BulkChatBubble({ message }: { message: ChartAiChatMessage }) {
+  if (message.role === "user") {
+    return (
+      <div className="flex justify-end">
+        <div className="bg-zinc-800/70 border border-zinc-700/40 text-foreground/85 rounded-2xl rounded-br-sm px-3.5 py-2 max-w-[88%] text-[12px] leading-relaxed whitespace-pre-wrap break-words">
+          {message.content}
+        </div>
+      </div>
+    );
+  }
+  return (
+    <div className="flex flex-col items-start gap-1 max-w-[95%]">
+      {message.source === "bulk_analysis" ? (
+        <span className="text-[10px] uppercase tracking-widest text-muted-foreground/50">
+          Bulk run summary
+        </span>
+      ) : null}
+      <BulkSummaryMarkdown content={message.content} />
+    </div>
+  );
+}
+
+function BulkSummaryMarkdown({ content }: { content: string }) {
+  return (
+    <div className="text-[12px] leading-relaxed text-foreground/85 [&_p]:mb-2 [&_p:last-child]:mb-0 [&_ul]:mb-2 [&_ul]:pl-4 [&_ul]:list-disc [&_ol]:mb-2 [&_ol]:pl-4 [&_ol]:list-decimal [&_li]:mb-0.5 [&_strong]:font-semibold [&_strong]:text-foreground">
+      <ReactMarkdown
+        components={{
+          p: ({ children }) => <p>{children}</p>,
+        }}
+      >
+        {content}
+      </ReactMarkdown>
+    </div>
+  );
+}
+
+function EmptyHint({
+  tickerCount,
+  activeFilterCount,
+  chartGranularity,
+  chartDateRange,
+  starting,
+  error,
+}: {
+  tickerCount: number;
+  activeFilterCount: number;
+  chartGranularity: ChartGranularity;
+  chartDateRange?: { from: string; to: string };
+  starting: boolean;
+  error: string | null;
+}) {
+  if (starting || error) return null;
+  return (
+    <p className="text-[12px] text-muted-foreground leading-relaxed">
+      Run the same prompt across{" "}
+      {activeFilterCount > 0 ? "the filtered" : "every"} ticker in this
+      screening. When the run finishes, a summary appears here; each ticker also
+      gets its own analysis in the per-ticker chat.
+      {activeFilterCount > 0
+        ? " Active filters are snapshotted at submit time."
+        : null}{" "}
+      Uses chart bar size{" "}
+      <span className="font-semibold text-foreground">
+        {GRANULARITY_LABELS[chartGranularity]}
+      </span>
+      {chartDateRange?.from && chartDateRange?.to
+        ? ` (${chartDateRange.from} → ${chartDateRange.to})`
+        : ""}
+      . Ready for{" "}
+      <span className="font-semibold text-foreground">{tickerCount}</span>{" "}
+      {tickerCount === 1 ? "ticker" : "tickers"}.
+    </p>
+  );
+}
+
 function startLabel(
   job: BulkAnalysisJob | null,
   starting: boolean,
@@ -151,12 +262,21 @@ function StatusBanner({
   starting,
   tickerCount,
   activeFilterCount,
+  chartGranularity,
+  chartDateRange,
 }: {
   job: BulkAnalysisJob | null;
   starting: boolean;
   tickerCount: number;
   activeFilterCount: number;
+  chartGranularity: ChartGranularity;
+  chartDateRange?: { from: string; to: string };
 }) {
+  const granLabel = GRANULARITY_LABELS[chartGranularity];
+  const rangeHint =
+    chartDateRange?.from && chartDateRange?.to
+      ? ` · ${chartDateRange.from}–${chartDateRange.to}`
+      : "";
   if (starting) {
     return (
       <Banner tone="info" icon={<Loader2 className="w-3.5 h-3.5 animate-spin" />}>
@@ -180,11 +300,12 @@ function StatusBanner({
               <span className="font-semibold text-foreground">
                 {activeFilterCount}
               </span>{" "}
-              active {activeFilterCount === 1 ? "filter" : "filters"}.
+              active {activeFilterCount === 1 ? "filter" : "filters"}
             </>
-          ) : (
-            "."
-          )}
+          ) : null}
+          {" "}at{" "}
+          <span className="font-semibold text-foreground">{granLabel}</span>
+          {rangeHint}.
         </span>
       </Banner>
     );
@@ -195,7 +316,12 @@ function StatusBanner({
       <Banner tone="info" icon={<Loader2 className="w-3.5 h-3.5 animate-spin" />}>
         <span>
           Queued — worker picks up within a minute (
-          {job.total_tickers || tickerCount} tickers).
+          {job.total_tickers || tickerCount} tickers,{" "}
+          {GRANULARITY_LABELS[job.chart_granularity ?? chartGranularity]}
+          {job.chart_date_from && job.chart_date_to
+            ? ` ${job.chart_date_from}–${job.chart_date_to}`
+            : ""}
+          ).
         </span>
       </Banner>
     );

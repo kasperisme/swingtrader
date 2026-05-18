@@ -1,6 +1,6 @@
 """
-Impact scorer — runs 8 parallel LLM heads (one per cluster) and aggregates
-scores into a single impact vector.
+Impact scorer — runs parallel LLM heads (one per dimension cluster plus
+special heads) and aggregates dimension scores into a single impact vector.
 
 Each head is independent; a failure in one never blocks the others.
 """
@@ -71,6 +71,15 @@ def _default_timeout() -> float:
 
 
 logger = logging.getLogger(__name__)
+
+# Special heads stored in news_impact_heads but excluded from aggregate_heads().
+SPECIAL_HEAD_CLUSTERS: frozenset[str] = frozenset({
+    "TICKER_RELATIONSHIPS",
+    "TICKER_SENTIMENT",
+    "STORY_KEY_POINTS",
+})
+
+EXPECTED_HEAD_COUNT: int = len(CLUSTERS) + len(SPECIAL_HEAD_CLUSTERS)
 
 # Concurrency: Ollama defaults to 1 (single GPU); cloud backends allow higher defaults.
 _CONCURRENCY = 1
@@ -573,6 +582,128 @@ async def _run_sentiment_head(article_text: str) -> HeadOutput:
     )
 
 
+# ── Story key points head ─────────────────────────────────────────────────────
+
+_KEY_POINTS_SYSTEM = (
+    "You are a financial news analyst. "
+    "Decompose articles into distinct, factual key points and rate each point's "
+    "potential market impact — how much the point would move prices or risk appetite "
+    "if investors fully digested it. Focus on material claims, not background color."
+)
+
+_KEY_POINTS_USER = """\
+Extract the story's key points and rate the market impact of each.
+
+For each point:
+- **point**: one clear sentence (the claim or development)
+- **impact**: -1.0 (strongly negative for risk assets / affected names) to +1.0 (strongly positive)
+- **rationale**: one sentence explaining why that impact score
+
+Rules:
+- Extract 3–7 points. Prefer fewer, higher-signal points over laundry lists.
+- Each point must be directly supported by the article text.
+- impact measures how much THIS POINT matters for markets, not whether the writing tone is bullish.
+- Omit trivial background and duplicate claims.
+- Order points by |impact| descending (most market-moving first).
+- Use stable ids: kp_1, kp_2, …
+
+Article:
+{article}
+
+Return ONLY valid JSON:
+{{
+  "key_points": [
+    {{
+      "id": "kp_1",
+      "point": "...",
+      "impact": 0.75,
+      "rationale": "..."
+    }}
+  ],
+  "confidence": 0.9
+}}
+
+confidence = how clearly the article supports scored key points (0.0–1.0).
+Return {{"key_points": [], "confidence": 0.0}} if the article has no analyzable claims."""
+
+
+def _parse_key_points_response(raw: str) -> tuple[dict[str, float], dict[str, str], float]:
+    """
+    Parse the story key-points head.
+    Returns (scores, reasoning, confidence) where scores = {kp_id: impact_float}
+    and reasoning = {kp_id: "point — rationale"}.
+    """
+    cleaned = _extract_json_object(raw)
+    data = json.loads(cleaned)
+    if not isinstance(data, dict):
+        raise ValueError(f"Expected JSON object, got {type(data).__name__}")
+
+    confidence = float(data.get("confidence", 0.0))
+    confidence = max(0.0, min(1.0, confidence))
+
+    scores: dict[str, float] = {}
+    reasoning: dict[str, str] = {}
+
+    for i, item in enumerate(data.get("key_points", [])):
+        if not isinstance(item, dict):
+            continue
+        kp_id = str(item.get("id", "")).strip() or f"kp_{i + 1}"
+        point = str(item.get("point", "")).strip()
+        rationale = str(item.get("rationale", "")).strip()
+        try:
+            impact = max(-1.0, min(1.0, float(item.get("impact", 0.0))))
+        except (TypeError, ValueError):
+            impact = 0.0
+        if not point:
+            continue
+        scores[kp_id] = impact
+        reasoning[kp_id] = point if not rationale else f"{point} — {rationale}"
+
+    return scores, reasoning, confidence
+
+
+async def _run_key_points_head(article_text: str) -> HeadOutput:
+    """Run the per-story key-points head."""
+    model = _default_model()
+    timeout = _default_timeout()
+    prompt = _KEY_POINTS_USER.format(article=article_text[:6000])
+
+    async with _get_semaphore():
+        try:
+            raw, latency_ms = await _chat(
+                prompt=prompt, system=_KEY_POINTS_SYSTEM, model=model, timeout=timeout
+            )
+        except LLMError as exc:
+            logger.warning("[impact_scorer] STORY_KEY_POINTS head failed: %s", exc)
+            return HeadOutput(
+                cluster="STORY_KEY_POINTS", scores={}, reasoning={},
+                confidence=0.0, model=model, latency_ms=0,
+                raw_response="", error=str(exc),
+            )
+
+        try:
+            scores, reasoning, confidence = _parse_key_points_response(raw)
+        except (json.JSONDecodeError, KeyError, ValueError) as exc:
+            logger.warning(
+                "[impact_scorer] STORY_KEY_POINTS parse error: %s | raw=%r", exc, raw[:200]
+            )
+            return HeadOutput(
+                cluster="STORY_KEY_POINTS", scores={}, reasoning={},
+                confidence=0.0, model=model, latency_ms=latency_ms,
+                raw_response=raw, error=f"parse error: {exc}",
+            )
+
+        return HeadOutput(
+            cluster="STORY_KEY_POINTS",
+            scores=scores,
+            reasoning=reasoning,
+            confidence=confidence,
+            model=model,
+            latency_ms=latency_ms,
+            raw_response=raw,
+        )
+
+
 # ── Ticker extraction ─────────────────────────────────────────────────────────
 
 _EXTRACT_SYSTEM = (
@@ -626,8 +757,16 @@ async def score_article(article_text: str) -> list[HeadOutput]:
     Failed heads have error set and confidence=0.0 with empty scores.
     """
     cluster_tasks = [_run_head(article_text, cluster) for cluster in CLUSTERS]
-    all_tasks = cluster_tasks + [_run_relationship_head(article_text), _run_sentiment_head(article_text)]
-    all_clusters = list(CLUSTERS.keys()) + ["TICKER_RELATIONSHIPS", "TICKER_SENTIMENT"]
+    all_tasks = cluster_tasks + [
+        _run_relationship_head(article_text),
+        _run_sentiment_head(article_text),
+        _run_key_points_head(article_text),
+    ]
+    all_clusters = list(CLUSTERS.keys()) + [
+        "TICKER_RELATIONSHIPS",
+        "TICKER_SENTIMENT",
+        "STORY_KEY_POINTS",
+    ]
 
     results = await asyncio.gather(*all_tasks, return_exceptions=True)
 
@@ -656,14 +795,14 @@ def aggregate_heads(head_outputs: list[HeadOutput]) -> dict[str, float]:
     Dimensions appearing in multiple heads are averaged.
     Dimensions with zero total confidence weight are omitted.
 
-    TICKER_RELATIONSHIPS heads are excluded — their scores are ticker-pair
-    keys, not impact dimensions, and are stored separately in scores_json.
+    Special heads (ticker sentiment, relationships, story key points) are
+    excluded — their score keys are not impact dimensions.
     """
     weighted_sum: dict[str, float] = {}
     weight_total: dict[str, float] = {}
 
     for head in head_outputs:
-        if head.cluster in ("TICKER_RELATIONSHIPS", "TICKER_SENTIMENT"):
+        if head.cluster in SPECIAL_HEAD_CLUSTERS:
             continue
         if head.confidence <= 0.0 or not head.scores:
             continue

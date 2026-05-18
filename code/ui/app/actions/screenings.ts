@@ -1,5 +1,6 @@
 "use server";
 
+import type { ChartAiChatMessage } from "@/app/actions/chart-workspace";
 import { createClient } from "@/lib/supabase/server";
 import { fetchAllPaged } from "@/lib/supabase/paginate";
 
@@ -446,6 +447,22 @@ export type BulkAnalysisJobStatus =
   | "error"
   | "cancelled";
 
+/** Matches ``ChartGranularity`` in chart-date-range-picker (OHLC bar size). */
+export type BulkChartGranularity = "1hour" | "4hour" | "1day" | "1week";
+
+const BULK_CHART_GRANULARITIES = new Set<string>([
+  "1hour",
+  "4hour",
+  "1day",
+  "1week",
+]);
+
+export interface BulkChartSnapshot {
+  granularity: BulkChartGranularity;
+  dateFrom?: string | null;
+  dateTo?: string | null;
+}
+
 export interface BulkAnalysisJob {
   id: string;
   scan_run_id: number;
@@ -459,11 +476,32 @@ export interface BulkAnalysisJob {
   user_prompt: string | null;
   /** Filtered ticker symbols to analyse. null → analyse every row in the run. */
   ticker_subset: string[] | null;
+  chart_granularity: BulkChartGranularity;
+  chart_date_from: string | null;
+  chart_date_to: string | null;
+  /** All-tickers tab thread: user prompt + assistant run summary. */
+  bulk_chat_messages: ChartAiChatMessage[];
   created_at: string;
 }
 
 const BULK_JOB_COLUMNS =
-  "id, scan_run_id, status, total_tickers, completed_tickers, failed_tickers, started_at, finished_at, error_message, user_prompt, ticker_subset, created_at";
+  "id, scan_run_id, status, total_tickers, completed_tickers, failed_tickers, started_at, finished_at, error_message, user_prompt, ticker_subset, chart_granularity, chart_date_from, chart_date_to, bulk_chat_messages, created_at";
+
+function parseBulkChatMessages(raw: unknown): ChartAiChatMessage[] {
+  if (!Array.isArray(raw)) return [];
+  const out: ChartAiChatMessage[] = [];
+  for (const item of raw) {
+    if (!item || typeof item !== "object") continue;
+    const o = item as Record<string, unknown>;
+    const role = o.role === "user" || o.role === "assistant" ? o.role : null;
+    const content = typeof o.content === "string" ? o.content : "";
+    if (!role || !content.trim()) continue;
+    const msg: ChartAiChatMessage = { role, content };
+    if (o.source === "bulk_analysis") msg.source = "bulk_analysis";
+    out.push(msg);
+  }
+  return out;
+}
 
 function asBulkJob(raw: unknown): BulkAnalysisJob {
   const r = raw as Record<string, unknown>;
@@ -481,8 +519,26 @@ function asBulkJob(raw: unknown): BulkAnalysisJob {
     ticker_subset: Array.isArray(r.ticker_subset)
       ? (r.ticker_subset as unknown[]).map((s) => String(s))
       : null,
+    chart_granularity: normalizeBulkChartGranularity(r.chart_granularity),
+    chart_date_from:
+      r.chart_date_from != null ? String(r.chart_date_from).slice(0, 10) : null,
+    chart_date_to:
+      r.chart_date_to != null ? String(r.chart_date_to).slice(0, 10) : null,
+    bulk_chat_messages: parseBulkChatMessages(r.bulk_chat_messages),
     created_at: String(r.created_at ?? ""),
   };
+}
+
+function normalizeBulkChartGranularity(raw: unknown): BulkChartGranularity {
+  const g = String(raw ?? "1day").trim().toLowerCase();
+  return BULK_CHART_GRANULARITIES.has(g)
+    ? (g as BulkChartGranularity)
+    : "1day";
+}
+
+function normalizeYmd(raw: string | null | undefined): string | null {
+  const s = (raw ?? "").trim().slice(0, 10);
+  return /^\d{4}-\d{2}-\d{2}$/.test(s) ? s : null;
 }
 
 /**
@@ -497,6 +553,7 @@ export async function bulkAnalyzeScanRun(
   runId: number,
   userPrompt?: string | null,
   tickerSubset?: ReadonlyArray<string> | null,
+  chartSnapshot?: BulkChartSnapshot | null,
 ): Promise<ScreeningActionSuccess<BulkAnalysisJob> | ScreeningActionError> {
   if (!Number.isFinite(runId) || runId < 1) {
     return { ok: false, error: "Invalid run" };
@@ -519,6 +576,12 @@ export async function bulkAnalyzeScanRun(
     }
     normalizedSubset = cleaned.length > 0 ? cleaned : null;
   }
+
+  const chartGranularity = normalizeBulkChartGranularity(
+    chartSnapshot?.granularity,
+  );
+  const chartDateFrom = normalizeYmd(chartSnapshot?.dateFrom ?? null);
+  const chartDateTo = normalizeYmd(chartSnapshot?.dateTo ?? null);
 
   const supabase = await createClient();
   const { data: claims } = await supabase.auth.getClaims();
@@ -553,6 +616,13 @@ export async function bulkAnalyzeScanRun(
   if (existingErr) return { ok: false, error: existingErr.message };
   if (existing) return { ok: true, data: asBulkJob(existing) };
 
+  const promptText =
+    trimmedPrompt ??
+    "Run a swing-trading technical analysis. Highlight setup quality, key levels, and any risks.";
+  const bulkChatSeed: ChartAiChatMessage[] = [
+    { role: "user", content: promptText, source: "bulk_analysis" },
+  ];
+
   const { data: inserted, error: insertErr } = await supabase
     .schema("swingtrader")
     .from("user_bulk_analysis_jobs")
@@ -562,6 +632,10 @@ export async function bulkAnalyzeScanRun(
       status: "queued",
       user_prompt: trimmedPrompt,
       ticker_subset: normalizedSubset,
+      chart_granularity: chartGranularity,
+      chart_date_from: chartDateFrom,
+      chart_date_to: chartDateTo,
+      bulk_chat_messages: bulkChatSeed,
     })
     .select(BULK_JOB_COLUMNS)
     .single();
