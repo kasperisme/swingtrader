@@ -497,7 +497,7 @@ export async function subscribeToPublicScreening(
       console.error("[public-screenings] subscribe failed", subRes.error);
       return { ok: false, error: "Could not subscribe. Please try again." };
     }
-    revalidatePath(`/screenings/${screeningSlug}`);
+    revalidatePath(`/marketscreenings/${screeningSlug}`);
     return { ok: true, data: { alreadySubscribed: true } };
   }
 
@@ -507,7 +507,7 @@ export async function subscribeToPublicScreening(
     screening_name: screening.name,
   });
 
-  revalidatePath(`/screenings/${screeningSlug}`);
+  revalidatePath(`/marketscreenings/${screeningSlug}`);
   return { ok: true, data: { alreadySubscribed: false } };
 }
 
@@ -803,7 +803,7 @@ export async function importLatestPublicScreeningResultForMe(
     chat_turns: chatTurns,
   });
 
-  revalidatePath(`/screenings/${screeningSlug}`);
+  revalidatePath(`/marketscreenings/${screeningSlug}`);
   revalidatePath("/protected/screenings");
 
   return {
@@ -858,6 +858,6 @@ export async function unsubscribeFromPublicScreening(
     screening_slug: screeningSlug,
   });
 
-  revalidatePath(`/screenings/${screeningSlug}`);
+  revalidatePath(`/marketscreenings/${screeningSlug}`);
   return { ok: true, data: { removed: true } };
 }

@@ -181,3 +181,73 @@ export async function getArticlesByIds(
   }
   return { ok: true, data: ordered };
 }
+
+export type StoryKeyPoint = { id: string; impact: number; text: string };
+
+export type StoryKeyPointsResult =
+  | { ok: true; data: StoryKeyPoint[] }
+  | { ok: false; error: string };
+
+function asJsonObject(v: unknown): Record<string, unknown> {
+  if (!v) return {};
+  if (typeof v === "string") {
+    try {
+      return asJsonObject(JSON.parse(v));
+    } catch {
+      return {};
+    }
+  }
+  if (typeof v !== "object" || Array.isArray(v)) return {};
+  return v as Record<string, unknown>;
+}
+
+function asStringMap(v: unknown): Record<string, string> {
+  const obj = asJsonObject(v);
+  const out: Record<string, string> = {};
+  for (const [k, raw] of Object.entries(obj)) {
+    out[k] = String(raw ?? "");
+  }
+  return out;
+}
+
+function asPreservedNumberMap(v: unknown): Record<string, number> {
+  const obj = asJsonObject(v);
+  const out: Record<string, number> = {};
+  for (const [k, raw] of Object.entries(obj)) {
+    const n = Number(raw);
+    if (Number.isFinite(n)) out[k] = n;
+  }
+  return out;
+}
+
+/** Story key points are persisted as a single news_impact_heads row with
+ *  cluster='STORY_KEY_POINTS' — scores_json maps point-id → impact, and
+ *  reasoning_json maps point-id → claim text. */
+export async function getStoryKeyPointsForArticle(
+  articleId: number,
+): Promise<StoryKeyPointsResult> {
+  if (!Number.isFinite(articleId) || articleId <= 0) {
+    return { ok: true, data: [] };
+  }
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .schema("swingtrader")
+    .from("news_impact_heads")
+    .select("scores_json, reasoning_json")
+    .eq("article_id", Math.trunc(articleId))
+    .eq("cluster", "STORY_KEY_POINTS")
+    .maybeSingle<{ scores_json: unknown; reasoning_json: unknown }>();
+
+  if (error) return { ok: false, error: error.message };
+  if (!data) return { ok: true, data: [] };
+
+  const scores = asPreservedNumberMap(data.scores_json ?? {});
+  const reasoning = asStringMap(data.reasoning_json ?? {});
+  const points = Object.entries(scores)
+    .map(([id, impact]) => ({ id, impact, text: reasoning[id] ?? "" }))
+    .filter((r) => r.text)
+    .sort((a, b) => Math.abs(b.impact) - Math.abs(a.impact))
+    .slice(0, 10);
+
+  return { ok: true, data: points };
+}

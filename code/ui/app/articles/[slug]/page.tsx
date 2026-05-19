@@ -447,7 +447,7 @@ function formatTagLabel(tag: string): string {
 }
 
 function articleTagSearchHref(tag: string): string {
-  return `/protected/articles?tag=${encodeURIComponent(tag)}`;
+  return `/articles?tag=${encodeURIComponent(tag)}`;
 }
 
 function ArticleTagsRow({ tags }: { tags: string[] }) {
@@ -508,6 +508,10 @@ function KeyPointsList({
   );
 }
 
+function relationsHref(ticker: string): string {
+  return `/protected/relations?ticker=${encodeURIComponent(ticker)}`;
+}
+
 function TickerRelationshipList({
   rows,
 }: {
@@ -535,15 +539,23 @@ function TickerRelationshipList({
         >
           <div className="flex items-baseline justify-between gap-3">
             <div className="flex min-w-0 items-baseline gap-2">
-              <span className="font-semibold tracking-tight text-foreground">
+              <Link
+                href={relationsHref(row.from)}
+                title={`Explore relationships for ${row.from}`}
+                className="font-semibold tracking-tight text-foreground transition-colors hover:text-amber-400"
+              >
                 {row.from}
-              </span>
+              </Link>
               <span className="font-mono text-[10px] text-muted-foreground/70">
                 →
               </span>
-              <span className="font-semibold tracking-tight text-foreground">
+              <Link
+                href={relationsHref(row.to)}
+                title={`Explore relationships for ${row.to}`}
+                className="font-semibold tracking-tight text-foreground transition-colors hover:text-amber-400"
+              >
                 {row.to}
-              </span>
+              </Link>
               <span className="ml-1 rounded-sm border border-border/60 bg-muted/40 px-1.5 py-px font-mono text-[9px] uppercase tracking-wider text-muted-foreground">
                 {row.relType}
               </span>
@@ -834,7 +846,7 @@ async function ArticleData({ params }: { params: Promise<{ slug?: string }> }) {
     <div className="mx-auto w-full max-w-5xl px-4 py-8 sm:px-6 sm:py-10">
       <div className="mb-8">
         <Link
-          href="/protected/articles"
+          href="/articles"
           className="inline-flex items-center gap-1.5 font-mono text-[10px] uppercase tracking-[0.2em] text-muted-foreground transition-colors hover:text-amber-500"
         >
           <ArrowLeft size={12} />

@@ -601,7 +601,7 @@ export default async function Home() {
               {publicScreeningsPreview.map((s) => (
                 <Link
                   key={s.id}
-                  href={`/screenings/${s.slug}`}
+                  href={`/marketscreenings/${s.slug}`}
                   className="group flex flex-col rounded-2xl border border-border bg-background/60 p-5 transition-colors hover:border-amber-400/60 hover:bg-amber-500/5"
                 >
                   <div className="flex items-center gap-2 text-xs text-muted-foreground">
@@ -636,7 +636,7 @@ export default async function Home() {
 
           <div className="mt-10">
             <Link
-              href="/screenings"
+              href="/marketscreenings"
               className="inline-flex items-center gap-1.5 text-sm font-medium text-amber-400 hover:underline"
             >
               Browse all public screenings →

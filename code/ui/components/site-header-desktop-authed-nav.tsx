@@ -47,7 +47,6 @@ export function SiteHeaderDesktopAuthedNav() {
           <ChevronDown className="ml-1 h-3.5 w-3.5 transition-transform duration-200 group-open:rotate-180" />
         </summary>
         <div className={navDropdownPanelClass}>
-          <NavDropLink href="/protected/articles">Articles</NavDropLink>
           <NavDropLink href="/protected/news-trends">News Trends</NavDropLink>
           <NavDropLink href="/protected/charts">Charts</NavDropLink>
           <NavDropLink href="/protected/relations">Relations</NavDropLink>

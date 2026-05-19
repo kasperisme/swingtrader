@@ -14,7 +14,7 @@ const portfolioLinks = [
 ] as const;
 
 const researchLinks = [
-  { href: "/protected/articles", label: "Articles" },
+  { href: "/articles", label: "Articles" },
   { href: "/protected/news-trends", label: "News Trends" },
   { href: "/protected/charts", label: "Charts" },
   { href: "/protected/relations", label: "Relations" },
@@ -28,11 +28,15 @@ const operationsLinks = [
 ] as const;
 
 const publicLinks = [
-  { href: "/screenings", label: "Screenings" },
+  { href: "/marketscreenings", label: "Market Screenings" },
   { href: "/pricing", label: "Pricing" },
   { href: "/docs", label: "Docs" },
   { href: "/blog", label: "Blog" },
   { href: "/changelog", label: "Changelog" },
+] as const;
+
+const anonResearchLinks = [
+  { href: "/articles", label: "Articles" },
 ] as const;
 
 const linkClass =
@@ -207,14 +211,24 @@ export function SiteHeaderMobileNav({ isAuthed, userEmail }: Props) {
                   </div>
                 </>
               ) : (
-                <div>
-                  <p className={sectionLabelClass}>Navigation</p>
-                  <ul className="space-y-0.5">
-                    {publicLinks.map(({ href, label }) => (
-                      <NavLink key={href} href={href} label={label} onClick={close} />
-                    ))}
-                  </ul>
-                </div>
+                <>
+                  <div>
+                    <p className={sectionLabelClass}>Research</p>
+                    <ul className="space-y-0.5">
+                      {anonResearchLinks.map(({ href, label }) => (
+                        <NavLink key={href} href={href} label={label} onClick={close} />
+                      ))}
+                    </ul>
+                  </div>
+                  <div>
+                    <p className={sectionLabelClass}>Navigation</p>
+                    <ul className="space-y-0.5">
+                      {publicLinks.map(({ href, label }) => (
+                        <NavLink key={href} href={href} label={label} onClick={close} />
+                      ))}
+                    </ul>
+                  </div>
+                </>
               )}
             </nav>
 

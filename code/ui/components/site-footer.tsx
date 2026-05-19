@@ -12,13 +12,13 @@ const INSTAGRAM_HANDLE = "@newsimpactscreener";
 export function SiteFooter() {
   return (
     <footer className="w-full border-t border-border">
-      <div className="mx-auto flex max-w-7xl flex-wrap items-center justify-between gap-4 px-6 py-8 lg:px-8">
-        <div className="flex items-center gap-1 text-xs text-muted-foreground">
+      <div className="mx-auto flex w-full max-w-7xl flex-col gap-3 px-4 py-8 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between sm:gap-x-6 sm:gap-y-4 lg:px-6">
+        <div className="flex min-w-0 flex-wrap items-center gap-x-1 gap-y-0.5 text-xs text-muted-foreground">
           <span className="h-1.5 w-1.5 rounded-full bg-amber-500" />
           <span className="ml-1 font-semibold text-foreground">newsimpactscreener</span>
           <span className="ml-2">— news connected to markets.</span>
         </div>
-        <div className="flex items-center gap-6 text-xs text-muted-foreground">
+        <div className="flex min-w-0 flex-wrap items-center gap-x-4 gap-y-2 text-xs text-muted-foreground sm:gap-x-5">
           <a
             href={SITE_X_PROFILE_URL}
             target="_blank"

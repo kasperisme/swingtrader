@@ -9,18 +9,18 @@ const GALLERY_DESCRIPTION =
   "Curated swing-trading screenings — Stage 2, technicals, fundamentals — delivered on a schedule. Subscribe to get results in your inbox.";
 
 export const metadata: Metadata = {
-  title: "Public Screenings | News Impact Screener",
+  title: "Market Screenings | News Impact Screener",
   description: GALLERY_DESCRIPTION,
-  alternates: { canonical: "/screenings" },
+  alternates: { canonical: "/marketscreenings" },
   openGraph: {
     type: "website",
-    title: "Public Screenings",
+    title: "Market Screenings",
     description: GALLERY_DESCRIPTION,
-    url: "/screenings",
+    url: "/marketscreenings",
   },
   twitter: {
     card: "summary_large_image",
-    title: "Public Screenings",
+    title: "Market Screenings",
     description: GALLERY_DESCRIPTION,
   },
 };
@@ -74,7 +74,7 @@ export default async function ScreeningsGalleryPage() {
             </div>
 
             <h1 className="mt-5 text-5xl font-bold leading-[0.95] tracking-tight md:text-6xl">
-              Public
+              Market
               <br />
               <span className="text-foreground/60">screenings.</span>
             </h1>

@@ -81,7 +81,7 @@ export const TOURS: Record<TourKey, TourConfig> = {
   articles: {
     key: "articles",
     label: "Tour the article feed",
-    route: "/protected/articles",
+    route: "/articles",
     summary:
       "Read the news feed: how every headline gets scored across sentiment, novelty, magnitude, and ticker relevance.",
     steps: [

@@ -242,7 +242,7 @@ function ScreeningRow({
       Date.now() - new Date(screening.last_run_at).getTime() <
         24 * 60 * 60 * 1000,
   );
-  const detailHref = `/screenings/${screening.slug}`;
+  const detailHref = `/marketscreenings/${screening.slug}`;
 
   return (
     <li
@@ -329,7 +329,7 @@ function ScreeningRow({
 
           <div className="pointer-events-auto flex items-center gap-1">
             <a
-              href={`/screenings/${screening.slug}/export`}
+              href={`/marketscreenings/${screening.slug}/export`}
               download
               title={`Download latest results as CSV — ${screening.download_count} download${screening.download_count === 1 ? "" : "s"}`}
               aria-label="Download latest results as CSV"

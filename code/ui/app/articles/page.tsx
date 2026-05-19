@@ -1,6 +1,6 @@
-import { redirect } from "next/navigation";
 import { Suspense } from "react";
 import { createClient } from "@/lib/supabase/server";
+import { createServiceClient } from "@/lib/supabase/service";
 import type { ArticleGridItem } from "@/components/articles-grid";
 import {
   ArticlesSearchPanel,
@@ -10,12 +10,9 @@ import { getOnboardingTours } from "@/app/actions/onboarding";
 import { PageTour } from "@/app/protected/_components/page-tour";
 
 async function ArticlesData({ initialTag }: { initialTag?: string }) {
-  const supabase = await createClient();
-  const { data: claims, error: claimsError } = await supabase.auth.getClaims();
-
-  if (claimsError || !claims?.claims) {
-    redirect("/auth/login");
-  }
+  // Use service-role client so logged-out visitors can read the public
+  // news_articles table (RLS blocks anon reads on the swingtrader schema).
+  const supabase = createServiceClient();
 
   const { data, error } = await supabase
     .schema("swingtrader")
@@ -42,6 +39,9 @@ async function ArticlesData({ initialTag }: { initialTag?: string }) {
 }
 
 async function ArticlesTourMount() {
+  const supabase = await createClient();
+  const { data: claims } = await supabase.auth.getClaims();
+  if (!claims?.claims?.sub) return null;
   const tours = await getOnboardingTours();
   return <PageTour tourKey="articles" autoStart={!tours.articles} />;
 }
@@ -56,7 +56,7 @@ export default async function ArticlesPage({
     typeof params.tag === "string" ? params.tag.trim() : undefined;
 
   return (
-    <div className="flex w-full flex-1 flex-col gap-8">
+    <div className="mx-auto flex w-full min-w-0 max-w-7xl flex-1 flex-col gap-8 px-4 py-8 sm:px-6 lg:px-8">
       <header className="grid gap-6 border-b border-border/60 pb-6 md:grid-cols-[1fr_auto] md:items-end">
         <div>
           <p className="mb-3 inline-flex items-center gap-2 font-mono text-[10px] uppercase tracking-[0.2em] text-amber-500/80">

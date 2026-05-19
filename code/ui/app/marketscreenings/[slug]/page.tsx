@@ -31,7 +31,7 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const description =
     s.description ??
     `${s.name} — curated swing-trading screening that runs on ${humanizeCron(s.schedule)}.`;
-  const canonical = `/screenings/${s.slug}`;
+  const canonical = `/marketscreenings/${s.slug}`;
   return {
     title: `${s.name} | Public Screenings`,
     description,
@@ -119,7 +119,7 @@ export default async function PublicScreeningDetailPage({ params }: Props) {
       <div className="mx-auto max-w-6xl px-4 pt-10 pb-20 sm:px-6 md:pt-14">
         {/* Breadcrumb */}
         <Link
-          href="/screenings"
+          href="/marketscreenings"
           className="inline-flex items-center gap-1.5 font-mono text-[11px] uppercase tracking-[0.18em] text-muted-foreground transition-colors hover:text-foreground"
         >
           <ArrowLeft className="h-3.5 w-3.5" />
@@ -231,7 +231,7 @@ export default async function PublicScreeningDetailPage({ params }: Props) {
               tableRows.length > 0 ? (
                 <div className="flex items-center gap-2">
                   <ToolbarAction
-                    href={`/screenings/${screening.slug}/export`}
+                    href={`/marketscreenings/${screening.slug}/export`}
                     download
                     icon={<DownloadIcon className="h-3.5 w-3.5" />}
                     label="CSV"

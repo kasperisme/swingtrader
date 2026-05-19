@@ -72,12 +72,28 @@ async function fetchCompanyVectors(): Promise<TickerRow[]> {
   return rows;
 }
 
-async function RelationshipsData() {
+async function RelationshipsData({ initialTicker }: { initialTicker?: string }) {
   const vectors = await fetchCompanyVectors();
-  return <RelationshipsUI vectors={vectors} />;
+  return <RelationshipsUI vectors={vectors} initialTicker={initialTicker} />;
 }
 
-export default function RelationshipsPage() {
+function normalizeTicker(raw: unknown): string | undefined {
+  if (typeof raw !== "string") return undefined;
+  const t = raw.trim().toUpperCase();
+  if (!t) return undefined;
+  if (!/^[A-Z0-9.\-]{1,10}$/.test(t)) return undefined;
+  return t;
+}
+
+export default async function RelationshipsPage({
+  searchParams,
+}: {
+  searchParams?: Promise<{ ticker?: string | string[] }>;
+}) {
+  const params = (await searchParams) ?? {};
+  const raw = Array.isArray(params.ticker) ? params.ticker[0] : params.ticker;
+  const initialTicker = normalizeTicker(raw);
+
   return (
     <div className="sm:-mx-2 lg:-mx-4 xl:-mx-8 flex flex-col h-[calc(100svh-9rem)] min-h-[480px] w-[85vw] content-center">
       <Suspense
@@ -87,7 +103,7 @@ export default function RelationshipsPage() {
           </div>
         }
       >
-        <RelationshipsData />
+        <RelationshipsData initialTicker={initialTicker} />
       </Suspense>
       <Suspense fallback={null}>
         <RelationsTourMount />

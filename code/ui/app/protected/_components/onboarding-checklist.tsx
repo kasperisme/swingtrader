@@ -54,7 +54,7 @@ const STEPS: ReadonlyArray<Step> = [
     title: "Learn how news gets scored",
     description:
       "Every headline is broken down across multiple dimensions — sentiment, novelty, magnitude, and ticker relevance — and combined into an impact score. Knowing how the score is built means you can trust (or override) it instead of treating it as a black box.",
-    href: "/protected/articles",
+    href: "/articles",
     cta: "Open articles",
     visitKey: "articles",
   },

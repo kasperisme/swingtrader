@@ -1,7 +1,14 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
-import { Loader2, X } from "lucide-react";
+import {
+  ArrowUpRight,
+  ChevronDown,
+  ChevronRight,
+  Loader2,
+  X,
+} from "lucide-react";
 import {
   articlesForCell,
   articlesForDimensionCell,
@@ -15,7 +22,9 @@ import {
 } from "@/lib/news-impact-heatmap/aggregate";
 import {
   getArticlesByIds,
+  getStoryKeyPointsForArticle,
   type HeatmapArticle,
+  type StoryKeyPoint,
 } from "@/app/actions/news-impact-heatmap";
 
 const MAX_ARTICLES = 12;
@@ -252,30 +261,124 @@ export function HeatmapCellDrilldown({
   );
 }
 
+type KeyPointsState =
+  | { status: "idle" }
+  | { status: "loading" }
+  | { status: "loaded"; points: StoryKeyPoint[] }
+  | { status: "error"; message: string };
+
 function ArticleRow({ article }: { article: RankedArticle }) {
+  const [expanded, setExpanded] = useState(false);
+  const [keyPoints, setKeyPoints] = useState<KeyPointsState>({ status: "idle" });
   const fill = colorForScore(article.impact);
   const title =
     (article.title ?? "").trim() || (article.url ?? "").trim() || "Untitled story";
+  const articleHref = article.slug
+    ? `/articles/${article.slug}`
+    : `/articles/${article.id}`;
+
+  useEffect(() => {
+    if (!expanded) return;
+    let cancelled = false;
+    setKeyPoints((prev) => (prev.status === "idle" ? { status: "loading" } : prev));
+    getStoryKeyPointsForArticle(article.id)
+      .then((res) => {
+        if (cancelled) return;
+        if (!res.ok) {
+          setKeyPoints({ status: "error", message: res.error });
+          return;
+        }
+        setKeyPoints({ status: "loaded", points: res.data });
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setKeyPoints({ status: "error", message: "Failed to load key points." });
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [expanded, article.id]);
+
   return (
-    <li className="flex items-start gap-2.5 py-2">
-      <span
-        className="mt-1 inline-block h-2 w-2 shrink-0 rounded-[2px]"
-        style={{ backgroundColor: fill ?? "transparent" }}
-        title={`Impact ${article.impact >= 0 ? "+" : ""}${article.impact.toFixed(2)}`}
-        aria-hidden
-      />
-      <p className="line-clamp-2 min-w-0 flex-1 text-sm font-medium leading-snug text-foreground">
-        {title}
-      </p>
-      {article.published_at && (
-        <span className="shrink-0 self-center text-[10px] text-muted-foreground/80">
-          {formatAge(article.published_at)}
+    <li className="py-1">
+      <button
+        type="button"
+        onClick={() => setExpanded((v) => !v)}
+        aria-expanded={expanded}
+        className="flex w-full items-start gap-2.5 rounded-md py-1.5 text-left transition-colors hover:bg-muted/40 focus:outline-none focus-visible:ring-1 focus-visible:ring-amber-500/70"
+      >
+        {expanded ? (
+          <ChevronDown className="mt-1 h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+        ) : (
+          <ChevronRight className="mt-1 h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+        )}
+        <span
+          className="mt-1.5 inline-block h-2 w-2 shrink-0 rounded-[2px]"
+          style={{ backgroundColor: fill ?? "transparent" }}
+          title={`Impact ${article.impact >= 0 ? "+" : ""}${article.impact.toFixed(2)}`}
+          aria-hidden
+        />
+        <p className="line-clamp-2 min-w-0 flex-1 text-sm font-medium leading-snug text-foreground">
+          {title}
+        </p>
+        {article.published_at && (
+          <span className="shrink-0 self-center text-[10px] text-muted-foreground/80">
+            {formatAge(article.published_at)}
+          </span>
+        )}
+        <span className="ml-1 shrink-0 self-center font-mono text-[11px] tabular-nums text-foreground/80">
+          {article.impact >= 0 ? "+" : ""}
+          {article.impact.toFixed(2)}
         </span>
+      </button>
+
+      {expanded && (
+        <div className="ml-6 mt-1 space-y-2.5 pb-2">
+          {keyPoints.status === "loading" || keyPoints.status === "idle" ? (
+            <div className="flex items-center gap-2 text-xs text-muted-foreground">
+              <Loader2 className="h-3 w-3 animate-spin" />
+              Loading key points…
+            </div>
+          ) : keyPoints.status === "error" ? (
+            <p className="text-xs text-rose-500">{keyPoints.message}</p>
+          ) : keyPoints.points.length === 0 ? (
+            <p className="text-xs text-muted-foreground">
+              No key points extracted for this story.
+            </p>
+          ) : (
+            <ul className="space-y-1.5">
+              {keyPoints.points.map((point) => (
+                <li key={point.id} className="flex items-start gap-2.5">
+                  <span
+                    className={`mt-[1px] w-10 shrink-0 font-mono text-[10px] tabular-nums ${
+                      point.impact > 0.03
+                        ? "text-emerald-500/90"
+                        : point.impact < -0.03
+                          ? "text-rose-500/90"
+                          : "text-muted-foreground/60"
+                    }`}
+                  >
+                    {point.impact >= 0 ? "+" : ""}
+                    {point.impact.toFixed(2)}
+                  </span>
+                  <p className="min-w-0 flex-1 text-xs leading-relaxed text-foreground/80">
+                    {point.text}
+                  </p>
+                </li>
+              ))}
+            </ul>
+          )}
+
+          <Link
+            href={articleHref}
+            className="inline-flex items-center gap-1 text-[11px] text-muted-foreground transition-colors hover:text-amber-400"
+          >
+            Full impact analysis
+            <ArrowUpRight className="h-3 w-3" />
+          </Link>
+        </div>
       )}
-      <span className="ml-1 shrink-0 self-center font-mono text-[11px] tabular-nums text-foreground/80">
-        {article.impact >= 0 ? "+" : ""}
-        {article.impact.toFixed(2)}
-      </span>
     </li>
   );
 }

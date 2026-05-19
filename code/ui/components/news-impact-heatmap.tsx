@@ -669,7 +669,7 @@ function HeatmapGrid({
                         className="bg-muted/20"
                       >
                         <td
-                          className={`sticky left-0 z-10 bg-muted/20 pl-7 pr-2 py-0.5 whitespace-nowrap text-[10px] text-muted-foreground ${
+                          className={`sticky left-0 z-10 bg-background pl-7 pr-2 py-0.5 whitespace-nowrap text-[10px] text-muted-foreground ${
                             showDivider && isLastDimRow
                               ? "border-b border-border"
                               : ""
