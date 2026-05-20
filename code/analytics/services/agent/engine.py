@@ -413,10 +413,9 @@ def _is_market_open(session: str) -> bool:
             now_et = datetime.now(ZoneInfo("America/New_York"))
         except Exception:
             now_et = datetime.now(timezone.utc)
-        t = now_et.timetz()
-        # NYSE is also closed on weekdays
-        if t.weekday() >= 5:
+        if now_et.weekday() >= 5:
             return False
+        t = now_et.time()
         return _NYSE_OPEN <= t < _NYSE_CLOSE
     return True
 
