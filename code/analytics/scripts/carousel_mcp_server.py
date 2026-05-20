@@ -240,11 +240,29 @@ Sweet spot: 6-9 slides. More than 10 loses people.
 - Stat slides: pair the big number with a one-sentence "so what".
 
 ## Visual style (handled by template — do not change in content)
-- Light mode: cream background (#FDFAF4), dark navy text (#0F172A)
-- Amber primary (#F59E0B) for kickers, bullet numbers, swipe pill
-- Purple accent (#A78BFA) for gradient highlights on cover/stat
-- Plus Jakarta Sans, generous letter-spacing, terminal-grid backdrop
+The aesthetic is intentionally **rough and almost handmade** — sketchbook
+energy, not corporate deck. Don't fight it with overly clinical copy;
+short, punchy phrases land best on this layout.
+- Light mode: cream background (#FDFAF4) with a subtle paper-noise +
+  dotted-paper texture, dark navy text (#0F172A)
+- Amber primary (#F59E0B) for kickers, bullet numbers, swipe pill,
+  doodled starburst accent
+- Purple accent (#A78BFA) for gradient highlights on cover/stat + a
+  hand-drawn squiggle doodle in the corner
+- Handwritten fonts: **Kalam** (body / titles / headings) +
+  **Caveat** (kickers, swipe, quote attribution, pager). No sans-serif.
+- Hand-drawn touches: wonky asymmetric border-radius on cards, slight
+  rotations (-2° to +2°) on bullets/title/CTA, offset shadow blocks (no
+  blur — flat sticker-shadow), squiggle SVG underline beneath kickers,
+  doodled corner accents replacing clean gradient blobs
 - 1080x1350 portrait (Instagram carousel standard)
+
+Copy implications:
+- The handwritten layout amplifies any clinical/SEO-flavoured phrasing.
+  Write like you're sketching a thought in a notebook, not authoring a
+  whitepaper. Fragments and dashes are good.
+- Avoid long uppercase blocks — handwritten caps look messy. Use
+  Title Case or sentence case for headings and kickers.
 
 ## Workflow
 1. Decide the ONE idea the carousel teaches. Write it as one sentence.

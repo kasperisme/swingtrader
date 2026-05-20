@@ -18,6 +18,7 @@ from .portfolio import (
     get_user_positions,
     get_user_alerts,
     get_user_screening_notes,
+    get_ticker_chat_history,
 )
 from .screening_writes import (
     add_ticker_to_screening,
@@ -139,6 +140,28 @@ TOOL_SCHEMAS: list[dict] = [
     {
         "type": "function",
         "function": {
+            "name": "get_ticker_chat_history",
+            "description": (
+                "Recent chat history from the user's chart-workspace conversation "
+                "for one ticker. Includes prior bulk-analysis answers — the "
+                "bulk-analysis worker appends its user prompt and assistant reply "
+                "to this same thread with source='bulk_analysis'. Use this to see "
+                "what the user (or a prior agent run) already concluded about a "
+                "ticker before re-deriving it."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "ticker": {"type": "string", "description": "Symbol, case-insensitive."},
+                    "limit": {"type": "integer", "description": "Most-recent N messages", "default": 20},
+                },
+                "required": ["ticker"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "search_news",
             "description": "Semantic search over news articles using vector similarity.",
             "parameters": {
@@ -206,6 +229,7 @@ def get_user_tools() -> dict[str, Callable]:
         "get_user_positions": get_user_positions,
         "get_user_alerts": get_user_alerts,
         "get_user_screening_notes": get_user_screening_notes,
+        "get_ticker_chat_history": get_ticker_chat_history,
     }
 
 

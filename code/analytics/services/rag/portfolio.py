@@ -186,3 +186,63 @@ def get_user_trading_strategy(user_id: str) -> str:
     if res is None or res.data is None:
         return ""
     return res.data.get("strategy") or ""
+
+
+def get_ticker_chat_history(
+    user_id: str,
+    ticker: str,
+    limit: int = 20,
+) -> list[dict[str, Any]]:
+    """Per-ticker AI workspace chat history for one ticker.
+
+    Reads ``swingtrader.user_ticker_chart_workspace.ai_chat_messages`` and
+    returns the most recent ``limit`` turns. Bulk-analysis runs append their
+    user + assistant turns to this same array with ``source="bulk_analysis"``,
+    so prior bulk-analysis answers are visible here — there is no need for a
+    separate bulk-analysis tool.
+
+    Each returned item: ``{role, content, source, created_at}``. Content is
+    truncated to 1500 chars to keep the agent's context budget sane.
+    """
+    sym = (ticker or "").strip().upper()
+    if not sym or not user_id:
+        return []
+
+    client, schema = _client()
+    res = (
+        client.schema(schema)
+        .table("user_ticker_chart_workspace")
+        .select("ai_chat_messages, updated_at")
+        .eq("user_id", user_id)
+        .eq("ticker", sym)
+        .maybe_single()
+        .execute()
+    )
+    if res is None or res.data is None:
+        return []
+
+    raw = res.data.get("ai_chat_messages")
+    raw = _as_json(raw) if isinstance(raw, str) else raw
+    if not isinstance(raw, list):
+        return []
+
+    try:
+        cap = max(1, int(limit))
+    except (TypeError, ValueError):
+        cap = 20
+    tail = raw[-cap:]
+
+    out: list[dict[str, Any]] = []
+    for m in tail:
+        if not isinstance(m, dict):
+            continue
+        content = m.get("content", "")
+        if isinstance(content, str) and len(content) > 1500:
+            content = content[:1500] + "…"
+        out.append({
+            "role": m.get("role"),
+            "content": content,
+            "source": m.get("source"),
+            "created_at": m.get("created_at") or m.get("ts"),
+        })
+    return out

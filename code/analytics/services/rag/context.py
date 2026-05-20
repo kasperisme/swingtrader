@@ -6,12 +6,44 @@ Extracted from services/agent/engine.py (_get_linked_scan_run_context).
 
 from __future__ import annotations
 
+import json
 import logging
 from typing import Any
 
 from shared.db import get_supabase_client
 
 log = logging.getLogger(__name__)
+
+
+def _format_entry(metadata_json: Any) -> str:
+    """Render `metadata_json.entry` as a compact `entry@X long, tp@Y, sl@Z`.
+
+    Returns empty string when no entry marker is set so the caller can skip it.
+    Accepts both dict and JSON-string shapes (Supabase JSONB normally arrives
+    parsed, but defensive parsing keeps unit-tests and edge cases honest).
+    """
+    if isinstance(metadata_json, str):
+        try:
+            metadata_json = json.loads(metadata_json)
+        except Exception:
+            return ""
+    if not isinstance(metadata_json, dict):
+        return ""
+    entry = metadata_json.get("entry")
+    if not isinstance(entry, dict):
+        return ""
+    price = entry.get("price")
+    if not isinstance(price, (int, float)):
+        return ""
+    direction = entry.get("direction") or "long"
+    parts = [f"entry@{price:g} {direction}"]
+    tp = entry.get("take_profit")
+    sl = entry.get("stop_loss")
+    if isinstance(tp, (int, float)):
+        parts.append(f"tp@{tp:g}")
+    if isinstance(sl, (int, float)):
+        parts.append(f"sl@{sl:g}")
+    return ", ".join(parts)
 
 
 def get_linked_scan_run_context(
@@ -46,7 +78,9 @@ def get_linked_scan_run_context(
     for n in (
         client.schema(schema)
         .table("user_scan_row_notes")
-        .select("run_id, ticker, status, highlighted, comment, stage, priority, tags")
+        .select(
+            "run_id, ticker, status, highlighted, comment, stage, priority, tags, metadata_json"
+        )
         .in_("run_id", scan_run_ids)
         .eq("user_id", user_id)
         .execute()
@@ -64,10 +98,12 @@ def get_linked_scan_run_context(
         if run_notes:
             for n in run_notes[:20]:
                 ticker = n.get("ticker", "")
+                entry_str = _format_entry(n.get("metadata_json"))
                 parts = [p for p in [
                     "★" if n.get("highlighted") else "",
                     n.get("status", ""),
                     n.get("stage") or "",
+                    entry_str,
                     (n.get("comment") or "")[:120],
                 ] if p]
                 note_str = f"{ticker} — {' '.join(parts)}" if parts else ticker
