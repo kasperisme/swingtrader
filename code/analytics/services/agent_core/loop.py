@@ -21,6 +21,46 @@ log = logging.getLogger(__name__)
 _HEARTBEAT_SECONDS = 5.0
 _RETRY_INITIAL_BACKOFF_S = 2.0
 _DEFAULT_RETRY_ATTEMPTS = 3
+_ARGS_LOG_MAX = 240
+_CONTENT_PEEK = 160
+
+
+def _describe_args(args: Any) -> str:
+    """Compact, log-safe rendering of a tool's arguments."""
+    try:
+        s = json.dumps(args, default=str, sort_keys=True)
+    except Exception:
+        s = repr(args)
+    if len(s) > _ARGS_LOG_MAX:
+        s = s[: _ARGS_LOG_MAX - 1] + "…"
+    return s
+
+
+def _describe_result(result: Any) -> str:
+    """One-line shape descriptor for a tool result (no raw payload)."""
+    if isinstance(result, dict):
+        if "error" in result:
+            err = str(result.get("error"))[:120]
+            return f"err({err!r})"
+        keys = list(result.keys())[:6]
+        more = "+" if len(result) > len(keys) else ""
+        return f"dict(keys={keys}{more})"
+    if isinstance(result, list):
+        head = type(result[0]).__name__ if result else "empty"
+        return f"list(n={len(result)}, head={head})"
+    if isinstance(result, str):
+        return f"str(len={len(result)})"
+    if result is None:
+        return "None"
+    return f"{type(result).__name__}"
+
+
+def _args_signature(args: Any) -> str:
+    """Stable signature for arg-set comparison (used to surface cache aliasing)."""
+    try:
+        return json.dumps(args or {}, default=str, sort_keys=True)
+    except Exception:
+        return repr(args)
 
 
 def is_transient_ollama_error(exc: BaseException) -> bool:
@@ -344,9 +384,26 @@ async def run_tool_loop(
     tool_results: dict[str, Any] = {}
     final_message: dict = {}
     rounds_used = 0
+    # Diagnostics — call counts, args-signature stash, and a chronological trace.
+    call_counts: dict[str, int] = {}
+    cache_hits: dict[str, int] = {}
+    cache_arg_mismatches: dict[str, int] = {}
+    first_args_sig: dict[str, str] = {}
+    call_trace: list[str] = []
+    run_started = time.monotonic()
+
+    log.info(
+        "%s: loop start — model=%s tools=%d max_rounds=%d cache_results=%s",
+        label,
+        model,
+        len(schemas),
+        max_rounds,
+        cache_results,
+    )
 
     for round_idx in range(1, max_rounds + 1):
         rounds_used = round_idx
+        round_started = time.monotonic()
         resp = await _chat_with_retry(
             client,
             base_url=base_url,
@@ -360,30 +417,90 @@ async def run_tool_loop(
             max_attempts=max_attempts,
         )
         tool_calls = resp.get("tool_calls") or []
+        round_text = (resp.get("content") or "").strip()
+
+        log.info(
+            "%s: round %d/%d response — tool_calls=%d content_len=%d preview=%r",
+            label,
+            round_idx,
+            max_rounds,
+            len(tool_calls),
+            len(round_text),
+            round_text[:_CONTENT_PEEK],
+        )
 
         if not tool_calls:
             final_message = resp
+            log.info(
+                "%s: round %d converged (no tool_calls) — emitting final message",
+                label,
+                round_idx,
+            )
             break
 
         messages.append(resp)
-        for tc in tool_calls:
+        for tc_idx, tc in enumerate(tool_calls, start=1):
             fn_name = tc["function"]["name"]
             fn_args = tc["function"].get("arguments", {}) or {}
+            args_sig = _args_signature(fn_args)
+            args_str = _describe_args(fn_args)
+            call_counts[fn_name] = call_counts.get(fn_name, 0) + 1
+            call_started = time.monotonic()
+
             if cache_results and fn_name in tool_results:
                 result: Any = tool_results[fn_name]
-                log.info("%s: cached %s (round %d)", label, fn_name, round_idx)
+                cache_hits[fn_name] = cache_hits.get(fn_name, 0) + 1
+                prior_sig = first_args_sig.get(fn_name, "")
+                mismatch = prior_sig and prior_sig != args_sig
+                if mismatch:
+                    cache_arg_mismatches[fn_name] = (
+                        cache_arg_mismatches.get(fn_name, 0) + 1
+                    )
+                    log.warning(
+                        "%s: round %d call %d — cached %s served for DIFFERENT args "
+                        "(this_call=%s, cached_from=%s) — cache aliasing!",
+                        label,
+                        round_idx,
+                        tc_idx,
+                        fn_name,
+                        args_str,
+                        prior_sig[:_ARGS_LOG_MAX],
+                    )
+                else:
+                    log.info(
+                        "%s: round %d call %d — cached %s args=%s",
+                        label,
+                        round_idx,
+                        tc_idx,
+                        fn_name,
+                        args_str,
+                    )
+                call_trace.append(f"r{round_idx}:{fn_name}(cache)")
             else:
+                log.info(
+                    "%s: round %d call %d — calling %s args=%s",
+                    label,
+                    round_idx,
+                    tc_idx,
+                    fn_name,
+                    args_str,
+                )
                 result = await registry.call(fn_name, fn_args)
                 tool_results[fn_name] = result
+                first_args_sig.setdefault(fn_name, args_sig)
+                elapsed_ms = int((time.monotonic() - call_started) * 1000)
+                is_err = isinstance(result, dict) and "error" in result
                 log.info(
-                    "%s: called %s (round %d) → %s",
+                    "%s: round %d call %d — %s returned %s in %dms (status=%s)",
                     label,
-                    fn_name,
                     round_idx,
-                    "ok"
-                    if not (isinstance(result, dict) and result.get("error"))
-                    else "err",
+                    tc_idx,
+                    fn_name,
+                    _describe_result(result),
+                    elapsed_ms,
+                    "err" if is_err else "ok",
                 )
+                call_trace.append(f"r{round_idx}:{fn_name}")
             messages.append(
                 {
                     "role": "tool",
@@ -391,6 +508,14 @@ async def run_tool_loop(
                     "content": json.dumps(result, default=str)[:8000],
                 }
             )
+
+        log.info(
+            "%s: round %d done — %d tool_calls processed in %.1fs",
+            label,
+            round_idx,
+            len(tool_calls),
+            time.monotonic() - round_started,
+        )
     else:
         log.warning(
             "%s: hit max_rounds=%d without final message — forcing emit",
@@ -418,6 +543,24 @@ async def run_tool_loop(
             label=label,
             max_attempts=max_attempts,
         )
+
+    total_calls = sum(call_counts.values())
+    total_cache_hits = sum(cache_hits.values())
+    total_mismatches = sum(cache_arg_mismatches.values())
+    log.info(
+        "%s: loop done — rounds=%d total_calls=%d cache_hits=%d "
+        "cache_arg_mismatches=%d distinct_tools=%d elapsed=%.1fs "
+        "counts=%s trace=%s",
+        label,
+        rounds_used,
+        total_calls,
+        total_cache_hits,
+        total_mismatches,
+        len(call_counts),
+        time.monotonic() - run_started,
+        call_counts,
+        " → ".join(call_trace),
+    )
 
     return final_message, tool_results, rounds_used
 

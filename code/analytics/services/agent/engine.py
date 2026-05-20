@@ -349,8 +349,18 @@ async def _run_agent_async(
         or os.environ.get("OLLAMA_BLOG_MODEL")
         or "gemma4:e4b"
     )
+    log.info(
+        "Screening agent: starting run — model=%s registry_tools=%d "
+        "system_len=%d prompt_len=%d prompt_preview=%r",
+        model,
+        len(registry.names()),
+        len(system),
+        len(user_prompt),
+        user_prompt[:200],
+    )
+    log.debug("Screening agent: registered tools = %s", registry.names())
     async with httpx.AsyncClient() as client:
-        final_message, tool_results, _rounds = await run_tool_loop(
+        final_message, tool_results, rounds = await run_tool_loop(
             client,
             base_url=base_url,
             model=model,
@@ -375,6 +385,14 @@ async def _run_agent_async(
         )
         parsed = {"triggered": False, "summary": None, "data_used": data_used}
     parsed.setdefault("data_used", data_used)
+    log.info(
+        "Screening agent: parsed result — rounds=%d triggered=%s summary_len=%d "
+        "tools_used=%s",
+        rounds,
+        parsed.get("triggered"),
+        len((parsed.get("summary") or "")),
+        list(tool_results.keys()),
+    )
     return parsed
 
 
@@ -477,6 +495,19 @@ def run_screening(screening: dict, dry_run: bool = False, is_test: bool = False)
             (screening.get("trigger_condition") or "").strip()
             if condition_enabled
             else None
+        )
+
+        log.info(
+            "Screening %s (%s) → run_agent: user=%s tickers_explicit=%d "
+            "tickers_filtered=%d linked_runs=%d has_condition=%s prompt_len=%d",
+            screening["id"],
+            screening.get("name") or "(unnamed)",
+            screening.get("user_id"),
+            len(explicit_tickers),
+            len(filtered_tickers or []),
+            len(linked_ids),
+            bool(trigger_condition),
+            len(screening.get("prompt") or ""),
         )
 
         result = run_agent(
