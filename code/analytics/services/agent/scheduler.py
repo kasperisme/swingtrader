@@ -184,9 +184,16 @@ def run_tick(max_concurrent: int | None = None) -> dict:
     except Exception as exc:
         log.warning("Stuck-job cleanup failed for user_screening_results: %s", exc)
 
+    # Only count fresh `running` rows toward the concurrency limit. Rows older
+    # than the stuck cutoff are zombies — the worker has either died or is
+    # past its wall-clock deadline; they shouldn't keep blocking the queue
+    # for everyone else until the cleanup pass eventually flips them.
     running_count = (
         client.schema(schema).table("user_screening_results")
-        .select("id", count="exact").eq("status", "running").execute()
+        .select("id", count="exact")
+        .eq("status", "running")
+        .gte("started_at", stuck_cutoff)
+        .execute()
     ).count or 0
     available = limit - running_count
 

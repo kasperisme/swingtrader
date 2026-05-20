@@ -154,7 +154,12 @@ _OLLAMA_MODEL_ENV = "OLLAMA_TIKTOK_MODEL"
 
 _FMP_ENABLED = bool(os.environ.get("FMP_API_KEY"))
 
-_MAX_TOOL_ROUNDS = 10
+_MAX_TOOL_ROUNDS = int(os.environ.get("AGENT_MAX_TOOL_ROUNDS", "10"))
+# Hard wall-clock ceiling on a single run. Stays well below the scheduler's
+# stuck cutoff so the worker fails itself (with a useful summary) instead of
+# being killed externally — which previously left the queue blocked for the
+# full 20-minute detection window.
+_RUN_TIMEOUT_SECONDS = float(os.environ.get("AGENT_RUN_TIMEOUT_SECONDS", "240"))
 
 
 # ── Agent loop ──────────────────────────────────────────────────────────────
@@ -298,7 +303,31 @@ def run_agent(
         )
 
     registry = _build_registry(user_id, writeable_run_ids=writeable_run_ids)
-    result = asyncio.run(_run_agent_async(system, prompt, registry))
+    try:
+        result = asyncio.run(
+            asyncio.wait_for(
+                _run_agent_async(system, prompt, registry),
+                timeout=_RUN_TIMEOUT_SECONDS,
+            )
+        )
+    except asyncio.TimeoutError:
+        log.error(
+            "Agent run timed out after %.0fs (max_tool_rounds=%d)",
+            _RUN_TIMEOUT_SECONDS,
+            _MAX_TOOL_ROUNDS,
+        )
+        result = {
+            "triggered": False,
+            "summary": (
+                f"Agent run exceeded the {_RUN_TIMEOUT_SECONDS:.0f}s wall-clock "
+                "deadline before producing a result."
+            ),
+            "data_used": {
+                "error": "wall_clock_timeout",
+                "timeout_seconds": _RUN_TIMEOUT_SECONDS,
+                "max_tool_rounds": _MAX_TOOL_ROUNDS,
+            },
+        }
 
     if not has_condition:
         result["triggered"] = True
