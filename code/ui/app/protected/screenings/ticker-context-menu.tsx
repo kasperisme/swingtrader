@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { Check, Copy, MessageSquare, RotateCcw, Trash2 } from "lucide-react";
+import { Bell, Check, Copy, MessageSquare, RotateCcw, Trash2 } from "lucide-react";
 
 export type NoteStatus = "active" | "dismissed" | "watchlist" | "pipeline";
 
@@ -18,6 +18,7 @@ interface TickerContextMenuProps {
   hasComment: boolean;
   onEditComment: () => void;
   onCopyOhlcv: (() => void) | null;
+  onSetupAgentAlarm?: () => void;
 }
 
 const STAGE_OPTS: { value: Exclude<NoteStatus, "dismissed">; label: string }[] = [
@@ -39,6 +40,7 @@ export function TickerContextMenu({
   hasComment,
   onEditComment,
   onCopyOhlcv,
+  onSetupAgentAlarm,
 }: TickerContextMenuProps) {
   const ref = useRef<HTMLDivElement>(null);
   const [pos, setPos] = useState({ left: x, top: y });
@@ -130,6 +132,17 @@ export function TickerContextMenu({
           >
             <Copy className="w-3.5 h-3.5 shrink-0" />
             Copy OHLCV
+          </button>
+        )}
+
+        {onSetupAgentAlarm && (
+          <button
+            type="button"
+            onClick={() => act(onSetupAgentAlarm)}
+            className="w-full flex items-center gap-2.5 px-3 py-1.5 text-sm text-amber-500 transition-colors hover:bg-amber-500/10"
+          >
+            <Bell className="w-3.5 h-3.5 shrink-0" />
+            Setup agent alarm
           </button>
         )}
       </div>

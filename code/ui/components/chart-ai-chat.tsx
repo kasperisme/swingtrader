@@ -535,9 +535,9 @@ export function ChartAiChat({
   }
 
   return (
-    <div className={`flex flex-col bg-background ${side ? "h-full" : "border-t border-border"}`}>
+    <div className={`flex flex-col bg-background ${side ? "flex-1 min-h-0" : "border-t border-border"}`}>
       {/* Header */}
-      <div className="flex items-center justify-between px-4 py-2.5 border-b border-border/60">
+      <div className="shrink-0 flex items-center justify-between px-4 py-2.5 border-b border-border/60">
         <div className="flex items-center gap-2">
           <div className="w-5 h-5 rounded-md bg-zinc-800 border border-zinc-700/60 flex items-center justify-center">
             <Sparkles className="w-3 h-3 text-amber-400/90" />
@@ -703,7 +703,7 @@ export function ChartAiChat({
       {/* Input form */}
       <form
         onSubmit={(e) => { e.preventDefault(); void send(); }}
-        className="flex items-center gap-2 px-3 py-2.5 border-t border-border/40 mt-auto"
+        className="shrink-0 flex items-center gap-2 px-3 py-2.5 border-t border-border/40 mt-auto"
       >
         <input
           type="text"

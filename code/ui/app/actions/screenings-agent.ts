@@ -57,8 +57,8 @@ export type ScreeningResult = {
   created_at: string;
 };
 
-export async function listScheduledScreenings(): Promise<
-  ActionResult<ScheduledScreening[]>
+export async function listScheduledScreenings(): ActionResult<
+  ScheduledScreening[]
 > {
   const supabase = await createClient();
   const { data: claims } = await supabase.auth.getClaims();

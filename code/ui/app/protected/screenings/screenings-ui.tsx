@@ -71,6 +71,7 @@ import {
   TickerContextMenu,
   type NoteStatus as ContextMenuNoteStatus,
 } from "./ticker-context-menu";
+import { AgentAlarmDialog } from "./agent-alarm-dialog";
 import type {
   OhlcBar,
   ChartAnnotation,
@@ -285,6 +286,7 @@ export function ScreeningsUI({
     x: number;
     y: number;
   } | null>(null);
+  const [agentAlarmTicker, setAgentAlarmTicker] = useState<string | null>(null);
   const ohlcvDataRef = useRef<OhlcBar[]>([]);
   const openTickerActionsMenu = useCallback((ticker: string, x: number, y: number) => {
     setContextMenu({ ticker, x, y });
@@ -314,6 +316,9 @@ export function ScreeningsUI({
   const selectedTickerRef = useRef(selectedTicker);
   selectedTickerRef.current = selectedTicker;
   const tickerMessagesCache = useRef(new Map<string, ChartAiChatMessage[]>());
+  // Mirror of the sidebar's currently-visible sort order, so dismiss/advance
+  // logic can jump to the closest ticker the user actually sees.
+  const sortedSidebarOrderRef = useRef<string[]>([]);
   const [chartDateRange, setChartDateRange] = useState<
     { from: string; to: string } | undefined
   >();
@@ -710,15 +715,18 @@ export function ScreeningsUI({
     if (!row) return;
     await upsertRowNote(row, { status: "dismissed" });
     if (selectedTicker === ticker) {
-      // Auto-advance to the next non-dismissed ticker in the current filter,
-      // otherwise the previous one — mirrors what the user expects when they
-      // clear something off the list.
-      const idx = filteredSymbols.indexOf(ticker);
+      // Auto-advance to the closest non-dismissed ticker in the user's actual
+      // visible sort order (sidebar sort), falling back to the source order
+      // when the sidebar order isn't available yet.
+      const visibleOrder = sortedSidebarOrderRef.current.length
+        ? sortedSidebarOrderRef.current
+        : filteredSymbols;
+      const idx = visibleOrder.indexOf(ticker);
       const nextSymbol =
-        filteredSymbols
+        visibleOrder
           .slice(idx + 1)
           .find((s) => !dismissedSymbols.has(s) && s !== ticker) ??
-        filteredSymbols
+        visibleOrder
           .slice(0, idx)
           .reverse()
           .find((s) => !dismissedSymbols.has(s) && s !== ticker) ??
@@ -1667,6 +1675,9 @@ export function ScreeningsUI({
                   hiddenDismissedCount={hiddenDismissedInListCount}
                   showDismissed={showDismissedInList}
                   onToggleShowDismissed={toggleShowDismissedInList}
+                  onSortedOrderChange={(order) => {
+                    sortedSidebarOrderRef.current = order;
+                  }}
                 />
               </div>
               <div
@@ -2258,9 +2269,16 @@ export function ScreeningsUI({
                     }
                   : null
               }
+              onSetupAgentAlarm={() => setAgentAlarmTicker(cm.ticker)}
             />
           );
         })()}
+
+      <AgentAlarmDialog
+        ticker={agentAlarmTicker}
+        open={agentAlarmTicker !== null}
+        onClose={() => setAgentAlarmTicker(null)}
+      />
     </div>
   );
 }

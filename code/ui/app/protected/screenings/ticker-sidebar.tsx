@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Eye, EyeOff, MoreHorizontal, StickyNote } from "lucide-react";
 import type { FmpQuote } from "@/lib/use-quotes";
 import type { EntryMarker } from "@/components/ticker-charts/types";
@@ -30,6 +30,9 @@ interface TickerSidebarProps {
   hiddenDismissedCount?: number;
   showDismissed?: boolean;
   onToggleShowDismissed?: () => void;
+  /** Fires whenever the visible sort order changes — lets the parent jump to
+   * the next ticker in the user's actual visible order (e.g. after dismiss). */
+  onSortedOrderChange?: (sortedSymbols: string[]) => void;
 }
 
 function SortArrow({ active, dir }: { active: boolean; dir: SortDir }) {
@@ -55,6 +58,7 @@ export function TickerSidebar({
   hiddenDismissedCount = 0,
   showDismissed = false,
   onToggleShowDismissed,
+  onSortedOrderChange,
 }: TickerSidebarProps) {
   const listRef = useRef<HTMLDivElement>(null);
   const [sortKey, setSortKey] = useState<SortKey>("symbol");
@@ -107,26 +111,39 @@ export function TickerSidebar({
     });
   }, [symbols, sortKey, sortDir, quotes, getEntryMarker]);
 
-  const handleKeyDown = useCallback(
-    (e: React.KeyboardEvent) => {
+  useEffect(() => {
+    if (sortedSymbols.length === 0) return;
+
+    function isEditableTarget(target: EventTarget | null): boolean {
+      if (!(target instanceof HTMLElement)) return false;
+      if (target.isContentEditable) return true;
+      const tag = target.tagName;
+      if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return true;
+      return false;
+    }
+
+    function onKey(e: KeyboardEvent) {
+      if (e.key !== "ArrowDown" && e.key !== "ArrowUp") return;
+      if (e.altKey || e.ctrlKey || e.metaKey) return;
+      if (isEditableTarget(e.target)) return;
+      e.preventDefault();
       const currentIdx = selectedTicker
         ? sortedSymbols.indexOf(selectedTicker)
         : -1;
-      if (e.key === "ArrowDown" || e.key === "ArrowUp") {
-        e.preventDefault();
-        const nextIdx =
-          e.key === "ArrowDown"
-            ? currentIdx < sortedSymbols.length - 1
-              ? currentIdx + 1
-              : 0
-            : currentIdx > 0
-              ? currentIdx - 1
-              : sortedSymbols.length - 1;
-        if (sortedSymbols[nextIdx]) onSelect(sortedSymbols[nextIdx]);
-      }
-    },
-    [sortedSymbols, selectedTicker, onSelect],
-  );
+      const nextIdx =
+        e.key === "ArrowDown"
+          ? currentIdx < sortedSymbols.length - 1
+            ? currentIdx + 1
+            : 0
+          : currentIdx > 0
+            ? currentIdx - 1
+            : sortedSymbols.length - 1;
+      if (sortedSymbols[nextIdx]) onSelect(sortedSymbols[nextIdx]);
+    }
+
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [sortedSymbols, selectedTicker, onSelect]);
 
   useEffect(() => {
     if (!selectedTicker || !listRef.current) return;
@@ -135,14 +152,15 @@ export function TickerSidebar({
     if (el) el.scrollIntoView({ block: "nearest", behavior: "smooth" });
   }, [selectedTicker]);
 
+  useEffect(() => {
+    onSortedOrderChange?.(sortedSymbols);
+  }, [sortedSymbols, onSortedOrderChange]);
+
   const headerBtn =
     "text-right cursor-pointer select-none hover:text-foreground transition-colors inline-flex items-center gap-0.5 justify-end";
 
   return (
-    <div
-      className="flex min-h-0 flex-1 flex-col bg-background"
-      onKeyDown={handleKeyDown}
-    >
+    <div className="flex min-h-0 flex-1 flex-col bg-background">
       {hiddenDismissedCount > 0 && onToggleShowDismissed && (
         <button
           type="button"
