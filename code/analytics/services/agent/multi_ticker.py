@@ -119,15 +119,23 @@ async def _plan_tools(
         model=model,
         system=_PLAN_SYSTEM,
         user="\n\n".join(user_parts),
-        options={"num_predict": 1024},
         request_format="json",
         label="Multi-ticker planner",
+    )
+    log.info(
+        "Multi-ticker planner: raw response len=%d head=%r tail=%r",
+        len(raw),
+        raw[:200],
+        raw[-200:] if len(raw) > 200 else "",
     )
     return _parse_plan(raw)
 
 
 def _parse_plan(raw: str) -> dict:
     raw = raw.removeprefix("```json").removeprefix("```").removesuffix("```").strip()
+    if not raw:
+        log.warning("Multi-ticker planner: empty response (no content emitted)")
+        return {"tool_plan": [], "per_ticker_brief": "", "rationale": ""}
     try:
         data = json.loads(raw)
     except json.JSONDecodeError:
@@ -151,6 +159,40 @@ def _parse_plan(raw: str) -> dict:
         "tool_plan": cleaned,
         "per_ticker_brief": str(data.get("per_ticker_brief") or "").strip(),
         "rationale": str(data.get("rationale") or "").strip(),
+    }
+
+
+def _default_fallback_plan(registry: ToolRegistry) -> dict:
+    """Construct a sensible plan when the LLM planner returns nothing.
+
+    Thinking-model planners (glm-*, qwen-thinking, etc.) sometimes burn the
+    `num_predict` budget on hidden reasoning and emit no JSON. Rather than
+    abort the whole screening, fall back to the canonical per-ticker
+    news-impact tool set — the ones that motivate this product in the first
+    place. Only tools actually in the registry are included.
+    """
+    candidates: list[tuple[str, dict]] = [
+        (
+            "get_ticker_news",
+            {"tickers": ["{TICKER}"], "hours": 24, "per_ticker_limit": 5},
+        ),
+        ("get_ticker_sentiment", {"tickers": ["{TICKER}"], "hours": 24}),
+        ("get_ticker_relationships", {"ticker": "{TICKER}", "hops": 1}),
+        ("get_company_vectors", {"tickers": ["{TICKER}"]}),
+    ]
+    plan: list[dict] = [
+        {"name": name, "args": args}
+        for name, args in candidates
+        if registry.has(name)
+    ]
+    return {
+        "tool_plan": plan,
+        "per_ticker_brief": (
+            "Evaluate this ticker against the screening prompt using the "
+            "latest news, sentiment scores, relationship graph, and company "
+            "factor profile. Cite specific data points."
+        ),
+        "rationale": "fallback: planner returned no plan, using canonical per-ticker tools",
     }
 
 
@@ -291,7 +333,6 @@ async def _evaluate_ticker(
         model=model,
         system=_PER_TICKER_SYSTEM,
         user="\n\n".join(user_parts),
-        options={"num_predict": 768},
         request_format="json",
         label=f"Per-ticker {ticker}",
     )
@@ -376,7 +417,6 @@ async def _conclude(
         model=model,
         system=_CONCLUDE_SYSTEM,
         user="\n\n".join(user_parts),
-        options={"num_predict": 768},
         request_format="json",
         label="Multi-ticker concluder",
     )
@@ -452,6 +492,25 @@ async def run_multi_ticker_async(
             }
         tool_plan = plan["tool_plan"]
         per_ticker_brief = plan["per_ticker_brief"]
+        if not tool_plan:
+            log.warning(
+                "Multi-ticker plan: empty — falling back to default per-ticker tool set"
+            )
+            plan = _default_fallback_plan(registry)
+            tool_plan = plan["tool_plan"]
+            per_ticker_brief = plan["per_ticker_brief"]
+            if not tool_plan:
+                # The registry didn't even have the basics — give up.
+                return {
+                    "triggered": False,
+                    "summary": "Planner returned no plan and registry has no fallback tools.",
+                    "data_used": {
+                        "plan": plan,
+                        "verdicts": [],
+                        "ticker_count": len(tickers),
+                        "triggered_count": 0,
+                    },
+                }
         per_ticker_plan, shared_plan = _split_plan(tool_plan)
         log.info(
             "Multi-ticker plan: %d tool(s) (%d per-ticker, %d shared) — names=%s brief=%r rationale=%r (%.1fs)",
@@ -463,17 +522,6 @@ async def run_multi_ticker_async(
             plan["rationale"][:120],
             time.monotonic() - t0,
         )
-        if not tool_plan:
-            return {
-                "triggered": False,
-                "summary": "Planner returned no tool plan — screening cannot evaluate tickers.",
-                "data_used": {
-                    "plan": plan,
-                    "verdicts": [],
-                    "ticker_count": len(tickers),
-                    "triggered_count": 0,
-                },
-            }
 
         # Stage 2 — execute shared (market-wide) tools ONCE, then fan out per ticker
         shared_data: dict[str, Any] = {}
