@@ -66,6 +66,9 @@ Rules:
 is per-ticker, not batched.
 - You MAY include market-wide tools whose args do not contain "{TICKER}" \
 (e.g. cluster trends). They will run once and be shared across all tickers.
+- Parameters shown as ``name={a|b|c}`` are ENUMS — you MUST use one of the \
+listed values verbatim. Never guess or shorten enum values (e.g. for FMP \
+``chart`` use ``endpoint="intraday-1-hour"``, not ``"1hr"``).
 - Do NOT plan write tools (anything starting with "add_ticker_to_screening" \
 or "set_screening_").
 
@@ -80,6 +83,28 @@ Respond with ONLY this JSON (no markdown, no commentary):
 """
 
 
+def _format_param(name: str, schema: Any) -> str:
+    """Render one parameter for the planner catalog.
+
+    When a param has an ``enum`` constraint (common for FMP MCP tools whose
+    ``endpoint`` arg selects which API to hit), expose every allowed value so
+    the planner can pick a valid one rather than guessing. Without this hint
+    the planner produces invalid enum values and FMP rejects the call.
+    """
+    if isinstance(schema, dict):
+        enum_vals = schema.get("enum")
+        if isinstance(enum_vals, list) and enum_vals:
+            shown = (
+                [str(v) for v in enum_vals]
+                if len(enum_vals) <= 20
+                else [str(v) for v in enum_vals[:20]] + ["..."]
+            )
+            return f"{name}={{{'|'.join(shown)}}}"
+        typ = schema.get("type") or "any"
+        return f"{name}:{typ}"
+    return name
+
+
 def _build_tool_catalog(registry: ToolRegistry) -> str:
     lines: list[str] = []
     for schema in registry.schemas():
@@ -88,9 +113,12 @@ def _build_tool_catalog(registry: ToolRegistry) -> str:
         if not name or any(name.startswith(p) for p in _WRITE_TOOL_PREFIXES):
             continue
         desc = (fn.get("description") or "").strip().split("\n", 1)[0][:220]
-        params = (fn.get("parameters") or {}).get("properties") or {}
-        param_names = list(params.keys())[:8]
-        lines.append(f"- {name}({', '.join(param_names)}): {desc}")
+        props = (fn.get("parameters") or {}).get("properties") or {}
+        param_parts = [
+            _format_param(p, props.get(p) or {})
+            for p in list(props.keys())[:10]
+        ]
+        lines.append(f"- {name}({', '.join(param_parts)}): {desc}")
     return "\n".join(lines)
 
 
