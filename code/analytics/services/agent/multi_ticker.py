@@ -34,6 +34,8 @@ import httpx
 
 from services.agent_core import ToolRegistry, simple_chat
 
+from .fmp_tools import get_denied_fmp_tools
+
 log = logging.getLogger(__name__)
 
 _OLLAMA_URL_ENV = "OLLAMA_BASE_URL"
@@ -69,6 +71,9 @@ is per-ticker, not batched.
 - Parameters shown as ``name={a|b|c}`` are ENUMS — you MUST use one of the \
 listed values verbatim. Never guess or shorten enum values (e.g. for FMP \
 ``chart`` use ``endpoint="intraday-1-hour"``, not ``"1hr"``).
+- The tool catalog has already been filtered to what the current FMP \
+subscription plan can access. Only pick from the AVAILABLE TOOLS list — do \
+NOT invent tool names or assume tools exist beyond the catalog.
 - Do NOT plan write tools (anything starting with "add_ticker_to_screening" \
 or "set_screening_").
 
@@ -106,11 +111,24 @@ def _format_param(name: str, schema: Any) -> str:
 
 
 def _build_tool_catalog(registry: ToolRegistry) -> str:
+    """Build the planner-facing tool catalog.
+
+    Drops:
+      - write tools (mutate state — pipeline is read-only)
+      - FMP subscription-restricted tools (per ``fmp_tools.get_denied_fmp_tools``)
+        so the planner doesn't even see them and we don't waste fan-out time
+        re-failing the same access-denied call once per ticker.
+    """
+    denied_fmp = get_denied_fmp_tools()
     lines: list[str] = []
+    skipped_denied: list[str] = []
     for schema in registry.schemas():
         fn = schema.get("function") or {}
         name = fn.get("name")
         if not name or any(name.startswith(p) for p in _WRITE_TOOL_PREFIXES):
+            continue
+        if name in denied_fmp:
+            skipped_denied.append(name)
             continue
         desc = (fn.get("description") or "").strip().split("\n", 1)[0][:220]
         props = (fn.get("parameters") or {}).get("properties") or {}
@@ -119,6 +137,11 @@ def _build_tool_catalog(registry: ToolRegistry) -> str:
             for p in list(props.keys())[:10]
         ]
         lines.append(f"- {name}({', '.join(param_parts)}): {desc}")
+    if skipped_denied:
+        log.info(
+            "Tool catalog: excluded %d FMP tool(s) on subscription denylist — %s",
+            len(skipped_denied), skipped_denied,
+        )
     return "\n".join(lines)
 
 
