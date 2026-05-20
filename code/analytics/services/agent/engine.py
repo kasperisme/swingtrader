@@ -41,6 +41,7 @@ from services.rag.context import (
 from services.rag.taxonomy import CLUSTERS as _CLUSTERS
 
 from .fmp_tools import _FMP_SYSTEM_ADDON, call_fmp_tool, get_fmp_tool_schemas
+from .multi_ticker import run_multi_ticker_async
 
 log = logging.getLogger(__name__)
 
@@ -190,6 +191,106 @@ def _build_registry(
     return registry
 
 
+def _build_context_addon(user_id: str | None, linked_scan_run_ids: list[int] | None,
+                         filtered_tickers: list[str] | None) -> str:
+    """Compose the strategy + linked-context block passed to every stage of
+    the multi-ticker pipeline. Returns empty string when neither applies."""
+    parts: list[str] = []
+    if user_id:
+        strategy = (get_user_trading_strategy(user_id) or "").strip()
+        if strategy:
+            parts.append(
+                f"User's trading strategy:\n{strategy}\n"
+                "Apply this when evaluating tickers and writing verdicts."
+            )
+    if linked_scan_run_ids:
+        linked = _get_linked_scan_run_context(
+            user_id, linked_scan_run_ids, filtered_tickers=filtered_tickers
+        )
+        linked = (linked or "").strip()
+        if linked:
+            parts.append(f"Linked screening context:\n{linked}")
+    return "\n\n".join(parts)
+
+
+def _run_agent_multi_ticker(
+    *,
+    prompt: str,
+    user_id: str | None,
+    tickers: list[str],
+    linked_scan_run_ids: list[int] | None,
+    filtered_tickers: list[str] | None,
+    trigger_condition: str | None,
+) -> dict:
+    """Route a multi-ticker screening through the plan → fan-out → conclude
+    pipeline. Mirrors ``run_agent``'s return contract and applies the same
+    always-send / condition gating semantics on top of the pipeline's verdict.
+    """
+    has_condition = bool(trigger_condition and trigger_condition.strip())
+    # Multi-ticker pipeline is read-only by design; write tools are filtered
+    # out of the planner's catalog. We still build the registry with the user
+    # scoped in so RAG queries (positions, alerts, etc.) work if the planner
+    # picks them.
+    writeable_run_ids = (
+        list(linked_scan_run_ids) if (user_id and linked_scan_run_ids) else None
+    )
+    registry = _build_registry(user_id, writeable_run_ids=writeable_run_ids)
+    context_addon = _build_context_addon(
+        user_id, linked_scan_run_ids, filtered_tickers
+    )
+
+    log.info(
+        "run_agent: routing to multi-ticker pipeline — tickers=%d has_condition=%s context_addon_len=%d",
+        len(tickers), has_condition, len(context_addon),
+    )
+
+    try:
+        result = asyncio.run(
+            asyncio.wait_for(
+                run_multi_ticker_async(
+                    prompt=prompt,
+                    tickers=tickers,
+                    registry=registry,
+                    trigger_condition=(
+                        trigger_condition.strip() if has_condition else None
+                    ),
+                    context_addon=context_addon,
+                ),
+                timeout=_RUN_TIMEOUT_SECONDS,
+            )
+        )
+    except asyncio.TimeoutError:
+        log.error(
+            "Multi-ticker pipeline timed out after %.0fs (tickers=%d)",
+            _RUN_TIMEOUT_SECONDS, len(tickers),
+        )
+        result = {
+            "triggered": False,
+            "summary": (
+                f"Multi-ticker pipeline exceeded the {_RUN_TIMEOUT_SECONDS:.0f}s "
+                "wall-clock deadline before producing a result."
+            ),
+            "data_used": {
+                "error": "wall_clock_timeout",
+                "timeout_seconds": _RUN_TIMEOUT_SECONDS,
+                "ticker_count": len(tickers),
+            },
+        }
+
+    # Apply the same always-send override the single-agent path uses. Without
+    # a user-set condition, screenings always fire — the pipeline's verdict
+    # only shapes the summary copy.
+    if not has_condition:
+        result["triggered"] = True
+        if not (result.get("summary") or "").strip():
+            result["summary"] = (
+                "Screening ran in always-send mode but the agent did not produce a summary. "
+                "See data_used for the per-ticker verdicts."
+            )
+
+    return result
+
+
 def run_agent(
     prompt: str,
     user_id: str | None = None,
@@ -205,7 +306,23 @@ def run_agent(
     gathered data satisfies the condition. The informational-rundown
     override is suppressed in that mode so the gate is the only thing
     deciding delivery.
+
+    When ``tickers`` has 2+ entries, routes to the multi-ticker fan-out
+    pipeline (``services.agent.multi_ticker``) so each ticker is processed
+    in an isolated LLM context and the conclusion sees only compact
+    per-ticker verdicts. Single-ticker / no-ticker runs use the existing
+    single-agent tool-calling loop.
     """
+    if tickers and len(tickers) >= 2:
+        return _run_agent_multi_ticker(
+            prompt=prompt,
+            user_id=user_id,
+            tickers=tickers,
+            linked_scan_run_ids=linked_scan_run_ids,
+            filtered_tickers=filtered_tickers,
+            trigger_condition=trigger_condition,
+        )
+
     base_system = _AGENT_SYSTEM + (_FMP_SYSTEM_ADDON if _FMP_ENABLED else "")
     system = base_system
     if user_id:
