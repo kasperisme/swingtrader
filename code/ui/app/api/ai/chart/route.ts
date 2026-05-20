@@ -1,4 +1,6 @@
 import { createClient } from "@/lib/supabase/server";
+import type { SupabaseClient } from "@supabase/supabase-js";
+import { normalizeSearchTag, tagsFromQuery } from "@/lib/news/search-tags";
 import type { ChartAnnotation, AnnotationRole } from "@/components/ticker-charts/types";
 import type { OhlcBar } from "@/components/ticker-charts/types";
 import type Anthropic from "@anthropic-ai/sdk";
@@ -176,6 +178,122 @@ const DRAW_CHART_TOOL: Anthropic.Tool = {
     },
   },
 };
+
+const SEARCH_NEWS_TOOL: Anthropic.Tool = {
+  name: "search_ticker_news",
+  description:
+    "Search recent news articles for the current ticker. By default returns articles tagged with this ticker; pass `tags` or `query` to narrow to a theme/event (e.g. earnings, lawsuit, AI, guidance, FDA). Tickers should be uppercase symbols; themes are short words or phrases that get slugified. Returns title, source, date, URL, and snippet. Call once to scan recent news, or call multiple times with different filters to drill into specific catalysts.",
+  input_schema: {
+    type: "object",
+    properties: {
+      query: {
+        type: "string",
+        description:
+          "Optional free-text query — tokens are auto-converted to tags (uppercase short tokens become ticker tags, longer words become theme slugs). Use this for natural-language follow-ups. Combined with the current ticker by default.",
+      },
+      tags: {
+        type: "array",
+        items: { type: "string" },
+        description:
+          "Optional explicit tag list to AND with the current ticker. Use uppercase symbols for tickers (AAPL) and lowercase words/phrases for themes (earnings, ai, lawsuit, guidance_cut). Leave empty to search just this ticker's news.",
+      },
+      include_ticker: {
+        type: "boolean",
+        description:
+          "Whether to include the current ticker in the tag filter. Defaults to true. Set false only when explicitly searching cross-market themes.",
+      },
+      limit: {
+        type: "integer",
+        minimum: 1,
+        maximum: 25,
+        description: "Maximum number of articles to return. Default 10.",
+      },
+      days_back: {
+        type: "integer",
+        minimum: 1,
+        maximum: 180,
+        description: "Only return articles from the last N days. Default 30.",
+      },
+    },
+  },
+};
+
+type NewsArticleResult = {
+  title: string;
+  source: string | null;
+  published_at: string | null;
+  url: string | null;
+  snippet: string | null;
+};
+
+async function searchTickerNews(
+  supabase: SupabaseClient,
+  ticker: string,
+  args: {
+    query?: unknown;
+    tags?: unknown;
+    include_ticker?: unknown;
+    limit?: unknown;
+    days_back?: unknown;
+  },
+): Promise<{
+  ticker: string;
+  tags: string[];
+  count: number;
+  articles: NewsArticleResult[];
+  note?: string;
+}> {
+  const rawLimit = Number(args.limit);
+  const limit = Number.isFinite(rawLimit) ? Math.min(Math.max(Math.round(rawLimit), 1), 25) : 10;
+  const rawDays = Number(args.days_back);
+  const daysBack = Number.isFinite(rawDays) ? Math.min(Math.max(Math.round(rawDays), 1), 180) : 30;
+  const lookbackHours = daysBack * 24;
+  const includeTicker = args.include_ticker === undefined ? true : Boolean(args.include_ticker);
+
+  const explicit = Array.isArray(args.tags)
+    ? (args.tags as unknown[]).map((t) => normalizeSearchTag(String(t))).filter(Boolean)
+    : [];
+  const fromQuery = typeof args.query === "string" ? tagsFromQuery(args.query) : [];
+
+  const tagSet = new Set<string>();
+  if (includeTicker) tagSet.add(normalizeSearchTag(ticker));
+  for (const t of explicit) tagSet.add(t);
+  for (const t of fromQuery) tagSet.add(t);
+  const tagFilter = [...tagSet];
+
+  if (tagFilter.length === 0) {
+    return { ticker, tags: [], count: 0, articles: [], note: "No tags resolved from input." };
+  }
+
+  const { data, error } = await supabase.schema("swingtrader").rpc("search_news_by_tags", {
+    tag_filter: tagFilter,
+    match_count: limit,
+    lookback_hours: lookbackHours,
+    stream_filter: null,
+  });
+
+  if (error) {
+    return { ticker, tags: tagFilter, count: 0, articles: [], note: `query failed: ${error.message}` };
+  }
+
+  const rows = (data ?? []) as {
+    title: string | null;
+    url: string | null;
+    source: string | null;
+    published_at: string | null;
+    snippet: string | null;
+  }[];
+
+  const articles: NewsArticleResult[] = rows.map((r) => ({
+    title: r.title ?? "",
+    source: r.source,
+    published_at: r.published_at,
+    url: r.url,
+    snippet: r.snippet,
+  }));
+
+  return { ticker, tags: tagFilter, count: articles.length, articles };
+}
 
 function parsePersonaScores(raw: string): { analysis: string; scores: PersonaScores | undefined } {
   const match = raw.match(/\nSCORES:\s*(\{[^\n]+\})\s*$/);
@@ -400,8 +518,8 @@ export async function POST(req: Request) {
         ];
 
         const tools: Anthropic.Tool[] = canUpdateStatus
-          ? [DRAW_CHART_TOOL, UPDATE_STATUS_TOOL, SHOW_HOW_TO_TOOL]
-          : [DRAW_CHART_TOOL, SHOW_HOW_TO_TOOL];
+          ? [DRAW_CHART_TOOL, UPDATE_STATUS_TOOL, SHOW_HOW_TO_TOOL, SEARCH_NEWS_TOOL]
+          : [DRAW_CHART_TOOL, SHOW_HOW_TO_TOOL, SEARCH_NEWS_TOOL];
 
         const howToSystem =
           `\n\n## How-to / "show me" questions\n` +
@@ -410,74 +528,125 @@ export async function POST(req: Request) {
           `Available tours and their steps (use these tour_key values verbatim):\n\n` +
           howToBriefMarkdown();
 
+        const newsSystem =
+          `\n\n## News questions\n` +
+          `When the user asks about news, catalysts, recent headlines, or what's been moving the stock, call search_ticker_news first to fetch articles, then incorporate the findings into your analysis. The tool defaults to searching the current ticker — pass \`tags\` (e.g. ["earnings"], ["lawsuit"], ["AI"]) or a natural-language \`query\` to drill into a specific theme. Cite specific headlines and dates when relevant. You may call it multiple times with different filters.`;
+
+        const orchestratorSystem =
+          withTradingStrategy(ORCHESTRATOR_PROMPT(symbol), tradingStrategy ?? "") +
+          howToSystem +
+          newsSystem;
+
+        const client = getAnthropicClient();
+        const conversation: Anthropic.MessageParam[] = [...orchestratorMessages];
+
+        let annotations: ChartAnnotation[] = [];
+        let analysisText = "";
+        let toolCallTotal = 0;
+        const MAX_TOOL_ROUNDS = 4;
+
         const tOrchestrator = performance.now();
-        let result: ClaudeResult;
         try {
-          result = await callClaude(orchestratorMessages, {
-            system:
-              withTradingStrategy(ORCHESTRATOR_PROMPT(symbol), tradingStrategy ?? "") +
-              howToSystem,
-            tools,
-            toolChoice: { type: "auto" },
-            maxTokens: 4096,
-          });
+          for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
+            const response = await client.messages.create({
+              model: DEFAULT_MODEL,
+              max_tokens: 4096,
+              system: orchestratorSystem,
+              messages: conversation,
+              tools,
+              tool_choice: { type: "auto" },
+            });
+
+            let roundText = "";
+            const toolUseBlocks: Anthropic.ToolUseBlock[] = [];
+            for (const block of response.content) {
+              if (block.type === "text") roundText += block.text;
+              else if (block.type === "tool_use") toolUseBlocks.push(block);
+            }
+            toolCallTotal += toolUseBlocks.length;
+
+            const toolResults: Anthropic.ToolResultBlockParam[] = [];
+
+            for (const tu of toolUseBlocks) {
+              if (tu.name === "search_ticker_news") {
+                emit(controller, { type: "tool_use", name: tu.name });
+                const args = tu.input as {
+                  query?: unknown;
+                  tags?: unknown;
+                  include_ticker?: unknown;
+                  limit?: unknown;
+                  days_back?: unknown;
+                };
+                const result = await searchTickerNews(supabase, symbol, args);
+                toolResults.push({
+                  type: "tool_result",
+                  tool_use_id: tu.id,
+                  content: JSON.stringify(result),
+                });
+              } else if (tu.name === "draw_on_chart") {
+                const args = tu.input as { annotations?: RawAnnotation[]; analysis?: string };
+                annotations = parseAnnotations(args.annotations ?? []);
+                if (args.analysis) analysisText = args.analysis;
+              } else if (tu.name === "show_how_to") {
+                const args = tu.input as {
+                  tour_key?: string;
+                  from_step?: number;
+                  to_step?: number;
+                  reply?: string;
+                };
+                if (
+                  typeof args.tour_key === "string" &&
+                  (TOUR_KEYS as string[]).includes(args.tour_key)
+                ) {
+                  const url = howToUrl(
+                    args.tour_key as TourKey,
+                    args.from_step,
+                    args.to_step,
+                  );
+                  emit(controller, { type: "navigate", url, reply: args.reply ?? null });
+                  if (args.reply) analysisText = args.reply;
+                }
+              } else if (tu.name === "update_ticker_status" && canUpdateStatus) {
+                const args = tu.input as { status?: string; comment?: string; highlighted?: boolean };
+                const status = TICKER_STATUSES.includes(args.status as TickerStatus)
+                  ? (args.status as TickerStatus)
+                  : null;
+                if (status) {
+                  const res = await screeningsUpsertDismissNote({
+                    scanRowId: scanRowId!,
+                    runId: runId!,
+                    ticker: symbol,
+                    status,
+                    ...(typeof args.highlighted === "boolean" ? { highlighted: args.highlighted } : {}),
+                    ...(typeof args.comment === "string" ? { comment: args.comment } : {}),
+                  });
+                  emit(controller, {
+                    type: "status_change",
+                    status,
+                    highlighted: args.highlighted ?? null,
+                    comment: args.comment ?? null,
+                    ok: res.ok,
+                    error: res.ok ? null : res.error,
+                  });
+                }
+              }
+            }
+
+            // If the model fetched data, return results and let it reason again.
+            if (toolResults.length > 0) {
+              conversation.push({ role: "assistant", content: response.content });
+              conversation.push({ role: "user", content: toolResults });
+              continue;
+            }
+
+            // No data-fetch tools used this round — finalize.
+            if (!analysisText) analysisText = roundText;
+            break;
+          }
         } catch (err) { emit(controller, { type: "error", message: String(err) }); return; }
         console.log(`[chart-ai] orchestrator: ${Math.round(performance.now() - tOrchestrator)}ms  total: ${Math.round(performance.now() - tTotal)}ms`);
 
-        let annotations: ChartAnnotation[] = [];
-        let analysisText = result.text;
-
-        for (const tu of result.toolUses) {
-          if (tu.name === "draw_on_chart") {
-            const args = tu.input as { annotations?: RawAnnotation[]; analysis?: string };
-            annotations = parseAnnotations(args.annotations ?? []);
-            if (args.analysis) analysisText = args.analysis;
-          } else if (tu.name === "show_how_to") {
-            const args = tu.input as {
-              tour_key?: string;
-              from_step?: number;
-              to_step?: number;
-              reply?: string;
-            };
-            if (
-              typeof args.tour_key === "string" &&
-              (TOUR_KEYS as string[]).includes(args.tour_key)
-            ) {
-              const url = howToUrl(
-                args.tour_key as TourKey,
-                args.from_step,
-                args.to_step,
-              );
-              emit(controller, { type: "navigate", url, reply: args.reply ?? null });
-              if (args.reply) analysisText = args.reply;
-            }
-          } else if (tu.name === "update_ticker_status" && canUpdateStatus) {
-            const args = tu.input as { status?: string; comment?: string; highlighted?: boolean };
-            const status = TICKER_STATUSES.includes(args.status as TickerStatus)
-              ? (args.status as TickerStatus)
-              : null;
-            if (status) {
-              const res = await screeningsUpsertDismissNote({
-                scanRowId: scanRowId!,
-                runId: runId!,
-                ticker: symbol,
-                status,
-                ...(typeof args.highlighted === "boolean" ? { highlighted: args.highlighted } : {}),
-                ...(typeof args.comment === "string" ? { comment: args.comment } : {}),
-              });
-              emit(controller, {
-                type: "status_change",
-                status,
-                highlighted: args.highlighted ?? null,
-                comment: args.comment ?? null,
-                ok: res.ok,
-                error: res.ok ? null : res.error,
-              });
-            }
-          }
-        }
-
-        console.log(`[chart-ai] tool_calls: ${result.toolUses.length}, annotations: ${annotations.length}, has_text: ${!!result.text}`);
+        console.log(`[chart-ai] tool_calls: ${toolCallTotal}, annotations: ${annotations.length}, has_text: ${!!analysisText}`);
         const personaLine = engagedPersonas.map((p) => p.label).join("|");
         emit(controller, { type: "annotations", data: annotations });
         emit(controller, { type: "analysis", content: personaLine ? `<!-- personas:${personaLine} -->\n${analysisText}` : analysisText });

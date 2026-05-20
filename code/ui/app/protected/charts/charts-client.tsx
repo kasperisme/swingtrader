@@ -290,17 +290,19 @@ export function ChartsPageClient({ tickersParam, suggestionTickers }: Props) {
 
         {/* AI chat side panel */}
         {aiChatOpen && selectedTicker && (
-          <div data-tour="chart-ai-panel" className="hidden sm:flex w-[340px] shrink-0 flex-col border-l border-border min-h-0">
-            <ChartAiChat
-              key={selectedTicker}
-              symbol={selectedTicker}
-              ohlcData={chartData}
-              annotations={annotations}
-              onAnnotations={handleAiAnnotations}
-              messages={aiChatMessages}
-              setMessages={setAiChatMessages}
-              side
-            />
+          <div data-tour="chart-ai-panel" className="hidden sm:block w-[340px] shrink-0 border-l border-border relative self-stretch">
+            <div className="absolute inset-0 flex flex-col min-h-0">
+              <ChartAiChat
+                key={selectedTicker}
+                symbol={selectedTicker}
+                ohlcData={chartData}
+                annotations={annotations}
+                onAnnotations={handleAiAnnotations}
+                messages={aiChatMessages}
+                setMessages={setAiChatMessages}
+                side
+              />
+            </div>
           </div>
         )}
 
