@@ -7,14 +7,17 @@
   <link href="https://fonts.googleapis.com/css2?family=Caveat:wght@700&family=Kalam:wght@300;400;700&display=swap" rel="stylesheet" />
   <style>
     :root {
-      --background: 36 60% 97%;
-      --foreground: 222 47% 11%;
-      --card: 36 45% 99%;
-      --primary: 38 92% 50%;
-      --accent: 262 83% 66%;
-      --border: 30 22% 80%;
-      --muted-foreground: 215 18% 40%;
+      /* Napkin palette: bright white tissue, deep ballpoint blue ink */
+      --background: 42 30% 96%;
+      --foreground: 222 70% 16%;
+      --card: 42 30% 96%;
+      --primary: 14 78% 48%;       /* coffee/red felt-tip for accents */
+      --accent: 220 70% 28%;       /* ballpoint navy */
+      --border: 220 25% 55%;
+      --muted-foreground: 220 30% 32%;
       --highlight: 50 100% 62%;
+      --ink: 222 75% 16%;
+      --stain: 24 55% 38%;          /* coffee ring */
     }
 
     * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -37,26 +40,57 @@
       flex-direction: column;
       overflow: hidden;
       background:
-        /* paper noise */
-        url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='240' height='240'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 0  0 0 0 0 0  0 0 0 0 0  0 0 0 0.07 0'/></filter><rect width='100%25' height='100%25' filter='url(%23n)'/></svg>"),
-        /* dotted paper */
-        radial-gradient(hsl(var(--border) / 0.55) 1.4px, transparent 1.6px) 0 0 / 28px 28px,
+        /* tissue fiber noise (lighter, finer than printer paper) */
+        url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='320' height='320'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='1.6' numOctaves='3' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 0  0 0 0 0 0  0 0 0 0 0  0 0 0 0.06 0'/></filter><rect width='100%25' height='100%25' filter='url(%23n)'/></svg>"),
+        /* long thin fibers — horizontal streaks */
+        url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='600' height='600'><filter id='f'><feTurbulence type='turbulence' baseFrequency='0.012 0.6' numOctaves='2' seed='3'/><feColorMatrix values='0 0 0 0 0  0 0 0 0 0  0 0 0 0 0  0 0 0 0.05 0'/></filter><rect width='100%25' height='100%25' filter='url(%23f)'/></svg>"),
+        /* vertical fold crease — soft gradient line down the middle */
+        linear-gradient(90deg,
+          transparent 0%,
+          transparent 49.4%,
+          hsla(220,15%,40%,0.10) 49.85%,
+          hsla(220,15%,30%,0.18) 50%,
+          hsla(220,15%,40%,0.10) 50.15%,
+          transparent 50.6%,
+          transparent 100%),
+        /* horizontal fold crease */
+        linear-gradient(0deg,
+          transparent 0%,
+          transparent 49.4%,
+          hsla(220,15%,40%,0.08) 49.85%,
+          hsla(220,15%,30%,0.14) 50%,
+          hsla(220,15%,40%,0.08) 50.15%,
+          transparent 50.6%,
+          transparent 100%),
+        /* gentle vignette — napkin edges sit slightly shaded */
+        radial-gradient(ellipse at center, hsl(var(--background)) 55%, hsl(40 15% 90%) 100%),
         hsl(var(--background));
     }
 
-    /* Doodle accents — sketchy starburst (top-right) and squiggle (bottom-left) */
+    /* Scalloped napkin edge — thin debossed pattern around the perimeter */
+    .slide-edge {
+      position: absolute;
+      inset: 26px;
+      pointer-events: none;
+      border: 2px dotted hsl(220 15% 70% / 0.55);
+      border-radius: 6px;
+      z-index: 1;
+    }
+
+    /* Doodle accents — coffee ring stain (top-right), pen squiggle (bottom-left) */
     .slide::before {
       content: "";
       position: absolute;
-      top: 70px;
-      right: 90px;
-      width: 130px;
-      height: 130px;
-      background-image: url("data:image/svg+xml;utf8,<svg viewBox='0 0 100 100' xmlns='http://www.w3.org/2000/svg' fill='none' stroke='%23F59E0B' stroke-width='3' stroke-linecap='round'><path d='M50 8 V30 M50 70 V92 M8 50 H30 M70 50 H92 M22 22 L36 36 M64 64 L78 78 M78 22 L64 36 M36 64 L22 78'/><circle cx='50' cy='50' r='4' fill='%23F59E0B'/></svg>");
+      top: 56px;
+      right: 70px;
+      width: 180px;
+      height: 180px;
+      background-image: url("data:image/svg+xml;utf8,<svg viewBox='0 0 100 100' xmlns='http://www.w3.org/2000/svg' fill='none' stroke='%23774422' stroke-width='2.2' stroke-linecap='round'><circle cx='50' cy='50' r='34' stroke-width='3.4' opacity='0.55'/><circle cx='50' cy='50' r='30' stroke-width='1.4' opacity='0.35'/><path d='M22 44 Q 30 38, 38 44 M64 56 Q 72 50, 80 56' opacity='0.45'/></svg>");
       background-size: contain;
       background-repeat: no-repeat;
-      opacity: 0.65;
-      transform: rotate(-8deg);
+      opacity: 0.7;
+      transform: rotate(-6deg);
+      filter: blur(0.3px);
       pointer-events: none;
     }
     .slide::after {
@@ -66,7 +100,7 @@
       left: 64px;
       width: 220px;
       height: 90px;
-      background-image: url("data:image/svg+xml;utf8,<svg viewBox='0 0 220 90' xmlns='http://www.w3.org/2000/svg' fill='none' stroke='%23A78BFA' stroke-width='3.5' stroke-linecap='round'><path d='M5 65 Q 30 18, 58 52 T 116 52 T 174 44 T 215 38'/></svg>");
+      background-image: url("data:image/svg+xml;utf8,<svg viewBox='0 0 220 90' xmlns='http://www.w3.org/2000/svg' fill='none' stroke='%231d3a8a' stroke-width='3.2' stroke-linecap='round'><path d='M5 65 Q 30 18, 58 52 T 116 52 T 174 44 T 215 38'/></svg>");
       background-size: contain;
       background-repeat: no-repeat;
       opacity: 0.55;
@@ -90,6 +124,7 @@
       font-weight: 700;
       font-size: 28px;
       letter-spacing: 0;
+      color: hsl(var(--ink));
       transform: rotate(-0.4deg);
     }
     .brand-mark {
@@ -99,14 +134,14 @@
       display: block;
       object-fit: contain;
       transform: rotate(-5deg);
-      filter: drop-shadow(3px 4px 0 hsl(var(--primary) / 0.5));
+      opacity: 0.92;
     }
 
     .pager {
       font-family: "Caveat", cursive;
       font-size: 34px;
       font-weight: 700;
-      color: hsl(var(--muted-foreground));
+      color: hsl(var(--ink) / 0.7);
       letter-spacing: 0;
       text-transform: none;
       transform: rotate(2.5deg);
@@ -135,7 +170,7 @@
       color: hsl(var(--primary));
       padding: 0 6px 16px 6px;
       transform: rotate(-1.6deg);
-      background-image: url("data:image/svg+xml;utf8,<svg viewBox='0 0 240 14' xmlns='http://www.w3.org/2000/svg' fill='none' stroke='%23F59E0B' stroke-width='3.5' stroke-linecap='round'><path d='M3 8 Q 22 2, 42 8 T 82 8 T 122 8 T 162 8 T 202 8 T 237 6'/></svg>");
+      background-image: url("data:image/svg+xml;utf8,<svg viewBox='0 0 240 14' xmlns='http://www.w3.org/2000/svg' fill='none' stroke='%23b5391d' stroke-width='3' stroke-linecap='round'><path d='M3 8 Q 22 2, 42 8 T 82 8 T 122 8 T 162 8 T 202 8 T 237 6'/></svg>");
       background-repeat: no-repeat;
       background-size: 100% 14px;
       background-position: 0 100%;
@@ -148,22 +183,31 @@
       display: inline-block;
     }
 
+    /* Ink bleed: tiny soft halo around text, like marker on napkin */
+    .title-cover, .heading, .prose, .subtitle-cover,
+    .stat-label, .stat-context,
+    .quote-text, .quote-attr,
+    .cta-headline, .cta-subline,
+    .bullet > div:not(.bullet-num) {
+      text-shadow: 0 0 0.6px hsl(var(--ink) / 0.55);
+    }
+
     .title-cover {
       font-family: "Kalam", cursive;
       font-size: 110px;
       font-weight: 700;
       line-height: 1.0;
       letter-spacing: -0.01em;
-      color: hsl(var(--foreground));
+      color: hsl(var(--ink));
       transform: rotate(-0.5deg);
       max-width: 940px;
     }
     .subtitle-cover {
       font-family: "Kalam", cursive;
       font-size: 36px;
-      font-weight: 300;
+      font-weight: 400;
       line-height: 1.4;
-      color: hsl(var(--muted-foreground));
+      color: hsl(var(--ink) / 0.78);
       max-width: 880px;
       transform: rotate(0.3deg);
     }
@@ -174,6 +218,7 @@
       font-weight: 700;
       line-height: 1.05;
       letter-spacing: -0.01em;
+      color: hsl(var(--ink));
       transform: rotate(-0.4deg);
     }
     .heading .accent {
@@ -185,51 +230,53 @@
       font-size: 32px;
       font-weight: 400;
       line-height: 1.5;
-      color: hsl(var(--foreground) / 0.88);
+      color: hsl(var(--ink) / 0.9);
       max-width: 880px;
     }
 
     .bullets {
       display: flex;
       flex-direction: column;
-      gap: 26px;
+      gap: 22px;
       margin-top: 8px;
     }
+    /* Napkin bullets: no card, no shadow — just a hand-drawn checkbox + ink text */
     .bullet {
       display: flex;
-      gap: 24px;
+      gap: 22px;
       align-items: flex-start;
       font-family: "Kalam", cursive;
-      font-size: 30px;
+      font-size: 32px;
       line-height: 1.4;
       font-weight: 400;
-      color: hsl(var(--foreground));
-      background: hsl(var(--card));
-      border: 2.5px solid hsl(var(--foreground));
-      border-radius: 20px 26px 18px 28px;
-      padding: 24px 28px;
-      box-shadow: 7px 7px 0 -1px hsl(var(--foreground) / 0.88);
+      color: hsl(var(--ink));
+      background: transparent;
+      border: none;
+      border-radius: 0;
+      padding: 6px 4px 10px 4px;
+      box-shadow: none;
+      border-bottom: 1.5px dashed hsl(var(--ink) / 0.18);
     }
-    .bullet:nth-child(odd)  { transform: rotate(-0.9deg); border-radius: 24px 18px 28px 16px; }
-    .bullet:nth-child(even) { transform: rotate(0.8deg);  border-radius: 18px 24px 16px 28px; }
-    .bullet:nth-child(3n)   { transform: rotate(-0.3deg); }
+    .bullet:nth-child(odd)  { transform: rotate(-0.4deg); }
+    .bullet:nth-child(even) { transform: rotate(0.3deg); }
+    .bullet:nth-child(3n)   { transform: rotate(-0.15deg); }
+    .bullet:last-child      { border-bottom: none; }
 
     .bullet-num {
       flex-shrink: 0;
-      width: 54px;
-      height: 54px;
-      border-radius: 48% 52% 50% 50% / 50% 50% 48% 52%;
-      background: hsl(var(--primary));
-      color: hsl(var(--foreground));
+      width: 44px;
+      height: 44px;
+      background:
+        url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 44 44' fill='none' stroke='%231a2b66' stroke-width='2.6' stroke-linecap='round' stroke-linejoin='round'><path d='M5 6 Q 20 3 39 7 Q 41 22 38 38 Q 22 41 6 38 Q 3 22 5 6 Z'/></svg>") no-repeat center / contain;
+      color: hsl(var(--ink));
       font-family: "Caveat", cursive;
       font-weight: 700;
-      font-size: 38px;
+      font-size: 32px;
       display: flex;
       align-items: center;
       justify-content: center;
-      border: 2.5px solid hsl(var(--foreground));
-      transform: rotate(-7deg);
-      box-shadow: 3px 3px 0 -1px hsl(var(--foreground) / 0.85);
+      transform: rotate(-4deg);
+      margin-top: 6px;
     }
 
     /* Stat */
@@ -239,12 +286,11 @@
       font-weight: 700;
       line-height: 1;
       letter-spacing: -0.04em;
-      background: linear-gradient(135deg, hsl(var(--primary)), hsl(var(--accent)));
-      -webkit-background-clip: text;
-      background-clip: text;
-      color: transparent;
+      color: hsl(var(--primary));
+      -webkit-text-stroke: 1px hsl(var(--ink) / 0.5);
       transform: rotate(-1.4deg);
       display: inline-block;
+      text-shadow: 1.5px 1.5px 0 hsl(var(--ink) / 0.18);
     }
     .stat-label {
       font-family: "Kalam", cursive;
@@ -252,6 +298,7 @@
       font-weight: 700;
       line-height: 1.2;
       letter-spacing: -0.01em;
+      color: hsl(var(--ink));
       margin-top: 14px;
       transform: rotate(0.4deg);
     }
@@ -260,7 +307,7 @@
       font-size: 28px;
       font-weight: 400;
       line-height: 1.5;
-      color: hsl(var(--muted-foreground));
+      color: hsl(var(--ink) / 0.78);
       max-width: 820px;
       margin-top: 22px;
     }
@@ -274,6 +321,7 @@
       margin-bottom: -20px;
       transform: rotate(-10deg);
       align-self: flex-start;
+      opacity: 0.85;
     }
     .quote-text {
       font-family: "Kalam", cursive;
@@ -281,6 +329,7 @@
       font-weight: 700;
       line-height: 1.25;
       letter-spacing: -0.01em;
+      color: hsl(var(--ink));
       max-width: 900px;
       transform: rotate(-0.4deg);
     }
@@ -289,7 +338,7 @@
       font-family: "Caveat", cursive;
       font-size: 36px;
       font-weight: 700;
-      color: hsl(var(--muted-foreground));
+      color: hsl(var(--ink) / 0.7);
       text-transform: none;
       letter-spacing: 0;
       transform: rotate(1.2deg);
@@ -303,33 +352,44 @@
       font-weight: 700;
       line-height: 1.05;
       letter-spacing: -0.01em;
+      color: hsl(var(--ink));
       transform: rotate(-0.6deg);
     }
     .cta-subline {
       font-family: "Kalam", cursive;
       font-size: 32px;
       font-weight: 400;
-      color: hsl(var(--muted-foreground));
+      color: hsl(var(--ink) / 0.78);
       max-width: 820px;
       margin-top: 26px;
     }
+    /* Pen-drawn pill — no fill, hand-drawn border, no offset shadow */
     .cta-pill {
       align-self: flex-start;
       margin-top: 44px;
       display: inline-flex;
       align-items: center;
       gap: 18px;
-      padding: 22px 38px;
-      background: hsl(var(--foreground));
-      color: hsl(var(--background));
-      border: 3px solid hsl(var(--foreground));
-      border-radius: 36px 44px 38px 46px;
+      padding: 20px 36px;
+      background: transparent;
+      color: hsl(var(--ink));
+      border: 2.5px solid hsl(var(--ink));
+      border-radius: 40px 36px 44px 38px;
       font-family: "Kalam", cursive;
       font-size: 32px;
       font-weight: 700;
       letter-spacing: 0;
-      box-shadow: 8px 8px 0 -1px hsl(var(--primary));
       transform: rotate(-2deg);
+      position: relative;
+    }
+    .cta-pill::before {
+      content: "";
+      position: absolute;
+      inset: -6px -8px -10px -6px;
+      border: 2px solid hsl(var(--ink) / 0.55);
+      border-radius: 44px 40px 50px 42px;
+      transform: rotate(1.2deg);
+      pointer-events: none;
     }
     .cta-pill::after {
       content: "→";
@@ -345,10 +405,10 @@
       font-family: "Kalam", cursive;
       font-size: 24px;
       font-weight: 700;
-      color: hsl(var(--muted-foreground));
+      color: hsl(var(--ink) / 0.75);
     }
     .footer-domain {
-      color: hsl(var(--foreground));
+      color: hsl(var(--ink));
       letter-spacing: 0;
       transform: rotate(-0.5deg);
     }
@@ -373,6 +433,7 @@
 </head>
 <body>
   <div class="slide">
+    <div class="slide-edge"></div>
     <div class="header">
       <div class="brand">
         {% if brand_icon %}
