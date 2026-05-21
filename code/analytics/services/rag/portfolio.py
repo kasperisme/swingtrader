@@ -172,6 +172,124 @@ def get_user_screening_notes(user_id: str) -> list[str]:
     })
 
 
+def _parse_entry(metadata_json: Any) -> dict[str, Any] | None:
+    """Extract metadata_json.entry into a compact dict, or None if absent.
+
+    Accepts both dict and JSON-string shapes. Surfaces price/direction/date
+    plus optional take_profit / stop_loss / bar index. Numbers are rounded
+    for prompt readability.
+    """
+    if isinstance(metadata_json, str):
+        metadata_json = _as_json(metadata_json, default=None)
+    if not isinstance(metadata_json, dict):
+        return None
+    entry = metadata_json.get("entry")
+    if not isinstance(entry, dict):
+        return None
+    price = entry.get("price")
+    if not isinstance(price, (int, float)):
+        return None
+
+    out: dict[str, Any] = {
+        "price": round(float(price), 4),
+        "direction": entry.get("direction") or "long",
+    }
+    date = entry.get("date") or entry.get("entry_date")
+    if isinstance(date, str) and date:
+        out["date"] = date[:10]
+    tp = entry.get("take_profit")
+    if isinstance(tp, (int, float)):
+        out["take_profit"] = round(float(tp), 4)
+    sl = entry.get("stop_loss")
+    if isinstance(sl, (int, float)):
+        out["stop_loss"] = round(float(sl), 4)
+    bar_idx = entry.get("barIdx")
+    if bar_idx is None:
+        bar_idx = entry.get("bar_idx") or entry.get("entry_bar_idx")
+    if isinstance(bar_idx, int):
+        out["bar_idx"] = bar_idx
+    return out
+
+
+_NOTE_TRACKED_STATUSES = ("active", "watchlist", "pipeline")
+
+
+def get_user_screening_note_details(
+    user_id: str,
+    statuses: list[str] | None = None,
+) -> list[dict[str, Any]]:
+    """Full screening-notes for the user's latest scan run.
+
+    Returns one row per tracked note with workflow state and any entry-point
+    annotation parsed out of ``metadata_json``. Defaults to non-dismissed
+    statuses (active / watchlist / pipeline) so the agent sees everything
+    currently on the user's plate; pass ``statuses`` to override.
+
+    Shape per row:
+      {ticker, status, stage, highlighted, priority, tags, comment, entry?}
+    where ``entry`` (when present) is ``{price, direction, date?, take_profit?,
+    stop_loss?, bar_idx?}``.
+    """
+    client, schema = _client()
+    runs = (
+        client.schema(schema)
+        .table("user_scan_runs")
+        .select("id")
+        .eq("user_id", user_id)
+        .or_("status.eq.active,status.is.null")
+        .order("scan_date", desc=True)
+        .order("id", desc=True)
+        .limit(1)
+        .execute()
+    ).data or []
+
+    if not runs:
+        return []
+
+    run_id = runs[0]["id"]
+    wanted = [
+        s for s in (statuses or _NOTE_TRACKED_STATUSES)
+        if s in {"active", "dismissed", "watchlist", "pipeline"}
+    ] or list(_NOTE_TRACKED_STATUSES)
+
+    notes = (
+        client.schema(schema)
+        .table("user_scan_row_notes")
+        .select(
+            "ticker, status, stage, highlighted, priority, tags, comment, metadata_json"
+        )
+        .eq("user_id", user_id)
+        .eq("run_id", run_id)
+        .in_("status", wanted)
+        .order("highlighted", desc=True)
+        .order("ticker")
+        .execute()
+    ).data or []
+
+    out: list[dict[str, Any]] = []
+    for n in notes:
+        ticker = (n.get("ticker") or "").strip()
+        if not ticker:
+            continue
+        comment = n.get("comment")
+        if isinstance(comment, str) and len(comment) > 240:
+            comment = comment[:240] + "…"
+        row: dict[str, Any] = {
+            "ticker": ticker,
+            "status": n.get("status"),
+            "stage": n.get("stage"),
+            "highlighted": bool(n.get("highlighted")),
+            "priority": n.get("priority"),
+            "tags": n.get("tags") or [],
+            "comment": comment,
+        }
+        entry = _parse_entry(n.get("metadata_json"))
+        if entry:
+            row["entry"] = entry
+        out.append(row)
+    return out
+
+
 def get_user_trading_strategy(user_id: str) -> str:
     """Return the user's saved trading strategy text, or empty string if none."""
     client, schema = _client()

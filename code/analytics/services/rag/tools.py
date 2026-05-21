@@ -18,6 +18,7 @@ from .portfolio import (
     get_user_positions,
     get_user_alerts,
     get_user_screening_notes,
+    get_user_screening_note_details,
     get_ticker_chat_history,
 )
 from .screening_writes import (
@@ -140,6 +141,37 @@ TOOL_SCHEMAS: list[dict] = [
     {
         "type": "function",
         "function": {
+            "name": "get_user_screening_note_details",
+            "description": (
+                "Get full per-ticker notes from the user's latest scan run — "
+                "workflow status (active/watchlist/pipeline), stage, highlighted "
+                "flag, priority, tags, comment, and any planned entry point "
+                "({price, direction, date, take_profit, stop_loss, bar_idx}) the "
+                "user has saved on the chart. Use this when the prompt asks "
+                "about entries, planned trades, watchlist context, or research "
+                "stage on tracked tickers."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "statuses": {
+                        "type": "array",
+                        "items": {
+                            "type": "string",
+                            "enum": ["active", "watchlist", "pipeline", "dismissed"],
+                        },
+                        "description": (
+                            "Filter to these workflow statuses. Defaults to "
+                            "[active, watchlist, pipeline] (excludes dismissed)."
+                        ),
+                    },
+                },
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "get_ticker_chat_history",
             "description": (
                 "Recent chat history from the user's chart-workspace conversation "
@@ -229,6 +261,7 @@ def get_user_tools() -> dict[str, Callable]:
         "get_user_positions": get_user_positions,
         "get_user_alerts": get_user_alerts,
         "get_user_screening_notes": get_user_screening_notes,
+        "get_user_screening_note_details": get_user_screening_note_details,
         "get_ticker_chat_history": get_ticker_chat_history,
     }
 

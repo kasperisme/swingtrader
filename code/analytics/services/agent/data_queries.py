@@ -11,6 +11,7 @@ from services.rag.portfolio import (
     get_user_positions,
     get_user_alerts,
     get_user_screening_notes,
+    get_user_screening_note_details,
     get_user_trading_strategy,
     get_ticker_chat_history,
 )
@@ -21,6 +22,7 @@ __all__ = [
     "get_top_articles", "get_ticker_news",
     "get_cluster_trends", "get_dimension_trends", "get_ticker_sentiment",
     "get_user_positions", "get_user_alerts", "get_user_screening_notes",
+    "get_user_screening_note_details",
     "get_user_trading_strategy", "get_ticker_chat_history",
     "get_ticker_relationships", "get_company_vectors",
     "search_news",

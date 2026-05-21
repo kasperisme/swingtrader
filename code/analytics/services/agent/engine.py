@@ -122,6 +122,15 @@ get_user_alerts()
 get_user_screening_notes()
   Returns list of active screening ticker symbols from the user's latest scan.
 
+get_user_screening_note_details(statuses: list[str] | None = None)
+  Returns the user's per-ticker notes for their latest scan run with full
+  workflow context. Each row: {ticker, status, stage, highlighted, priority,
+  tags, comment, entry?}. When the user has marked a planned entry on the
+  chart, `entry` is {price, direction, date, take_profit?, stop_loss?,
+  bar_idx?}. Defaults to active+watchlist+pipeline (excludes dismissed).
+  Use this when the prompt references entry points, planned trades, or the
+  research stage of tracked tickers.
+
 ## 9 clusters and their dimensions
 
 {_CLUSTER_BLOCK_PLACEHOLDER}

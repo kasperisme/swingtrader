@@ -16,6 +16,7 @@ from .portfolio import (
     get_user_positions,
     get_user_alerts,
     get_user_screening_notes,
+    get_user_screening_note_details,
     get_user_trading_strategy,
     get_ticker_chat_history,
 )
@@ -52,6 +53,7 @@ __all__ = [
     "compute_cluster_summary",
     # portfolio
     "get_user_positions", "get_user_alerts", "get_user_screening_notes",
+    "get_user_screening_note_details",
     "get_user_trading_strategy", "get_ticker_chat_history",
     # graph
     "get_ticker_relationships", "get_company_vectors",
