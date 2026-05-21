@@ -149,11 +149,23 @@ TOOL_SCHEMAS: list[dict] = [
                 "({price, direction, date, take_profit, stop_loss, bar_idx}) the "
                 "user has saved on the chart. Use this when the prompt asks "
                 "about entries, planned trades, watchlist context, or research "
-                "stage on tracked tickers."
+                "stage on tracked tickers. ALWAYS pass `tickers` when you "
+                "already know which symbols you care about — unfiltered "
+                "responses are capped to the top ~25 rows and may miss the "
+                "ticker you need."
             ),
             "parameters": {
                 "type": "object",
                 "properties": {
+                    "tickers": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": (
+                            "Restrict the lookup to these tickers "
+                            "(case-insensitive). Strongly preferred when the "
+                            "tickers of interest are known."
+                        ),
+                    },
                     "statuses": {
                         "type": "array",
                         "items": {

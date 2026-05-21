@@ -212,18 +212,28 @@ def _parse_entry(metadata_json: Any) -> dict[str, Any] | None:
 
 
 _NOTE_TRACKED_STATUSES = ("active", "watchlist", "pipeline")
+# Sized to fit under the agent loop's 8 KB per-tool-result truncation
+# (rows average ~320 chars, so 20 keeps a safety margin).
+_NOTE_DETAILS_UNFILTERED_CAP = 20
 
 
 def get_user_screening_note_details(
     user_id: str,
+    tickers: list[str] | None = None,
     statuses: list[str] | None = None,
 ) -> list[dict[str, Any]]:
     """Full screening-notes for the user's latest scan run.
 
     Returns one row per tracked note with workflow state and any entry-point
-    annotation parsed out of ``metadata_json``. Defaults to non-dismissed
-    statuses (active / watchlist / pipeline) so the agent sees everything
-    currently on the user's plate; pass ``statuses`` to override.
+    annotation parsed out of ``metadata_json``. Pass ``tickers`` to scope the
+    lookup to specific symbols — strongly preferred when the caller already
+    knows which tickers it cares about, because the agent loop truncates each
+    tool response to 8 KB and an unfiltered list can easily exceed that.
+
+    Defaults to non-dismissed statuses (active / watchlist / pipeline); pass
+    ``statuses`` to override. When ``tickers`` is omitted the response is
+    capped at the most relevant rows (highlighted first, then notes with an
+    entry annotation) so the truncation boundary doesn't silently drop them.
 
     Shape per row:
       {ticker, status, stage, highlighted, priority, tags, comment, entry?}
@@ -252,16 +262,32 @@ def get_user_screening_note_details(
         if s in {"active", "dismissed", "watchlist", "pipeline"}
     ] or list(_NOTE_TRACKED_STATUSES)
 
-    notes = (
+    wanted_tickers: set[str] | None = None
+    if tickers:
+        wanted_tickers = {
+            t.strip().upper()
+            for t in tickers
+            if isinstance(t, str) and t.strip()
+        }
+        if not wanted_tickers:
+            wanted_tickers = None
+
+    query = (
         client.schema(schema)
         .table("user_scan_row_notes")
         .select(
-            "ticker, status, stage, highlighted, priority, tags, comment, metadata_json"
+            "ticker, status, stage, highlighted, priority, tags, comment, metadata_json, updated_at"
         )
         .eq("user_id", user_id)
         .eq("run_id", run_id)
         .in_("status", wanted)
+    )
+    if wanted_tickers is not None:
+        query = query.in_("ticker", sorted(wanted_tickers))
+    notes = (
+        query
         .order("highlighted", desc=True)
+        .order("updated_at", desc=True)
         .order("ticker")
         .execute()
     ).data or []
@@ -270,6 +296,8 @@ def get_user_screening_note_details(
     for n in notes:
         ticker = (n.get("ticker") or "").strip()
         if not ticker:
+            continue
+        if wanted_tickers is not None and ticker.upper() not in wanted_tickers:
             continue
         comment = n.get("comment")
         if isinstance(comment, str) and len(comment) > 240:
@@ -287,6 +315,15 @@ def get_user_screening_note_details(
         if entry:
             row["entry"] = entry
         out.append(row)
+
+    # Sort so the most informative rows survive the agent loop's 8 KB
+    # per-tool-result truncation: highlighted first, then notes that carry an
+    # entry annotation. Python's sort is stable, so ties retain the DB order
+    # (updated_at DESC, ticker ASC) — recent activity wins over alphabetical.
+    out.sort(key=lambda r: (not r["highlighted"], "entry" not in r))
+
+    if wanted_tickers is None and len(out) > _NOTE_DETAILS_UNFILTERED_CAP:
+        out = out[:_NOTE_DETAILS_UNFILTERED_CAP]
     return out
 
 

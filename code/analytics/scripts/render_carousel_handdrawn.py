@@ -23,6 +23,7 @@ import concurrent.futures as cf
 import json
 import os
 import pathlib
+import random
 import sys
 import time
 from typing import Any
@@ -51,8 +52,11 @@ _load_env(ENV_PATH)
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "")
 OPENAI_IMAGE_MODEL = os.environ.get("OPENAI_IMAGE_MODEL", "gpt-image-1")
 OPENAI_IMAGE_QUALITY = os.environ.get("CAROUSEL_IMAGE_QUALITY", "high")
-OPENAI_IMAGE_SIZE = "1024x1536"  # portrait 2:3, closest to 1080x1350 (4:5)
-TARGET_W, TARGET_H = 1080, 1350
+OPENAI_IMAGE_SIZE = "1024x1536"  # portrait 2:3 (gpt-image-2 native)
+# Preserve full source — resize to 1080-wide, height scales to 1620.
+# IG carousels render 2:3 portraits fine; cropping was lopping off
+# the brand mark / swipe pill at top + bottom.
+TARGET_W, TARGET_H = 1080, 1620
 
 
 # ── Prompt builders ────────────────────────────────────────────────────────
@@ -86,10 +90,40 @@ Common frame elements on every napkin:
 """
 
 
+# Bank of weird, low-fidelity doodles that get dropped into the cover slide
+# as an unexpected scroll-stop. Phrased as "someone's hand absentmindedly
+# scribbled this in the corner while bored on the phone" — quick, lazy,
+# 3-second sketches. Not detailed illustrations. Just funny enough to make
+# you look twice.
+WEIRD_DOODLES = [
+    "a googly-eyed dollar bill with stick legs running away from a tiny down-arrow chart, with a small label 'help'",
+    "a penguin wearing a tiny business suit and a clip-on tie, holding a briefcase, with a label 'CEO'",
+    "a fried egg wearing sunglasses, with a tiny label 'cool egg'",
+    "a worried-looking pigeon clutching a stock chart in its beak, eyes very wide",
+    "a martini glass with a tiny shark fin sticking out of the liquid, label 'risk'",
+    "a skull smoking a tiny pipe with a little curl of smoke",
+    "a banana doing a yoga pose (sitting cross-legged), label 'zen'",
+    "a tiny rocket with a flame coming out of a toilet, label 'to the moon'",
+    "a stick figure on fire, grinning, giving a thumbs up, label 'this is fine'",
+    "a hot dog wearing a necktie and tiny glasses, label 'analyst'",
+    "a mushroom with sunglasses and a tiny smirk, label 'fungi guy'",
+    "a pile of three dollar bills with cartoon eyeballs on each, all looking different directions",
+    "a frog wearing a tiny crown and holding a scepter, label 'macro king'",
+    "a single floating eyeball with little wings, label 'the market sees'",
+    "a tiny man inside a wooden barrel rolling downhill, the hill labeled 'macro'",
+    "a chicken at a tiny desk staring at a tiny laptop, label 'day trader'",
+    "a confused alien holding a candle chart upside down, label 'bullish?'",
+    "a sad slice of pizza with one bite missing, single tear on the cheese, label 'EPS miss'",
+    "a tiny shark wearing a name tag that says 'HELLO my name is yield'",
+    "a snail with a tiny rocket strapped to its shell, label 'NVDA'",
+]
+
+
 def _cover_prompt(slide: dict, index: int, total: int) -> str:
     kicker = slide.get("kicker") or ""
     title = slide["title"]
     subtitle = slide.get("subtitle") or ""
+    doodle = random.choice(WEIRD_DOODLES)
     layout = f"""\
 Layout (cover slide):
 - A small RED underlined kicker label near the upper area, written casually: '{kicker}' \
@@ -98,7 +132,22 @@ Layout (cover slide):
   naturally across 2-3 lines: '{title}'
 - Below the title, a smaller cursive subtitle in navy ink: '{subtitle}'
 - A small red star/asterisk doodle next to the kicker.
-- The overall look is the first idea someone scribbled to open a pitch.\
+
+UNEXPECTED VISUAL HOOK (very important): Somewhere in an empty corner or \
+margin of the napkin, draw a SMALL, SILLY, LOW-FIDELITY doodle, as if \
+someone got bored and absent-mindedly scribbled it in 5 seconds while on \
+the phone. The doodle is: {doodle}. \
+Critical rules for this doodle: \
+(1) it is TINY relative to the napkin — maybe 8-12% of the napkin width; \
+(2) it is QUICK and SLOPPY, the kind of thing a kid would draw, not a \
+detailed illustration — basically stick-figure level, with simple lines, \
+dots for eyes, no shading; \
+(3) it sits OFF to one side in white space, not overlapping the title; \
+(4) it is drawn in mixed cheap ballpoint inks (blue, red, or black); \
+(5) the tiny handwritten label next to it is in small messy lowercase. \
+The doodle should feel completely unrelated to finance, unexpected, and \
+mildly amusing — the kind of thing that makes someone pause scrolling \
+because it doesn't match what they expected from a markets post.\
 """
     return f"{STYLE_BLOCK}\n\n{FRAME_BLOCK.format(index=index, total=total)}\n\n{layout}"
 
@@ -218,20 +267,8 @@ def _generate_one(slide: dict, index: int, total: int, out_path: pathlib.Path) -
     try:
         b64 = result.data[0].b64_json
         img = Image.open(BytesIO(base64.b64decode(b64))).convert("RGB")
-        # Resize from 1024x1536 (2:3) to 1080x1350 (4:5) — crop bottom slightly
-        # to preserve the framing of the headline and bullets, then resize.
-        src_w, src_h = img.size
-        target_ratio = TARGET_W / TARGET_H  # 0.8
-        src_ratio = src_w / src_h           # ~0.667
-        if src_ratio < target_ratio:
-            # source is taller than target — crop top+bottom
-            new_h = int(src_w / target_ratio)
-            top = (src_h - new_h) // 2
-            img = img.crop((0, top, src_w, top + new_h))
-        else:
-            new_w = int(src_h * target_ratio)
-            left = (src_w - new_w) // 2
-            img = img.crop((left, 0, left + new_w, src_h))
+        # No crop — uniform resize preserving aspect ratio. Source is
+        # 1024x1536 (2:3); output is 1080x1620, identical aspect.
         img = img.resize((TARGET_W, TARGET_H), Image.LANCZOS)
         img.save(out_path, "PNG")
         return index, out_path, None
