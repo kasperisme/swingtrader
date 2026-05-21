@@ -110,6 +110,7 @@ def call_fmp_tool(name: str, args: dict) -> Any:
     pipeline's trial-run validator inspects the error text via
     ``looks_like_access_denied`` and drops unavailable tools from the plan.
     """
+    args = _fill_required_discriminators(name, args)
     try:
         return asyncio.run(_acall_tool(name, args))
     except Exception as exc:
@@ -117,6 +118,28 @@ def call_fmp_tool(name: str, args: dict) -> Any:
         if not looks_like_access_denied(msg):
             log.error("FMP tool %s failed: %s", name, exc)
         return {"error": msg}
+
+
+# Several FMP MCP tools group multiple REST endpoints behind one tool name and
+# require an ``endpoint`` discriminator to select which one to hit. Models
+# routinely forget to include it, so we backfill a sensible default keyed off
+# the shape of the args (single ticker vs. list).
+_FMP_DEFAULT_ENDPOINTS: dict[str, dict[str, str]] = {
+    "quote": {"single": "quote", "batch": "batch-quote"},
+}
+
+
+def _fill_required_discriminators(name: str, args: dict) -> dict:
+    defaults = _FMP_DEFAULT_ENDPOINTS.get(name)
+    if not defaults or args.get("endpoint"):
+        return args
+    symbol = args.get("symbol") or args.get("symbols")
+    is_batch = isinstance(symbol, (list, tuple)) or (
+        isinstance(symbol, str) and "," in symbol
+    )
+    chosen = defaults["batch"] if is_batch else defaults["single"]
+    log.warning("FMP tool %s called without 'endpoint'; defaulting to %r", name, chosen)
+    return {**args, "endpoint": chosen}
 
 
 def test_fmp_connection() -> None:
@@ -147,4 +170,10 @@ Useful tools include: quote, company-profile, key-metrics, financial-ratios,
 income-statement, rsi, sma, historical-price, analyst-grades, insider-trading,
 earnings-surprises, sector-performance, biggest-gainers, biggest-losers.
 Call tools by their FMP MCP name (e.g. "quote" not "fmp_quote").
+
+Some FMP tools multiplex several REST endpoints behind one tool name and
+require an ``endpoint`` argument. In particular, ``quote`` MUST include
+``endpoint``: pass ``"quote"`` for a single full quote, ``"quote-short"`` for
+a lightweight single quote, or ``"batch-quote"`` (with ``symbols`` as a comma
+list) for multiple tickers at once.
 """
