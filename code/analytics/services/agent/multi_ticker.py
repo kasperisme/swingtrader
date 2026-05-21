@@ -53,6 +53,18 @@ _MAX_TOOL_RESULT_CHARS = 4000
 # path still uses them via run_tool_loop; this pipeline is read-only.
 _WRITE_TOOL_PREFIXES = ("add_ticker_to_screening", "set_screening_")
 
+# Process-local memo of tool names that failed availability in this worker's
+# lifetime (typically FMP endpoints the current API plan can't access). The
+# trial-run validator adds to it; the planner's catalog builder reads from it
+# to keep the prompt small on subsequent runs. NOT persisted to disk — a
+# worker restart resets it, so this never outlives the running process.
+_session_unavailable_tools: set[str] = set()
+
+
+def reset_session_unavailable_tools() -> None:
+    """Clear the per-process unavailable-tools memo. Test seam."""
+    _session_unavailable_tools.clear()
+
 
 # ── Stage 1: plan ───────────────────────────────────────────────────────────
 
@@ -119,18 +131,22 @@ def _build_tool_catalog(
 ) -> str:
     """Build the planner-facing tool catalog.
 
-    Drops write tools (pipeline is read-only) and any names in ``excluded``
-    (used by the re-plan path after a trial-run availability check finds
-    tools that the current FMP plan can't access).
+    Drops write tools (pipeline is read-only), any names in ``excluded``
+    (passed in by the re-plan path), and any tool the trial run has already
+    flagged unavailable earlier in this worker's lifetime. Keeping the catalog
+    small directly controls planner latency.
     """
-    excluded = excluded or set()
+    excluded = (excluded or set()) | _session_unavailable_tools
     lines: list[str] = []
+    skipped_session: list[str] = []
     for schema in registry.schemas():
         fn = schema.get("function") or {}
         name = fn.get("name")
         if not name or any(name.startswith(p) for p in _WRITE_TOOL_PREFIXES):
             continue
         if name in excluded:
+            if name in _session_unavailable_tools:
+                skipped_session.append(name)
             continue
         desc = (fn.get("description") or "").strip().split("\n", 1)[0][:220]
         props = (fn.get("parameters") or {}).get("properties") or {}
@@ -139,6 +155,12 @@ def _build_tool_catalog(
             for p in list(props.keys())[:10]
         ]
         lines.append(f"- {name}({', '.join(param_parts)}): {desc}")
+    if skipped_session:
+        log.info(
+            "Tool catalog: excluded %d tool(s) memoised unavailable this "
+            "session — %s",
+            len(skipped_session), sorted(skipped_session),
+        )
     return "\n".join(lines)
 
 
@@ -650,6 +672,7 @@ async def run_multi_ticker_async(
                 sorted(unavailable),
                 time.monotonic() - t_trial,
             )
+            _session_unavailable_tools.update(unavailable)
             survived = [e for e in tool_plan if e["name"] not in unavailable]
             if survived:
                 tool_plan = survived
@@ -698,6 +721,7 @@ async def run_multi_ticker_async(
                             len(extra_unavail),
                             sorted(extra_unavail),
                         )
+                        _session_unavailable_tools.update(extra_unavail)
                         tool_plan = [
                             e for e in tool_plan
                             if e["name"] not in extra_unavail
