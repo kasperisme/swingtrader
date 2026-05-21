@@ -61,4 +61,4 @@ MVP Scope:
 [ ] Gennemgå platformen og sikre at det er så simpelt og intuitivt som muligt
 [ ] News trend UI skal forbedres. Det er svært at finde rundt i, og se hvad konklusionen skal være
 
-[ ] Agent jobs should have access to the screening notes for the ticker as well
+[x] Agent jobs should have access to the screening notes for the ticker as well

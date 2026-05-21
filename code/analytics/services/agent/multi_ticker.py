@@ -34,7 +34,7 @@ import httpx
 
 from services.agent_core import ToolRegistry, simple_chat
 
-from .fmp_tools import get_denied_fmp_tools
+from .fmp_tools import looks_like_access_denied
 
 log = logging.getLogger(__name__)
 
@@ -71,9 +71,11 @@ is per-ticker, not batched.
 - Parameters shown as ``name={a|b|c}`` are ENUMS — you MUST use one of the \
 listed values verbatim. Never guess or shorten enum values (e.g. for FMP \
 ``chart`` use ``endpoint="intraday-1-hour"``, not ``"1hr"``).
-- The tool catalog has already been filtered to what the current FMP \
-subscription plan can access. Only pick from the AVAILABLE TOOLS list — do \
-NOT invent tool names or assume tools exist beyond the catalog.
+- Only pick from the AVAILABLE TOOLS list — do NOT invent tool names or \
+assume tools exist beyond the catalog.
+- If an "EXCLUDED TOOLS" list is given, those tools failed a trial-run \
+availability check (typically a subscription-tier rejection). Do NOT pick \
+them — choose alternatives from AVAILABLE TOOLS instead.
 - Do NOT plan write tools (anything starting with "add_ticker_to_screening" \
 or "set_screening_").
 
@@ -110,25 +112,25 @@ def _format_param(name: str, schema: Any) -> str:
     return name
 
 
-def _build_tool_catalog(registry: ToolRegistry) -> str:
+def _build_tool_catalog(
+    registry: ToolRegistry,
+    *,
+    excluded: set[str] | None = None,
+) -> str:
     """Build the planner-facing tool catalog.
 
-    Drops:
-      - write tools (mutate state — pipeline is read-only)
-      - FMP subscription-restricted tools (per ``fmp_tools.get_denied_fmp_tools``)
-        so the planner doesn't even see them and we don't waste fan-out time
-        re-failing the same access-denied call once per ticker.
+    Drops write tools (pipeline is read-only) and any names in ``excluded``
+    (used by the re-plan path after a trial-run availability check finds
+    tools that the current FMP plan can't access).
     """
-    denied_fmp = get_denied_fmp_tools()
+    excluded = excluded or set()
     lines: list[str] = []
-    skipped_denied: list[str] = []
     for schema in registry.schemas():
         fn = schema.get("function") or {}
         name = fn.get("name")
         if not name or any(name.startswith(p) for p in _WRITE_TOOL_PREFIXES):
             continue
-        if name in denied_fmp:
-            skipped_denied.append(name)
+        if name in excluded:
             continue
         desc = (fn.get("description") or "").strip().split("\n", 1)[0][:220]
         props = (fn.get("parameters") or {}).get("properties") or {}
@@ -137,11 +139,6 @@ def _build_tool_catalog(registry: ToolRegistry) -> str:
             for p in list(props.keys())[:10]
         ]
         lines.append(f"- {name}({', '.join(param_parts)}): {desc}")
-    if skipped_denied:
-        log.info(
-            "Tool catalog: excluded %d FMP tool(s) on subscription denylist — %s",
-            len(skipped_denied), skipped_denied,
-        )
     return "\n".join(lines)
 
 
@@ -154,13 +151,19 @@ async def _plan_tools(
     tickers: list[str],
     registry: ToolRegistry,
     context_addon: str,
+    excluded_tools: set[str] | None = None,
 ) -> dict:
-    catalog = _build_tool_catalog(registry)
+    catalog = _build_tool_catalog(registry, excluded=excluded_tools)
     user_parts = [
         f"SCREENING PROMPT:\n{prompt}",
         f"TICKERS ({len(tickers)}): {', '.join(tickers)}",
         f"AVAILABLE TOOLS:\n{catalog}",
     ]
+    if excluded_tools:
+        user_parts.append(
+            "EXCLUDED TOOLS (failed a trial-run availability check — do not pick):\n"
+            + ", ".join(sorted(excluded_tools))
+        )
     if context_addon:
         user_parts.append(f"CONTEXT:\n{context_addon}")
     user_parts.append("Return the JSON plan now.")
@@ -265,6 +268,74 @@ def _split_plan(plan: list[dict]) -> tuple[list[dict], list[dict]]:
         else:
             shared.append(entry)
     return per_ticker, shared
+
+
+# ── Stage 1.5: trial-run availability check ─────────────────────────────────
+
+
+def _result_unavailable(result: Any) -> bool:
+    """True when ``result`` looks like a subscription-tier rejection.
+
+    Handles both shapes the FMP client can produce: an ``{"error": msg}``
+    envelope (raised exception path) and a structured/text body returned by
+    the MCP server that contains an access-denied marker in its payload.
+    """
+    if result is None:
+        return False
+    if isinstance(result, dict):
+        err = result.get("error")
+        if isinstance(err, str) and looks_like_access_denied(err):
+            return True
+        try:
+            payload = json.dumps(result, default=str)
+        except Exception:
+            return False
+        return looks_like_access_denied(payload)
+    if isinstance(result, str):
+        return looks_like_access_denied(result)
+    return False
+
+
+async def _trial_run_plan(
+    registry: ToolRegistry,
+    plan: list[dict],
+    probe_ticker: str,
+) -> tuple[set[str], dict[str, Any]]:
+    """Probe every unique tool in ``plan`` once to verify availability.
+
+    Per-ticker tools (args contain ``{TICKER}``) are substituted with
+    ``probe_ticker``; shared tools are called with their planned args.
+    Returns ``(unavailable_tool_names, results_by_name)`` where the result
+    map can be reused as the shared-tool cache so we don't re-execute on the
+    real fan-out.
+    """
+    if not plan:
+        return set(), {}
+
+    # Dedup by name — same tool listed twice gets probed once.
+    seen: set[str] = set()
+    unique: list[dict] = []
+    for entry in plan:
+        name = entry.get("name")
+        if not isinstance(name, str) or name in seen:
+            continue
+        seen.add(name)
+        unique.append(entry)
+
+    async def _probe(entry: dict) -> tuple[str, Any]:
+        name = entry["name"]
+        args = _substitute_ticker(entry.get("args") or {}, probe_ticker)
+        if not registry.has(name):
+            return name, {"error": f"unknown tool {name!r}"}
+        try:
+            return name, await registry.call(name, args)
+        except Exception as exc:  # noqa: BLE001
+            return name, {"error": str(exc)}
+
+    pairs = await asyncio.gather(*(_probe(e) for e in unique))
+    results: dict[str, Any] = {n: r for n, r in pairs}
+    unavailable = {n for n, r in results.items() if _result_unavailable(r)}
+    return unavailable, results
 
 
 # ── Stage 2: per-ticker execution ───────────────────────────────────────────
@@ -562,9 +633,102 @@ async def run_multi_ticker_async(
                         "triggered_count": 0,
                     },
                 }
+        # Stage 1.5 — trial run: probe every unique planned tool against the
+        # first ticker to verify it's actually available under the current API
+        # plan. Drop any that fail and, if the plan empties out, re-plan once
+        # with the excluded list before falling back to "nothing to evaluate".
+        probe_ticker = tickers[0]
+        t_trial = time.monotonic()
+        unavailable, trial_results = await _trial_run_plan(
+            registry, tool_plan, probe_ticker
+        )
+        if unavailable:
+            log.warning(
+                "Trial run: %d tool(s) unavailable on probe ticker %s — %s (%.1fs)",
+                len(unavailable),
+                probe_ticker,
+                sorted(unavailable),
+                time.monotonic() - t_trial,
+            )
+            survived = [e for e in tool_plan if e["name"] not in unavailable]
+            if survived:
+                tool_plan = survived
+            else:
+                log.info(
+                    "Trial run dropped every planned tool — re-planning with "
+                    "EXCLUDED hint"
+                )
+                try:
+                    plan = await asyncio.wait_for(
+                        _plan_tools(
+                            client,
+                            base_url=base_url,
+                            model=model,
+                            prompt=prompt,
+                            tickers=tickers,
+                            registry=registry,
+                            context_addon=context_addon,
+                            excluded_tools=unavailable,
+                        ),
+                        timeout=_PLAN_TIMEOUT,
+                    )
+                    tool_plan = [
+                        e for e in plan["tool_plan"]
+                        if e["name"] not in unavailable
+                    ]
+                    per_ticker_brief = plan["per_ticker_brief"]
+                except asyncio.TimeoutError:
+                    log.error(
+                        "Re-plan timed out — falling back to default plan"
+                    )
+                    plan = _default_fallback_plan(registry)
+                    tool_plan = [
+                        e for e in plan["tool_plan"]
+                        if e["name"] not in unavailable
+                    ]
+                    per_ticker_brief = plan["per_ticker_brief"]
+
+                if tool_plan:
+                    extra_unavail, extra_results = await _trial_run_plan(
+                        registry, tool_plan, probe_ticker
+                    )
+                    if extra_unavail:
+                        log.warning(
+                            "Re-plan trial flagged %d more unavailable: %s",
+                            len(extra_unavail),
+                            sorted(extra_unavail),
+                        )
+                        tool_plan = [
+                            e for e in tool_plan
+                            if e["name"] not in extra_unavail
+                        ]
+                        unavailable |= extra_unavail
+                    trial_results.update(extra_results)
+
+                if not tool_plan:
+                    return {
+                        "triggered": False,
+                        "summary": (
+                            "Trial run: every planned tool is unavailable "
+                            "under the current data plan; nothing to evaluate."
+                        ),
+                        "data_used": {
+                            "unavailable_tools": sorted(unavailable),
+                            "ticker_count": len(tickers),
+                            "rationale": plan["rationale"],
+                        },
+                    }
+        else:
+            log.info(
+                "Trial run: all %d tool(s) available on probe ticker %s (%.1fs)",
+                len(trial_results),
+                probe_ticker,
+                time.monotonic() - t_trial,
+            )
+
         per_ticker_plan, shared_plan = _split_plan(tool_plan)
         log.info(
-            "Multi-ticker plan: %d tool(s) (%d per-ticker, %d shared) — names=%s brief=%r rationale=%r (%.1fs)",
+            "Multi-ticker plan: %d tool(s) (%d per-ticker, %d shared) — names=%s brief=%r rationale=%r (%.1fs total to plan+trial)",
             len(tool_plan),
             len(per_ticker_plan),
             len(shared_plan),
@@ -574,16 +738,40 @@ async def run_multi_ticker_async(
             time.monotonic() - t0,
         )
 
-        # Stage 2 — execute shared (market-wide) tools ONCE, then fan out per ticker
+        # Stage 2 — execute shared (market-wide) tools ONCE, then fan out per
+        # ticker. Reuse any successful trial-run results to avoid re-executing
+        # the same call we just made during validation.
         shared_data: dict[str, Any] = {}
         if shared_plan:
-            t_shared = time.monotonic()
-            shared_data = await _execute_plan(registry, shared_plan, ticker="N/A")
-            log.info(
-                "Multi-ticker shared tools done: %s (%.1fs)",
-                list(shared_data.keys()),
-                time.monotonic() - t_shared,
-            )
+            cached_shared: dict[str, Any] = {}
+            missing_shared: list[dict] = []
+            for entry in shared_plan:
+                name = entry["name"]
+                cached = trial_results.get(name)
+                if cached is not None and not _result_unavailable(cached):
+                    cached_shared[name] = cached
+                else:
+                    missing_shared.append(entry)
+            if missing_shared:
+                t_shared = time.monotonic()
+                executed = await _execute_plan(
+                    registry, missing_shared, ticker="N/A"
+                )
+                log.info(
+                    "Multi-ticker shared tools done: %s "
+                    "(%d reused from trial, %d freshly executed, %.1fs)",
+                    list(cached_shared.keys()) + list(executed.keys()),
+                    len(cached_shared),
+                    len(executed),
+                    time.monotonic() - t_shared,
+                )
+                shared_data = {**cached_shared, **executed}
+            else:
+                shared_data = cached_shared
+                log.info(
+                    "Multi-ticker shared tools: %d reused from trial run",
+                    len(cached_shared),
+                )
 
         sem = asyncio.Semaphore(_TICKER_CONCURRENCY)
 
@@ -677,6 +865,7 @@ async def run_multi_ticker_async(
                 "shared_tools": [t["name"] for t in shared_plan],
                 "per_ticker_brief": per_ticker_brief,
                 "rationale": plan["rationale"],
+                "unavailable_tools": sorted(unavailable),
             },
             "verdicts": verdicts,
             "ticker_count": len(tickers),

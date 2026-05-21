@@ -10,7 +10,6 @@ Enabled when FMP_API_KEY env var is set.
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
 import os
 from typing import Any
@@ -20,77 +19,19 @@ log = logging.getLogger(__name__)
 _FMP_MCP_BASE = "https://financialmodelingprep.com/mcp"
 _cached_schemas: list[dict] | None = None
 
-# ── Subscription-tier denylist ───────────────────────────────────────────────
+# ── Access-denied detection ──────────────────────────────────────────────────
 # Some FMP MCP tools require a higher plan than the configured FMP_API_KEY can
-# access. Calls to those tools fail with "ACCESS DENIED" / "requires a higher
-# plan". To stop the planner from picking them again (and to short-circuit the
-# per-ticker fan-out before it wastes time re-failing the same call N times),
-# we maintain a persistent denylist that grows automatically as we observe the
-# errors.
+# access. Calls to those tools either raise with "ACCESS DENIED" / "requires a
+# higher plan" or return a body containing the same markers. The multi-ticker
+# pipeline's trial-run validator imports ``looks_like_access_denied`` to spot
+# these so the planner can drop the offending tool and re-plan once before the
+# per-ticker fan-out wastes time re-failing the same call.
 
-_DENIED_TOOLS_PATH = os.environ.get(
-    "FMP_DENIED_TOOLS_FILE",
-    os.path.join(
-        os.path.expanduser("~"), ".cache", "swingtrader", "fmp_denied_tools.json"
-    ),
-)
 _ACCESS_DENIED_MARKERS = ("ACCESS DENIED", "requires a higher plan", "Premium Endpoint")
-_denied_tools: set[str] | None = None
 
 
-def _load_denied_tools() -> set[str]:
-    """Lazy-load the FMP denylist: env-var seed + persisted file."""
-    global _denied_tools
-    if _denied_tools is not None:
-        return _denied_tools
-    seed: set[str] = set()
-    env_seed = os.environ.get("FMP_DENIED_TOOLS", "")
-    for n in env_seed.split(","):
-        n = n.strip()
-        if n:
-            seed.add(n)
-    try:
-        with open(_DENIED_TOOLS_PATH, "r") as f:
-            data = json.load(f)
-        if isinstance(data, list):
-            seed.update(str(n) for n in data if isinstance(n, str))
-    except (FileNotFoundError, json.JSONDecodeError, OSError):
-        pass
-    _denied_tools = seed
-    if seed:
-        log.info("FMP denylist loaded: %d tool(s) — %s", len(seed), sorted(seed))
-    return _denied_tools
-
-
-def get_denied_fmp_tools() -> set[str]:
-    """Snapshot of FMP tools the current plan cannot access."""
-    return set(_load_denied_tools())
-
-
-def _persist_denied_tools() -> None:
-    cache = _denied_tools or set()
-    try:
-        os.makedirs(os.path.dirname(_DENIED_TOOLS_PATH), exist_ok=True)
-        with open(_DENIED_TOOLS_PATH, "w") as f:
-            json.dump(sorted(cache), f, indent=2)
-    except OSError as exc:
-        log.warning(
-            "Failed to persist FMP denylist to %s: %s", _DENIED_TOOLS_PATH, exc
-        )
-
-
-def _record_denied_tool(name: str) -> None:
-    cache = _load_denied_tools()
-    if name not in cache:
-        cache.add(name)
-        log.warning(
-            "FMP tool %r added to denylist (subscription-limited) — persisted to %s",
-            name, _DENIED_TOOLS_PATH,
-        )
-        _persist_denied_tools()
-
-
-def _looks_like_access_denied(msg: str) -> bool:
+def looks_like_access_denied(msg: str) -> bool:
+    """Heuristic: does ``msg`` look like a subscription-tier rejection?"""
     upper = msg.upper()
     return any(marker.upper() in upper for marker in _ACCESS_DENIED_MARKERS)
 
@@ -164,30 +105,17 @@ def get_fmp_tool_schemas() -> list[dict]:
 def call_fmp_tool(name: str, args: dict) -> Any:
     """Synchronous wrapper — dispatches a single tool call to the FMP MCP server.
 
-    Short-circuits when ``name`` is already on the subscription denylist (set
-    by a prior failed call or seeded via ``FMP_DENIED_TOOLS``). On a fresh
-    access-denied response, the tool is added to the denylist for the rest of
-    this process AND persisted so subsequent screening runs skip it too.
+    Errors (including subscription-tier rejections) are returned as
+    ``{"error": <msg>}`` so the caller can decide what to do. The multi-ticker
+    pipeline's trial-run validator inspects the error text via
+    ``looks_like_access_denied`` and drops unavailable tools from the plan.
     """
-    if name in _load_denied_tools():
-        return {
-            "error": (
-                f"FMP tool {name!r} is on the subscription denylist; "
-                "skipped without calling FMP."
-            )
-        }
     try:
         return asyncio.run(_acall_tool(name, args))
     except Exception as exc:
         msg = str(exc)
-        if _looks_like_access_denied(msg):
-            _record_denied_tool(name)
-            return {
-                "error": (
-                    f"FMP tool {name} requires a plan upgrade — added to denylist."
-                )
-            }
-        log.error("FMP tool %s failed: %s", name, exc)
+        if not looks_like_access_denied(msg):
+            log.error("FMP tool %s failed: %s", name, exc)
         return {"error": msg}
 
 
