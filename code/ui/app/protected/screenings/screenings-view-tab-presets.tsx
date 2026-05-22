@@ -3,8 +3,8 @@
 import {
   Activity,
   BarChart2,
+  FileText,
   Gauge,
-  List,
   Newspaper,
   TrendingUp,
 } from "lucide-react";
@@ -12,7 +12,6 @@ import type { ScreeningsPrimaryTabDef } from "./screenings-types";
 
 /** Tabs that apply to the whole filtered symbol list. */
 export const SCREENINGS_MULTI_SYMBOL_TABS: ScreeningsPrimaryTabDef[] = [
-  { id: "results", label: "Custom Data", icon: <List className="w-3.5 h-3.5" /> },
   {
     id: "quotes",
     label: "Quotes",
@@ -31,6 +30,11 @@ export const SCREENINGS_DEEP_DIVE_TABS: ScreeningsPrimaryTabDef[] = [
     id: "charts",
     label: "Charts",
     icon: <BarChart2 className="w-3.5 h-3.5" />,
+  },
+  {
+    id: "articles",
+    label: "Articles",
+    icon: <FileText className="w-3.5 h-3.5" />,
   },
   {
     id: "news",

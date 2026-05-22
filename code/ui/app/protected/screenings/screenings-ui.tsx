@@ -27,7 +27,17 @@ import {
   Bell,
   FolderPlus,
   Sparkles,
+  Calendar,
+  Target,
+  TrendingUp,
+  Check as CheckIcon,
+  Building2,
+  ExternalLink,
+  Gauge,
+  Newspaper,
+  ArrowUpRight,
 } from "lucide-react";
+import Link from "next/link";
 import { AiAnalysisPanel } from "@/components/ai-analysis-panel";
 import { CLUSTERS } from "../vectors/dimensions";
 import { relationshipsResolveTicker } from "@/app/actions/relationships";
@@ -45,9 +55,15 @@ import {
   screeningsSoftDeleteRun,
   screeningsUpsertDismissNote,
   screeningsGetUserTrades,
+  screeningsGetTickerSentimentHeadRows,
   type BulkAnalysisJob,
   type LoggedTrade,
+  type ScreeningTickerSentimentHeadRow,
 } from "@/app/actions/screenings";
+import {
+  fmpGetCompanyProfile,
+  type FmpCompanyProfile,
+} from "@/app/actions/fmp";
 import {
   collectAllRowDataKeys,
   getRowDataValue,
@@ -104,6 +120,7 @@ import { QuotesView } from "./screenings-quotes-view";
 import { ScreeningsRelationshipNetworkPanel } from "./screenings-relationship-panel";
 import { SentimentView } from "./screenings-sentiment-view";
 import { StockNewsTrendView } from "./screenings-news-trend-view";
+import { ScreeningsArticlesView } from "./screenings-articles-view";
 import { TradeMonitoringView } from "./screenings-trade-monitoring-view";
 import { buildScreeningsAiMessage } from "./screenings-build-ai-message";
 import { filterAndSortScreeningRows } from "./screenings-filter-rows";
@@ -178,69 +195,102 @@ function createOptimisticScreeningRow(
 type SortKey = string;
 type SortDir = "asc" | "desc";
 
-// Caveman date range chips. Three presets (1M / 6M / 1Y) that emit the same
-// granularity + range shape the rest of the chart pipeline expects from
-// ChartDateRangePicker, so swapping the two is a drop-in. 1M uses hourly
-// candles (intraday detail for a short window); the longer ranges roll up
-// to daily so the chart stays readable.
+// Caveman date range presets. 1M uses hourly candles (intraday detail for a
+// short window); the longer ranges roll up to daily so the chart stays
+// readable. State lives in the parent so the desktop chip strip and the
+// mobile swipe arrows around the chart stay in sync.
 const CAVEMAN_RANGES = [
   {
     id: "1m",
     label: "1 month",
+    shortLabel: "1M",
     days: 30,
     granularity: "1hour" as ChartGranularity,
   },
   {
     id: "6m",
     label: "6 months",
+    shortLabel: "6M",
     days: 180,
     granularity: "1day" as ChartGranularity,
   },
   {
     id: "1y",
     label: "1 year",
+    shortLabel: "1Y",
     days: 365,
     granularity: "1day" as ChartGranularity,
   },
 ] as const;
 
-const CAVEMAN_DEFAULT_RANGE_ID: (typeof CAVEMAN_RANGES)[number]["id"] = "6m";
+type CavemanRangeId = (typeof CAVEMAN_RANGES)[number]["id"];
+const CAVEMAN_DEFAULT_RANGE_ID: CavemanRangeId = "6m";
 
+// Human-readable label for a chart granularity, used in the chart title.
+function granularityLabel(g: ChartGranularity): string {
+  switch (g) {
+    case "1hour":
+      return "Hourly";
+    case "4hour":
+      return "4-Hour";
+    case "1week":
+      return "Weekly";
+    case "1day":
+    default:
+      return "Daily";
+  }
+}
+
+// Approximate a "1 month / 6 months / 1 year / …" label from an arbitrary
+// from→to range. Caveman uses a known preset; businessman date picker can
+// produce anything, so we bucket by days.
+function rangeLabelFromDates(
+  range: { from: string; to: string } | undefined,
+): string {
+  if (!range) return "—";
+  const ms =
+    new Date(range.to).getTime() - new Date(range.from).getTime();
+  const days = Math.round(ms / 86400000);
+  if (!Number.isFinite(days) || days <= 0) return "—";
+  if (days <= 10) return "1 week";
+  if (days <= 45) return "1 month";
+  if (days <= 100) return "3 months";
+  if (days <= 220) return "6 months";
+  if (days <= 730) return "1 year";
+  if (days <= 1500) return "3 years";
+  return "5 years";
+}
+
+// Convert a CavemanRange id into the from/to range the chart pipeline expects.
+function cavemanRangeToDates(
+  id: CavemanRangeId,
+): { from: string; to: string; granularity: ChartGranularity } | null {
+  const preset = CAVEMAN_RANGES.find((r) => r.id === id);
+  if (!preset) return null;
+  const end = new Date();
+  const start = new Date(end);
+  start.setDate(start.getDate() - preset.days);
+  const pad2 = (n: number) => String(n).padStart(2, "0");
+  const fmt = (d: Date) =>
+    `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
+  return {
+    from: fmt(start),
+    to: fmt(end),
+    granularity: preset.granularity,
+  };
+}
+
+// Desktop chip strip (sm and up). Controlled component — parent owns state.
 function CavemanRangeChips({
-  onChange,
-  onGranularityChange,
+  activeId,
+  onSelect,
 }: {
-  onChange: (range: { from: string; to: string }) => void;
-  onGranularityChange?: (granularity: ChartGranularity) => void;
+  activeId: CavemanRangeId;
+  onSelect: (id: CavemanRangeId) => void;
 }) {
-  const [activeId, setActiveId] =
-    useState<(typeof CAVEMAN_RANGES)[number]["id"]>(CAVEMAN_DEFAULT_RANGE_ID);
-
-  const emit = useCallback(
-    (id: (typeof CAVEMAN_RANGES)[number]["id"]) => {
-      const preset = CAVEMAN_RANGES.find((r) => r.id === id);
-      if (!preset) return;
-      const end = new Date();
-      const start = new Date(end);
-      start.setDate(start.getDate() - preset.days);
-      const pad2 = (n: number) => String(n).padStart(2, "0");
-      const fmt = (d: Date) =>
-        `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
-      onGranularityChange?.(preset.granularity);
-      onChange({ from: fmt(start), to: fmt(end) });
-    },
-    [onChange, onGranularityChange],
-  );
-
-  useEffect(() => {
-    emit(CAVEMAN_DEFAULT_RANGE_ID);
-    // Run once on mount so the chart loads with the caveman default range.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
   return (
     <div
-      className="flex items-center gap-1 px-1 py-2"
+      className="hidden sm:flex items-center gap-1 px-1 py-2"
       role="radiogroup"
       aria-label="Chart time range"
     >
@@ -255,10 +305,7 @@ function CavemanRangeChips({
             type="button"
             role="radio"
             aria-checked={active}
-            onClick={() => {
-              setActiveId(r.id);
-              emit(r.id);
-            }}
+            onClick={() => onSelect(r.id)}
             className={`min-h-[36px] px-3 py-1.5 text-xs font-mono uppercase tracking-[0.1em] rounded-md border transition-colors ${
               active
                 ? "border-foreground bg-foreground text-background"
@@ -270,6 +317,69 @@ function CavemanRangeChips({
         );
       })}
     </div>
+  );
+}
+
+// Tinder-style mobile chart navigation. Three pieces:
+//   - A segment progress bar pinned at the very top of the chart card,
+//     showing which range is active and tappable to jump directly.
+//   - Two absolutely-positioned chevron tap zones on the chart's left/right
+//     edges for thumb-friendly stepping (the chart's center keeps pan/zoom).
+// Caller renders this inside a `relative` container that wraps the chart.
+function CavemanRangeMobileSwipe({
+  activeId,
+  onPrev,
+  onNext,
+  onSelect,
+}: {
+  activeId: CavemanRangeId;
+  onPrev: () => void;
+  onNext: () => void;
+  onSelect: (id: CavemanRangeId) => void;
+}) {
+  return (
+    <>
+      {/* Segment progress — same pattern as Tinder photo-deck pagination */}
+      <div
+        className="sm:hidden absolute top-0 left-0 right-0 z-10 flex items-center gap-1 px-2 pt-1.5 pb-1 pointer-events-none"
+        aria-hidden
+      >
+        {CAVEMAN_RANGES.map((r) => {
+          const active = r.id === activeId;
+          return (
+            <button
+              key={r.id}
+              type="button"
+              onClick={() => onSelect(r.id)}
+              aria-label={`Show ${r.label}`}
+              className="pointer-events-auto flex-1 h-1.5 flex items-center justify-center group"
+            >
+              <span
+                className={`block h-[3px] w-full rounded-full transition-colors ${
+                  active ? "bg-foreground" : "bg-foreground/25"
+                } group-active:bg-foreground/60`}
+              />
+            </button>
+          );
+        })}
+      </div>
+      <button
+        type="button"
+        onClick={onPrev}
+        aria-label="Previous time range"
+        className="sm:hidden absolute left-1 top-1/2 -translate-y-1/2 z-10 flex items-center justify-center h-11 w-11 rounded-full border border-border bg-background/85 backdrop-blur-sm text-foreground shadow-md active:bg-muted/80"
+      >
+        <ChevronLeft className="h-5 w-5" />
+      </button>
+      <button
+        type="button"
+        onClick={onNext}
+        aria-label="Next time range"
+        className="sm:hidden absolute right-1 top-1/2 -translate-y-1/2 z-10 flex items-center justify-center h-11 w-11 rounded-full border border-border bg-background/85 backdrop-blur-sm text-foreground shadow-md active:bg-muted/80"
+      >
+        <ChevronRight className="h-5 w-5" />
+      </button>
+    </>
   );
 }
 
@@ -301,55 +411,66 @@ function DeepDiveSymbolHeader({
         : "text-muted-foreground";
 
   return (
-    <div className="border-b border-border bg-background">
-      <div className="flex items-end justify-between gap-3 px-3 pt-3 pb-1.5 sm:gap-6">
-        <div className="flex min-w-0 items-baseline gap-3 sm:gap-5">
+    <div className="border-b border-border bg-background px-3 pt-3 pb-2">
+      <div className="flex items-start justify-between gap-3">
+        {/* Left column: symbol + subtitle (company / sector / industry). */}
+        <div className="flex min-w-0 flex-col gap-1">
           <span
             className="font-mono font-semibold tracking-[-0.02em] tabular-nums text-2xl leading-none sm:text-3xl"
             title={quote?.name ?? symbol}
           >
             {symbol || "—"}
           </span>
-          <span className="font-mono tabular-nums text-base sm:text-lg text-foreground/90 leading-none">
-            {quote ? `$${quote.price.toFixed(2)}` : "—"}
-          </span>
-          {quote ? (
-            <span
-              className={`font-mono tabular-nums text-xs sm:text-sm leading-none ${changeColor}`}
-            >
-              {change != null && change >= 0 ? "+" : ""}
-              {change != null ? change.toFixed(2) : "—"}
-              {changePct != null && (
-                <span className="ml-1 opacity-80">
-                  ({changePct >= 0 ? "+" : ""}
-                  {changePct.toFixed(2)}%)
-                </span>
-              )}
-            </span>
-          ) : null}
+          <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[10px] font-mono uppercase tracking-[0.12em] text-muted-foreground/80">
+            {quote?.name ? (
+              <span className="truncate normal-case tracking-normal text-foreground/70 font-sans text-xs">
+                {quote.name}
+              </span>
+            ) : null}
+            {quote?.name && (meta.sector || meta.industry) ? (
+              <span aria-hidden className="text-muted-foreground/40">
+                ·
+              </span>
+            ) : null}
+            {meta.sector ? (
+              <span className="truncate">{meta.sector}</span>
+            ) : null}
+            {meta.sector && meta.industry ? (
+              <span aria-hidden className="text-muted-foreground/40">
+                ·
+              </span>
+            ) : null}
+            {meta.industry ? (
+              <span className="truncate">{meta.industry}</span>
+            ) : null}
+          </div>
         </div>
-        <div className="shrink-0">{rightSlot}</div>
-      </div>
-      <div className="flex items-center gap-2 px-3 pb-2 text-[10px] font-mono uppercase tracking-[0.12em] text-muted-foreground/80 min-h-[14px]">
-        {quote?.name ? (
-          <span className="truncate normal-case tracking-normal text-foreground/70 font-sans text-xs">
-            {quote.name}
-          </span>
-        ) : null}
-        {quote?.name && (meta.sector || meta.industry) ? (
-          <span aria-hidden className="text-muted-foreground/40">
-            ·
-          </span>
-        ) : null}
-        {meta.sector ? <span className="truncate">{meta.sector}</span> : null}
-        {meta.sector && meta.industry ? (
-          <span aria-hidden className="text-muted-foreground/40">
-            ·
-          </span>
-        ) : null}
-        {meta.industry ? (
-          <span className="truncate">{meta.industry}</span>
-        ) : null}
+        {/* Right column: price on top, change underneath. Range slot
+            (chip strip or date picker) renders next to it on desktop; on
+            mobile the slot is invisible because CavemanRangeChips uses
+            `hidden sm:flex` internally. */}
+        <div className="flex shrink-0 items-start gap-4">
+          <div className="flex flex-col items-end gap-0.5">
+            <span className="font-mono tabular-nums text-lg sm:text-xl text-foreground leading-none">
+              {quote ? `$${quote.price.toFixed(2)}` : "—"}
+            </span>
+            {quote ? (
+              <span
+                className={`font-mono tabular-nums text-xs sm:text-sm leading-none ${changeColor}`}
+              >
+                {change != null && change >= 0 ? "+" : ""}
+                {change != null ? change.toFixed(2) : "—"}
+                {changePct != null && (
+                  <span className="ml-1 opacity-80">
+                    ({changePct >= 0 ? "+" : ""}
+                    {changePct.toFixed(2)}%)
+                  </span>
+                )}
+              </span>
+            ) : null}
+          </div>
+          {rightSlot}
+        </div>
       </div>
     </div>
   );
@@ -470,6 +591,726 @@ function CavemanQuickActions({
   );
 }
 
+// Mobile-only floating action bar. Tinder-style bottom toolbar pinned above
+// the MobileTickerBar. Renders three labelled pills (Status / Note / Agent)
+// and surfaces stage changes through a bottom-sheet popover — full-height
+// targets so non-technical users don't fight tiny tap zones.
+function CavemanMobileActionBar({
+  ticker,
+  status,
+  isDismissed,
+  onSetStatus,
+  onDismiss,
+  onRestore,
+  hasNote,
+  onEditNote,
+  onSetupAgent,
+}: {
+  ticker: string;
+  status: NoteStatus;
+  isDismissed: boolean;
+  onSetStatus: (s: Exclude<NoteStatus, "dismissed">) => void;
+  onDismiss: () => void;
+  onRestore: () => void;
+  hasNote: boolean;
+  onEditNote: () => void;
+  onSetupAgent: () => void;
+}) {
+  const [statusOpen, setStatusOpen] = useState(false);
+
+  const stageLabel = isDismissed
+    ? "Dismissed"
+    : status === "watchlist"
+      ? "Watch"
+      : status === "pipeline"
+        ? "Pipeline"
+        : "Active";
+
+  const stageTone = isDismissed
+    ? "border-rose-500/40 bg-rose-500/10 text-rose-500"
+    : "border-border bg-card text-foreground";
+
+  const stages: { value: Exclude<NoteStatus, "dismissed">; label: string }[] = [
+    { value: "active", label: "Active" },
+    { value: "watchlist", label: "Watch" },
+    { value: "pipeline", label: "Pipeline" },
+  ];
+  const currentStage =
+    status === "dismissed"
+      ? null
+      : (status as Exclude<NoteStatus, "dismissed">);
+
+  return (
+    <>
+      <div className="sm:hidden shrink-0 border-t border-border bg-background/95 backdrop-blur-md">
+        <div className="flex items-center gap-2 px-3 py-2 pb-[max(0.5rem,env(safe-area-inset-bottom))]">
+          <button
+            type="button"
+            onClick={() => setStatusOpen(true)}
+            className={`flex-1 min-h-[44px] inline-flex items-center justify-center gap-1.5 rounded-full border px-3 text-[12px] font-mono uppercase tracking-[0.1em] transition-colors active:scale-[0.98] ${stageTone}`}
+            aria-haspopup="dialog"
+            aria-expanded={statusOpen}
+            aria-label={`Status: ${stageLabel}. Tap to change.`}
+          >
+            <span className="truncate">{stageLabel}</span>
+            <ChevronUp className="h-3 w-3 opacity-60 shrink-0" />
+          </button>
+          <button
+            type="button"
+            onClick={onEditNote}
+            className={`flex-1 min-h-[44px] inline-flex items-center justify-center gap-1.5 rounded-full border px-3 text-[12px] font-mono uppercase tracking-[0.1em] transition-colors active:scale-[0.98] ${
+              hasNote
+                ? "border-amber-500/40 bg-amber-500/10 text-amber-600 dark:text-amber-400"
+                : "border-border bg-card text-foreground"
+            }`}
+            aria-label={hasNote ? "Edit note" : "Add note"}
+          >
+            <MessageSquare className="h-3.5 w-3.5 shrink-0" />
+            Note
+          </button>
+          <button
+            type="button"
+            onClick={onSetupAgent}
+            className="flex-1 min-h-[44px] inline-flex items-center justify-center gap-1.5 rounded-full border border-amber-500/40 bg-amber-500/10 px-3 text-[12px] font-mono uppercase tracking-[0.1em] text-amber-600 dark:text-amber-400 transition-colors active:scale-[0.98]"
+            aria-label="Setup agent alarm"
+          >
+            <Bell className="h-3.5 w-3.5 shrink-0" />
+            Agent
+          </button>
+        </div>
+      </div>
+
+      {statusOpen && (
+        <>
+          <div
+            className="sm:hidden fixed inset-0 z-40 bg-black/40"
+            onClick={() => setStatusOpen(false)}
+            aria-hidden
+          />
+          <div
+            className="sm:hidden fixed inset-x-0 bottom-0 z-50 border-t border-border bg-background rounded-t-2xl shadow-2xl"
+            role="dialog"
+            aria-label={`Change status for ${ticker}`}
+          >
+            <div className="flex items-center justify-center py-2">
+              <div className="h-1 w-10 rounded-full bg-border" />
+            </div>
+            <div className="px-2 pb-[max(1rem,env(safe-area-inset-bottom))]">
+              <div className="px-3 pb-2 text-[10px] font-mono uppercase tracking-[0.14em] text-muted-foreground">
+                Set stage for {ticker}
+              </div>
+              {stages.map((s) => {
+                const checked = currentStage === s.value && !isDismissed;
+                return (
+                  <button
+                    key={s.value}
+                    type="button"
+                    onClick={() => {
+                      onSetStatus(s.value);
+                      setStatusOpen(false);
+                    }}
+                    className="w-full flex items-center justify-between px-3 py-3 text-sm transition-colors hover:bg-muted/40 active:bg-muted"
+                  >
+                    <span>{s.label}</span>
+                    {checked && (
+                      <CheckIcon className="h-4 w-4 text-foreground" />
+                    )}
+                  </button>
+                );
+              })}
+              <div className="border-t border-border my-1" />
+              <button
+                type="button"
+                onClick={() => {
+                  if (isDismissed) onRestore();
+                  else onDismiss();
+                  setStatusOpen(false);
+                }}
+                className={`w-full flex items-center gap-2 px-3 py-3 text-sm transition-colors ${
+                  isDismissed
+                    ? "text-emerald-600 dark:text-emerald-400 hover:bg-emerald-500/10"
+                    : "text-rose-500 hover:bg-rose-500/10"
+                }`}
+              >
+                {isDismissed ? (
+                  <RotateCcw className="h-4 w-4" />
+                ) : (
+                  <Trash2 className="h-4 w-4" />
+                )}
+                {isDismissed ? "Restore ticker" : "Dismiss ticker"}
+              </button>
+            </div>
+          </div>
+        </>
+      )}
+    </>
+  );
+}
+
+// Tinder-style info cards. Rendered below the chart on mobile-caveman only,
+// when the user scrolls. Each card is a small white block with a small-caps
+// title and a few "label → value" rows. Builds context for non-technical
+// users in plain numeric form (snapshot, 52-week position, screen verdict).
+function InfoCard({
+  icon,
+  title,
+  children,
+}: {
+  icon: ReactNode;
+  title: string;
+  children: ReactNode;
+}) {
+  return (
+    <section className="rounded-xl border border-border bg-card overflow-hidden flex flex-col shadow-sm">
+      {/* Header band — high-contrast Tinder-style section header. Solid
+          tinted background, inverted icon badge, sentence-case title at
+          text-sm/font-semibold so it reads as an unmistakable heading. */}
+      <header className="flex items-center gap-2.5 border-b border-border bg-muted/50 px-4 py-3">
+        <span className="flex h-7 w-7 items-center justify-center rounded-md bg-foreground text-background">
+          {icon}
+        </span>
+        <h3 className="text-sm font-semibold text-foreground leading-none">
+          {title}
+        </h3>
+      </header>
+      <div className="flex flex-col gap-2.5 px-4 py-4">{children}</div>
+    </section>
+  );
+}
+
+function InfoRow({
+  label,
+  value,
+  tone,
+}: {
+  label: string;
+  value: ReactNode;
+  tone?: "default" | "positive" | "negative" | "muted";
+}) {
+  const toneCls =
+    tone === "positive"
+      ? "text-emerald-500"
+      : tone === "negative"
+        ? "text-rose-500"
+        : tone === "muted"
+          ? "text-muted-foreground"
+          : "text-foreground";
+  return (
+    <div className="flex items-center justify-between gap-3">
+      <span className="text-xs text-muted-foreground">{label}</span>
+      <span className={`font-mono text-sm font-medium tabular-nums ${toneCls}`}>
+        {value}
+      </span>
+    </div>
+  );
+}
+
+function formatLargeNumber(n: number, prefix = ""): string {
+  if (!Number.isFinite(n)) return "—";
+  const abs = Math.abs(n);
+  if (abs >= 1e12) return `${prefix}${(n / 1e12).toFixed(2)}T`;
+  if (abs >= 1e9) return `${prefix}${(n / 1e9).toFixed(2)}B`;
+  if (abs >= 1e6) return `${prefix}${(n / 1e6).toFixed(2)}M`;
+  if (abs >= 1e3) return `${prefix}${(n / 1e3).toFixed(1)}K`;
+  return `${prefix}${n.toFixed(2)}`;
+}
+
+// Slim article preview card for the mobile-caveman scroll stack. Calls the
+// same /api/news/semantic-search endpoint the public articles page uses,
+// scoped via the ticker tag. Shows up to 5 most recent headlines; the
+// footer link drops the user into the full Articles deep-dive tab.
+type ArticlePreviewItem = {
+  article_id: number;
+  title: string | null;
+  source: string | null;
+  slug: string | null;
+  published_at: string | null;
+};
+
+function ArticlesInfoCard({ symbol }: { symbol: string }) {
+  const [items, setItems] = useState<ArticlePreviewItem[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!symbol) return;
+    let cancelled = false;
+    setLoading(true);
+    setError(null);
+    void fetch("/api/news/semantic-search", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        query: symbol,
+        tags: [symbol],
+        limit: 5,
+        lookback_days: 90,
+        mode: "tags",
+      }),
+    })
+      .then((r) => r.json())
+      .then((data: { results?: ArticlePreviewItem[]; error?: string }) => {
+        if (cancelled) return;
+        if (!data?.results) throw new Error(data?.error ?? "Search failed");
+        setItems(data.results);
+      })
+      .catch((err: unknown) => {
+        if (cancelled) return;
+        setError(err instanceof Error ? err.message : "Search failed");
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [symbol]);
+
+  return (
+    <InfoCard
+      icon={<Newspaper className="w-3.5 h-3.5 text-muted-foreground" />}
+      title="Recent articles"
+    >
+      {loading ? (
+        <div className="flex items-center gap-2 text-muted-foreground">
+          <Loader2 className="h-3 w-3 animate-spin" />
+          <span className="text-xs">Loading articles for {symbol}…</span>
+        </div>
+      ) : error ? (
+        <p className="text-xs text-rose-500">{error}</p>
+      ) : items.length === 0 ? (
+        <p className="text-xs text-muted-foreground">
+          No recent articles tagged{" "}
+          <span className="font-mono text-foreground">{symbol}</span>.
+        </p>
+      ) : (
+        <div className="flex flex-col gap-3">
+          <ul className="-mx-1 divide-y divide-border/60">
+            {items.map((item) => (
+              <li key={item.article_id}>
+                <Link
+                  href={
+                    item.slug
+                      ? `/articles/${item.slug}`
+                      : `/articles/${item.article_id}`
+                  }
+                  className="group block px-1 py-2 transition-colors hover:bg-muted/30"
+                >
+                  <p className="line-clamp-2 text-sm font-medium leading-snug text-foreground">
+                    {item.title || "Untitled"}
+                  </p>
+                  <div className="mt-1 flex items-center gap-1.5 text-[10px] font-mono uppercase tracking-[0.1em] text-muted-foreground">
+                    <span className="truncate">
+                      {item.source || "feed"}
+                    </span>
+                    <span className="text-muted-foreground/40">·</span>
+                    <span>
+                      {item.published_at
+                        ? formatArticleAge(item.published_at)
+                        : "—"}
+                    </span>
+                  </div>
+                </Link>
+              </li>
+            ))}
+          </ul>
+          <Link
+            href={`/articles?tag=${encodeURIComponent(symbol)}`}
+            className="inline-flex w-fit items-center gap-1 text-[11px] font-mono uppercase tracking-[0.1em] text-amber-600 dark:text-amber-400 hover:underline"
+          >
+            <ArrowUpRight className="h-3 w-3" />
+            See all articles for {symbol}
+          </Link>
+        </div>
+      )}
+    </InfoCard>
+  );
+}
+
+function formatArticleAge(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "—";
+  const diff = Date.now() - d.getTime();
+  if (diff < 0) return "now";
+  const m = 60_000;
+  const h = 60 * m;
+  const day = 24 * h;
+  const wk = 7 * day;
+  if (diff < h) return `${Math.max(1, Math.floor(diff / m))}m`;
+  if (diff < day) return `${Math.floor(diff / h)}h`;
+  if (diff < wk) return `${Math.floor(diff / day)}d`;
+  return `${Math.floor(diff / wk)}w`;
+}
+
+// Sentiment card. Aggregates `sentiment_score` over 7 / 30 / 90 day
+// windows for the selected ticker — same data the multi-symbol Sentiment
+// view uses, just narrowed to one symbol and rendered as bar rows so it
+// fits in the mobile info stack.
+function SentimentInfoCard({
+  symbol,
+  rows,
+}: {
+  symbol: string;
+  rows: ScreeningTickerSentimentHeadRow[];
+}) {
+  const stats = useMemo(() => {
+    const now = Date.now();
+    const cutoff = (days: number) =>
+      new Date(now - days * 86400000).toISOString().slice(0, 10);
+    const targets = [
+      { label: "7 days", cutoff: cutoff(7) },
+      { label: "30 days", cutoff: cutoff(30) },
+      { label: "90 days", cutoff: cutoff(90) },
+    ] as const;
+    const out = targets.map((t) => {
+      let total = 0;
+      let count = 0;
+      for (const r of rows) {
+        if (r.ticker.toUpperCase() !== symbol) continue;
+        const day = r.article_ts.slice(0, 10);
+        if (day < t.cutoff) continue;
+        if (Number.isFinite(r.sentiment_score)) {
+          total += r.sentiment_score;
+          count += 1;
+        }
+      }
+      return { label: t.label, total, count };
+    });
+    const maxAbs = Math.max(0.01, ...out.map((s) => Math.abs(s.total)));
+    return { rows: out, maxAbs };
+  }, [rows, symbol]);
+
+  const totalArticles = useMemo(
+    () =>
+      rows.reduce(
+        (acc, r) => (r.ticker.toUpperCase() === symbol ? acc + 1 : acc),
+        0,
+      ),
+    [rows, symbol],
+  );
+
+  return (
+    <InfoCard
+      icon={<Gauge className="w-3.5 h-3.5 text-muted-foreground" />}
+      title="Sentiment"
+    >
+      {totalArticles === 0 ? (
+        <p className="text-xs text-muted-foreground">
+          No recent articles tagged with this ticker.
+        </p>
+      ) : (
+        <>
+          <div className="flex flex-col gap-2">
+            {stats.rows.map((s) => {
+              const pct =
+                stats.maxAbs > 0 ? Math.abs(s.total) / stats.maxAbs : 0;
+              const pos = s.total >= 0;
+              const negligible = Math.abs(s.total) < 0.01;
+              return (
+                <div
+                  key={s.label}
+                  className="grid grid-cols-[minmax(0,4rem)_minmax(0,1fr)_auto] items-center gap-2"
+                >
+                  <span className="text-[10px] font-mono uppercase tracking-[0.1em] text-muted-foreground">
+                    {s.label}
+                  </span>
+                  <div className="relative h-1.5 rounded-full bg-muted overflow-hidden">
+                    <div className="absolute inset-y-0 left-1/2 w-px bg-border" />
+                    <div
+                      className={`absolute top-0 h-full rounded-full ${
+                        pos
+                          ? "bg-emerald-500 left-1/2"
+                          : "bg-rose-400 right-1/2"
+                      }`}
+                      style={{ width: `${pct * 50}%` }}
+                    />
+                  </div>
+                  <span
+                    className={`font-mono text-xs tabular-nums w-14 text-right ${
+                      negligible
+                        ? "text-muted-foreground"
+                        : pos
+                          ? "text-emerald-500"
+                          : "text-rose-400"
+                    }`}
+                  >
+                    {s.total >= 0 ? "+" : ""}
+                    {s.total.toFixed(2)}
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+          <p className="text-[10px] font-mono uppercase tracking-[0.1em] text-muted-foreground/70">
+            Across {totalArticles} article{totalArticles === 1 ? "" : "s"} ·
+            past 120 days
+          </p>
+        </>
+      )}
+    </InfoCard>
+  );
+}
+
+// Company card with expand/collapse for the (often long) FMP description.
+// Keeps the expanded state local so toggling doesn't disturb the other
+// info-card scroll positions in the parent stack.
+function CompanyInfoCard({ profile }: { profile: FmpCompanyProfile }) {
+  const [expanded, setExpanded] = useState(false);
+  const employees =
+    profile.fullTimeEmployees != null
+      ? Number(profile.fullTimeEmployees)
+      : null;
+  const employeesLabel =
+    employees != null && Number.isFinite(employees) && employees > 0
+      ? formatLargeNumber(employees)
+      : null;
+  const ipoYear = profile.ipoDate?.slice(0, 4) ?? null;
+  const websiteHost = (() => {
+    if (!profile.website) return null;
+    try {
+      return new URL(profile.website).host.replace(/^www\./, "");
+    } catch {
+      return profile.website;
+    }
+  })();
+  // Heuristic — only show the expand control if there's enough text to be
+  // worth expanding (line-clamp-4 with text-xs leading-relaxed clips around
+  // ~320 chars on a 358-px-wide card).
+  const description = profile.description?.trim() ?? "";
+  const isClampable = description.length > 280;
+
+  return (
+    <InfoCard
+      icon={<Building2 className="w-3.5 h-3.5 text-muted-foreground" />}
+      title="Company"
+    >
+      {profile.companyName ? (
+        <p className="text-sm font-medium leading-snug text-foreground">
+          {profile.companyName}
+        </p>
+      ) : null}
+      {description ? (
+        <div className="flex flex-col gap-1.5">
+          <p
+            className={`text-xs leading-relaxed text-muted-foreground ${
+              isClampable && !expanded ? "line-clamp-4" : ""
+            }`}
+          >
+            {description}
+          </p>
+          {isClampable && (
+            <button
+              type="button"
+              onClick={() => setExpanded((v) => !v)}
+              className="inline-flex w-fit items-center gap-1 text-[11px] font-mono uppercase tracking-[0.1em] text-foreground/70 transition-colors hover:text-foreground"
+              aria-expanded={expanded}
+            >
+              {expanded ? (
+                <>
+                  <ChevronUp className="h-3 w-3" />
+                  Show less
+                </>
+              ) : (
+                <>
+                  <ChevronDown className="h-3 w-3" />
+                  Read more
+                </>
+              )}
+            </button>
+          )}
+        </div>
+      ) : null}
+      {profile.ceo ? <InfoRow label="CEO" value={profile.ceo} /> : null}
+      {(profile.sector || profile.industry) && (
+        <InfoRow
+          label="Sector · Industry"
+          value={
+            [profile.sector, profile.industry]
+              .filter(Boolean)
+              .join(" · ") || "—"
+          }
+        />
+      )}
+      {(profile.exchange || profile.exchangeFullName) && (
+        <InfoRow
+          label="Exchange"
+          value={profile.exchangeFullName ?? profile.exchange ?? "—"}
+        />
+      )}
+      {(employeesLabel || ipoYear) && (
+        <InfoRow
+          label="Employees · IPO"
+          value={[employeesLabel, ipoYear].filter(Boolean).join(" · ") || "—"}
+        />
+      )}
+      {profile.country ? (
+        <InfoRow label="HQ" value={profile.country} />
+      ) : null}
+      {websiteHost && profile.website ? (
+        <a
+          href={profile.website}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="inline-flex w-fit items-center gap-1 text-[11px] font-mono uppercase tracking-[0.1em] text-amber-600 dark:text-amber-400 hover:underline"
+        >
+          <ExternalLink className="h-3 w-3" />
+          {websiteHost}
+        </a>
+      ) : null}
+    </InfoCard>
+  );
+}
+
+function CavemanInfoCards({
+  symbol,
+  quote,
+  profile,
+  sentimentRows,
+}: {
+  symbol: string;
+  quote: FmpQuote | null | undefined;
+  profile: FmpCompanyProfile | null;
+  sentimentRows: ScreeningTickerSentimentHeadRow[];
+}) {
+  const yearLow = quote?.yearLow ?? null;
+  const yearHigh = quote?.yearHigh ?? null;
+  const price = quote?.price ?? null;
+  const pctFrom52wHigh =
+    yearHigh != null && price != null && yearHigh > 0
+      ? ((price - yearHigh) / yearHigh) * 100
+      : null;
+  const positionPct =
+    yearLow != null &&
+    yearHigh != null &&
+    yearHigh > yearLow &&
+    price != null
+      ? ((price - yearLow) / (yearHigh - yearLow)) * 100
+      : null;
+
+  return (
+    <>
+      {profile && <CompanyInfoCard profile={profile} />}
+
+      <SentimentInfoCard symbol={symbol} rows={sentimentRows} />
+
+      <InfoCard
+        icon={<Activity className="w-3.5 h-3.5 text-muted-foreground" />}
+        title="Snapshot"
+      >
+        <InfoRow
+          label="Today's range"
+          value={
+            quote?.dayLow != null && quote?.dayHigh != null
+              ? `$${quote.dayLow.toFixed(2)} – $${quote.dayHigh.toFixed(2)}`
+              : "—"
+          }
+        />
+        <InfoRow
+          label="Open"
+          value={quote?.open != null ? `$${quote.open.toFixed(2)}` : "—"}
+        />
+        <InfoRow
+          label="Volume"
+          value={
+            quote?.volume != null ? formatLargeNumber(quote.volume) : "—"
+          }
+        />
+        <InfoRow
+          label="Market cap"
+          value={
+            quote?.marketCap != null
+              ? formatLargeNumber(quote.marketCap, "$")
+              : "—"
+          }
+        />
+      </InfoCard>
+
+      <InfoCard
+        icon={<Calendar className="w-3.5 h-3.5 text-muted-foreground" />}
+        title="52-week position"
+      >
+        {positionPct != null && yearLow != null && yearHigh != null ? (
+          <div className="flex flex-col gap-1.5">
+            <div className="flex items-center justify-between text-[10px] font-mono uppercase tracking-[0.1em] text-muted-foreground">
+              <span>${yearLow.toFixed(2)}</span>
+              <span>${yearHigh.toFixed(2)}</span>
+            </div>
+            <div className="relative h-1.5 rounded-full bg-muted">
+              <div
+                className="absolute top-0 left-0 h-full rounded-full bg-foreground/30"
+                style={{
+                  width: `${Math.min(100, Math.max(0, positionPct))}%`,
+                }}
+              />
+              <div
+                className="absolute top-1/2 -translate-y-1/2 -translate-x-1/2 h-3 w-3 rounded-full bg-foreground border-2 border-background"
+                style={{
+                  left: `${Math.min(100, Math.max(0, positionPct))}%`,
+                }}
+                aria-label={`Current price at ${positionPct.toFixed(0)}% of 52-week range`}
+              />
+            </div>
+          </div>
+        ) : (
+          <p className="text-xs text-muted-foreground">No range data.</p>
+        )}
+        <InfoRow
+          label="From 52w high"
+          value={
+            pctFrom52wHigh != null ? `${pctFrom52wHigh.toFixed(1)}%` : "—"
+          }
+          tone={
+            pctFrom52wHigh == null
+              ? "muted"
+              : pctFrom52wHigh >= -10
+                ? "positive"
+                : pctFrom52wHigh >= -25
+                  ? "default"
+                  : "muted"
+          }
+        />
+        <InfoRow
+          label="vs 50-day MA"
+          value={
+            quote?.priceAvg50 != null && price != null
+              ? `${(((price - quote.priceAvg50) / quote.priceAvg50) * 100).toFixed(1)}%`
+              : "—"
+          }
+          tone={
+            quote?.priceAvg50 != null && price != null
+              ? price >= quote.priceAvg50
+                ? "positive"
+                : "negative"
+              : "muted"
+          }
+        />
+        <InfoRow
+          label="vs 200-day MA"
+          value={
+            quote?.priceAvg200 != null && price != null
+              ? `${(((price - quote.priceAvg200) / quote.priceAvg200) * 100).toFixed(1)}%`
+              : "—"
+          }
+          tone={
+            quote?.priceAvg200 != null && price != null
+              ? price >= quote.priceAvg200
+                ? "positive"
+                : "negative"
+              : "muted"
+          }
+        />
+      </InfoCard>
+      {/* The Screen verdict + Fundamentals cards (RS Rank, Trend Template
+          flags, EPS growth, ROE, …) used to render here. They surface the
+          custom screening row data and the user explicitly asked to drop
+          them from the mobile-caveman scroll stack — caveman is meant to
+          stay non-technical. The data remains accessible via the
+          businessman deep-dive tabs and the right-side AI chat. */}
+      <ArticlesInfoCard symbol={symbol} />
+    </>
+  );
+}
+
 // ─── main component ──────────────────────────────────────────────────────────
 
 export function ScreeningsUI({
@@ -549,12 +1390,39 @@ export function ScreeningsUI({
   // scan-run switching, ticker add and screening creation intact.
   const { isCaveman } = useCavemanMode();
 
+  // Caveman-mode active range. Shared between the desktop chip strip in the
+  // symbol header and the mobile chart-edge swipe arrows. The effect below
+  // emits to the chart pipeline whenever this changes in caveman mode.
+  const [cavemanRangeId, setCavemanRangeId] = useState<CavemanRangeId>(
+    CAVEMAN_DEFAULT_RANGE_ID,
+  );
+
   // When caveman flips on, force the deep-dive Charts view and collapse the
   // AI side panel. Users can re-expand chat manually.
   useEffect(() => {
     if (!isCaveman) return;
     if (activeView !== "charts") setActiveView("charts");
   }, [isCaveman, activeView]);
+
+  // Sync caveman range → chart pipeline. Whenever the active caveman range
+  // changes (chip click on desktop, arrow tap on mobile), translate it to
+  // from/to + granularity for the chart fetch. Also runs on initial mount.
+  useEffect(() => {
+    if (!isCaveman) return;
+    const r = cavemanRangeToDates(cavemanRangeId);
+    if (!r) return;
+    setChartGranularity(r.granularity);
+    setChartDateRange({ from: r.from, to: r.to });
+  }, [isCaveman, cavemanRangeId]);
+
+  const stepCavemanRange = useCallback((delta: number) => {
+    setCavemanRangeId((current) => {
+      const n = CAVEMAN_RANGES.length;
+      const i = CAVEMAN_RANGES.findIndex((r) => r.id === current);
+      const next = CAVEMAN_RANGES[(i + delta + n) % n];
+      return next?.id ?? current;
+    });
+  }, []);
 
   useEffect(() => {
     document.body.classList.add("screenings-fullscreen");
@@ -605,6 +1473,75 @@ export function ScreeningsUI({
     [openTickerActionsMenu],
   );
   const [selectedTicker, setSelectedTicker] = useState<string | null>(null);
+  // FMP company profile for the selected ticker. Drives the "Company" info
+  // card under the chart. Cached per-symbol via a Map so flipping back to a
+  // previously-viewed ticker is instant.
+  const companyProfileCacheRef = useRef<Map<string, FmpCompanyProfile>>(
+    new Map(),
+  );
+  const [companyProfile, setCompanyProfile] =
+    useState<FmpCompanyProfile | null>(null);
+  useEffect(() => {
+    if (!selectedTicker) {
+      setCompanyProfile(null);
+      return;
+    }
+    const sym = selectedTicker.trim().toUpperCase();
+    const cached = companyProfileCacheRef.current.get(sym);
+    if (cached) {
+      setCompanyProfile(cached);
+      return;
+    }
+    let cancelled = false;
+    void fmpGetCompanyProfile(sym).then((res) => {
+      if (cancelled) return;
+      if (res.ok) {
+        companyProfileCacheRef.current.set(sym, res.data);
+        setCompanyProfile(res.data);
+      } else {
+        setCompanyProfile(null);
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedTicker]);
+
+  // Per-ticker sentiment rows (same source as the multi-symbol Sentiment
+  // view: `ticker_sentiment_heads_v`). Drives the Sentiment info card in the
+  // mobile-caveman scroll stack. Cached per-symbol — flipping tickers reads
+  // from the cache instantly.
+  const sentimentCacheRef = useRef<
+    Map<string, ScreeningTickerSentimentHeadRow[]>
+  >(new Map());
+  const [tickerSentimentRows, setTickerSentimentRows] = useState<
+    ScreeningTickerSentimentHeadRow[]
+  >([]);
+  useEffect(() => {
+    if (!selectedTicker) {
+      setTickerSentimentRows([]);
+      return;
+    }
+    const sym = selectedTicker.trim().toUpperCase();
+    const cached = sentimentCacheRef.current.get(sym);
+    if (cached) {
+      setTickerSentimentRows(cached);
+      return;
+    }
+    let cancelled = false;
+    void screeningsGetTickerSentimentHeadRows([sym]).then((res) => {
+      if (cancelled) return;
+      if (res.ok) {
+        sentimentCacheRef.current.set(sym, res.data);
+        setTickerSentimentRows(res.data);
+      } else {
+        setTickerSentimentRows([]);
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedTicker]);
   const [chartAnnotations, setChartAnnotations] = useState<ChartAnnotation[]>(
     [],
   );
@@ -1247,20 +2184,7 @@ export function ScreeningsUI({
     );
   }, [rows.length, dataColumnKeys, sortKey]);
 
-  const hasCustomData = dataColumnKeys.length > 0;
-  const visibleMultiSymbolTabs = useMemo(
-    () =>
-      hasCustomData
-        ? SCREENINGS_MULTI_SYMBOL_TABS
-        : SCREENINGS_MULTI_SYMBOL_TABS.filter((t) => t.id !== "results"),
-    [hasCustomData],
-  );
-
-  useEffect(() => {
-    if (activeView === "results" && !hasCustomData) {
-      setActiveView(visibleMultiSymbolTabs[0]?.id ?? "quotes");
-    }
-  }, [activeView, hasCustomData, visibleMultiSymbolTabs]);
+  const visibleMultiSymbolTabs = SCREENINGS_MULTI_SYMBOL_TABS;
 
   function selectRun(id: number) {
     router.push(`/protected/screenings?run=${id}`);
@@ -2042,7 +2966,13 @@ export function ScreeningsUI({
                 {activeView === "charts" ? (
                   <div className="flex-1 flex flex-col gap-3 w-full min-h-0">
                     <div className="flex-1 flex items-stretch w-full min-h-0">
-                      <div className="flex-1 min-w-0 flex flex-col min-h-0">
+                      <div
+                        className={`flex-1 min-w-0 flex flex-col min-h-0 ${
+                          isCaveman
+                            ? "overflow-y-auto sm:overflow-hidden"
+                            : ""
+                        }`}
+                      >
                         <DeepDiveSymbolHeader
                           symbol={selectedTicker ?? ""}
                           quote={
@@ -2056,8 +2986,8 @@ export function ScreeningsUI({
                           rightSlot={
                             isCaveman ? (
                               <CavemanRangeChips
-                                onChange={setChartDateRange}
-                                onGranularityChange={setChartGranularity}
+                                activeId={cavemanRangeId}
+                                onSelect={setCavemanRangeId}
                               />
                             ) : (
                               <ChartDateRangePicker
@@ -2068,75 +2998,131 @@ export function ScreeningsUI({
                           }
                         />
                         {isCaveman && selectedTicker && (
-                          <CavemanQuickActions
-                            ticker={selectedTicker}
-                            status={getTickerStatus(selectedTicker)}
-                            isDismissed={dismissedSymbols.has(selectedTicker)}
-                            onSetStatus={(s) =>
-                              setTickerStatus(selectedTicker, s)
-                            }
-                            onDismiss={() => dismissTicker(selectedTicker)}
-                            onRestore={() => restoreTicker(selectedTicker)}
-                            hasNote={tickerHasComment(selectedTicker)}
-                            onEditNote={() =>
-                              editTickerComment(selectedTicker)
-                            }
-                            onSetupAgent={() =>
-                              setAgentAlarmTicker(selectedTicker)
-                            }
-                          />
+                          // Desktop only: above-chart quick actions. On mobile
+                          // the same actions are surfaced via the floating
+                          // CavemanMobileActionBar pinned above the
+                          // MobileTickerBar at the bottom of the viewport.
+                          <div className="hidden sm:block">
+                            <CavemanQuickActions
+                              ticker={selectedTicker}
+                              status={getTickerStatus(selectedTicker)}
+                              isDismissed={dismissedSymbols.has(selectedTicker)}
+                              onSetStatus={(s) =>
+                                setTickerStatus(selectedTicker, s)
+                              }
+                              onDismiss={() => dismissTicker(selectedTicker)}
+                              onRestore={() => restoreTicker(selectedTicker)}
+                              hasNote={tickerHasComment(selectedTicker)}
+                              onEditNote={() =>
+                                editTickerComment(selectedTicker)
+                              }
+                              onSetupAgent={() =>
+                                setAgentAlarmTicker(selectedTicker)
+                              }
+                            />
+                          </div>
                         )}
-                        <TickerChartsPanel
-                          symbols={chartSymbols}
-                          selectedTicker={selectedTicker}
-                          onSelect={setSelectedTicker}
-                          dismissed={dismissedSymbols}
-                          onDismiss={dismissTicker}
-                          onRestore={restoreTicker}
-                          getStatus={getTickerStatus}
-                          onSetStatus={setTickerStatus}
-                          hasComment={tickerHasComment}
-                          onEditComment={editTickerComment}
-                          getTickerMeta={getTickerMeta}
-                          getEntryMarker={getTickerEntryMarker}
-                          onSetEntryMarker={setTickerEntryMarker}
-                          onClearEntryMarker={clearTickerEntryMarker}
-                          tradeMarkers={(selectedTicker ? (tradesByTicker.get(selectedTicker) ?? []) : []).map((t) => ({
-                            date: t.executed_at.slice(0, 10),
-                            price: t.price_per_unit,
-                            side: t.side,
-                            position_side: t.position_side,
-                          }))}
-                          showChevronSymbolNav={false}
-                          screeningToolbar={false}
-                          showSymbolHeadline={false}
-                          showChartFrame={false}
-                          annotations={isCaveman ? [] : chartAnnotations}
-                          onChartData={(rows: OhlcBar[]) => {
-                            ohlcvDataRef.current = rows;
-                          }}
-                          onAnnotationAdd={
+                        {/* Chart title — range + granularity. Each graph gets
+                            an explicit label so non-technical users always
+                            know what timeframe they're looking at. */}
+                        <div className="flex items-center justify-center px-3 py-1.5 sm:justify-start">
+                          <span className="font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground">
+                            {isCaveman
+                              ? CAVEMAN_RANGES.find(
+                                  (r) => r.id === cavemanRangeId,
+                                )?.label ?? "—"
+                              : rangeLabelFromDates(chartDateRange)}
+                            <span
+                              aria-hidden
+                              className="mx-1.5 text-muted-foreground/40"
+                            >
+                              ·
+                            </span>
+                            {granularityLabel(chartGranularity)} chart
+                          </span>
+                        </div>
+                        <div
+                          className={`relative ${
                             isCaveman
-                              ? undefined
-                              : (ann) =>
-                                  setChartAnnotations((prev) => [...prev, ann])
-                          }
-                          onAnnotationDelete={
-                            isCaveman
-                              ? undefined
-                              : (id) =>
-                                  setChartAnnotations((prev) =>
-                                    prev.filter((a) => a.id !== id),
-                                  )
-                          }
-                          dateRange={chartDateRange}
-                          interval={chartGranularity}
-                          getReferenceClose={(ticker) => {
-                            const q = quotes[ticker];
-                            if (!q) return null;
-                            return q.previousClose ?? q.price ?? null;
-                          }}
-                        />
+                              ? "shrink-0 h-[calc(100%-9rem)] min-h-[50vh] mx-3 mb-1 rounded-2xl border border-border bg-card shadow-[0_4px_24px_-8px_rgba(0,0,0,0.25)] overflow-hidden sm:mx-0 sm:mb-0 sm:rounded-none sm:border-0 sm:bg-transparent sm:shadow-none sm:overflow-visible sm:flex-1 sm:min-h-0 sm:h-auto"
+                              : "flex-1 min-h-0"
+                          }`}
+                        >
+                          <TickerChartsPanel
+                            symbols={chartSymbols}
+                            selectedTicker={selectedTicker}
+                            onSelect={setSelectedTicker}
+                            dismissed={dismissedSymbols}
+                            onDismiss={dismissTicker}
+                            onRestore={restoreTicker}
+                            getStatus={getTickerStatus}
+                            onSetStatus={setTickerStatus}
+                            hasComment={tickerHasComment}
+                            onEditComment={editTickerComment}
+                            getTickerMeta={getTickerMeta}
+                            getEntryMarker={getTickerEntryMarker}
+                            onSetEntryMarker={setTickerEntryMarker}
+                            onClearEntryMarker={clearTickerEntryMarker}
+                            tradeMarkers={(selectedTicker ? (tradesByTicker.get(selectedTicker) ?? []) : []).map((t) => ({
+                              date: t.executed_at.slice(0, 10),
+                              price: t.price_per_unit,
+                              side: t.side,
+                              position_side: t.position_side,
+                            }))}
+                            showChevronSymbolNav={false}
+                            screeningToolbar={false}
+                            showSymbolHeadline={false}
+                            showChartFrame={false}
+                            fillContainer={isCaveman}
+                            annotations={isCaveman ? [] : chartAnnotations}
+                            onChartData={(rows: OhlcBar[]) => {
+                              ohlcvDataRef.current = rows;
+                            }}
+                            onAnnotationAdd={
+                              isCaveman
+                                ? undefined
+                                : (ann) =>
+                                    setChartAnnotations((prev) => [...prev, ann])
+                            }
+                            onAnnotationDelete={
+                              isCaveman
+                                ? undefined
+                                : (id) =>
+                                    setChartAnnotations((prev) =>
+                                      prev.filter((a) => a.id !== id),
+                                    )
+                            }
+                            dateRange={chartDateRange}
+                            interval={chartGranularity}
+                            getReferenceClose={(ticker) => {
+                              const q = quotes[ticker];
+                              if (!q) return null;
+                              return q.previousClose ?? q.price ?? null;
+                            }}
+                          />
+                          {isCaveman && (
+                            <CavemanRangeMobileSwipe
+                              activeId={cavemanRangeId}
+                              onPrev={() => stepCavemanRange(-1)}
+                              onNext={() => stepCavemanRange(1)}
+                              onSelect={setCavemanRangeId}
+                            />
+                          )}
+                        </div>
+                        {/* Tinder-style info stack below the chart on mobile.
+                            Reveals additional ticker context as the user
+                            scrolls down — same pattern as Tinder's profile
+                            details below the photo deck. Mobile + caveman only. */}
+                        {isCaveman && selectedTicker && (
+                          <div className="sm:hidden flex flex-col gap-2.5 p-3 pb-6 bg-muted/15">
+                            <CavemanInfoCards
+                              symbol={selectedTicker.toUpperCase()}
+                              quote={quotes[selectedTicker]}
+                              profile={companyProfile}
+                              sentimentRows={tickerSentimentRows}
+                            />
+                          </div>
+                        )}
                       </div>
                     </div>
                   </div>
@@ -2156,6 +3142,10 @@ export function ScreeningsUI({
                       getTickerMeta={getTickerMeta}
                     />
                   </div>
+                ) : activeView === "articles" ? (
+                  <div className="flex-1 min-h-0 flex flex-col">
+                    <ScreeningsArticlesView selectedTicker={selectedTicker} />
+                  </div>
                 ) : (
                   <StockNewsTrendView
                     symbols={filteredSymbols}
@@ -2174,6 +3164,23 @@ export function ScreeningsUI({
                 )}
               </div>
             </div>
+            {/* Caveman floating action bar — pinned above the ticker nav,
+                mobile only. Surfaces status / note / agent without consuming
+                vertical chart space. */}
+            {isCaveman && selectedTicker && (
+              <CavemanMobileActionBar
+                ticker={selectedTicker}
+                status={getTickerStatus(selectedTicker)}
+                isDismissed={dismissedSymbols.has(selectedTicker)}
+                onSetStatus={(s) => setTickerStatus(selectedTicker, s)}
+                onDismiss={() => dismissTicker(selectedTicker)}
+                onRestore={() => restoreTicker(selectedTicker)}
+                hasNote={tickerHasComment(selectedTicker)}
+                onEditNote={() => editTickerComment(selectedTicker)}
+                onSetupAgent={() => setAgentAlarmTicker(selectedTicker)}
+              />
+            )}
+
             {/* Mobile ticker nav bar — pinned at bottom on mobile, hidden on sm+ */}
             <MobileTickerBar
               symbols={deepDiveListSymbols}
@@ -2205,190 +3212,6 @@ export function ScreeningsUI({
               }
             />
           </div>
-        ) : activeView === "results" ? (
-          <>
-            {filtered.length === 0 ? (
-              <div className="text-sm text-muted-foreground py-8 text-center">
-                No stocks match the current filters.
-              </div>
-            ) : (
-              <div data-tour="screen-results" className="overflow-x-auto border border-border">
-                <table className="min-w-max w-full text-sm">
-                  <thead className="bg-muted/40 border-b border-border">
-                    <tr>
-                      <th
-                        className="sticky left-0 z-10 bg-muted/40 px-3 py-2 text-xs font-medium text-muted-foreground uppercase tracking-wide cursor-pointer select-none hover:text-foreground text-left whitespace-nowrap"
-                        onClick={() => toggleSort("symbol")}
-                      >
-                        Symbol
-                        <ScreeningsSortIcon
-                          col="symbol"
-                          sortKey={sortKey}
-                          sortDir={sortDir}
-                        />
-                      </th>
-                      {dataColumnKeys.map((k) => {
-                        const boolCol = isBooleanColumn(rows, k);
-                        return (
-                          <th
-                            key={k}
-                            title={
-                              TECH_CRITERIA.find((t) => t.key === k)?.label ?? k
-                            }
-                            className={`px-2 py-2 text-xs font-medium text-muted-foreground uppercase tracking-wide whitespace-nowrap cursor-pointer select-none hover:text-foreground ${
-                              boolCol ? "text-center" : "text-left"
-                            }`}
-                            onClick={() => toggleSort(k)}
-                          >
-                            {screeningsColumnHeaderShort(k)}
-                            <ScreeningsSortIcon
-                            col={k}
-                            sortKey={sortKey}
-                            sortDir={sortDir}
-                          />
-                          </th>
-                        );
-                      })}
-                      <th
-                        title="Company sensitivity vector in database"
-                        className="px-3 py-2 text-center text-xs font-medium text-muted-foreground uppercase tracking-wide"
-                      >
-                        Vec
-                      </th>
-                      <th className="px-3 py-2 text-center text-xs font-medium text-muted-foreground uppercase tracking-wide w-8">
-                        AI
-                      </th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-border">
-                    {filtered.map((row, i) => {
-                      const isSelected = row.symbol === selectedTicker;
-                      const isAiSelected =
-                        aiSelectedRow?.scan_row_id === row.scan_row_id;
-                      const note = rowNotes.get(row.scan_row_id);
-                      const isDismissed = note?.status === "dismissed";
-                      const isHighlighted = !!note?.highlighted;
-                      const hasPosition = activePositionSymbols.has(row.symbol ?? "");
-                      const status = note?.status ?? "active";
-                      const statusStripe: Record<string, string> = {
-                        dismissed: "border-l-rose-400",
-                        watchlist: "border-l-amber-400",
-                        pipeline: "border-l-sky-400",
-                        active: "border-l-emerald-400",
-                      };
-                      const stripe =
-                        isDismissed || isHighlighted || isSelected
-                          ? (statusStripe[status] ?? "border-l-transparent")
-                          : "";
-                      return (
-                        <tr
-                          key={row.scan_row_id ?? row.symbol ?? i}
-                          onClick={() =>
-                            row.symbol && setSelectedTicker(row.symbol)
-                          }
-                          onDoubleClick={() =>
-                            row.symbol &&
-                            void openTickerWorkflowEditor(row.symbol)
-                          }
-                          onContextMenu={(e) =>
-                            row.symbol && handleContextMenu(row.symbol, e)
-                          }
-                          className={`group cursor-pointer transition-colors border-l-[3px] ${stripe || "border-l-transparent"} ${isDismissed ? "opacity-40" : ""} ${isHighlighted ? "bg-amber-500/10" : ""} ${isSelected ? "bg-foreground/10 ring-1 ring-inset ring-foreground/20" : "hover:bg-muted/30"}`}
-                        >
-                          <td
-                            className={`sticky left-0 z-10 px-3 py-2 font-mono font-semibold whitespace-nowrap ${isSelected ? "bg-foreground/10" : isHighlighted ? "bg-amber-500/10" : "bg-background"}`}
-                          >
-                            <span className="flex items-center gap-1.5">
-                              {hasPosition && (
-                                <span
-                                  className="shrink-0 w-1.5 h-1.5 rounded-full bg-emerald-400"
-                                  title="Active position"
-                                />
-                              )}
-                              {row.symbol ?? "—"}
-                            </span>
-                          </td>
-                          {dataColumnKeys.map((k) => {
-                            const boolCol = isBooleanColumn(rows, k);
-                            const v = getRowDataValue(row, k);
-                            return (
-                              <td
-                                key={k}
-                                className={`px-2 py-2 align-middle ${boolCol ? "text-center" : "text-left"}`}
-                              >
-                                <DataCell colKey={k} value={v} />
-                              </td>
-                            );
-                          })}
-                          <td className="px-3 py-2 text-center">
-                            <div className="flex justify-center">
-                              <Check
-                                value={vectorTickers.has(row.symbol ?? "")}
-                              />
-                            </div>
-                          </td>
-                          <td
-                            className="px-2 py-1.5 text-center"
-                            onClick={(e) => e.stopPropagation()}
-                          >
-                            <button
-                              type="button"
-                              title={`Analyse ${row.symbol} with AI`}
-                              onClick={() =>
-                                setAiSelectedRow(isAiSelected ? null : row)
-                              }
-                              className={`p-1 rounded transition-colors ${isAiSelected ? "text-primary bg-primary/10" : "text-muted-foreground hover:text-foreground hover:bg-muted"}`}
-                            >
-                              <Bot className="w-3.5 h-3.5" />
-                            </button>
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
-            )}
-
-            {/* Column legend */}
-            {filtered.length > 0 && (
-              <details className="text-xs text-muted-foreground">
-                <summary className="cursor-pointer hover:text-foreground">
-                  Column key
-                </summary>
-                <div className="mt-2 grid grid-cols-2 gap-x-6 gap-y-0.5 pl-2">
-                  <div>
-                    <span className="font-mono font-medium">Symbol</span> — From
-                    scan row (not duplicated from{" "}
-                    <code className="text-[10px]">row_data</code>)
-                  </div>
-                  {dataColumnKeys.map((k) => {
-                    const tech = TECH_CRITERIA.find((t) => t.key === k);
-                    return (
-                      <div key={k}>
-                        <span className="font-mono font-medium">
-                          {screeningsColumnHeaderShort(k)}
-                        </span>
-                        {tech ? (
-                          ` — ${tech.label}`
-                        ) : (
-                          <>
-                            {" — "}
-                            <code className="text-[10px]">{k}</code>
-                            {" from row_data"}
-                          </>
-                        )}
-                      </div>
-                    );
-                  })}
-                  <div>
-                    <span className="font-mono font-medium">Vec</span> — Company
-                    sensitivity vector in database
-                  </div>
-                </div>
-              </details>
-            )}
-          </>
         ) : activeView === "quotes" ? (
           <QuotesView
             symbols={filteredSymbols}

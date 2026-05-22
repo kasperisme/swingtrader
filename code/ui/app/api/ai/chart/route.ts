@@ -226,6 +226,29 @@ type NewsArticleResult = {
   snippet: string | null;
 };
 
+function formatLatestArticlesBlock(
+  ticker: string,
+  articles: NewsArticleResult[],
+): string {
+  if (!articles || articles.length === 0) return "";
+  const lines = articles.slice(0, 10).map((a, i) => {
+    const dateStr = a.published_at
+      ? a.published_at.slice(0, 10)
+      : "—";
+    const source = a.source ?? "feed";
+    const title = a.title || "(untitled)";
+    const snippet = a.snippet ? ` — ${a.snippet}` : "";
+    return `${i + 1}. [${dateStr} · ${source}] ${title}${snippet}`;
+  });
+  return [
+    `## Latest news for ${ticker} (last 30 days)`,
+    "",
+    "Top headlines pre-loaded for context — cite by index when relevant. Call search_ticker_news for deeper drill-downs.",
+    "",
+    ...lines,
+  ].join("\n");
+}
+
 async function searchTickerNews(
   supabase: SupabaseClient,
   ticker: string,
@@ -421,6 +444,13 @@ export async function POST(req: Request) {
     fetchRiskContext(symbol).catch(() => null),
     fetchFundamentalsContext(symbol).catch(() => null),
     fetchNewsTrendContext(symbol).catch(() => null),
+    // Always pre-fetch the latest articles tagged with the current ticker so
+    // every persona — and the orchestrator — can cite specific headlines
+    // without first calling the search_ticker_news tool. The tool stays
+    // available for follow-up drill-down queries.
+    searchTickerNews(supabase, symbol, { limit: 10, days_back: 30 }).catch(
+      () => null,
+    ),
   ]);
 
   const ALL_PERSONA_IDS: PersonaId[] = ["technical", "sentiment", "risk", "fundamentals", "newsTrend"];
@@ -482,15 +512,33 @@ export async function POST(req: Request) {
         if (needsPersonas && requestedPersonas.length > 0) {
           emit(controller, { type: "specialists_requested", personas: requestedPersonas });
 
-          const [sentimentCtx, riskCtx, fundamentalsCtx, newsTrendCtx] = await dataFetchPromise;
+          const [
+            sentimentCtx,
+            riskCtx,
+            fundamentalsCtx,
+            newsTrendCtx,
+            latestArticlesResult,
+          ] = await dataFetchPromise;
           console.log(`[chart-ai] data-fetch: ${Math.round(performance.now() - tData)}ms`);
+
+          // Compact markdown summary of the latest ticker articles. Used as
+          // an addendum on the newsTrend persona prompt + an extra block on
+          // the orchestrator input so every persona can cite specifics.
+          const latestArticlesBlock = formatLatestArticlesBlock(
+            symbol,
+            latestArticlesResult?.articles ?? [],
+          );
 
           const personaContexts: Record<PersonaId, string> = {
             technical: "Provide your technical analysis based on the price and volume data above.",
             sentiment: sentimentCtx ? formatSentimentContext(sentimentCtx) : "No sentiment data available.",
             risk: riskCtx ? formatRiskContext(riskCtx) : "No risk data available.",
             fundamentals: fundamentalsCtx ? formatFundamentalsContext(fundamentalsCtx) : "No fundamental data available.",
-            newsTrend: newsTrendCtx ? formatNewsTrendContext(newsTrendCtx) : "No news trend data available.",
+            newsTrend:
+              (newsTrendCtx
+                ? formatNewsTrendContext(newsTrendCtx)
+                : "No news trend data available.") +
+              (latestArticlesBlock ? `\n\n${latestArticlesBlock}` : ""),
           };
 
           const tPersonas = performance.now();
@@ -506,9 +554,18 @@ export async function POST(req: Request) {
           console.log(`[chart-ai] personas (${requestedPersonas.length}): ${Math.round(performance.now() - tPersonas)}ms`);
         }
 
+        // Re-fetch outside the persona branch so the orchestrator still sees
+        // the article list when no specialists ran (router skipped them, etc.).
+        const [, , , , latestArticlesAtTop] = await dataFetchPromise;
+        const orchestratorArticlesBlock = formatLatestArticlesBlock(
+          symbol,
+          latestArticlesAtTop?.articles ?? [],
+        );
+
         const orchestratorInput = [
           ohlcBlock,
           annotationBlock,
+          orchestratorArticlesBlock ? `\n${orchestratorArticlesBlock}` : "",
           specialistReports.length > 0 ? `\n## Specialist Reports\n\n${specialistReports.join("\n\n")}` : "",
         ].filter(Boolean).join("\n");
 

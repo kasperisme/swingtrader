@@ -128,6 +128,7 @@ export function CandlestickSvg({
   onAnnotationDelete,
   dateRange,
   interval,
+  fillContainer = false,
 }: {
   symbol: string;
   onPointChange?: (point: ChartPoint | null) => void;
@@ -143,6 +144,11 @@ export function CandlestickSvg({
   onAnnotationDelete?: (id: string) => void;
   dateRange?: { from: string; to: string };
   interval?: string;
+  /** When true, the chart measures its wrapper and renders a viewBox that
+   * matches container dimensions 1:1 — so it visually fills both axes with
+   * no aspect-ratio letterboxing or text distortion. Used by the caveman
+   * deep-dive where the chart lives inside a tall Tinder-style card. */
+  fillContainer?: boolean;
 }) {
   const [data, setData] = useState<OhlcBar[]>([]);
   const [loading, setLoading] = useState(false);
@@ -154,6 +160,38 @@ export function CandlestickSvg({
   const [isPanning, setIsPanning] = useState(false);
   const [loadingOlder, setLoadingOlder] = useState(false);
   const [priceOffset, setPriceOffset] = useState(0);
+  // Container dimensions, used when fillContainer=true to size the viewBox
+  // to actual pixels so the chart fills both axes without distortion.
+  const [containerSize, setContainerSize] = useState<{
+    w: number;
+    h: number;
+  } | null>(null);
+  const observerRef = useRef<ResizeObserver | null>(null);
+  // Callback ref. Using useRef + useEffect doesn't work here because the
+  // chart returns early during loading / no-data states, so the wrapper div
+  // isn't mounted when useEffect first fires. A callback ref attaches the
+  // observer the moment the wrapper enters the DOM and detaches it on
+  // unmount — robust across loading transitions and prop changes.
+  const wrapperRef = useCallback(
+    (el: HTMLDivElement | null) => {
+      if (observerRef.current) {
+        observerRef.current.disconnect();
+        observerRef.current = null;
+      }
+      if (!el || !fillContainer) return;
+      const measure = () => {
+        const rect = el.getBoundingClientRect();
+        if (rect.width > 0 && rect.height > 0) {
+          setContainerSize({ w: rect.width, h: rect.height });
+        }
+      };
+      measure();
+      const ro = new ResizeObserver(measure);
+      ro.observe(el);
+      observerRef.current = ro;
+    },
+    [fillContainer],
+  );
   const svgRef = useRef<SVGSVGElement>(null);
   const dataRef = useRef<OhlcBar[]>([]);
   const symbolRef = useRef(symbol);
@@ -301,10 +339,24 @@ export function CandlestickSvg({
     [data, sliceStart, viewportBars],
   );
 
-  const W = 900;
-  const H_PRICE = 340;
+  // Default chart geometry (used outside fillContainer mode). Total ≈ 436 high,
+  // 900 wide. When fillContainer is on we override these from the live wrapper
+  // size so the chart matches its parent 1:1 — no letterboxing, no stretch.
+  const DEFAULT_W = 900;
+  const DEFAULT_H_PRICE = 340;
   const H_VOL = 80;
-  const H = H_PRICE + H_VOL + 16;
+  const PRICE_VOL_GAP = 16;
+  const DEFAULT_H = DEFAULT_H_PRICE + H_VOL + PRICE_VOL_GAP;
+
+  const W =
+    fillContainer && containerSize && containerSize.w > 0
+      ? containerSize.w
+      : DEFAULT_W;
+  const H =
+    fillContainer && containerSize && containerSize.h > 0
+      ? containerSize.h
+      : DEFAULT_H;
+  const H_PRICE = Math.max(120, H - H_VOL - PRICE_VOL_GAP);
   const PAD_L = 60;
   const PAD_R = 12;
   const PAD_T = 12;
@@ -357,7 +409,11 @@ export function CandlestickSvg({
   const toVolY = useCallback((v: number) => {
     const volH = H_VOL - 8;
     return H_PRICE + 16 + volH - (v / volMax) * volH;
-  }, [volMax]);
+    // H_PRICE is now dynamic (varies with the parent's measured height when
+    // fillContainer is on). Must be a dep so the closure refreshes — otherwise
+    // volume bars render at the wrong y-coords (using the previous H_PRICE)
+    // and overlap the date axis.
+  }, [volMax, H_PRICE]);
 
   function xOf(localIdx: number) {
     return PAD_L + localIdx * barStep + barStep / 2;
@@ -377,14 +433,18 @@ export function CandlestickSvg({
     return ticks;
   }, [priceMin, priceMax]);
 
-  // X-axis ticks (local indices into displaySlice)
+  // X-axis ticks (local indices into displaySlice). Density scales with the
+  // chart's actual width: roughly one date label per ~80 viewBox units of
+  // chartW, clamped to a sensible range. On a narrow mobile card (chartW ≈
+  // 300) this yields ~4 ticks; on the default 900-wide chart ~8 ticks.
   const xTickIndices = useMemo(() => {
     if (n === 0) return [];
-    const step = Math.ceil(n / 8);
+    const targetTicks = Math.max(3, Math.min(8, Math.floor(chartW / 80)));
+    const step = Math.max(1, Math.ceil(n / targetTicks));
     const idx: number[] = [];
     for (let i = 0; i < n; i += step) idx.push(i);
     return idx;
-  }, [n]);
+  }, [n, chartW]);
 
   const toPrice = useCallback((svgY: number): number => {
     return priceMin + (1 - (svgY - PAD_T) / chartH) * (priceMax - priceMin);
@@ -804,7 +864,10 @@ export function CandlestickSvg({
   if (data.length === 0) return <p className="text-sm text-muted-foreground text-center py-8">No chart data.</p>;
 
   return (
-    <div className="relative w-full">
+    <div
+      ref={wrapperRef}
+      className={`relative w-full ${fillContainer ? "h-full" : ""}`}
+    >
       {loadingOlder ? (
         <div className="pointer-events-none absolute left-2 top-2 z-[5] flex items-center gap-1.5 rounded-md border border-border bg-background/90 px-2 py-1 text-xs text-muted-foreground">
           <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden />
@@ -815,7 +878,8 @@ export function CandlestickSvg({
         ref={svgRef}
         viewBox={`0 0 ${W} ${H}`}
         width="100%"
-        className={`block select-none ${
+        {...(fillContainer ? { height: "100%" } : {})}
+        className={`block select-none ${fillContainer ? "h-full w-full" : ""} ${
           drawingMode !== "none"
             ? drawingFirstPoint ? "cursor-cell" : "cursor-crosshair"
             : isPanning

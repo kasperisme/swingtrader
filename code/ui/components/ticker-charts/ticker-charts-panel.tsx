@@ -70,6 +70,9 @@ export type TickerChartsPanelProps = {
   interval?: string;
   /** Optional external close reference (e.g. quote previousClose) for "vs entry". */
   getReferenceClose?: (ticker: string) => number | null;
+  /** When true, the chart sizes its viewBox to the parent's actual pixels so
+   * it fills both axes (used in the caveman Tinder-style card layout). */
+  fillContainer?: boolean;
 };
 
 export function TickerChartsPanel({
@@ -100,6 +103,7 @@ export function TickerChartsPanel({
   dateRange,
   interval,
   getReferenceClose,
+  fillContainer = false,
 }: TickerChartsPanelProps) {
   const symbol = useMemo(() => {
     if (symbols.length === 0) return "";
@@ -227,7 +231,17 @@ export function TickerChartsPanel({
   const showTrailingStepNav = showChevronSymbolNav || symbolPicker != null;
 
   return (
-    <div className="flex flex-col gap-4">
+    <div
+      className={`flex flex-col ${
+        fillContainer ? "h-full min-h-0 gap-0" : "gap-4"
+      }`}
+    >
+      {/* Header toolbar. Skipped in fillContainer mode (caveman) — the wrapping
+          card already provides the symbol header + range chips + quick-action
+          bar, and the chart needs every pixel of vertical space inside the
+          Tinder card. Skipping also avoids overlap with the absolute-positioned
+          mobile segment progress bar that sits at top:0 of the chart. */}
+      {!fillContainer && (
       <div className="flex items-center gap-3">
         {showChevronSymbolNav ? (
           <button
@@ -368,6 +382,7 @@ export function TickerChartsPanel({
           </div>
         ) : null}
       </div>
+      )}
 
       {/* Drawing toolbar */}
       {onAnnotationAdd && (
@@ -419,7 +434,9 @@ export function TickerChartsPanel({
         className={
           showChartFrame
             ? "relative border border-border rounded-lg p-4 bg-background"
-            : "relative"
+            : fillContainer
+              ? "relative flex-1 min-h-0"
+              : "relative"
         }
         title="Drag left/right to pan time · Drag up/down to pan price · Double-click to reset price pan · Right-click for entry options"
         onContextMenu={(e) => {
@@ -447,6 +464,7 @@ export function TickerChartsPanel({
           onAnnotationDelete={onAnnotationDelete}
           dateRange={dateRange}
           interval={interval}
+          fillContainer={fillContainer}
         />
       </div>
 

@@ -272,6 +272,34 @@ def _default_fallback_plan(registry: ToolRegistry) -> dict:
     }
 
 
+def _ensure_latest_news_in_plan(
+    plan: list[dict], registry: ToolRegistry
+) -> list[dict]:
+    """Guarantee ``get_ticker_news`` is in the planned per-ticker tool set.
+
+    The LLM planner can pick anything, and some configurations skip news
+    altogether (e.g. when it leans hard on sentiment + relationships). For a
+    *news* impact screener that's a bad floor — we always want the actual
+    headlines available to each per-ticker evaluator. If the registry doesn't
+    expose ``get_ticker_news`` (custom environment) we leave the plan alone.
+    """
+    if not registry.has("get_ticker_news"):
+        return plan
+    for entry in plan:
+        if entry.get("name") == "get_ticker_news":
+            return plan
+    return list(plan) + [
+        {
+            "name": "get_ticker_news",
+            "args": {
+                "tickers": [_TICKER_PLACEHOLDER],
+                "hours": 72,
+                "per_ticker_limit": 8,
+            },
+        }
+    ]
+
+
 def _split_plan(plan: list[dict]) -> tuple[list[dict], list[dict]]:
     """Split into (per_ticker_calls, shared_market_wide_calls).
 
@@ -749,6 +777,13 @@ async def run_multi_ticker_async(
                 probe_ticker,
                 time.monotonic() - t_trial,
             )
+
+        # Always include the latest ticker articles in the per-ticker context,
+        # even if the planner didn't pick get_ticker_news. News impact is the
+        # core thesis of the screener — the per-ticker evaluator should never
+        # have to guess from sentiment scores alone when the headlines are
+        # one tool call away.
+        tool_plan = _ensure_latest_news_in_plan(tool_plan, registry)
 
         per_ticker_plan, shared_plan = _split_plan(tool_plan)
         log.info(

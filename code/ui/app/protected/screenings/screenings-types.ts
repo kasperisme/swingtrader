@@ -65,15 +65,20 @@ export interface ScanRowNote {
 }
 
 export type ViewTab =
-  | "results"
   | "quotes"
   | "charts"
   | "news"
+  | "articles"
   | "sentiment"
   | "relationship"
   | "tradeMonitoring";
 
-export const DEEP_DIVE_VIEWS: ViewTab[] = ["charts", "news", "relationship"];
+export const DEEP_DIVE_VIEWS: ViewTab[] = [
+  "charts",
+  "news",
+  "articles",
+  "relationship",
+];
 
 export function isDeepDiveView(v: ViewTab): boolean {
   return DEEP_DIVE_VIEWS.includes(v);
