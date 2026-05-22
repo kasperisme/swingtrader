@@ -112,21 +112,34 @@ function AuthedSubscribeButton({
   const confirmImport = () => {
     setImportStatus({ kind: "pending" });
     startTransition(async () => {
-      const res = await importLatestPublicScreeningResultForMe(screeningSlug);
-      if (!res.ok) {
-        setImportStatus({ kind: "error", message: res.error });
-        return;
+      try {
+        const res = await importLatestPublicScreeningResultForMe(screeningSlug);
+        if (!res.ok) {
+          setImportStatus({ kind: "error", message: res.error });
+          return;
+        }
+        if (!res.data.imported) {
+          setImportStatus({ kind: "no_results" });
+          return;
+        }
+        setImportStatus({
+          kind: "done",
+          rowCount: res.data.rowCount,
+          chatTurns: res.data.chatTurns,
+          runAt: res.data.runAt,
+        });
+      } catch (e) {
+        // If the server action throws (e.g. serverless timeout) the dialog
+        // would otherwise hang at "pending" forever. Surface an error so
+        // the user can retry or close.
+        setImportStatus({
+          kind: "error",
+          message:
+            e instanceof Error && e.message
+              ? e.message
+              : "Import did not complete. Your subscription is saved — try again or close.",
+        });
       }
-      if (!res.data.imported) {
-        setImportStatus({ kind: "no_results" });
-        return;
-      }
-      setImportStatus({
-        kind: "done",
-        rowCount: res.data.rowCount,
-        chatTurns: res.data.chatTurns,
-        runAt: res.data.runAt,
-      });
     });
   };
 

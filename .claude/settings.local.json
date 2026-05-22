@@ -9,7 +9,8 @@
       "Skill(claude-api)",
       "Bash(python3 *)",
       "WebFetch(domain:site.financialmodelingprep.com)",
-      "Skill(taste-skill)"
+      "Skill(taste-skill)",
+      "Bash(curl -sS -o /dev/null -w \"%{http_code}\\\\n\" http://localhost:3000/protected/screenings)"
     ]
   },
   "enableAllProjectMcpServers": true,

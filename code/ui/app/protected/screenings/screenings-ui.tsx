@@ -24,6 +24,7 @@ import {
   Copy,
   Plus,
   Bot,
+  Bell,
   FolderPlus,
   Sparkles,
 } from "lucide-react";
@@ -116,6 +117,7 @@ import {
   SCREENINGS_MULTI_SYMBOL_TABS,
 } from "./screenings-view-tab-presets";
 import { ScreeningsMobileViewPicker } from "./screenings-mobile-view-picker";
+import { useCavemanMode } from "@/lib/caveman-mode";
 
 export type { ScanRun, ScreeningRow, ScanRowNote } from "./screenings-types";
 
@@ -175,6 +177,298 @@ function createOptimisticScreeningRow(
 /** Sort column: `symbol` or any key present in rowData (discovered per run). */
 type SortKey = string;
 type SortDir = "asc" | "desc";
+
+// Caveman date range chips. Three presets (1M / 6M / 1Y) that emit the same
+// granularity + range shape the rest of the chart pipeline expects from
+// ChartDateRangePicker, so swapping the two is a drop-in. 1M uses hourly
+// candles (intraday detail for a short window); the longer ranges roll up
+// to daily so the chart stays readable.
+const CAVEMAN_RANGES = [
+  {
+    id: "1m",
+    label: "1 month",
+    days: 30,
+    granularity: "1hour" as ChartGranularity,
+  },
+  {
+    id: "6m",
+    label: "6 months",
+    days: 180,
+    granularity: "1day" as ChartGranularity,
+  },
+  {
+    id: "1y",
+    label: "1 year",
+    days: 365,
+    granularity: "1day" as ChartGranularity,
+  },
+] as const;
+
+const CAVEMAN_DEFAULT_RANGE_ID: (typeof CAVEMAN_RANGES)[number]["id"] = "6m";
+
+function CavemanRangeChips({
+  onChange,
+  onGranularityChange,
+}: {
+  onChange: (range: { from: string; to: string }) => void;
+  onGranularityChange?: (granularity: ChartGranularity) => void;
+}) {
+  const [activeId, setActiveId] =
+    useState<(typeof CAVEMAN_RANGES)[number]["id"]>(CAVEMAN_DEFAULT_RANGE_ID);
+
+  const emit = useCallback(
+    (id: (typeof CAVEMAN_RANGES)[number]["id"]) => {
+      const preset = CAVEMAN_RANGES.find((r) => r.id === id);
+      if (!preset) return;
+      const end = new Date();
+      const start = new Date(end);
+      start.setDate(start.getDate() - preset.days);
+      const pad2 = (n: number) => String(n).padStart(2, "0");
+      const fmt = (d: Date) =>
+        `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
+      onGranularityChange?.(preset.granularity);
+      onChange({ from: fmt(start), to: fmt(end) });
+    },
+    [onChange, onGranularityChange],
+  );
+
+  useEffect(() => {
+    emit(CAVEMAN_DEFAULT_RANGE_ID);
+    // Run once on mount so the chart loads with the caveman default range.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  return (
+    <div
+      className="flex items-center gap-1 px-1 py-2"
+      role="radiogroup"
+      aria-label="Chart time range"
+    >
+      <span className="text-[10px] font-medium uppercase tracking-[0.1em] text-muted-foreground mr-1">
+        Range
+      </span>
+      {CAVEMAN_RANGES.map((r) => {
+        const active = activeId === r.id;
+        return (
+          <button
+            key={r.id}
+            type="button"
+            role="radio"
+            aria-checked={active}
+            onClick={() => {
+              setActiveId(r.id);
+              emit(r.id);
+            }}
+            className={`min-h-[36px] px-3 py-1.5 text-xs font-mono uppercase tracking-[0.1em] rounded-md border transition-colors ${
+              active
+                ? "border-foreground bg-foreground text-background"
+                : "border-border text-muted-foreground hover:text-foreground hover:border-foreground/40"
+            }`}
+          >
+            {r.label}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+// Hero symbol headline for the deep-dive Charts surface. The chart panel's
+// built-in headline brings the entire screenings toolbar with it; we render
+// our own so we control the typography (mono numbers, tight tracking, single
+// accent on change) and so the right-hand range-picker slot stays free for
+// either the businessman picker or the caveman chip strip.
+function DeepDiveSymbolHeader({
+  symbol,
+  quote,
+  meta,
+  rightSlot,
+}: {
+  symbol: string;
+  quote: FmpQuote | null | undefined;
+  meta: { sector: string; industry: string; subSector?: string };
+  rightSlot: ReactNode;
+}) {
+  const change = quote?.change ?? null;
+  const changePct = quote?.changePercentage ?? null;
+  const dir =
+    change == null ? "flat" : change >= 0 ? "up" : "down";
+  const changeColor =
+    dir === "up"
+      ? "text-emerald-500"
+      : dir === "down"
+        ? "text-rose-500"
+        : "text-muted-foreground";
+
+  return (
+    <div className="border-b border-border bg-background">
+      <div className="flex items-end justify-between gap-3 px-3 pt-3 pb-1.5 sm:gap-6">
+        <div className="flex min-w-0 items-baseline gap-3 sm:gap-5">
+          <span
+            className="font-mono font-semibold tracking-[-0.02em] tabular-nums text-2xl leading-none sm:text-3xl"
+            title={quote?.name ?? symbol}
+          >
+            {symbol || "—"}
+          </span>
+          <span className="font-mono tabular-nums text-base sm:text-lg text-foreground/90 leading-none">
+            {quote ? `$${quote.price.toFixed(2)}` : "—"}
+          </span>
+          {quote ? (
+            <span
+              className={`font-mono tabular-nums text-xs sm:text-sm leading-none ${changeColor}`}
+            >
+              {change != null && change >= 0 ? "+" : ""}
+              {change != null ? change.toFixed(2) : "—"}
+              {changePct != null && (
+                <span className="ml-1 opacity-80">
+                  ({changePct >= 0 ? "+" : ""}
+                  {changePct.toFixed(2)}%)
+                </span>
+              )}
+            </span>
+          ) : null}
+        </div>
+        <div className="shrink-0">{rightSlot}</div>
+      </div>
+      <div className="flex items-center gap-2 px-3 pb-2 text-[10px] font-mono uppercase tracking-[0.12em] text-muted-foreground/80 min-h-[14px]">
+        {quote?.name ? (
+          <span className="truncate normal-case tracking-normal text-foreground/70 font-sans text-xs">
+            {quote.name}
+          </span>
+        ) : null}
+        {quote?.name && (meta.sector || meta.industry) ? (
+          <span aria-hidden className="text-muted-foreground/40">
+            ·
+          </span>
+        ) : null}
+        {meta.sector ? <span className="truncate">{meta.sector}</span> : null}
+        {meta.sector && meta.industry ? (
+          <span aria-hidden className="text-muted-foreground/40">
+            ·
+          </span>
+        ) : null}
+        {meta.industry ? (
+          <span className="truncate">{meta.industry}</span>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
+// Caveman quick-actions strip. The full context menu (right-click on a
+// sidebar row) stays available, but right-click is invisible to non-technical
+// users — they need explicit, labelled buttons for the three most common
+// actions: status change, note edit, agent alarm setup. Renders below the
+// symbol header, only in caveman mode.
+function CavemanQuickActions({
+  ticker,
+  status,
+  isDismissed,
+  onSetStatus,
+  onDismiss,
+  onRestore,
+  hasNote,
+  onEditNote,
+  onSetupAgent,
+}: {
+  ticker: string;
+  status: NoteStatus;
+  isDismissed: boolean;
+  onSetStatus: (s: Exclude<NoteStatus, "dismissed">) => void;
+  onDismiss: () => void;
+  onRestore: () => void;
+  hasNote: boolean;
+  onEditNote: () => void;
+  onSetupAgent: () => void;
+}) {
+  const stageStatus: Exclude<NoteStatus, "dismissed"> =
+    status === "dismissed" ? "active" : (status as Exclude<NoteStatus, "dismissed">);
+  const stages: { value: Exclude<NoteStatus, "dismissed">; label: string }[] = [
+    { value: "active", label: "Active" },
+    { value: "watchlist", label: "Watch" },
+    { value: "pipeline", label: "Pipeline" },
+  ];
+  return (
+    <div className="flex flex-wrap items-center gap-3 px-3 py-2 border-b border-border bg-muted/15">
+      <div className="flex items-center gap-1.5">
+        <span className="text-[10px] font-mono uppercase tracking-[0.12em] text-muted-foreground">
+          Status
+        </span>
+        <div
+          role="radiogroup"
+          aria-label={`Status for ${ticker}`}
+          className="flex items-center rounded-md border border-border bg-background overflow-hidden"
+        >
+          {stages.map((s) => {
+            const active = stageStatus === s.value && !isDismissed;
+            return (
+              <button
+                key={s.value}
+                type="button"
+                role="radio"
+                aria-checked={active}
+                onClick={() => onSetStatus(s.value)}
+                disabled={isDismissed}
+                className={`min-h-[32px] px-3 py-1 text-[11px] font-mono uppercase tracking-[0.08em] transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
+                  active
+                    ? "bg-foreground text-background"
+                    : "text-muted-foreground hover:text-foreground hover:bg-muted"
+                }`}
+              >
+                {s.label}
+              </button>
+            );
+          })}
+        </div>
+        {isDismissed ? (
+          <button
+            type="button"
+            onClick={onRestore}
+            className="inline-flex items-center gap-1.5 min-h-[32px] rounded-md border border-emerald-500/40 bg-emerald-500/10 px-2.5 py-1 text-[11px] font-mono uppercase tracking-[0.08em] text-emerald-600 dark:text-emerald-400 transition-colors hover:bg-emerald-500/20"
+            title={`Restore ${ticker}`}
+          >
+            <RotateCcw className="w-3 h-3" />
+            Restore
+          </button>
+        ) : (
+          <button
+            type="button"
+            onClick={onDismiss}
+            className="inline-flex items-center gap-1.5 min-h-[32px] rounded-md border border-border bg-background px-2.5 py-1 text-[11px] font-mono uppercase tracking-[0.08em] text-muted-foreground transition-colors hover:text-rose-500 hover:border-rose-500/40 hover:bg-rose-500/10"
+            title={`Dismiss ${ticker}`}
+          >
+            <Trash2 className="w-3 h-3" />
+            Dismiss
+          </button>
+        )}
+      </div>
+      <div className="flex items-center gap-2 ml-auto">
+        <button
+          type="button"
+          onClick={onEditNote}
+          className={`inline-flex items-center gap-1.5 min-h-[32px] rounded-md border bg-background px-2.5 py-1 text-[11px] font-mono uppercase tracking-[0.08em] transition-colors hover:bg-muted ${
+            hasNote
+              ? "border-amber-500/40 text-amber-600 dark:text-amber-400"
+              : "border-border text-foreground"
+          }`}
+          title={hasNote ? "Edit note" : "Add note"}
+        >
+          <MessageSquare className="w-3 h-3" />
+          {hasNote ? "Edit note" : "Add note"}
+        </button>
+        <button
+          type="button"
+          onClick={onSetupAgent}
+          className="inline-flex items-center gap-1.5 min-h-[32px] rounded-md border border-amber-500/40 bg-amber-500/10 px-2.5 py-1 text-[11px] font-mono uppercase tracking-[0.08em] text-amber-600 dark:text-amber-400 transition-colors hover:bg-amber-500/20"
+          title="Setup agent alarm"
+        >
+          <Bell className="w-3 h-3" />
+          Agent alarm
+        </button>
+      </div>
+    </div>
+  );
+}
 
 // ─── main component ──────────────────────────────────────────────────────────
 
@@ -247,8 +541,20 @@ export function ScreeningsUI({
       return next;
     });
   }
-  const [activeView, setActiveView] = useState<ViewTab>("results");
+  const [activeView, setActiveView] = useState<ViewTab>("charts");
   const [collapsed, setCollapsed] = useState(false);
+
+  // Caveman mode = simplified UI for non-technical users. Hides multi-symbol
+  // tabs, advanced filters, drawing tools and dense sidebar columns. Keeps
+  // scan-run switching, ticker add and screening creation intact.
+  const { isCaveman } = useCavemanMode();
+
+  // When caveman flips on, force the deep-dive Charts view and collapse the
+  // AI side panel. Users can re-expand chat manually.
+  useEffect(() => {
+    if (!isCaveman) return;
+    if (activeView !== "charts") setActiveView("charts");
+  }, [isCaveman, activeView]);
 
   useEffect(() => {
     document.body.classList.add("screenings-fullscreen");
@@ -1148,6 +1454,17 @@ export function ScreeningsUI({
     return filteredSymbols.filter((s) => !dismissedSymbols.has(s));
   }, [filteredSymbols, dismissedSymbols, showDismissedInList]);
 
+  // Default selection: when the deep-dive lands without a ticker chosen, pick
+  // the first one in the user's currently visible sort order (sidebar header).
+  // Falls back to the raw list order only if the sidebar hasn't reported its
+  // sort yet (briefly true on the very first mount).
+  useEffect(() => {
+    if (selectedTicker) return;
+    const first =
+      sortedSidebarOrderRef.current[0] ?? deepDiveListSymbols[0];
+    if (first) setSelectedTicker(first);
+  }, [selectedTicker, deepDiveListSymbols]);
+
   const hiddenDismissedInListCount = useMemo(() => {
     let count = 0;
     for (const s of filteredSymbols) {
@@ -1303,55 +1620,26 @@ export function ScreeningsUI({
     <div className="flex flex-col h-full min-h-0 w-full pb-[env(safe-area-inset-bottom,0px)]">
       {/* Collapsible: scan runs + search + filters */}
       <div
+        id="screenings-top-controls"
         className={`shrink-0 transition-all duration-200 overflow-hidden ${collapsed ? "max-h-0 opacity-0" : "max-h-[2000px] opacity-100"}`}
       >
-        {/* Scan runs */}
-        <div className="flex flex-col gap-2 mb-4">
-          <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between sm:gap-3">
-            <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide shrink-0">
-              Scan runs
-            </p>
-            <form
-              data-tour="screen-create"
-              className="flex flex-wrap items-center gap-2 min-w-0"
-              onSubmit={(e) => {
-                e.preventDefault();
-                void handleCreateScreening();
-              }}
-            >
-              <input
-                type="text"
-                value={newScreeningName}
-                onChange={(e) => setNewScreeningName(e.target.value)}
-                placeholder="New screening name…"
-                maxLength={120}
-                disabled={creatingRun}
-                className="min-w-[10rem] flex-1 sm:flex-initial sm:w-56 rounded-md border border-input bg-background px-2.5 py-1.5 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-60"
-                aria-label="New screening name"
-              />
-              <button
-                type="submit"
-                disabled={creatingRun || !newScreeningName.trim()}
-                className="inline-flex items-center gap-1.5 shrink-0 rounded-md border border-border bg-background px-2.5 py-1.5 text-xs font-medium text-foreground transition-colors hover:bg-muted disabled:pointer-events-none disabled:opacity-40"
-              >
-                {creatingRun ? (
-                  <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden />
-                ) : (
-                  <FolderPlus className="h-3.5 w-3.5" aria-hidden />
-                )}
-                Create screening
-              </button>
-            </form>
-          </div>
+        {/* Screenings — flat editorial tab strip + inline create form.
+            Replaces the previous raised-card pill row. Per the project's
+            "data terminal" aesthetic, each run is a column with a hairline
+            bottom-border accent for active state — no rounded card chrome. */}
+        <div className="flex items-end gap-3 border-b border-border mb-3 min-h-[3.25rem]">
+          <span className="shrink-0 self-end pb-2 text-[10px] font-mono uppercase tracking-[0.14em] text-muted-foreground/70">
+            Screenings
+          </span>
           {runs.length === 0 ? (
-            <p className="text-sm text-muted-foreground">
-              No screenings yet. Name one above and click Create — then add
-              tickers from Charts or the Add to screening control.
+            <p className="self-end pb-2 text-xs text-muted-foreground">
+              No screenings yet. Name one and click Create — then add tickers
+              from the search above.
             </p>
           ) : (
             <div
               data-tour="screen-runs"
-              className="flex gap-2 overflow-x-auto pb-1 -mx-1 px-1 [scrollbar-width:thin]"
+              className="flex flex-1 min-w-0 items-end gap-x-4 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
             >
               {runs.map((run) => {
                 const active = run.id === (selectedRun?.id ?? null);
@@ -1359,27 +1647,27 @@ export function ScreeningsUI({
                 return (
                   <div
                     key={run.id}
-                    className={`relative shrink-0 group min-w-[9.5rem] max-w-[220px] rounded-lg border flex flex-col ${
+                    className={`relative group shrink-0 flex flex-col border-b-2 -mb-px transition-colors ${
                       active
-                        ? "border-foreground bg-foreground text-background"
-                        : "border-border bg-background text-muted-foreground"
-                    }`}
+                        ? "border-foreground"
+                        : "border-transparent hover:border-foreground/30"
+                    } ${busy ? "opacity-60" : ""}`}
                   >
                     <button
                       type="button"
                       onClick={() => selectRun(run.id)}
                       disabled={busy}
-                      className={`text-left px-3 pt-2 pb-1.5 pr-8 text-sm transition-colors rounded-t-lg ${
+                      className={`text-left pl-1 pr-7 pt-2 pb-1.5 min-w-[5.5rem] max-w-[180px] transition-colors ${
                         active
-                          ? "font-medium"
-                          : "hover:bg-muted hover:text-foreground hover:border-foreground/30"
-                      } ${busy ? "opacity-60" : ""}`}
+                          ? "text-foreground"
+                          : "text-muted-foreground hover:text-foreground"
+                      }`}
                     >
-                      <div className="font-medium leading-tight">
+                      <div className="font-mono text-[13px] font-semibold tabular-nums leading-tight">
                         {run.scan_date}
                       </div>
                       <div
-                        className="text-xs opacity-80 truncate mt-0.5"
+                        className="text-[10px] uppercase tracking-[0.08em] opacity-70 truncate mt-0.5"
                         title={run.source}
                       >
                         {run.source}
@@ -1394,16 +1682,12 @@ export function ScreeningsUI({
                         e.stopPropagation();
                         void softDeleteRun(run.id);
                       }}
-                      className={`absolute right-1 top-1 p-1 rounded-md transition-colors ${
-                        active
-                          ? "text-background/70 hover:text-background hover:bg-background/15"
-                          : "text-muted-foreground hover:text-destructive hover:bg-destructive/10"
-                      } ${busy ? "pointer-events-none opacity-50" : ""}`}
+                      className={`absolute right-0 top-1 p-1 rounded-sm text-muted-foreground/50 transition-all opacity-0 group-hover:opacity-100 focus:opacity-100 hover:text-rose-500 ${busy ? "pointer-events-none opacity-50" : ""}`}
                     >
                       {busy ? (
-                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                        <Loader2 className="w-3 h-3 animate-spin" />
                       ) : (
-                        <Trash2 className="w-3.5 h-3.5" />
+                        <Trash2 className="w-3 h-3" />
                       )}
                     </button>
                   </div>
@@ -1411,10 +1695,48 @@ export function ScreeningsUI({
               })}
             </div>
           )}
+          <form
+            data-tour="screen-create"
+            className="shrink-0 self-end pb-2 flex items-center gap-1.5"
+            onSubmit={(e) => {
+              e.preventDefault();
+              void handleCreateScreening();
+            }}
+          >
+            <input
+              type="text"
+              value={newScreeningName}
+              onChange={(e) => setNewScreeningName(e.target.value)}
+              placeholder="New screening…"
+              maxLength={120}
+              disabled={creatingRun}
+              className="w-44 sm:w-52 rounded-md border border-input bg-background px-2.5 py-1 text-xs placeholder:text-muted-foreground/70 focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-60"
+              aria-label="New screening name"
+            />
+            <button
+              type="submit"
+              disabled={creatingRun || !newScreeningName.trim()}
+              className="inline-flex items-center gap-1 shrink-0 rounded-md border border-border bg-background px-2 py-1 text-[11px] font-mono uppercase tracking-[0.08em] text-foreground transition-colors hover:bg-muted disabled:pointer-events-none disabled:opacity-40"
+              title="Create screening"
+            >
+              {creatingRun ? (
+                <Loader2 className="h-3 w-3 animate-spin" aria-hidden />
+              ) : (
+                <FolderPlus className="h-3 w-3" aria-hidden />
+              )}
+              <span className="hidden sm:inline">Create</span>
+            </button>
+          </form>
         </div>
 
-        {/* Search + count */}
-        <div data-tour="screen-filters" className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-start sm:gap-3 mb-2">
+        {/* Search + count + (caveman) filter widget.
+            In caveman mode the view-tabs row is hidden, so the AddFilterWidget
+            lives here at the right edge — open it to access the same filter
+            wizard businessman users get. When the wizard expands inline we
+            hide the search/count siblings so it gets the full row, matching
+            the businessman pattern. */}
+        <div data-tour="screen-filters" className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center sm:gap-3 mb-2">
+          {!(isCaveman && addFilterOpen) && (
           <div className="flex flex-col gap-1.5 min-w-0 shrink-0 w-full max-w-[min(100%,20rem)] sm:w-56">
             <div className="relative w-full">
               <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none" />
@@ -1473,7 +1795,8 @@ export function ScreeningsUI({
               </div>
             ) : null}
           </div>
-          {dismissedCount > 0 && (() => {
+          )}
+          {!isCaveman && dismissedCount > 0 && (() => {
             const showingDismissed =
               filters.statusIn.length === 1 && filters.statusIn[0] === "dismissed";
             return (
@@ -1498,17 +1821,63 @@ export function ScreeningsUI({
             </button>
             );
           })()}
-          <span className="text-sm text-muted-foreground ml-auto">
-            {filtered.length} shown
-            {rows.length > 0 && ` / ${rows.length} screened`}
-          </span>
+          {!(isCaveman && addFilterOpen) && (
+            isCaveman ? (
+              <span className="text-sm text-muted-foreground ml-auto">
+                {filtered.length} stock{filtered.length === 1 ? "" : "s"}
+              </span>
+            ) : (
+              <span className="text-sm text-muted-foreground ml-auto">
+                {filtered.length} shown
+                {rows.length > 0 && ` / ${rows.length} screened`}
+              </span>
+            )
+          )}
+          {isCaveman && (
+            <AddFilterWidget
+              open={addFilterOpen}
+              onOpen={() => setAddFilterOpen(true)}
+              onClose={() => setAddFilterOpen(false)}
+              filters={filters}
+              setFilters={setFilters}
+              noteStageOptions={noteStageOptions}
+              noteTagOptions={noteTagOptions}
+              boolKeys={boolFilterKeys}
+              numKeys={numFilterKeys}
+              categoricalStringCols={categoricalStringCols}
+              freeStringKeys={freeStringKeys}
+            />
+          )}
         </div>
       </div>
 
-      {/* View tabs */}
+      {/* Collapse toggle — its own persistent rail on the seam between the
+          collapsible top region and the body. Lives outside the view-tabs row
+          so it stays reachable in caveman mode (where view-tabs are hidden)
+          and when the top region is collapsed. Labelled so users don't have
+          to decode a bare chevron. */}
+      <div className="shrink-0 flex justify-center border-b border-border">
+        <button
+          type="button"
+          onClick={() => setCollapsed((c) => !c)}
+          className="group inline-flex items-center gap-1.5 -mb-px translate-y-1/2 rounded-full border border-border bg-background px-3 py-1 text-[10px] font-mono uppercase tracking-[0.14em] text-foreground shadow-sm transition-colors hover:border-foreground/40 hover:bg-muted focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 focus:ring-offset-background"
+          title={collapsed ? "Show top controls" : "Hide top controls"}
+          aria-expanded={!collapsed}
+          aria-controls="screenings-top-controls"
+        >
+          {collapsed ? (
+            <ChevronDown className="w-3 h-3 text-muted-foreground group-hover:text-foreground transition-colors" />
+          ) : (
+            <ChevronUp className="w-3 h-3 text-muted-foreground group-hover:text-foreground transition-colors" />
+          )}
+          {collapsed ? "Show controls" : "Hide controls"}
+        </button>
+      </div>
+
+      {/* View tabs — hidden in caveman mode (the only view is Charts). */}
+      {!isCaveman && (
       <div className="border-b border-border pb-px shrink-0">
-        {/* Mobile-only view picker — its own row so it gets full width
-            (collapse toggle + bulk-analysis on the next row) */}
+        {/* Mobile-only view picker — its own row so it gets full width */}
         {!addFilterOpen && (
           <div className="sm:hidden mb-2">
             <ScreeningsMobileViewPicker
@@ -1520,21 +1889,6 @@ export function ScreeningsUI({
           </div>
         )}
         <div className="flex items-stretch relative">
-          {/* Collapse toggle — fixed, not scrollable */}
-          {!addFilterOpen && (
-            <button
-              type="button"
-              onClick={() => setCollapsed((c) => !c)}
-              className="shrink-0 self-center mr-1 p-1.5 rounded-md border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
-              title={collapsed ? "Show filters" : "Hide filters"}
-            >
-              {collapsed ? (
-                <ChevronDown className="w-3.5 h-3.5" />
-              ) : (
-                <ChevronUp className="w-3.5 h-3.5" />
-              )}
-            </button>
-          )}
           {/* Scrollable tab strip — desktop only */}
           <div className="hidden sm:block flex-1 min-w-0 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
             <div className="flex items-end gap-x-0 flex-nowrap min-w-max">
@@ -1637,6 +1991,7 @@ export function ScreeningsUI({
           />
         </div>
       </div>
+      )}
 
       {/* Main row: view content + global AI chat side panel (desktop) */}
       <div className="flex flex-1 min-h-0 min-w-0">
@@ -1678,6 +2033,7 @@ export function ScreeningsUI({
                   onSortedOrderChange={(order) => {
                     sortedSidebarOrderRef.current = order;
                   }}
+                  isCaveman={isCaveman}
                 />
               </div>
               <div
@@ -1686,11 +2042,50 @@ export function ScreeningsUI({
                 {activeView === "charts" ? (
                   <div className="flex-1 flex flex-col gap-3 w-full min-h-0">
                     <div className="flex-1 flex items-stretch w-full min-h-0">
-                      <div className="flex-1 min-w-0">
-                        <ChartDateRangePicker
-                          onChange={setChartDateRange}
-                          onGranularityChange={setChartGranularity}
+                      <div className="flex-1 min-w-0 flex flex-col min-h-0">
+                        <DeepDiveSymbolHeader
+                          symbol={selectedTicker ?? ""}
+                          quote={
+                            selectedTicker ? quotes[selectedTicker] : null
+                          }
+                          meta={
+                            selectedTicker
+                              ? getTickerMeta(selectedTicker)
+                              : { sector: "", industry: "", subSector: "" }
+                          }
+                          rightSlot={
+                            isCaveman ? (
+                              <CavemanRangeChips
+                                onChange={setChartDateRange}
+                                onGranularityChange={setChartGranularity}
+                              />
+                            ) : (
+                              <ChartDateRangePicker
+                                onChange={setChartDateRange}
+                                onGranularityChange={setChartGranularity}
+                              />
+                            )
+                          }
                         />
+                        {isCaveman && selectedTicker && (
+                          <CavemanQuickActions
+                            ticker={selectedTicker}
+                            status={getTickerStatus(selectedTicker)}
+                            isDismissed={dismissedSymbols.has(selectedTicker)}
+                            onSetStatus={(s) =>
+                              setTickerStatus(selectedTicker, s)
+                            }
+                            onDismiss={() => dismissTicker(selectedTicker)}
+                            onRestore={() => restoreTicker(selectedTicker)}
+                            hasNote={tickerHasComment(selectedTicker)}
+                            onEditNote={() =>
+                              editTickerComment(selectedTicker)
+                            }
+                            onSetupAgent={() =>
+                              setAgentAlarmTicker(selectedTicker)
+                            }
+                          />
+                        )}
                         <TickerChartsPanel
                           symbols={chartSymbols}
                           selectedTicker={selectedTicker}
@@ -1716,17 +2111,23 @@ export function ScreeningsUI({
                           screeningToolbar={false}
                           showSymbolHeadline={false}
                           showChartFrame={false}
-                          annotations={chartAnnotations}
+                          annotations={isCaveman ? [] : chartAnnotations}
                           onChartData={(rows: OhlcBar[]) => {
                             ohlcvDataRef.current = rows;
                           }}
-                          onAnnotationAdd={(ann) =>
-                            setChartAnnotations((prev) => [...prev, ann])
+                          onAnnotationAdd={
+                            isCaveman
+                              ? undefined
+                              : (ann) =>
+                                  setChartAnnotations((prev) => [...prev, ann])
                           }
-                          onAnnotationDelete={(id) =>
-                            setChartAnnotations((prev) =>
-                              prev.filter((a) => a.id !== id),
-                            )
+                          onAnnotationDelete={
+                            isCaveman
+                              ? undefined
+                              : (id) =>
+                                  setChartAnnotations((prev) =>
+                                    prev.filter((a) => a.id !== id),
+                                  )
                           }
                           dateRange={chartDateRange}
                           interval={chartGranularity}
@@ -2117,58 +2518,10 @@ export function ScreeningsUI({
               <div className="w-10 h-1 rounded-full bg-border" />
             </div>
             <div className="flex items-center justify-between">
-              <h3 className="text-base font-semibold">Workflow update</h3>
+              <h3 className="text-base font-semibold">Edit note</h3>
               <span className="font-mono text-sm text-muted-foreground">
                 {workflowEditor.ticker}
               </span>
-            </div>
-            <div className="flex flex-col gap-1.5">
-              <span className="text-xs text-muted-foreground">Stage</span>
-              <div className="grid grid-cols-3 gap-1.5">
-                {(
-                  [
-                    { value: "active", label: "Active", color: "emerald" },
-                    { value: "watchlist", label: "Watchlist", color: "amber" },
-                    { value: "pipeline", label: "Pipeline", color: "sky" },
-                  ] as const
-                ).map(({ value, label, color }) => {
-                  const isActive = workflowEditor.status === value;
-                  const ring: Record<typeof color, string> = {
-                    emerald:
-                      "ring-emerald-500/50 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/40",
-                    amber:
-                      "ring-amber-500/50 bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/40",
-                    sky: "ring-sky-500/50 bg-sky-500/10 text-sky-600 dark:text-sky-400 border-sky-500/40",
-                  };
-                  return (
-                    <button
-                      key={value}
-                      type="button"
-                      disabled={
-                        savingWorkflowEditor ||
-                        workflowEditor.status === "dismissed"
-                      }
-                      onClick={() =>
-                        setWorkflowEditor((prev) =>
-                          prev ? { ...prev, status: value } : prev,
-                        )
-                      }
-                      className={`px-2 py-2 text-xs font-mono uppercase tracking-[0.08em] rounded border transition-all disabled:opacity-50 ${
-                        isActive
-                          ? `ring-2 ${ring[color]}`
-                          : "border-border hover:bg-muted"
-                      }`}
-                    >
-                      {label}
-                    </button>
-                  );
-                })}
-              </div>
-              {workflowEditor.status === "dismissed" && (
-                <p className="text-[11px] text-rose-500">
-                  Ticker is dismissed. Restore it below to change stage.
-                </p>
-              )}
             </div>
             <label className="flex flex-col gap-1">
               <span className="text-xs text-muted-foreground">Note</span>
@@ -2186,51 +2539,23 @@ export function ScreeningsUI({
                 autoFocus
               />
             </label>
-            <div className="flex flex-col-reverse sm:flex-row sm:items-center sm:justify-between gap-2 pt-1">
+            <div className="flex items-center justify-end gap-2 pt-1">
               <button
                 type="button"
-                onClick={() =>
-                  setWorkflowEditor((prev) =>
-                    prev
-                      ? {
-                          ...prev,
-                          status:
-                            prev.status === "dismissed"
-                              ? "active"
-                              : "dismissed",
-                        }
-                      : prev,
-                  )
-                }
-                className={`min-h-[44px] sm:min-h-0 px-3 py-1.5 text-sm rounded border transition-colors ${
-                  workflowEditor.status === "dismissed"
-                    ? "border-emerald-500/40 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-500/10"
-                    : "border-rose-500/30 text-rose-500 hover:bg-rose-500/10"
-                }`}
+                onClick={() => setWorkflowEditor(null)}
+                className="min-h-[44px] sm:min-h-0 px-3 py-1.5 text-sm rounded border border-border hover:bg-muted transition-colors"
                 disabled={savingWorkflowEditor}
               >
-                {workflowEditor.status === "dismissed"
-                  ? "Restore ticker"
-                  : "Dismiss ticker"}
+                Cancel
               </button>
-              <div className="flex items-center justify-end gap-2">
-                <button
-                  type="button"
-                  onClick={() => setWorkflowEditor(null)}
-                  className="min-h-[44px] sm:min-h-0 px-3 py-1.5 text-sm rounded border border-border hover:bg-muted transition-colors"
-                  disabled={savingWorkflowEditor}
-                >
-                  Cancel
-                </button>
-                <button
-                  type="button"
-                  onClick={() => void saveWorkflowEditor()}
-                  className="min-h-[44px] sm:min-h-0 px-4 py-1.5 text-sm rounded bg-foreground text-background hover:opacity-90 transition-opacity disabled:opacity-50"
-                  disabled={savingWorkflowEditor}
-                >
-                  {savingWorkflowEditor ? "Saving..." : "Save"}
-                </button>
-              </div>
+              <button
+                type="button"
+                onClick={() => void saveWorkflowEditor()}
+                className="min-h-[44px] sm:min-h-0 px-4 py-1.5 text-sm rounded bg-foreground text-background hover:opacity-90 transition-opacity disabled:opacity-50"
+                disabled={savingWorkflowEditor}
+              >
+                {savingWorkflowEditor ? "Saving..." : "Save"}
+              </button>
             </div>
           </div>
         </div>

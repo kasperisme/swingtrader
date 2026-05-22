@@ -711,19 +711,27 @@ export async function importLatestPublicScreeningResultForMe(
 
   // 4. Chart workspace chat turns. Per ticker, append one user+assistant pair
   // tagged source: "public_screening", mirroring runner.py's fan-out.
+  // Sequential per-ticker round-trips blow the serverless function timeout
+  // on screenings with many LLM-analysed tickers — the rows from steps 1–3
+  // land, but the action never returns, so the client dialog hangs at
+  // "Importing the latest run…". Fan out with Promise.allSettled so total
+  // wall time is the slowest single ticker, not the sum.
   let chatTurns = 0;
   if (llmPrompt) {
     const userMessage = llmPrompt || "Run a technical analysis.";
-    for (const { symbol, rowData } of rowPayloads) {
+    const upsertOne = async (
+      symbol: string | null,
+      rowData: Record<string, unknown>,
+    ): Promise<boolean> => {
       const sym = (symbol || "").trim().toUpperCase();
-      if (!sym) continue;
+      if (!sym) return false;
       const llm = rowData.llm_analysis;
       const analysisMarkdown =
         llm && typeof llm === "object" && !Array.isArray(llm)
           ? (llm as Record<string, unknown>).analysis_markdown
           : null;
       if (typeof analysisMarkdown !== "string" || !analysisMarkdown.trim()) {
-        continue;
+        return false;
       }
 
       try {
@@ -781,16 +789,24 @@ export async function importLatestPublicScreeningResultForMe(
             sym,
             describePgError(wsErr),
           );
-        } else {
-          chatTurns += 1;
+          return false;
         }
+        return true;
       } catch (e) {
         console.warn(
           "[public-screenings] import: chart workspace threw",
           sym,
           e,
         );
+        return false;
       }
+    };
+
+    const settled = await Promise.allSettled(
+      rowPayloads.map((p) => upsertOne(p.symbol, p.rowData)),
+    );
+    for (const r of settled) {
+      if (r.status === "fulfilled" && r.value) chatTurns += 1;
     }
   }
 

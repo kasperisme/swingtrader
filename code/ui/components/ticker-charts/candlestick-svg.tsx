@@ -239,9 +239,13 @@ export function CandlestickSvg({
         const defaultLen = Math.min(CHART_DEFAULT_VIEWPORT_BARS, n);
 
         // Global IndexedDB zoom is shared across tickers. When the parent passes an
-        // explicit OHLC window, prefer a sane default viewport so a prior 12-bar zoom
-        // does not hide a newly chosen multi-year range.
-        if (cached && dateRange == null) {
+        // explicit OHLC window, honour it: show the full fetched range so 6M and 1Y
+        // visibly differ. Otherwise fall back to the cached zoom (if any) or a
+        // sensible default viewport.
+        if (dateRange != null) {
+          setViewportBars(n);
+          setViewStart(0);
+        } else if (cached) {
           setViewportBars(cached.viewportBars);
           setPriceOffset(cached.priceOffset);
           // Scroll position is not cached globally — always show most recent bars.

@@ -33,6 +33,9 @@ interface TickerSidebarProps {
   /** Fires whenever the visible sort order changes — lets the parent jump to
    * the next ticker in the user's actual visible order (e.g. after dismiss). */
   onSortedOrderChange?: (sortedSymbols: string[]) => void;
+  /** Simplified two-column layout (Symbol + Chg%) for non-technical users.
+   * Hides Last / Dist columns and locks sort to symbol. */
+  isCaveman?: boolean;
 }
 
 function SortArrow({ active, dir }: { active: boolean; dir: SortDir }) {
@@ -59,6 +62,7 @@ export function TickerSidebar({
   showDismissed = false,
   onToggleShowDismissed,
   onSortedOrderChange,
+  isCaveman = false,
 }: TickerSidebarProps) {
   const listRef = useRef<HTMLDivElement>(null);
   const [sortKey, setSortKey] = useState<SortKey>("symbol");
@@ -189,38 +193,46 @@ export function TickerSidebar({
           </span>
         </button>
       )}
-      <div className="shrink-0 px-2 grid grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)_1.25rem] gap-x-1.5 items-center bg-muted/40 border-b border-border py-2 text-xs font-medium text-muted-foreground uppercase tracking-wide">
-        <button
-          type="button"
-          className={`text-left cursor-pointer select-none hover:text-foreground transition-colors inline-flex items-center gap-0.5`}
-          onClick={() => toggleSort("symbol")}
-        >
-          Symbol <SortArrow active={sortKey === "symbol"} dir={sortDir} />
-        </button>
-        <button
-          type="button"
-          className={headerBtn}
-          onClick={() => toggleSort("price")}
-        >
-          <SortArrow active={sortKey === "price"} dir={sortDir} /> Last
-        </button>
-        <button
-          type="button"
-          className={headerBtn}
-          onClick={() => toggleSort("change")}
-        >
-          <SortArrow active={sortKey === "change"} dir={sortDir} /> Chg%
-        </button>
-        <button
-          type="button"
-          className={headerBtn}
-          onClick={() => toggleSort("dist")}
-          title="Distance to entry marker (% from current price)"
-        >
-          <SortArrow active={sortKey === "dist"} dir={sortDir} /> Dist
-        </button>
-        <span className="w-6" aria-hidden />
-      </div>
+      {isCaveman ? (
+        <div className="shrink-0 px-2 grid grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)_1.25rem] gap-x-1.5 items-center bg-muted/40 border-b border-border py-2 text-[10px] font-medium uppercase tracking-[0.1em] text-muted-foreground">
+          <span className="text-left">Stock</span>
+          <span className="text-right">Today</span>
+          <span className="w-6" aria-hidden />
+        </div>
+      ) : (
+        <div className="shrink-0 px-2 grid grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)_1.25rem] gap-x-1.5 items-center bg-muted/30 border-b border-border py-2 text-[10px] font-mono uppercase tracking-[0.12em] text-muted-foreground/80">
+          <button
+            type="button"
+            className={`text-left cursor-pointer select-none hover:text-foreground transition-colors inline-flex items-center gap-0.5`}
+            onClick={() => toggleSort("symbol")}
+          >
+            Symbol <SortArrow active={sortKey === "symbol"} dir={sortDir} />
+          </button>
+          <button
+            type="button"
+            className={headerBtn}
+            onClick={() => toggleSort("price")}
+          >
+            <SortArrow active={sortKey === "price"} dir={sortDir} /> Last
+          </button>
+          <button
+            type="button"
+            className={headerBtn}
+            onClick={() => toggleSort("change")}
+          >
+            <SortArrow active={sortKey === "change"} dir={sortDir} /> Chg%
+          </button>
+          <button
+            type="button"
+            className={headerBtn}
+            onClick={() => toggleSort("dist")}
+            title="Distance to entry marker (% from current price)"
+          >
+            <SortArrow active={sortKey === "dist"} dir={sortDir} /> Dist
+          </button>
+          <span className="w-6" aria-hidden />
+        </div>
+      )}
       <div
         ref={listRef}
         className="max-h-full min-h-0 flex-1 overflow-y-auto divide-y divide-border"
@@ -287,7 +299,13 @@ export function TickerSidebar({
                 .filter(Boolean)
                 .join(" · ")}
             >
-              <div className="grid grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)_1.25rem] items-start gap-x-1.5 px-2 py-2">
+              <div
+                className={`grid items-start gap-x-1.5 px-2 py-2 ${
+                  isCaveman
+                    ? "grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)_1.25rem]"
+                    : "grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)_1.25rem]"
+                }`}
+              >
                 <div className="min-w-0 text-left">
                   <span className="flex min-w-0 items-center gap-1.5">
                     {hasPosition && (
@@ -323,17 +341,19 @@ export function TickerSidebar({
                       {meta.sector}
                     </span>
                   )}
-                  {meta.subSector && (
+                  {!isCaveman && meta.subSector && (
                     <span className="block min-w-0 truncate text-[10px] leading-tight text-muted-foreground">
                       {meta.subSector}
                     </span>
                   )}
                 </div>
-                <span
-                  className={`self-start truncate pt-0.5 text-xs tabular-nums text-right ${isSelected ? "font-medium" : "text-muted-foreground"}`}
-                >
-                  {q ? `$${q.price.toFixed(2)}` : "—"}
-                </span>
+                {!isCaveman && (
+                  <span
+                    className={`self-start truncate pt-0.5 text-xs tabular-nums text-right ${isSelected ? "font-medium" : "text-muted-foreground"}`}
+                  >
+                    {q ? `$${q.price.toFixed(2)}` : "—"}
+                  </span>
+                )}
                 <span
                   className={`self-start truncate pt-0.5 text-xs tabular-nums font-medium text-right ${chgColor}`}
                 >
@@ -341,11 +361,13 @@ export function TickerSidebar({
                     ? `${q.changePercentage >= 0 ? "+" : ""}${q.changePercentage.toFixed(2)}%`
                     : "—"}
                 </span>
-                <span
-                  className={`self-start truncate pt-0.5 text-xs tabular-nums font-medium text-right ${distColor}`}
-                >
-                  {distDisplay}
-                </span>
+                {!isCaveman && (
+                  <span
+                    className={`self-start truncate pt-0.5 text-xs tabular-nums font-medium text-right ${distColor}`}
+                  >
+                    {distDisplay}
+                  </span>
+                )}
                 <button
                   type="button"
                   className="h-6 w-6 shrink-0 self-start rounded-sm text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
