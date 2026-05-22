@@ -35,6 +35,10 @@ interface MobileTickerBarProps {
   onOpenChat?: () => void;
   /** Show a green dot on the chat button to indicate unread / existing messages. */
   chatHasIndicator?: boolean;
+  /** Suppress the selected-ticker action strip (note row + dismiss/restore).
+   * Used in caveman mode where those controls live in the dedicated floating
+   * action bar above the ticker nav, so showing them here is duplication. */
+  hideSelectedActionStrip?: boolean;
 }
 
 export function MobileTickerBar({
@@ -55,6 +59,7 @@ export function MobileTickerBar({
   onToggleShowDismissed,
   onOpenChat,
   chatHasIndicator = false,
+  hideSelectedActionStrip = false,
 }: MobileTickerBarProps) {
   const [sheetOpen, setSheetOpen] = useState(false);
 
@@ -93,7 +98,7 @@ export function MobileTickerBar({
       {/* Sticky nav bar — mobile only, pinned at the bottom of the screenings layout */}
       <div className="sm:hidden flex flex-col border-t border-border bg-background shrink-0">
         {/* Selected-ticker action strip: note + dismiss / restore — sits above the nav row */}
-        {selectedTicker && (
+        {selectedTicker && !hideSelectedActionStrip && (
           <button
             type="button"
             onClick={() => onEditNote?.(selectedTicker)}

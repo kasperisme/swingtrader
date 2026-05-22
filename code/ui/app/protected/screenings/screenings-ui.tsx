@@ -280,8 +280,10 @@ function cavemanRangeToDates(
   };
 }
 
-// Desktop chip strip (sm and up). Controlled component — parent owns state.
-function CavemanRangeChips({
+// Tinder-style index bar — renders as an inline row of three segments
+// showing carousel position. Caller decides where to place it; it does not
+// position itself. Tappable: clicking a segment jumps directly to that range.
+function CavemanRangeSegments({
   activeId,
   onSelect,
 }: {
@@ -290,29 +292,27 @@ function CavemanRangeChips({
 }) {
   return (
     <div
-      className="hidden sm:flex items-center gap-1 px-1 py-2"
-      role="radiogroup"
-      aria-label="Chart time range"
+      className="flex items-center gap-1 px-3 py-2"
+      role="tablist"
+      aria-label="Chart time range carousel"
     >
-      <span className="text-[10px] font-medium uppercase tracking-[0.1em] text-muted-foreground mr-1">
-        Range
-      </span>
       {CAVEMAN_RANGES.map((r) => {
-        const active = activeId === r.id;
+        const active = r.id === activeId;
         return (
           <button
             key={r.id}
             type="button"
-            role="radio"
-            aria-checked={active}
+            role="tab"
+            aria-selected={active}
             onClick={() => onSelect(r.id)}
-            className={`min-h-[36px] px-3 py-1.5 text-xs font-mono uppercase tracking-[0.1em] rounded-md border transition-colors ${
-              active
-                ? "border-foreground bg-foreground text-background"
-                : "border-border text-muted-foreground hover:text-foreground hover:border-foreground/40"
-            }`}
+            aria-label={`Show ${r.label}`}
+            className="flex-1 min-h-[20px] flex items-center group"
           >
-            {r.label}
+            <span
+              className={`block h-[3px] w-full rounded-full transition-colors ${
+                active ? "bg-foreground" : "bg-foreground/25"
+              } group-active:bg-foreground/60`}
+            />
           </button>
         );
       })}
@@ -320,54 +320,23 @@ function CavemanRangeChips({
   );
 }
 
-// Tinder-style mobile chart navigation. Three pieces:
-//   - A segment progress bar pinned at the very top of the chart card,
-//     showing which range is active and tappable to jump directly.
-//   - Two absolutely-positioned chevron tap zones on the chart's left/right
-//     edges for thumb-friendly stepping (the chart's center keeps pan/zoom).
+// Tinder-style chart-edge chevron tap zones. Left/right pills on the chart's
+// edges for thumb-friendly stepping; the chart's center keeps pan/zoom.
 // Caller renders this inside a `relative` container that wraps the chart.
 function CavemanRangeMobileSwipe({
-  activeId,
   onPrev,
   onNext,
-  onSelect,
 }: {
-  activeId: CavemanRangeId;
   onPrev: () => void;
   onNext: () => void;
-  onSelect: (id: CavemanRangeId) => void;
 }) {
   return (
     <>
-      {/* Segment progress — same pattern as Tinder photo-deck pagination */}
-      <div
-        className="sm:hidden absolute top-0 left-0 right-0 z-10 flex items-center gap-1 px-2 pt-1.5 pb-1 pointer-events-none"
-        aria-hidden
-      >
-        {CAVEMAN_RANGES.map((r) => {
-          const active = r.id === activeId;
-          return (
-            <button
-              key={r.id}
-              type="button"
-              onClick={() => onSelect(r.id)}
-              aria-label={`Show ${r.label}`}
-              className="pointer-events-auto flex-1 h-1.5 flex items-center justify-center group"
-            >
-              <span
-                className={`block h-[3px] w-full rounded-full transition-colors ${
-                  active ? "bg-foreground" : "bg-foreground/25"
-                } group-active:bg-foreground/60`}
-              />
-            </button>
-          );
-        })}
-      </div>
       <button
         type="button"
         onClick={onPrev}
         aria-label="Previous time range"
-        className="sm:hidden absolute left-1 top-1/2 -translate-y-1/2 z-10 flex items-center justify-center h-11 w-11 rounded-full border border-border bg-background/85 backdrop-blur-sm text-foreground shadow-md active:bg-muted/80"
+        className="absolute left-2 top-1/2 -translate-y-1/2 z-10 flex items-center justify-center h-11 w-11 rounded-full border border-border bg-background/85 backdrop-blur-sm text-foreground shadow-md transition-colors hover:bg-muted active:bg-muted/80"
       >
         <ChevronLeft className="h-5 w-5" />
       </button>
@@ -375,7 +344,7 @@ function CavemanRangeMobileSwipe({
         type="button"
         onClick={onNext}
         aria-label="Next time range"
-        className="sm:hidden absolute right-1 top-1/2 -translate-y-1/2 z-10 flex items-center justify-center h-11 w-11 rounded-full border border-border bg-background/85 backdrop-blur-sm text-foreground shadow-md active:bg-muted/80"
+        className="absolute right-2 top-1/2 -translate-y-1/2 z-10 flex items-center justify-center h-11 w-11 rounded-full border border-border bg-background/85 backdrop-blur-sm text-foreground shadow-md transition-colors hover:bg-muted active:bg-muted/80"
       >
         <ChevronRight className="h-5 w-5" />
       </button>
@@ -446,9 +415,8 @@ function DeepDiveSymbolHeader({
           </div>
         </div>
         {/* Right column: price on top, change underneath. Range slot
-            (chip strip or date picker) renders next to it on desktop; on
-            mobile the slot is invisible because CavemanRangeChips uses
-            `hidden sm:flex` internally. */}
+            (date picker in businessman; null in caveman where range nav
+            lives in the chart card via segments + arrows). */}
         <div className="flex shrink-0 items-start gap-4">
           <div className="flex flex-col items-end gap-0.5">
             <span className="font-mono tabular-nums text-lg sm:text-xl text-foreground leading-none">
@@ -2968,9 +2936,7 @@ export function ScreeningsUI({
                     <div className="flex-1 flex items-stretch w-full min-h-0">
                       <div
                         className={`flex-1 min-w-0 flex flex-col min-h-0 ${
-                          isCaveman
-                            ? "overflow-y-auto sm:overflow-hidden"
-                            : ""
+                          isCaveman ? "overflow-y-auto" : ""
                         }`}
                       >
                         <DeepDiveSymbolHeader
@@ -2984,12 +2950,11 @@ export function ScreeningsUI({
                               : { sector: "", industry: "", subSector: "" }
                           }
                           rightSlot={
-                            isCaveman ? (
-                              <CavemanRangeChips
-                                activeId={cavemanRangeId}
-                                onSelect={setCavemanRangeId}
-                              />
-                            ) : (
+                            // Businessman: full date range picker.
+                            // Caveman: nothing — range is driven entirely by
+                            // the arrow nav + segment carousel inside the
+                            // chart card, matching the mobile pattern.
+                            isCaveman ? null : (
                               <ChartDateRangePicker
                                 onChange={setChartDateRange}
                                 onGranularityChange={setChartGranularity}
@@ -3022,99 +2987,127 @@ export function ScreeningsUI({
                             />
                           </div>
                         )}
-                        {/* Chart title — range + granularity. Each graph gets
-                            an explicit label so non-technical users always
-                            know what timeframe they're looking at. */}
-                        <div className="flex items-center justify-center px-3 py-1.5 sm:justify-start">
-                          <span className="font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground">
-                            {isCaveman
-                              ? CAVEMAN_RANGES.find(
-                                  (r) => r.id === cavemanRangeId,
-                                )?.label ?? "—"
-                              : rangeLabelFromDates(chartDateRange)}
-                            <span
-                              aria-hidden
-                              className="mx-1.5 text-muted-foreground/40"
-                            >
-                              ·
-                            </span>
-                            {granularityLabel(chartGranularity)} chart
-                          </span>
-                        </div>
+                        {/* Index bar — carousel position segments above the
+                            chart card. Tap any segment to jump to that range.
+                            Caveman only; businessman uses the date picker in
+                            the symbol header. */}
+                        {isCaveman && (
+                          <CavemanRangeSegments
+                            activeId={cavemanRangeId}
+                            onSelect={setCavemanRangeId}
+                          />
+                        )}
                         <div
-                          className={`relative ${
+                          className={`${
                             isCaveman
-                              ? "shrink-0 h-[calc(100%-9rem)] min-h-[50vh] mx-3 mb-1 rounded-2xl border border-border bg-card shadow-[0_4px_24px_-8px_rgba(0,0,0,0.25)] overflow-hidden sm:mx-0 sm:mb-0 sm:rounded-none sm:border-0 sm:bg-transparent sm:shadow-none sm:overflow-visible sm:flex-1 sm:min-h-0 sm:h-auto"
-                              : "flex-1 min-h-0"
+                              ? "shrink-0 h-[calc(100%-9rem)] min-h-[50vh] mx-3 mb-1 rounded-2xl border border-border bg-card shadow-[0_4px_24px_-8px_rgba(0,0,0,0.25)] overflow-hidden flex flex-col"
+                              : "relative flex-1 min-h-0"
                           }`}
                         >
-                          <TickerChartsPanel
-                            symbols={chartSymbols}
-                            selectedTicker={selectedTicker}
-                            onSelect={setSelectedTicker}
-                            dismissed={dismissedSymbols}
-                            onDismiss={dismissTicker}
-                            onRestore={restoreTicker}
-                            getStatus={getTickerStatus}
-                            onSetStatus={setTickerStatus}
-                            hasComment={tickerHasComment}
-                            onEditComment={editTickerComment}
-                            getTickerMeta={getTickerMeta}
-                            getEntryMarker={getTickerEntryMarker}
-                            onSetEntryMarker={setTickerEntryMarker}
-                            onClearEntryMarker={clearTickerEntryMarker}
-                            tradeMarkers={(selectedTicker ? (tradesByTicker.get(selectedTicker) ?? []) : []).map((t) => ({
-                              date: t.executed_at.slice(0, 10),
-                              price: t.price_per_unit,
-                              side: t.side,
-                              position_side: t.position_side,
-                            }))}
-                            showChevronSymbolNav={false}
-                            screeningToolbar={false}
-                            showSymbolHeadline={false}
-                            showChartFrame={false}
-                            fillContainer={isCaveman}
-                            annotations={isCaveman ? [] : chartAnnotations}
-                            onChartData={(rows: OhlcBar[]) => {
-                              ohlcvDataRef.current = rows;
-                            }}
-                            onAnnotationAdd={
-                              isCaveman
-                                ? undefined
-                                : (ann) =>
-                                    setChartAnnotations((prev) => [...prev, ann])
-                            }
-                            onAnnotationDelete={
-                              isCaveman
-                                ? undefined
-                                : (id) =>
-                                    setChartAnnotations((prev) =>
-                                      prev.filter((a) => a.id !== id),
-                                    )
-                            }
-                            dateRange={chartDateRange}
-                            interval={chartGranularity}
-                            getReferenceClose={(ticker) => {
-                              const q = quotes[ticker];
-                              if (!q) return null;
-                              return q.previousClose ?? q.price ?? null;
-                            }}
-                          />
+                          {/* Title pill — fixed band at the top of the chart
+                              card. Pushes the chart down so the pill never
+                              overlaps the SMA legend or any candle data.
+                              Chart's fillContainer ResizeObserver picks up
+                              the new height. */}
                           {isCaveman && (
-                            <CavemanRangeMobileSwipe
-                              activeId={cavemanRangeId}
-                              onPrev={() => stepCavemanRange(-1)}
-                              onNext={() => stepCavemanRange(1)}
-                              onSelect={setCavemanRangeId}
-                            />
+                            <div className="shrink-0 flex items-center justify-center border-b border-border/60 bg-muted/30 px-3 py-2">
+                              <div className="inline-flex items-stretch rounded-full border border-border bg-background/85 backdrop-blur-sm overflow-hidden shadow-sm">
+                                <span className="inline-flex items-center gap-1.5 border-r border-border bg-foreground/[0.06] px-2.5 py-0.5">
+                                  <Calendar
+                                    className="h-3 w-3 text-foreground/70"
+                                    aria-hidden
+                                  />
+                                  <span className="font-mono text-[10px] font-semibold uppercase tracking-[0.14em] text-foreground">
+                                    {CAVEMAN_RANGES.find(
+                                      (r) => r.id === cavemanRangeId,
+                                    )?.label ?? "—"}
+                                  </span>
+                                </span>
+                                <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5">
+                                  <Activity
+                                    className="h-3 w-3 text-muted-foreground"
+                                    aria-hidden
+                                  />
+                                  <span className="font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground">
+                                    {granularityLabel(chartGranularity)}
+                                  </span>
+                                </span>
+                              </div>
+                            </div>
                           )}
+                          <div
+                            className={
+                              isCaveman
+                                ? "relative flex-1 min-h-0"
+                                : "relative h-full"
+                            }
+                          >
+                            <TickerChartsPanel
+                              symbols={chartSymbols}
+                              selectedTicker={selectedTicker}
+                              onSelect={setSelectedTicker}
+                              dismissed={dismissedSymbols}
+                              onDismiss={dismissTicker}
+                              onRestore={restoreTicker}
+                              getStatus={getTickerStatus}
+                              onSetStatus={setTickerStatus}
+                              hasComment={tickerHasComment}
+                              onEditComment={editTickerComment}
+                              getTickerMeta={getTickerMeta}
+                              getEntryMarker={getTickerEntryMarker}
+                              onSetEntryMarker={setTickerEntryMarker}
+                              onClearEntryMarker={clearTickerEntryMarker}
+                              tradeMarkers={(selectedTicker ? (tradesByTicker.get(selectedTicker) ?? []) : []).map((t) => ({
+                                date: t.executed_at.slice(0, 10),
+                                price: t.price_per_unit,
+                                side: t.side,
+                                position_side: t.position_side,
+                              }))}
+                              showChevronSymbolNav={false}
+                              screeningToolbar={false}
+                              showSymbolHeadline={false}
+                              showChartFrame={false}
+                              fillContainer={isCaveman}
+                              annotations={isCaveman ? [] : chartAnnotations}
+                              onChartData={(rows: OhlcBar[]) => {
+                                ohlcvDataRef.current = rows;
+                              }}
+                              onAnnotationAdd={
+                                isCaveman
+                                  ? undefined
+                                  : (ann) =>
+                                      setChartAnnotations((prev) => [...prev, ann])
+                              }
+                              onAnnotationDelete={
+                                isCaveman
+                                  ? undefined
+                                  : (id) =>
+                                      setChartAnnotations((prev) =>
+                                        prev.filter((a) => a.id !== id),
+                                      )
+                              }
+                              dateRange={chartDateRange}
+                              interval={chartGranularity}
+                              getReferenceClose={(ticker) => {
+                                const q = quotes[ticker];
+                                if (!q) return null;
+                                return q.previousClose ?? q.price ?? null;
+                              }}
+                            />
+                            {isCaveman && (
+                              <CavemanRangeMobileSwipe
+                                onPrev={() => stepCavemanRange(-1)}
+                                onNext={() => stepCavemanRange(1)}
+                              />
+                            )}
+                          </div>
                         </div>
                         {/* Tinder-style info stack below the chart on mobile.
                             Reveals additional ticker context as the user
                             scrolls down — same pattern as Tinder's profile
                             details below the photo deck. Mobile + caveman only. */}
                         {isCaveman && selectedTicker && (
-                          <div className="sm:hidden flex flex-col gap-2.5 p-3 pb-6 bg-muted/15">
+                          <div className="flex flex-col gap-2.5 p-3 pb-6 bg-muted/15">
                             <CavemanInfoCards
                               symbol={selectedTicker.toUpperCase()}
                               quote={quotes[selectedTicker]}
@@ -3210,6 +3203,7 @@ export function ScreeningsUI({
                 bulkJob?.status === "running" ||
                 bulkJob?.status === "queued"
               }
+              hideSelectedActionStrip={isCaveman}
             />
           </div>
         ) : activeView === "quotes" ? (
