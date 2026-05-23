@@ -591,6 +591,7 @@ def run_screening(screening: dict, dry_run: bool = False, is_test: bool = False)
             return {
                 **base,
                 "triggered": False,
+                "skipped": True,
                 "summary": f"Skipped: market not open ({_SESSION_LABELS.get(trading_session, trading_session)})",
                 "data_used": {},
             }
@@ -667,7 +668,8 @@ def persist_and_deliver(result: dict, result_id: str | None = None) -> None:
     is_test = bool(result.get("is_test"))
     triggered = bool(result.get("triggered"))
     error = bool(result.get("error"))
-    status = "error" if error else "done"
+    skipped = bool(result.get("skipped"))
+    status = "error" if error else "skipped" if skipped else "done"
 
     if result_id:
         try:
@@ -710,6 +712,13 @@ def persist_and_deliver(result: dict, result_id: str | None = None) -> None:
     client.schema(schema).table("user_scheduled_screenings").update(
         update_fields,
     ).eq("id", result["screening_id"]).execute()
+
+    if skipped:
+        log.info(
+            "Skipping Telegram delivery: screening=%s reason=%s",
+            result["screening_id"], result.get("summary"),
+        )
+        return
 
     chat_id = get_user_chat_id(result["user_id"])
     if not chat_id:

@@ -61,3 +61,4 @@ MVP Scope:
 [ ] News trend graph refined (narrative generation)
 [ ] Gennemgå platformen og sikre at det er så simpelt og intuitivt som muligt
 [ ] News trend UI skal forbedres. Det er svært at finde rundt i, og se hvad konklusionen skal være
+[ ] Persist highlights from agent screenings so that it can be reused in the ui.
