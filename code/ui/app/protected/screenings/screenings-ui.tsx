@@ -135,6 +135,7 @@ import {
 } from "./screenings-view-tab-presets";
 import { ScreeningsMobileViewPicker } from "./screenings-mobile-view-picker";
 import { useCavemanMode } from "@/lib/caveman-mode";
+import { prefetchOhlc } from "@/lib/ohlc-cache";
 
 export type { ScanRun, ScreeningRow, ScanRowNote } from "./screenings-types";
 
@@ -2356,6 +2357,41 @@ export function ScreeningsUI({
       sortedSidebarOrderRef.current[0] ?? deepDiveListSymbols[0];
     if (first) setSelectedTicker(first);
   }, [selectedTicker, deepDiveListSymbols]);
+
+  // Caveman prefetch: warm the OHLC client cache so range and ticker switches
+  // render instantly. For the selected ticker we prefetch all three date-filter
+  // ranges (1M / 6M / 1Y); for the immediate neighbours in the deep-dive list
+  // we prefetch the currently active range. Re-runs whenever the selection or
+  // active range changes. Fire-and-forget + deduped inside prefetchOhlc.
+  useEffect(() => {
+    if (!isCaveman || !selectedTicker) return;
+
+    for (const r of CAVEMAN_RANGES) {
+      const d = cavemanRangeToDates(r.id);
+      if (d) {
+        void prefetchOhlc(selectedTicker, d.granularity, {
+          from: d.from,
+          to: d.to,
+        });
+      }
+    }
+
+    const active = cavemanRangeToDates(cavemanRangeId);
+    if (active) {
+      const list = deepDiveListSymbols;
+      const i = list.indexOf(selectedTicker);
+      if (i >= 0) {
+        for (const neighbor of [list[i - 1], list[i + 1]]) {
+          if (neighbor) {
+            void prefetchOhlc(neighbor, active.granularity, {
+              from: active.from,
+              to: active.to,
+            });
+          }
+        }
+      }
+    }
+  }, [isCaveman, selectedTicker, cavemanRangeId, deepDiveListSymbols]);
 
   const hiddenDismissedInListCount = useMemo(() => {
     let count = 0;
