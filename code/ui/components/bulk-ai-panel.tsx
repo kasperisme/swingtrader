@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { Loader2, Sparkles, AlertCircle, Send, CheckCircle2 } from "lucide-react";
-import ReactMarkdown from "react-markdown";
+import { ChatMarkdown } from "@/components/chat-markdown";
 import type {
   BulkAnalysisJob,
   BulkChartGranularity,
@@ -193,17 +193,7 @@ function BulkChatBubble({ message }: { message: ChartAiChatMessage }) {
 }
 
 function BulkSummaryMarkdown({ content }: { content: string }) {
-  return (
-    <div className="text-[12px] leading-relaxed text-foreground/85 [&_p]:mb-2 [&_p:last-child]:mb-0 [&_ul]:mb-2 [&_ul]:pl-4 [&_ul]:list-disc [&_ol]:mb-2 [&_ol]:pl-4 [&_ol]:list-decimal [&_li]:mb-0.5 [&_strong]:font-semibold [&_strong]:text-foreground">
-      <ReactMarkdown
-        components={{
-          p: ({ children }) => <p>{children}</p>,
-        }}
-      >
-        {content}
-      </ReactMarkdown>
-    </div>
-  );
+  return <ChatMarkdown content={content} variant="analysis" />;
 }
 
 function EmptyHint({

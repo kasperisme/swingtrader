@@ -1,7 +1,7 @@
 "use client";
 
 import { useLayoutEffect, useRef, useState } from "react";
-import ReactMarkdown from "react-markdown";
+import { ChatMarkdown } from "@/components/chat-markdown";
 import { ChevronDown, ChevronUp } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -44,7 +44,7 @@ export function ScreeningDescription({
           maxHeight: clamped ? `${collapsedHeight}px` : "none",
         }}
       >
-        <Markdown source={source} />
+        <ChatMarkdown content={source} variant="description" />
         {clamped && (
           <div
             aria-hidden
@@ -71,65 +71,5 @@ export function ScreeningDescription({
         </button>
       )}
     </div>
-  );
-}
-
-function Markdown({ source }: { source: string }) {
-  return (
-    <ReactMarkdown
-      components={{
-        h1: ({ children }) => (
-          <h3 className="mt-4 text-sm font-semibold uppercase tracking-wide text-foreground first:mt-0">
-            {children}
-          </h3>
-        ),
-        h2: ({ children }) => (
-          <h4 className="mt-4 text-sm font-semibold uppercase tracking-wide text-foreground first:mt-0">
-            {children}
-          </h4>
-        ),
-        h3: ({ children }) => (
-          <h5 className="mt-3 text-sm font-semibold text-foreground first:mt-0">
-            {children}
-          </h5>
-        ),
-        p: ({ children }) => (
-          <p className="text-sm leading-7 text-muted-foreground">{children}</p>
-        ),
-        ul: ({ children }) => (
-          <ul className="my-2 list-disc space-y-1 pl-5 text-sm leading-7 text-muted-foreground marker:text-muted-foreground/50">
-            {children}
-          </ul>
-        ),
-        ol: ({ children }) => (
-          <ol className="my-2 list-decimal space-y-1 pl-5 text-sm leading-7 text-muted-foreground marker:text-muted-foreground/60">
-            {children}
-          </ol>
-        ),
-        li: ({ children }) => <li className="pl-1">{children}</li>,
-        strong: ({ children }) => (
-          <strong className="font-semibold text-foreground">{children}</strong>
-        ),
-        em: ({ children }) => <em className="italic">{children}</em>,
-        code: ({ children }) => (
-          <code className="rounded bg-muted px-1 py-0.5 font-mono text-[12px] text-foreground">
-            {children}
-          </code>
-        ),
-        a: ({ children, href }) => (
-          <a
-            href={href}
-            className="text-primary underline-offset-2 hover:underline"
-            target={href?.startsWith("http") ? "_blank" : undefined}
-            rel={href?.startsWith("http") ? "noopener noreferrer" : undefined}
-          >
-            {children}
-          </a>
-        ),
-        hr: () => <hr className="my-4 border-border/60" />,
-      }}
-    >
-      {source}
-    </ReactMarkdown>
   );
 }
