@@ -19,7 +19,7 @@ import {
 import { createPortal } from "react-dom";
 import { useRouter } from "next/navigation";
 import { Bot, Loader2, Send, Sparkles, X } from "lucide-react";
-import ReactMarkdown from "react-markdown";
+import { ChatMarkdown } from "@/components/chat-markdown";
 
 import {
   RUN_TOUR_EVENT,
@@ -386,9 +386,7 @@ function HelpChatPanel({ onClose }: { onClose: () => void }) {
                       Thinking…
                     </span>
                   ) : m.role === "assistant" ? (
-                    <div className="prose prose-sm dark:prose-invert max-w-none [&_p]:my-1 [&_ul]:my-1 [&_li]:my-0">
-                      <ReactMarkdown>{m.content}</ReactMarkdown>
-                    </div>
+                    <ChatMarkdown content={m.content} variant="help" />
                   ) : (
                     <p className="whitespace-pre-wrap">{m.content}</p>
                   )}
