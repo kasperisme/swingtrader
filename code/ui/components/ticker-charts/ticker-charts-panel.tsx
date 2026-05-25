@@ -690,6 +690,41 @@ export function TickerChartsPanel({
               />
             </label>
           </div>
+          {(() => {
+            const e = Number.parseFloat(entryEditor.entry);
+            const tp = Number.parseFloat(entryEditor.target);
+            const sl = Number.parseFloat(entryEditor.stop);
+            if (
+              !Number.isFinite(e) ||
+              !Number.isFinite(tp) ||
+              !Number.isFinite(sl)
+            ) {
+              return null;
+            }
+            const risk = Math.abs(e - sl);
+            if (risk <= 0) return null;
+            const rr = Math.abs(tp - e) / risk;
+            // <1 bad · 1–2 good · >2 excellent
+            const { label, color } =
+              rr < 1
+                ? { label: "bad", color: "text-rose-500" }
+                : rr <= 2
+                  ? { label: "good", color: "text-amber-500" }
+                  : { label: "excellent", color: "text-emerald-500" };
+            return (
+              <div className="mt-3 flex items-center justify-between border-t border-border pt-2 text-xs">
+                <span
+                  className="text-muted-foreground"
+                  title="Reward ÷ risk = |target − entry| / |entry − stop|"
+                >
+                  Reward : risk
+                </span>
+                <span className={`font-mono font-semibold tabular-nums ${color}`}>
+                  {rr.toFixed(2)} &middot; {label}
+                </span>
+              </div>
+            );
+          })()}
           <div className="mt-3 flex items-center justify-between gap-2">
             <button
               type="button"
