@@ -12,6 +12,7 @@ import {
 import { Loader2 } from "lucide-react";
 import { fmpGetOhlc } from "@/app/actions/fmp";
 import { readChartViewCache, putChartViewCache } from "@/lib/chart-view-cache";
+import { getCachedOhlc, putCachedOhlc } from "@/lib/ohlc-cache";
 import { subtractCalendarDays } from "@/lib/fmp-date-utils";
 import type { ChartPoint, OhlcBar, EntryMarker, ChartAnnotation } from "./types";
 import { resolveEntryBarIndex, ANNOTATION_COLORS } from "./types";
@@ -154,13 +155,27 @@ export function CandlestickSvg({
    * deep-dive where the chart lives inside a tall Tinder-style card. */
   fillContainer?: boolean;
 }) {
-  const [data, setData] = useState<OhlcBar[]>([]);
-  const [loading, setLoading] = useState(false);
+  // Seed from the client cache on mount (and on key-driven remounts, e.g.
+  // interval changes) so a prefetched window paints on the first frame with no
+  // "No chart data" flash and no spinner.
+  const [data, setData] = useState<OhlcBar[]>(
+    () => getCachedOhlc(symbol, interval, dateRange) ?? [],
+  );
+  const [loading, setLoading] = useState(
+    () => getCachedOhlc(symbol, interval, dateRange) == null,
+  );
   const [error, setError] = useState<string | null>(null);
   const [crosshair, setCrosshair] = useState<Crosshair | null>(null);
   const [selBox, setSelBox] = useState<SelectionBox | null>(null);
   const [viewStart, setViewStart] = useState(0);
-  const [viewportBars, setViewportBars] = useState(CHART_DEFAULT_VIEWPORT_BARS);
+  const [viewportBars, setViewportBars] = useState(() => {
+    // For an explicit window (caveman date filters) the chart shows the full
+    // fetched range. Seed that from the cache so a remount paints the right
+    // viewport on frame one instead of the default 120-bar slice.
+    const cached = getCachedOhlc(symbol, interval, dateRange);
+    if (cached && dateRange != null && cached.length > 0) return cached.length;
+    return CHART_DEFAULT_VIEWPORT_BARS;
+  });
   const [isPanning, setIsPanning] = useState(false);
   const [loadingOlder, setLoadingOlder] = useState(false);
   const [priceOffset, setPriceOffset] = useState(0);
@@ -253,20 +268,38 @@ export function CandlestickSvg({
   const cacheWriteTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
-    setLoading(true);
     setError(null);
-    setData([]);
     setViewStart(0);
     setViewportBars(CHART_DEFAULT_VIEWPORT_BARS);
     setPriceOffset(0);
     pastExhaustedRef.current = false;
     const sym = symbol;
 
+    // Synchronous client cache: if this exact window was prefetched (or viewed
+    // recently) render it immediately — no spinner, no refetch. When the parent
+    // supplies an explicit window (caveman date filters), seed the viewport now
+    // too so range/ticker switches paint without an intermediate frame.
+    const cachedRows = getCachedOhlc(symbol, interval, dateRange);
+    if (cachedRows) {
+      setData(cachedRows);
+      setLoading(false);
+      if (dateRange != null) {
+        setViewportBars(cachedRows.length);
+        setViewStart(0);
+      }
+    } else {
+      setLoading(true);
+      setData([]);
+    }
+
     void (async () => {
       try {
-        // Read cached view and OHLC data in parallel.
+        // Read cached view and OHLC data in parallel. When OHLC is already in
+        // the client cache, skip the network round-trip entirely.
         const [ohlcResult, cached] = await Promise.all([
-          fmpGetOhlc(sym, interval, dateRange),
+          cachedRows
+            ? Promise.resolve({ ok: true as const, data: cachedRows })
+            : fmpGetOhlc(sym, interval, dateRange),
           readChartViewCache(),
         ]);
         if (sym !== symbolRef.current) return; // navigated away
@@ -276,6 +309,7 @@ export function CandlestickSvg({
           return;
         }
         const rows = ohlcResult.data;
+        if (!cachedRows) putCachedOhlc(sym, interval, dateRange, rows);
         setData(rows);
         const n = rows.length;
         const defaultLen = Math.min(CHART_DEFAULT_VIEWPORT_BARS, n);

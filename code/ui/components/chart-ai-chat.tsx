@@ -3,7 +3,7 @@
 import { useState, useRef, useEffect, type Dispatch, type SetStateAction } from "react";
 import { useRouter } from "next/navigation";
 import { Bot, Send, Loader2, Trash2, ChevronDown, ChevronRight, Crosshair, Check, Sparkles } from "lucide-react";
-import ReactMarkdown from "react-markdown";
+import { ChatMarkdown } from "@/components/chat-markdown";
 import {
   RUN_TOUR_EVENT,
   type RunTourEventDetail,
@@ -79,75 +79,11 @@ function scoreColor(v: number): string {
 // --- markdown renderers ---
 
 function PersonaMarkdown({ content }: { content: string }) {
-  return (
-    <ReactMarkdown
-      components={{
-        p: ({ children }) => (
-          <p className="text-[11px] leading-relaxed text-muted-foreground mb-1.5 last:mb-0">{children}</p>
-        ),
-        strong: ({ children }) => (
-          <strong className="font-semibold text-foreground/90">{children}</strong>
-        ),
-        ul: ({ children }) => <ul className="mb-1.5 space-y-0.5">{children}</ul>,
-        ol: ({ children }) => <ol className="mb-1.5 space-y-0.5 list-decimal pl-3">{children}</ol>,
-        li: ({ children }) => (
-          <li className="text-[11px] text-muted-foreground flex gap-2 leading-relaxed">
-            <span className="mt-[5px] w-[3px] h-[3px] rounded-full bg-muted-foreground/40 flex-shrink-0" />
-            <span>{children}</span>
-          </li>
-        ),
-        h1: ({ children }) => (
-          <h1 className="text-[12px] font-semibold text-foreground mt-3 mb-1 first:mt-0">{children}</h1>
-        ),
-        h2: ({ children }) => (
-          <h2 className="text-[11px] font-semibold text-foreground/80 mt-2.5 mb-1 first:mt-0">{children}</h2>
-        ),
-        h3: ({ children }) => (
-          <h3 className="text-[10px] font-medium text-foreground/50 uppercase tracking-widest mt-2 mb-0.5 first:mt-0">
-            {children}
-          </h3>
-        ),
-      }}
-    >
-      {content}
-    </ReactMarkdown>
-  );
+  return <ChatMarkdown content={content} variant="persona" />;
 }
 
 function AnalysisMarkdown({ content }: { content: string }) {
-  return (
-    <ReactMarkdown
-      components={{
-        p: ({ children }) => (
-          <p className="text-[12px] leading-relaxed text-foreground/70 mb-2 last:mb-0">{children}</p>
-        ),
-        strong: ({ children }) => (
-          <strong className="font-semibold text-foreground">{children}</strong>
-        ),
-        ul: ({ children }) => <ul className="mb-2 space-y-1">{children}</ul>,
-        ol: ({ children }) => <ol className="mb-2 space-y-1 list-decimal pl-4">{children}</ol>,
-        li: ({ children }) => (
-          <li className="text-[12px] text-foreground/70 flex gap-2.5 leading-relaxed">
-            <span className="mt-[5px] w-[3px] h-[3px] rounded-full bg-amber-500/60 flex-shrink-0" />
-            <span>{children}</span>
-          </li>
-        ),
-        h1: ({ children }) => (
-          <h1 className="text-[13px] font-semibold text-foreground mt-4 mb-1.5 first:mt-0">{children}</h1>
-        ),
-        h2: ({ children }) => (
-          <h2 className="text-[12px] font-semibold text-foreground mt-3 mb-1 first:mt-0">{children}</h2>
-        ),
-        h3: ({ children }) => (
-          <h3 className="text-[10px] font-medium text-foreground/45 uppercase tracking-widest mt-3 mb-1 first:mt-0">
-            {children}
-          </h3>
-        ),
-      }}
-    >
-      {content}
-    </ReactMarkdown>
-  );
+  return <ChatMarkdown content={content} variant="analysis" />;
 }
 
 // --- sub-components ---

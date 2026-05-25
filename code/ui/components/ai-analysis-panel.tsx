@@ -3,7 +3,7 @@
 import { useState, useRef, useEffect } from "react";
 import { Bot, X, Loader2, RotateCcw } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import ReactMarkdown from "react-markdown";
+import { ChatMarkdown } from "@/components/chat-markdown";
 import { fmpGetQuote, fmpGetOhlc, type FmpOhlcBar } from "@/app/actions/fmp";
 
 const responseCache = new Map<string, string>();
@@ -183,16 +183,8 @@ export function AiAnalysisPanel({
             </div>
           )}
           {output && (
-            <div className="text-sm leading-relaxed text-foreground prose prose-sm prose-invert max-w-none
-              prose-headings:font-semibold prose-headings:text-foreground
-              prose-h1:text-base prose-h2:text-sm prose-h3:text-sm
-              prose-p:my-1.5 prose-p:leading-relaxed
-              prose-ul:my-1.5 prose-ul:pl-4 prose-li:my-0.5
-              prose-ol:my-1.5 prose-ol:pl-4
-              prose-strong:text-foreground prose-strong:font-semibold
-              prose-code:text-xs prose-code:bg-muted prose-code:px-1 prose-code:py-0.5 prose-code:rounded
-              prose-hr:border-border prose-hr:my-3">
-              <ReactMarkdown>{output}</ReactMarkdown>
+            <div className="text-sm leading-relaxed text-foreground">
+              <ChatMarkdown content={output} variant="help" />
               {loading && <span className="inline-block w-1.5 h-4 bg-primary ml-0.5 animate-pulse align-middle" />}
             </div>
           )}
