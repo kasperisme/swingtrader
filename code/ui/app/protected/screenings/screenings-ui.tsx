@@ -52,7 +52,7 @@ import {
   getBulkAnalysisJob,
   screeningsAddTicker,
   screeningsCreateRun,
-  screeningsSoftDeleteRun,
+  screeningsDeleteRun,
   screeningsUpsertDismissNote,
   screeningsGetUserTrades,
   screeningsGetTickerSentimentHeadRows,
@@ -142,6 +142,16 @@ export type { ScanRun, ScreeningRow, ScanRowNote } from "./screenings-types";
 
 type Filters = ScreeningsFilters;
 const DEFAULT_FILTERS = DEFAULT_SCREENINGS_FILTERS;
+
+// Filters are persisted per-screening (keyed by the run's `source`) so each
+// screening keeps its own filter set, shared across that screening's dated
+// runs. Runs without a source fall back to the bare key, which also preserves
+// the pre-existing global blob written before this change.
+const FILTERS_KEY_PREFIX = "screenings-filters";
+function filtersStorageKey(source: string | null | undefined): string {
+  const s = (source ?? "").trim();
+  return s ? `${FILTERS_KEY_PREFIX}:${s}` : FILTERS_KEY_PREFIX;
+}
 
 const OPTIMISTIC_ROW_ID = -1;
 
@@ -1314,12 +1324,27 @@ export function ScreeningsUI({
   const [search, setSearch] = useState("");
   const [filters, setFiltersState] = useState<Filters>(DEFAULT_FILTERS);
 
+  // The screening whose filters are currently active — identified by the
+  // selected run's `source` (falls back to the first run). Filter load/save
+  // are keyed off this so switching to a different screening swaps filter sets.
+  const currentSource = useMemo(() => {
+    const run = runs.find((r) => r.id === selectedRunId) ?? runs[0] ?? null;
+    return run?.source ?? null;
+  }, [runs, selectedRunId]);
+
+  // Held in a ref so the stable setFilters callback always writes to the key
+  // for the screening that's active at save time.
+  const filtersKeyRef = useRef(filtersStorageKey(currentSource));
+  useEffect(() => {
+    filtersKeyRef.current = filtersStorageKey(currentSource);
+  }, [currentSource]);
+
   const setFilters = useCallback(
     (f: Filters | ((prev: Filters) => Filters)) => {
       setFiltersState((prev) => {
         const next = typeof f === "function" ? f(prev) : f;
         try {
-          localStorage.setItem("screenings-filters", JSON.stringify(next));
+          localStorage.setItem(filtersKeyRef.current, JSON.stringify(next));
         } catch {
           /* ignore */
         }
@@ -1623,10 +1648,15 @@ export function ScreeningsUI({
   const [bulkStarting, setBulkStarting] = useState(false);
   const [bulkError, setBulkError] = useState<string | null>(null);
 
-  // Load persisted UI preferences only after hydration to avoid SSR/client mismatch.
+  // Load the active screening's persisted filters whenever it changes — on
+  // mount and on every switch between screenings. Reading runs only after
+  // hydration avoids an SSR/client mismatch. A screening with no saved blob
+  // resets to defaults so filters from another screening don't leak across.
   useEffect(() => {
     try {
-      const storedFilters = localStorage.getItem("screenings-filters");
+      const storedFilters = localStorage.getItem(
+        filtersStorageKey(currentSource),
+      );
       if (storedFilters) {
         const parsed = JSON.parse(storedFilters) as Record<string, unknown>;
         // Legacy keys (dynamicTruthys, dynamicNumericMins) merged into the
@@ -1647,11 +1677,16 @@ export function ScreeningsUI({
           normalized.numMin = { ...normalized.numMin, ...legacy.dynamicNumericMins };
         }
         setFiltersState(normalized);
+      } else {
+        setFiltersState(DEFAULT_FILTERS);
       }
     } catch {
       // ignore malformed storage
     }
+  }, [currentSource]);
 
+  // Sort preferences are global (not screening-specific); load once on mount.
+  useEffect(() => {
     try {
       const v = localStorage.getItem("screenings-sort-key");
       if (typeof v === "string" && v.length > 0 && v.length < 200) {
@@ -2237,17 +2272,17 @@ export function ScreeningsUI({
     }
   }
 
-  async function softDeleteRun(runId: number) {
+  async function deleteRun(runId: number) {
     if (
       !window.confirm(
-        "Remove this screening from your list? Data stays in the database but it will no longer appear here.",
+        "Permanently delete this screening? This removes it and all of its results from the database and cannot be undone.",
       )
     ) {
       return;
     }
     setDeletingRunId(runId);
     try {
-      const res = await screeningsSoftDeleteRun(runId);
+      const res = await screeningsDeleteRun(runId);
       if (!res.ok) {
         window.alert(res.error);
         return;
@@ -2519,7 +2554,7 @@ export function ScreeningsUI({
             Replaces the previous raised-card pill row. Per the project's
             "data terminal" aesthetic, each run is a column with a hairline
             bottom-border accent for active state — no rounded card chrome. */}
-        <div className="flex items-end gap-3 border-b border-border mb-3 min-h-[3.25rem]">
+        <div className="flex flex-wrap sm:flex-nowrap items-end gap-x-3 gap-y-2 border-b border-border mb-3 min-h-[3.25rem]">
           <span className="shrink-0 self-end pb-2 text-[10px] font-mono uppercase tracking-[0.14em] text-muted-foreground/70">
             Screenings
           </span>
@@ -2529,9 +2564,11 @@ export function ScreeningsUI({
               from the search above.
             </p>
           ) : (
+            <>
+            {/* Desktop / tablet: editorial tab strip. */}
             <div
               data-tour="screen-runs"
-              className="flex flex-1 min-w-0 items-end gap-x-4 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+              className="hidden sm:flex flex-1 min-w-0 items-end gap-x-4 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
             >
               {runs.map((run) => {
                 const active = run.id === (selectedRun?.id ?? null);
@@ -2567,12 +2604,12 @@ export function ScreeningsUI({
                     </button>
                     <button
                       type="button"
-                      title="Remove from list"
-                      aria-label={`Remove screening ${run.scan_date}`}
+                      title="Delete screening"
+                      aria-label={`Delete screening ${run.scan_date}`}
                       disabled={busy}
                       onClick={(e) => {
                         e.stopPropagation();
-                        void softDeleteRun(run.id);
+                        void deleteRun(run.id);
                       }}
                       className={`absolute right-0 top-1 p-1 rounded-sm text-muted-foreground/50 transition-all opacity-0 group-hover:opacity-100 focus:opacity-100 hover:text-rose-500 ${busy ? "pointer-events-none opacity-50" : ""}`}
                     >
@@ -2586,10 +2623,46 @@ export function ScreeningsUI({
                 );
               })}
             </div>
+            {/* Mobile: native dropdown — far easier to pick a screening than
+                scrubbing a horizontal tab strip on a small screen. */}
+            <div className="flex sm:hidden flex-1 min-w-0 items-end gap-2 pb-2">
+              <div className="relative flex-1 min-w-0">
+                <select
+                  aria-label="Select screening"
+                  value={selectedRun?.id ?? ""}
+                  onChange={(e) => selectRun(Number(e.target.value))}
+                  className="w-full appearance-none rounded-md border border-input bg-background py-2 pl-2.5 pr-8 text-sm font-mono tabular-nums focus:outline-none focus:ring-1 focus:ring-ring"
+                >
+                  {runs.map((run) => (
+                    <option key={run.id} value={run.id}>
+                      {run.scan_date} · {run.source}
+                    </option>
+                  ))}
+                </select>
+                <ChevronDown className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+              </div>
+              {selectedRun && (
+                <button
+                  type="button"
+                  title="Delete screening"
+                  aria-label={`Delete screening ${selectedRun.scan_date}`}
+                  disabled={deletingRunId === selectedRun.id}
+                  onClick={() => void deleteRun(selectedRun.id)}
+                  className="shrink-0 rounded-md border border-border p-2 text-muted-foreground/70 transition-colors hover:text-rose-500 disabled:pointer-events-none disabled:opacity-50"
+                >
+                  {deletingRunId === selectedRun.id ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <Trash2 className="h-4 w-4" />
+                  )}
+                </button>
+              )}
+            </div>
+            </>
           )}
           <form
             data-tour="screen-create"
-            className="shrink-0 self-end pb-2 flex items-center gap-1.5"
+            className="shrink-0 self-end pb-2 flex items-center gap-1.5 basis-full sm:basis-auto"
             onSubmit={(e) => {
               e.preventDefault();
               void handleCreateScreening();
@@ -2602,7 +2675,7 @@ export function ScreeningsUI({
               placeholder="New screening…"
               maxLength={120}
               disabled={creatingRun}
-              className="w-44 sm:w-52 rounded-md border border-input bg-background px-2.5 py-1 text-xs placeholder:text-muted-foreground/70 focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-60"
+              className="flex-1 sm:flex-none sm:w-52 rounded-md border border-input bg-background px-2.5 py-1 text-xs placeholder:text-muted-foreground/70 focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-60"
               aria-label="New screening name"
             />
             <button

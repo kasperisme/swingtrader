@@ -686,6 +686,7 @@ export async function importLatestPublicScreeningResultForMe(
   // 3. user_scan_rows — per-ticker payload (dataset = script_key matches the
   // /protected/screenings filter).
   let rowCount = 0;
+  let insertedRows: { id: number }[] = [];
   if (rowPayloads.length > 0) {
     const rowsToInsert = rowPayloads.map((p) => ({
       run_id: runId,
@@ -695,17 +696,105 @@ export async function importLatestPublicScreeningResultForMe(
       row_data: p.rowData,
       user_id: userId,
     }));
-    const { error: rowsErr } = await supabase
+    // .select("id") returns the inserted rows in input order so each ticker
+    // maps back to its scan_row_id for the note write below.
+    const { data: insRows, error: rowsErr } = await supabase
       .schema(SCHEMA)
       .from("user_scan_rows")
-      .insert(rowsToInsert);
+      .insert(rowsToInsert)
+      .select("id");
     if (rowsErr) {
       console.error(
         "[public-screenings] import: user_scan_rows insert failed",
         describePgError(rowsErr),
       );
     } else {
-      rowCount = rowsToInsert.length;
+      insertedRows = (insRows as { id: number }[]) || [];
+      rowCount = insertedRows.length || rowsToInsert.length;
+    }
+  }
+
+  // 3b. user_scan_row_notes — copy each ticker's llm_analysis verdict (status,
+  // comment, entry metadata) into the subscriber's workflow state, mirroring
+  // services/public_screenings/runner.py. Every note carries metadata_json
+  // (default {}) so the bulk upsert keys stay uniform — PostgREST rejects a
+  // batch whose objects don't all share the same keys, which would otherwise
+  // drop every note as soon as one ticker has an entry and another doesn't.
+  if (insertedRows.length > 0) {
+    type Note = {
+      scan_row_id: number;
+      run_id: number;
+      ticker: string;
+      user_id: string;
+      status: string;
+      comment: string | null;
+      metadata_json: Record<string, unknown>;
+      updated_at: string;
+    };
+    const notes: Note[] = [];
+    for (let i = 0; i < insertedRows.length && i < rowPayloads.length; i += 1) {
+      const scanRowId = insertedRows[i]?.id;
+      const llm = rowPayloads[i].rowData.llm_analysis;
+      if (!llm || typeof llm !== "object" || Array.isArray(llm)) continue;
+      const llmObj = llm as Record<string, unknown>;
+      const status = llmObj.status;
+      if (
+        status !== "active" &&
+        status !== "watchlist" &&
+        status !== "pipeline" &&
+        status !== "dismissed"
+      ) {
+        continue;
+      }
+      const ticker = (rowPayloads[i].symbol || "").trim();
+      if (!scanRowId || !ticker) continue;
+
+      // Match runner.py's entry shape so the chart UI's setTickerEntryMarker
+      // resolves it the same way (by date first, then barIdx fallback).
+      const metadataJson: Record<string, unknown> = {};
+      const entry = llmObj.entry;
+      if (entry && typeof entry === "object" && !Array.isArray(entry)) {
+        const e = entry as Record<string, unknown>;
+        if (e.price != null) {
+          const entryBlock: Record<string, unknown> = {
+            barIdx: Number(llmObj.entry_bar_idx) || 0,
+            date: String(llmObj.entry_date || ""),
+            price: e.price,
+            direction: e.direction,
+          };
+          if ("take_profit" in e) entryBlock.take_profit = e.take_profit;
+          if ("stop_loss" in e) entryBlock.stop_loss = e.stop_loss;
+          metadataJson.entry = entryBlock;
+        }
+      }
+
+      const comment =
+        typeof llmObj.comment === "string"
+          ? llmObj.comment.trim().slice(0, 400) || null
+          : null;
+
+      notes.push({
+        scan_row_id: scanRowId,
+        run_id: runId,
+        ticker,
+        user_id: userId,
+        status,
+        comment,
+        metadata_json: metadataJson,
+        updated_at: nowIso,
+      });
+    }
+    if (notes.length > 0) {
+      const { error: notesErr } = await supabase
+        .schema(SCHEMA)
+        .from("user_scan_row_notes")
+        .upsert(notes, { onConflict: "scan_row_id,user_id" });
+      if (notesErr) {
+        console.warn(
+          "[public-screenings] import: user_scan_row_notes upsert failed",
+          describePgError(notesErr),
+        );
+      }
     }
   }
 

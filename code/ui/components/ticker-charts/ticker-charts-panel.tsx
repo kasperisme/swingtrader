@@ -42,7 +42,13 @@ export type TickerChartsPanelProps = {
   onEditComment: (ticker: string) => void;
   getTickerMeta: (ticker: string) => { sector: string; industry: string; subSector?: string };
   getEntryMarker: (ticker: string) => EntryMarker | null;
-  onSetEntryMarker: (ticker: string, point: ChartPoint) => void;
+  onSetEntryMarker: (
+    ticker: string,
+    point: ChartPoint,
+    direction?: "long" | "short",
+    takeProfit?: number | null,
+    stopLoss?: number | null,
+  ) => void;
   onClearEntryMarker: (ticker: string) => void;
   /** When false, hides dismiss / status / note controls (e.g. standalone research page). */
   screeningToolbar?: boolean;
@@ -140,6 +146,15 @@ export function TickerChartsPanel({
     pointSnapshot: ChartPoint | null;
   } | null>(null);
   const entryMenuRef = useRef<HTMLDivElement>(null);
+  const [entryEditor, setEntryEditor] = useState<{
+    x: number;
+    y: number;
+    direction: "long" | "short";
+    entry: string;
+    target: string;
+    stop: string;
+  } | null>(null);
+  const entryEditorRef = useRef<HTMLDivElement>(null);
   const [chartLastClose, setChartLastClose] = useState<number | null>(null);
   const [chartData, setChartData] = useState<OhlcBar[]>([]);
   const [copyState, setCopyState] = useState<"idle" | "ok" | "err">("idle");
@@ -158,6 +173,7 @@ export function TickerChartsPanel({
     setChartLastClose(null);
     setChartData([]);
     setCopyState("idle");
+    setEntryEditor(null);
   }, [symbol]);
 
   const entryMarker = getEntryMarker(symbol);
@@ -207,6 +223,50 @@ export function TickerChartsPanel({
       document.removeEventListener("keydown", onKey);
     };
   }, [entryMenu]);
+
+  useEffect(() => {
+    if (!entryEditor) return;
+    function onPointerDown(e: PointerEvent) {
+      if (entryEditorRef.current?.contains(e.target as Node)) return;
+      setEntryEditor(null);
+    }
+    function onKey(e: KeyboardEvent) {
+      if (e.key === "Escape") setEntryEditor(null);
+    }
+    document.addEventListener("pointerdown", onPointerDown, true);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("pointerdown", onPointerDown, true);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [entryEditor]);
+
+  function saveEntryEditor() {
+    if (!entryEditor || !entryMarker) return;
+    const entryPrice = Number.parseFloat(entryEditor.entry);
+    if (!Number.isFinite(entryPrice)) return;
+    const tpRaw = entryEditor.target.trim();
+    const slRaw = entryEditor.stop.trim();
+    const tp = tpRaw === "" ? null : Number.parseFloat(tpRaw);
+    const sl = slRaw === "" ? null : Number.parseFloat(slRaw);
+    const point: ChartPoint = {
+      barIdx: entryMarker.barIdx,
+      date: entryMarker.date,
+      price: entryPrice,
+      open: 0,
+      high: 0,
+      low: 0,
+      close: 0,
+    };
+    onSetEntryMarker(
+      symbol,
+      point,
+      entryEditor.direction,
+      tp != null && Number.isFinite(tp) ? tp : null,
+      sl != null && Number.isFinite(sl) ? sl : null,
+    );
+    setEntryEditor(null);
+  }
 
   if (symbols.length === 0) {
     return (
@@ -457,6 +517,25 @@ export function TickerChartsPanel({
           onChartMetrics={onChartMetrics}
           onChartData={onChartData}
           onAutoEntry={(point) => onSetEntryMarker(symbol, point)}
+          onEntryEdit={
+            entryMarker
+              ? (cx, cy) =>
+                  setEntryEditor({
+                    x: cx,
+                    y: cy,
+                    direction: entryMarker.direction ?? "long",
+                    entry: String(entryMarker.price),
+                    target:
+                      entryMarker.take_profit != null
+                        ? String(entryMarker.take_profit)
+                        : "",
+                    stop:
+                      entryMarker.stop_loss != null
+                        ? String(entryMarker.stop_loss)
+                        : "",
+                  })
+              : undefined
+          }
           annotations={annotations}
           drawingMode={drawingMode}
           drawingRole={drawingRole}
@@ -521,6 +600,108 @@ export function TickerChartsPanel({
           >
             Clear entry
           </button>
+        </div>
+      )}
+
+      {entryEditor && (
+        <div
+          ref={entryEditorRef}
+          className="fixed z-[100] w-[220px] rounded-md border border-border bg-popover p-3 text-popover-foreground shadow-md"
+          style={{
+            left: Math.min(entryEditor.x, window.innerWidth - 232),
+            top: Math.min(entryEditor.y, window.innerHeight - 260),
+          }}
+          onPointerDown={(e) => e.stopPropagation()}
+        >
+          <div className="mb-2 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+            Edit position
+          </div>
+          <div className="space-y-2">
+            <label className="flex items-center justify-between gap-2 text-xs">
+              <span className="text-muted-foreground">Direction</span>
+              <select
+                className="h-7 w-[120px] rounded border border-border bg-background px-1.5 text-xs"
+                value={entryEditor.direction}
+                onChange={(e) =>
+                  setEntryEditor((p) =>
+                    p ? { ...p, direction: e.target.value as "long" | "short" } : p,
+                  )
+                }
+              >
+                <option value="long">Long</option>
+                <option value="short">Short</option>
+              </select>
+            </label>
+            <label className="flex items-center justify-between gap-2 text-xs">
+              <span className="text-muted-foreground">Entry</span>
+              <input
+                type="number"
+                step="any"
+                inputMode="decimal"
+                className="h-7 w-[120px] rounded border border-border bg-background px-1.5 text-xs"
+                value={entryEditor.entry}
+                onChange={(e) =>
+                  setEntryEditor((p) => (p ? { ...p, entry: e.target.value } : p))
+                }
+              />
+            </label>
+            <label className="flex items-center justify-between gap-2 text-xs">
+              <span className="text-muted-foreground">Target</span>
+              <input
+                type="number"
+                step="any"
+                inputMode="decimal"
+                placeholder="—"
+                className="h-7 w-[120px] rounded border border-border bg-background px-1.5 text-xs"
+                value={entryEditor.target}
+                onChange={(e) =>
+                  setEntryEditor((p) => (p ? { ...p, target: e.target.value } : p))
+                }
+              />
+            </label>
+            <label className="flex items-center justify-between gap-2 text-xs">
+              <span className="text-muted-foreground">Stop</span>
+              <input
+                type="number"
+                step="any"
+                inputMode="decimal"
+                placeholder="—"
+                className="h-7 w-[120px] rounded border border-border bg-background px-1.5 text-xs"
+                value={entryEditor.stop}
+                onChange={(e) =>
+                  setEntryEditor((p) => (p ? { ...p, stop: e.target.value } : p))
+                }
+              />
+            </label>
+          </div>
+          <div className="mt-3 flex items-center justify-between gap-2">
+            <button
+              type="button"
+              className="text-xs text-muted-foreground hover:text-destructive"
+              onClick={() => {
+                onClearEntryMarker(symbol);
+                setEntryEditor(null);
+              }}
+            >
+              Clear
+            </button>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                className="rounded border border-border px-2 py-1 text-xs hover:bg-muted"
+                onClick={() => setEntryEditor(null)}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="rounded bg-primary px-2 py-1 text-xs font-medium text-primary-foreground hover:opacity-90"
+                onClick={saveEntryEditor}
+              >
+                Save
+              </button>
+            </div>
+          </div>
         </div>
       )}
 

@@ -31,8 +31,32 @@ export function resolveEntryBarIndex(
   data: OhlcBar[],
   entry: { barIdx: number; date: string },
 ): number {
-  const byDate = data.findIndex((d) => d.date === entry.date);
-  if (byDate >= 0) return byDate;
+  if (data.length === 0) return 0;
+  // Exact match first (fast path).
+  const exact = data.findIndex((d) => d.date === entry.date);
+  if (exact >= 0) return exact;
+  // Normalise to calendar day: metadata_json dates may carry a time
+  // component ("2026-05-22 00:00") while OHLC bars are "2026-05-22"
+  // (or vice versa). Compare on the YYYY-MM-DD prefix so the marker
+  // anchors to the right bar regardless of formatting.
+  const key = entry.date.slice(0, 10);
+  if (key) {
+    const sameDay = data.findIndex((d) => d.date.slice(0, 10) === key);
+    if (sameDay >= 0) return sameDay;
+    // No bar on that exact day (e.g. a weekly/4h chart, or a non-trading
+    // day): anchor to the last bar on or before the entry date so the
+    // marker lands in the right region instead of snapping to a stale
+    // absolute barIdx. `data` is sorted ascending by date.
+    let candidate = -1;
+    for (let i = 0; i < data.length; i++) {
+      if (data[i]!.date.slice(0, 10) <= key) candidate = i;
+      else break;
+    }
+    if (candidate >= 0) return candidate;
+    // Entry predates all loaded bars — clamp to the oldest bar.
+    return 0;
+  }
+  // No usable date — fall back to the stored absolute index.
   return Math.max(0, Math.min(data.length - 1, entry.barIdx));
 }
 

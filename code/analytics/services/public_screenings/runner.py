@@ -543,15 +543,11 @@ def _write_scan_artefacts_for_subscriber(
             )
             if not scan_row_id or not ticker:
                 continue
-            note: dict[str, Any] = {
-                "scan_row_id": scan_row_id,
-                "run_id": run_id,
-                "ticker": ticker,
-                "user_id": user_id,
-                "status": llm_status,
-                "comment": ((llm.get("comment") or "").strip()[:400] or None),
-                "updated_at": finished_at_iso,
-            }
+            # Always set metadata_json (default {}). PostgREST bulk upserts
+            # require every object in the batch to carry identical keys, so a
+            # mix of entry/no-entry tickers must not omit the key on some rows
+            # — doing so fails the whole batch and writes zero notes.
+            metadata_json: dict[str, Any] = {}
             entry = llm.get("entry")
             if isinstance(entry, dict) and entry.get("price") is not None:
                 # Match services.bulk_analysis.worker._upsert_note's entry
@@ -567,7 +563,17 @@ def _write_scan_artefacts_for_subscriber(
                     entry_block["take_profit"] = entry["take_profit"]
                 if "stop_loss" in entry:
                     entry_block["stop_loss"] = entry["stop_loss"]
-                note["metadata_json"] = {"entry": entry_block}
+                metadata_json["entry"] = entry_block
+            note: dict[str, Any] = {
+                "scan_row_id": scan_row_id,
+                "run_id": run_id,
+                "ticker": ticker,
+                "user_id": user_id,
+                "status": llm_status,
+                "comment": ((llm.get("comment") or "").strip()[:400] or None),
+                "metadata_json": metadata_json,
+                "updated_at": finished_at_iso,
+            }
             notes_to_upsert.append(note)
 
         if notes_to_upsert:

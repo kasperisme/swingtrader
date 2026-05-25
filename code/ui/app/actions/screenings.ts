@@ -285,8 +285,8 @@ export async function screeningsUpsertDismissNote(input: {
   return { ok: true, data: true };
 }
 
-/** Soft-delete a screening run (hides from UI; does not remove rows). */
-export async function screeningsSoftDeleteRun(
+/** Permanently delete a screening run and all of its rows/notes. */
+export async function screeningsDeleteRun(
   runId: number,
 ): Promise<ScreeningActionSuccess<true> | ScreeningActionError> {
   if (!runId || typeof runId !== "number" || runId < 1) {
@@ -300,13 +300,46 @@ export async function screeningsSoftDeleteRun(
     return { ok: false, error: "Unauthorized" };
   }
 
+  // Confirm ownership before touching child rows so we don't delete another
+  // user's data if the FKs aren't scoped by user_id.
+  const { data: run, error: runErr } = await supabase
+    .schema("swingtrader")
+    .from("user_scan_runs")
+    .select("id")
+    .eq("id", runId)
+    .eq("user_id", userId)
+    .limit(1)
+    .maybeSingle();
+
+  if (runErr) return { ok: false, error: runErr.message };
+  if (!run) {
+    return { ok: false, error: "Screening not found or already removed" };
+  }
+
+  // Delete children first (notes → rows) in case the schema lacks ON DELETE
+  // CASCADE, then the run itself.
+  const { error: notesErr } = await supabase
+    .schema("swingtrader")
+    .from("user_scan_row_notes")
+    .delete()
+    .eq("run_id", runId)
+    .eq("user_id", userId);
+  if (notesErr) return { ok: false, error: notesErr.message };
+
+  const { error: rowsErr } = await supabase
+    .schema("swingtrader")
+    .from("user_scan_rows")
+    .delete()
+    .eq("run_id", runId)
+    .eq("user_id", userId);
+  if (rowsErr) return { ok: false, error: rowsErr.message };
+
   const { data, error } = await supabase
     .schema("swingtrader")
     .from("user_scan_runs")
-    .update({ status: "deleted" })
+    .delete()
     .eq("id", runId)
     .eq("user_id", userId)
-    .eq("status", "active")
     .select("id");
 
   if (error) return { ok: false, error: error.message };

@@ -121,6 +121,7 @@ export function CandlestickSvg({
   onChartMetrics,
   onChartData,
   onAutoEntry,
+  onEntryEdit,
   annotations = [],
   drawingMode = "none",
   drawingRole = "info",
@@ -137,6 +138,9 @@ export function CandlestickSvg({
   onChartMetrics?: (m: { lastClose: number } | null) => void;
   onChartData?: (rows: OhlcBar[]) => void;
   onAutoEntry?: (point: ChartPoint) => void;
+  /** Fired when the user clicks the entry / TP / SL position to edit it.
+   * Receives the click's client coords so the parent can position an editor. */
+  onEntryEdit?: (clientX: number, clientY: number) => void;
   annotations?: ChartAnnotation[];
   drawingMode?: "none" | "horizontal" | "zone" | "trend_line";
   drawingRole?: import("./types").AnnotationRole;
@@ -1063,21 +1067,100 @@ export function CandlestickSvg({
           return null;
         })}
 
-        {/* Entry marker: dot at bar + horizontal line to the right edge of the price pane */}
+        {/* Entry / take-profit / stop-loss — TradingView-style position:
+            translucent white profit zone (entry→TP), translucent red risk
+            zone (entry→SL), amber entry ray + dot. Clicking anywhere on the
+            position opens the editor (onEntryEdit). */}
         {entryMarker && (() => {
           const pbi = resolveEntryBarIndex(data, entryMarker);
           if (pbi < sliceStart || pbi > sliceStart + n - 1) return null;
           const px = xOf(pbi - sliceStart);
-          const py = toY(entryMarker.price);
-          const inPane = py >= PAD_T && py <= H_PRICE - PAD_B;
+          const entryY = toY(entryMarker.price);
+          const inPane = entryY >= PAD_T && entryY <= H_PRICE - PAD_B;
           if (!inPane) return null;
+          const xRight = W - PAD_R;
+          const clampY = (y: number) =>
+            Math.max(PAD_T, Math.min(H_PRICE - PAD_B, y));
+          const tp = entryMarker.take_profit;
+          const sl = entryMarker.stop_loss;
+          const tpY = tp != null ? clampY(toY(tp)) : null;
+          const slY = sl != null ? clampY(toY(sl)) : null;
+          const editable = !!onEntryEdit;
+          const handleClick = editable
+            ? (ev: MouseEvent) => {
+                ev.stopPropagation();
+                onEntryEdit!(ev.clientX, ev.clientY);
+              }
+            : undefined;
           return (
-            <g pointerEvents="none">
+            <g
+              style={{ cursor: editable ? "pointer" : "default" }}
+              onClick={handleClick}
+            >
+              {/* Profit zone (entry → take profit), white translucent */}
+              {tpY != null && (
+                <rect
+                  x={px}
+                  y={Math.min(entryY, tpY)}
+                  width={Math.max(0, xRight - px)}
+                  height={Math.abs(tpY - entryY)}
+                  fill="#ffffff"
+                  opacity={0.1}
+                />
+              )}
+              {/* Risk zone (entry → stop loss), red translucent */}
+              {slY != null && (
+                <rect
+                  x={px}
+                  y={Math.min(entryY, slY)}
+                  width={Math.max(0, xRight - px)}
+                  height={Math.abs(slY - entryY)}
+                  fill="#ef4444"
+                  opacity={0.12}
+                />
+              )}
+              {/* Take-profit boundary + label */}
+              {tpY != null && (
+                <>
+                  <line
+                    x1={px}
+                    x2={xRight}
+                    y1={tpY}
+                    y2={tpY}
+                    stroke="#e5e7eb"
+                    strokeWidth={1}
+                    opacity={0.8}
+                  />
+                  <text x={px + 4} y={tpY - 3} fontSize={10} fill="#e5e7eb" opacity={0.95}>
+                    TP {tp!.toFixed(2)}
+                  </text>
+                </>
+              )}
+              {/* Stop-loss boundary + label */}
+              {slY != null && (
+                <>
+                  <line
+                    x1={px}
+                    x2={xRight}
+                    y1={slY}
+                    y2={slY}
+                    stroke="#ef4444"
+                    strokeWidth={1}
+                    opacity={0.85}
+                  />
+                  <text x={px + 4} y={slY + 11} fontSize={10} fill="#ef4444" opacity={0.95}>
+                    SL {sl!.toFixed(2)}
+                  </text>
+                </>
+              )}
+              {/* Wide invisible hit area along the entry ray */}
+              <line x1={px} x2={xRight} y1={entryY} y2={entryY} stroke="transparent" strokeWidth={12} />
+              {/* Entry ray + dot (amber) */}
               <line
                 x1={px}
-                y1={py}
-                x2={W - PAD_R}
-                y2={py}
+                y1={entryY}
+                x2={xRight}
+                y2={entryY}
                 stroke="#f59e0b"
                 strokeWidth={1.5}
                 strokeDasharray="5 3"
@@ -1085,12 +1168,15 @@ export function CandlestickSvg({
               />
               <circle
                 cx={px}
-                cy={py}
+                cy={entryY}
                 r={4}
                 fill="#f59e0b"
                 stroke="hsl(var(--background))"
                 strokeWidth={1.5}
               />
+              <text x={px + 8} y={entryY - 4} fontSize={10} fill="#f59e0b" opacity={0.95}>
+                Entry {entryMarker.price.toFixed(2)}
+              </text>
             </g>
           );
         })()}
