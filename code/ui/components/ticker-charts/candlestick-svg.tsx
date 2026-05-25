@@ -246,6 +246,15 @@ export function CandlestickSvg({
       }
   >({ mode: "idle" });
   const suppressClickAfterPan = useRef(false);
+  // Touch long-press → create an entry at the pressed bar/price. The mobile
+  // equivalent of the desktop right-click "set entry" menu.
+  const longPressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const clearLongPress = useCallback(() => {
+    if (longPressTimerRef.current) {
+      clearTimeout(longPressTimerRef.current);
+      longPressTimerRef.current = null;
+    }
+  }, []);
   const [drawingFirstPoint, setDrawingFirstPoint] = useState<{ price: number; date: string } | null>(null);
 
   useEffect(() => {
@@ -713,6 +722,38 @@ export function CandlestickSvg({
       startViewStart: sliceStart,
       startPriceOffset: priceOffset,
     };
+
+    // Touch long-press (no movement) creates an entry at the pressed point —
+    // the mobile stand-in for the desktop right-click menu. Cancelled by any
+    // pan/scroll movement in handlePointerMove and on pointer up/cancel.
+    clearLongPress();
+    if (e.pointerType === "touch" && onAutoEntry) {
+      const coords = svgCoordsFromEvent(e as unknown as MouseEvent<SVGSVGElement>);
+      if (coords) {
+        longPressTimerRef.current = setTimeout(() => {
+          longPressTimerRef.current = null;
+          const bar = data[coords.barIdx];
+          if (!bar) return;
+          const price = toPrice(
+            Math.max(PAD_T, Math.min(H_PRICE - PAD_B, coords.svgY)),
+          );
+          onAutoEntry({
+            barIdx: coords.barIdx,
+            date: bar.date,
+            price,
+            open: bar.open,
+            high: bar.high,
+            low: bar.low,
+            close: bar.close,
+          });
+          // Swallow the click that fires on release and stop the gesture
+          // from turning into a pan.
+          suppressClickAfterPan.current = true;
+          panRef.current = { mode: "idle" };
+          setIsPanning(false);
+        }, 480);
+      }
+    }
   }
 
   function handlePointerMove(e: ReactPointerEvent<SVGSVGElement>) {
@@ -720,6 +761,10 @@ export function CandlestickSvg({
     if (p.mode === "candidate" && (e.buttons & 1) === 1) {
       const dx = e.clientX - p.startClientX;
       const dy = e.clientY - p.startClientY;
+      // Any real movement means this is a pan, not a long-press.
+      if (longPressTimerRef.current && (Math.abs(dx) > 8 || Math.abs(dy) > 8)) {
+        clearLongPress();
+      }
       if (Math.abs(dx) > 6 && Math.abs(dx) > Math.abs(dy) * 0.65) {
         try { e.currentTarget.setPointerCapture(e.pointerId); } catch { /* already captured */ }
         panRef.current = {
@@ -788,6 +833,7 @@ export function CandlestickSvg({
   }
 
   function handlePointerUp(e: ReactPointerEvent<SVGSVGElement>) {
+    clearLongPress();
     const p = panRef.current;
     if ((p.mode === "panning" || p.mode === "price_panning") && p.pointerId === e.pointerId) {
       try { e.currentTarget.releasePointerCapture(e.pointerId); } catch { /* not captured */ }

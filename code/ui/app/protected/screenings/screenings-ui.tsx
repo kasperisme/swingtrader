@@ -136,6 +136,7 @@ import {
 import { ScreeningsMobileViewPicker } from "./screenings-mobile-view-picker";
 import { useCavemanMode } from "@/lib/caveman-mode";
 import { prefetchOhlc } from "@/lib/ohlc-cache";
+import { useHorizontalSwipe } from "@/lib/use-horizontal-swipe";
 
 export type { ScanRun, ScreeningRow, ScanRowNote } from "./screenings-types";
 
@@ -2382,6 +2383,31 @@ export function ScreeningsUI({
     return filteredSymbols.filter((s) => !dismissedSymbols.has(s));
   }, [filteredSymbols, dismissedSymbols, showDismissedInList]);
 
+  // Step the selected ticker through the deep-dive list. Clamps at both ends
+  // (no wrap) so it matches the mobile ticker bar's prev/next buttons.
+  const stepTicker = useCallback(
+    (delta: number) => {
+      const list = deepDiveListSymbols;
+      if (list.length === 0) return;
+      const cur = selectedTickerRef.current;
+      const i = cur ? list.indexOf(cur) : -1;
+      const base = i >= 0 ? i : 0;
+      const next = Math.min(list.length - 1, Math.max(0, base + delta));
+      const sym = list[next];
+      if (sym && sym !== cur) setSelectedTicker(sym);
+    },
+    [deepDiveListSymbols],
+  );
+
+  // Mobile: horizontal swipe over the deep-dive area (anywhere except the
+  // chart, which keeps its own drag-to-pan) steps to the next/previous
+  // ticker. Swipe left → next, swipe right → previous.
+  const tickerSwipeHandlers = useHorizontalSwipe({
+    enabled: isDeepDiveView(activeView) && deepDiveListSymbols.length > 1,
+    onSwipeLeft: () => stepTicker(1),
+    onSwipeRight: () => stepTicker(-1),
+  });
+
   // Default selection: when the deep-dive lands without a ticker chosen, pick
   // the first one in the user's currently visible sort order (sidebar header).
   // Falls back to the raw list order only if the sidebar hasn't reported its
@@ -2875,9 +2901,12 @@ export function ScreeningsUI({
         </button>
       </div>
 
-      {/* View tabs — hidden in caveman mode (the only view is Charts). */}
+      {/* View tabs — hidden in caveman mode (the only view is Charts).
+          pt-3 reserves clearance for the collapse pill above, whose bottom
+          half is rendered via translate-y-1/2 (a transform that reserves no
+          layout space) and would otherwise overlap this row. */}
       {!isCaveman && (
-      <div className="border-b border-border pb-px shrink-0">
+      <div className="pt-3 border-b border-border pb-px shrink-0">
         {/* Mobile-only view picker — its own row so it gets full width */}
         {!addFilterOpen && (
           <div className="sm:hidden mb-2">
@@ -2999,6 +3028,7 @@ export function ScreeningsUI({
       {/* View content — scrollable area */}
       <div
         className={`flex-1 min-w-0 min-h-0 ${isDeepDiveView(activeView) && filteredSymbols.length > 0 ? "overflow-hidden" : "overflow-y-auto"}`}
+        {...tickerSwipeHandlers}
       >
         {rows.length === 0 ? (
           <div className="text-sm text-muted-foreground py-8 text-center">

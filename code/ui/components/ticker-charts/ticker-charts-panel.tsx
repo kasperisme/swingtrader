@@ -160,6 +160,17 @@ export function TickerChartsPanel({
   const [copyState, setCopyState] = useState<"idle" | "ok" | "err">("idle");
   const [drawingMode, setDrawingMode] = useState<"none" | "horizontal" | "zone" | "trend_line">("none");
   const [drawingRole, setDrawingRole] = useState<AnnotationRole>("info");
+  // Touch / no-hover device: right-click and hover affordances don't exist,
+  // so entry guidance and gestures differ.
+  const [isTouch, setIsTouch] = useState(false);
+  useEffect(() => {
+    if (typeof window === "undefined" || !window.matchMedia) return;
+    const mq = window.matchMedia("(hover: none) and (pointer: coarse)");
+    const update = () => setIsTouch(mq.matches);
+    update();
+    mq.addEventListener("change", update);
+    return () => mq.removeEventListener("change", update);
+  }, []);
 
   const onChartMetrics = useCallback((m: { lastClose: number } | null) => {
     setChartLastClose(m?.lastClose ?? null);
@@ -287,6 +298,10 @@ export function TickerChartsPanel({
   const footerNavHint = showChevronSymbolNav
     ? "Use ← → arrow keys or buttons to navigate · "
     : "";
+
+  const entryHint = isTouch
+    ? "Long-press chart to add an entry · tap it to edit"
+    : "Right-click chart for entry";
 
   const showTrailingStepNav = showChevronSymbolNav || symbolPicker != null;
 
@@ -499,6 +514,7 @@ export function TickerChartsPanel({
               : "relative"
         }
         title="Drag left/right to pan time · Drag up/down to pan price · Double-click to reset price pan · Right-click for entry options"
+        data-swipe-ignore
         onContextMenu={(e) => {
           e.preventDefault();
           setEntryMenu({
@@ -706,7 +722,7 @@ export function TickerChartsPanel({
       )}
 
       <p className="text-xs text-muted-foreground text-center">
-        {footerNavHint}Right-click chart for entry · {footerTail}
+        {footerNavHint}{entryHint} · {footerTail}
       </p>
     </div>
   );
