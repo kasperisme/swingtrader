@@ -3,24 +3,72 @@
 -- Tag overlap (search_news_by_tags) only matches the curated `search_tags`
 -- array and sorts purely by recency, so a free-text query like
 -- "iran oil crisis" can neither match body text nor rank by how well it fits.
--- This adds a weighted tsvector over title + tags + body and a ranking RPC
--- that ORs the query terms and scores with ts_rank_cd.
+-- This adds a weighted, materialized tsvector over title + tags + body and a
+-- ranking RPC that ORs the query terms and scores with ts_rank_cd.
 
 -- Weighted document vector: title (A) > tags (B) > body (C). ts_rank_cd weights
 -- these {A:1.0, B:0.4, C:0.2} by default, so a title hit outranks a body hit.
-ALTER TABLE swingtrader.news_articles
-    ADD COLUMN IF NOT EXISTS fts tsvector
-    GENERATED ALWAYS AS (
-        setweight(to_tsvector('english', coalesce(title, '')), 'A') ||
-        setweight(to_tsvector('english', array_to_string(search_tags, ' ')), 'B') ||
-        setweight(to_tsvector('english', coalesce(body, '')), 'C')
-    ) STORED;
+--
+-- IMMUTABLE wrapper: a STABLE function (array_to_string) can't be used directly
+-- in a generated column / index, but the result is genuinely deterministic, so
+-- wrapping it lets the column trigger and index reference one shared definition.
+CREATE OR REPLACE FUNCTION swingtrader.news_article_fts(
+    title text,
+    search_tags text[],
+    body text
+)
+RETURNS tsvector
+LANGUAGE sql
+IMMUTABLE
+PARALLEL SAFE
+AS $$
+    SELECT setweight(to_tsvector('english', coalesce(title, '')), 'A')
+        || setweight(to_tsvector('english', coalesce(array_to_string(search_tags, ' '), '')), 'B')
+        || setweight(to_tsvector('english', coalesce(body, '')), 'C');
+$$;
 
-CREATE INDEX IF NOT EXISTS idx_news_articles_fts_gin
-    ON swingtrader.news_articles USING GIN (fts);
+-- Materialize the vector in a real column (NOT a generated/expression index).
+-- Ranking (ts_rank_cd) and the GIN recheck must READ the vector per matched
+-- row; with an expression index Postgres can't read it back and rebuilds
+-- to_tsvector over the full body for every match — tens of thousands of
+-- re-tokenizations for common terms, which times out. A stored column is read
+-- directly. The column is nullable with no default, so ADD COLUMN is an instant
+-- metadata change (no table rewrite); a trigger keeps it current and existing
+-- rows are backfilled below.
+ALTER TABLE swingtrader.news_articles ADD COLUMN IF NOT EXISTS fts tsvector;
 
 COMMENT ON COLUMN swingtrader.news_articles.fts IS
     'Weighted full-text vector (title A, search_tags B, body C) for ranked search.';
+
+CREATE OR REPLACE FUNCTION swingtrader.news_articles_fts_maintain()
+RETURNS trigger
+LANGUAGE plpgsql
+AS $$
+BEGIN
+    NEW.fts := swingtrader.news_article_fts(NEW.title, NEW.search_tags, NEW.body);
+    RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS trg_news_articles_fts ON swingtrader.news_articles;
+CREATE TRIGGER trg_news_articles_fts
+    BEFORE INSERT OR UPDATE OF title, search_tags, body
+    ON swingtrader.news_articles
+    FOR EACH ROW
+    EXECUTE FUNCTION swingtrader.news_articles_fts_maintain();
+
+-- Backfill existing rows. On a large table run this in id-range batches (each
+-- its own transaction) to avoid a long lock / statement timeout, e.g.:
+--   UPDATE swingtrader.news_articles SET fts = swingtrader.news_article_fts(title, search_tags, body)
+--   WHERE id >= :lo AND id < :hi AND fts IS NULL;
+UPDATE swingtrader.news_articles
+   SET fts = swingtrader.news_article_fts(title, search_tags, body)
+ WHERE fts IS NULL;
+
+-- GIN index on the stored column. Use CREATE INDEX CONCURRENTLY (outside a
+-- transaction) when applying against a live table to avoid blocking writes.
+CREATE INDEX IF NOT EXISTS idx_news_articles_fts_gin
+    ON swingtrader.news_articles USING GIN (fts);
 
 -- Ranked full-text search. The query is lexed and stemmed, then the lexemes are
 -- OR-combined so "iran oil crisis" matches articles containing iran OR oil OR
@@ -70,10 +118,12 @@ BEGIN
     RETURN QUERY
     SELECT
         a.id AS article_id,
-        a.title,
-        a.url,
-        a.source,
-        a.slug,
+        -- title/url/source/slug are varchar; cast to text to match the declared
+        -- return type (plpgsql RETURN QUERY does not auto-widen varchar→text).
+        a.title::text,
+        a.url::text,
+        a.source::text,
+        a.slug::text,
         a.image_url,
         a.article_stream,
         a.published_at,

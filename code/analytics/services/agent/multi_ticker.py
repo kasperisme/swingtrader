@@ -28,6 +28,7 @@ import json
 import logging
 import os
 import time
+from datetime import datetime, timezone
 from typing import Any
 
 import httpx
@@ -66,6 +67,22 @@ def reset_session_unavailable_tools() -> None:
     _session_unavailable_tools.clear()
 
 
+def _today_str() -> str:
+    """Current date (US Eastern, the market timezone) as ISO YYYY-MM-DD.
+
+    Injected into every LLM stage so the planner emits correct date-range
+    args (from_date/to_date) and the evaluator reasons about "today" against
+    the real calendar — without this, models default to dates baked into
+    their training data and request stale price windows.
+    """
+    try:
+        from zoneinfo import ZoneInfo
+        now = datetime.now(ZoneInfo("America/New_York"))
+    except Exception:
+        now = datetime.now(timezone.utc)
+    return now.strftime("%Y-%m-%d")
+
+
 # ── Stage 1: plan ───────────────────────────────────────────────────────────
 
 
@@ -83,6 +100,10 @@ is per-ticker, not batched.
 - Parameters shown as ``name={a|b|c}`` are ENUMS — you MUST use one of the \
 listed values verbatim. Never guess or shorten enum values (e.g. for FMP \
 ``chart`` use ``endpoint="intraday-1-hour"``, not ``"1hr"``).
+- For any date arguments (e.g. ``from_date``/``to_date``), compute them \
+RELATIVE to TODAY'S DATE given in the user message. ``to_date`` should be \
+today's date and ``from_date`` an appropriate lookback before it. NEVER use a \
+date from memory or training data — always derive from the provided TODAY.
 - Only pick from the AVAILABLE TOOLS list — do NOT invent tool names or \
 assume tools exist beyond the catalog.
 - If an "EXCLUDED TOOLS" list is given, those tools failed a trial-run \
@@ -177,6 +198,7 @@ async def _plan_tools(
 ) -> dict:
     catalog = _build_tool_catalog(registry, excluded=excluded_tools)
     user_parts = [
+        f"TODAY'S DATE: {_today_str()}",
         f"SCREENING PROMPT:\n{prompt}",
         f"TICKERS ({len(tickers)}): {', '.join(tickers)}",
         f"AVAILABLE TOOLS:\n{catalog}",
@@ -486,6 +508,7 @@ async def _evaluate_ticker(
     context_addon: str,
 ) -> dict:
     user_parts = [
+        f"TODAY'S DATE: {_today_str()}",
         f"SCREENING PROMPT:\n{prompt}",
         f"TICKER: {ticker}",
         f"PLANNER BRIEF:\n{per_ticker_brief or '(none)'}",
@@ -575,6 +598,7 @@ async def _conclude(
         for v in verdicts
     ]
     user_parts = [
+        f"TODAY'S DATE: {_today_str()}",
         f"SCREENING PROMPT:\n{prompt}",
         f"PER-TICKER VERDICTS ({len(verdicts)}):\n" + "\n".join(verdict_lines),
     ]
