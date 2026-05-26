@@ -118,6 +118,7 @@ from shared.db import (
     get_dry_days,
     get_supabase_client,
     is_source_day_dry,
+    refresh_ticker_relationship_materialization,
     load_article_tickers,
     mark_source_day_dry,
     patch_news_article_image_if_missing,
@@ -1146,7 +1147,30 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         action="store_false",
         help="Disable dry-day skipping — process all days even if previously marked dry",
     )
+    parser.add_argument(
+        "--skip-relationship-refresh",
+        action="store_true",
+        help=(
+            "Skip end-of-batch ticker relationship graph refresh "
+            "(faster; graph may be stale until a later refresh)"
+        ),
+    )
     return parser.parse_args(argv)
+
+
+def _maybe_refresh_relationship_graph(args: argparse.Namespace) -> None:
+    """Refresh materialized ticker relationship tables after a batch ingest."""
+    if args.no_persist or getattr(args, "skip_relationship_refresh", False):
+        return
+    console.print("[dim]Refreshing ticker relationship graph…[/dim]")
+    try:
+        refresh_ticker_relationship_materialization()
+        console.print("[dim]Relationship graph refreshed.[/dim]")
+    except Exception as exc:
+        logger.warning("[score_news] relationship graph refresh failed: %s", exc)
+        console.print(
+            f"[yellow]Relationship graph refresh failed (ingest OK): {exc}[/yellow]",
+        )
 
 
 # ── Main ─────────────────────────────────────────────────────────────────────
@@ -1931,6 +1955,8 @@ async def _process_x_news(args: argparse.Namespace) -> None:
         except Exception as exc:
             logger.warning("[score_news] failed to mark X dry: %s", exc)
 
+    _maybe_refresh_relationship_graph(args)
+
 
 async def _process_fmp_news(args: argparse.Namespace) -> None:
     """Fetch articles from FMP and run each through the full pipeline."""
@@ -2042,6 +2068,8 @@ async def _process_fmp_news(args: argparse.Namespace) -> None:
                 )
         except Exception as exc:
             logger.warning("[score_news] failed to mark dry: %s", exc)
+
+    _maybe_refresh_relationship_graph(args)
 
 
 async def _run_sparse_fill_for_day(
@@ -2294,6 +2322,8 @@ async def _process_fmp_sparse_fill(args: argparse.Namespace) -> None:
                 f"\n[dim]Sparse-fill loop finished: processed [cyan]{len(excluded)}[/cyan] day(s).[/dim]",
             )
             break
+
+    _maybe_refresh_relationship_graph(args)
 
 
 # ── Rescore (--rescore) ───────────────────────────────────────────────────────
@@ -2606,6 +2636,8 @@ async def _process_rescore(args: argparse.Namespace) -> None:
         f"\n[bold green]Done.[/bold green] "
         f"{done} rescored, {failed} failed out of {total} unscored articles."
     )
+
+    _maybe_refresh_relationship_graph(args)
 
 
 def _health_job_name_from_namespace(args: argparse.Namespace) -> str | None:

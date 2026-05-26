@@ -773,3 +773,16 @@ def clear_dry_days(
         q = q.lt("day", before.isoformat())
     res = q.execute()
     return len(res.data or [])
+
+
+def refresh_ticker_relationship_materialization() -> None:
+    """
+    Recompute ticker_relationship_edges and ticker_relationship_edge_evidence
+    from all TICKER_RELATIONSHIPS heads.
+
+    Call after batch news ingest (score_cli). Not run synchronously on each
+    head insert — see migration 20260526120000_defer_relationship_graph_refresh.
+    """
+    client = get_supabase_client()
+    schema = os.environ.get("SUPABASE_SCHEMA", "swingtrader")
+    client.schema(schema).rpc("exec_ticker_relationship_heads_refresh").execute()
