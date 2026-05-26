@@ -1,5 +1,4 @@
 import { NextResponse } from "next/server";
-import { createClient } from "@/lib/supabase/server";
 import { warmEmbedding } from "@/lib/embeddings/query-embedding";
 
 // Module-scoped guard so a flurry of mounts (Strict Mode, multiple tabs hitting
@@ -27,12 +26,8 @@ async function warmOnce(): Promise<void> {
 }
 
 export async function POST() {
-  const supabase = await createClient();
-  const { data: claims, error: claimsError } = await supabase.auth.getClaims();
-  if (claimsError || !claims?.claims) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
-
+  // Public: search (and thus the embedding pod) is available to logged-out
+  // visitors on /articles, so the lazy warmup must not require auth either.
   await warmOnce();
   return new NextResponse(null, { status: 204 });
 }
