@@ -775,6 +775,36 @@ def clear_dry_days(
     return len(res.data or [])
 
 
+def fetch_article_ids_without_scored_heads() -> list[int]:
+    """
+    Article IDs with no head row where ``scores_json`` is non-empty.
+
+    Includes articles with zero head rows and articles whose heads are all ``{}``.
+    Newest first (``published_at``, else ``created_at``, else ``id``).
+    Uses direct Postgres (fast). Requires ``SUPABASE_DB_DIRECT_URL`` or
+    ``SUPABASE_URL`` + ``SUPABASE_DB_PWD``.
+    """
+    schema = os.environ.get("SUPABASE_SCHEMA", "swingtrader")
+    sql = f"""
+        SELECT a.id
+        FROM {schema}.news_articles a
+        WHERE NOT EXISTS (
+            SELECT 1
+            FROM {schema}.news_impact_heads h
+            WHERE h.article_id = a.id
+              AND h.scores_json IS DISTINCT FROM '{{}}'::jsonb
+        )
+        ORDER BY COALESCE(a.published_at, a.created_at) DESC NULLS LAST, a.id DESC
+    """
+    conn = get_pg_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(sql)
+            return [int(row[0]) for row in cur.fetchall()]
+    finally:
+        conn.close()
+
+
 def refresh_ticker_relationship_materialization() -> None:
     """
     Recompute ticker_relationship_edges and ticker_relationship_edge_evidence

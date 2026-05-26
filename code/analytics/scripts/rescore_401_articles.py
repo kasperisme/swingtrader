@@ -1,8 +1,8 @@
 """
 Rescore articles that have no impact heads (e.g. failed due to Ollama HTTP 401).
 
-Queries news_articles LEFT JOIN news_impact_heads to find all articles with zero
-head rows, then re-runs the full scoring pipeline and persists the results.
+Finds articles with no non-empty impact heads (single SQL query when direct DB
+credentials are set), then re-runs the full scoring pipeline and persists results.
 The body is used as-is from the DB — no URL refetching.
 
 Usage:
@@ -25,7 +25,11 @@ load_dotenv(pathlib.Path(__file__).parent.parent / ".env")
 
 os.environ.setdefault("OLLAMA_IMPACT_MODEL", "gemma4:31b-cloud")
 
-from shared.db import get_supabase_client, save_article_tickers
+from shared.db import (
+    fetch_article_ids_without_scored_heads,
+    get_supabase_client,
+    save_article_tickers,
+)
 from services.news.scoring.news_ingester import _delete_heads_and_vector, _persist, _sha256
 from services.news.scoring.impact_scorer import score_article, aggregate_heads, extract_tickers, top_dimensions
 from services.news.scoring.score_cli import (
@@ -39,52 +43,35 @@ from rich.console import Console
 console = Console()
 logger = logging.getLogger(__name__)
 
-PAGE_SIZE = 1000  # rows per PostgREST page when scanning the DB
-
-
 # ── DB helpers ────────────────────────────────────────────────────────────────
-
-def _paginate(client, table: str, select: str, filters: dict | None = None) -> list[dict]:
-    """Paginate through a table and return all rows."""
-    schema = "swingtrader"
-    result = []
-    offset = 0
-    while True:
-        q = client.schema(schema).table(table).select(select).range(offset, offset + PAGE_SIZE - 1)
-        for col, val in (filters or {}).items():
-            q = q.neq(col, val)
-        res = q.execute()
-        rows = res.data or []
-        result.extend(rows)
-        if len(rows) < PAGE_SIZE:
-            break
-        offset += PAGE_SIZE
-    return result
-
 
 def fetch_unscored_ids(client) -> list[int]:
     """
-    Return IDs of all news_articles where ALL heads have scores_json = '{}',
-    i.e. no head has produced any actual scores.
+    Return IDs of articles with no non-empty impact head.
 
-    Scored = has at least one head where scores_json != '{}'.
-    Unscored = no such head exists (all empty, or no heads at all).
+    Scored = at least one head where scores_json != '{}'.
+    Unscored = no such head (all empty placeholders, or no head rows).
     """
     console.print("[dim]Querying DB for unscored articles…[/dim]")
+    try:
+        unscored = fetch_article_ids_without_scored_heads()
+    except RuntimeError as exc:
+        console.print(
+            f"[yellow]Direct Postgres unavailable ({exc}); "
+            "falling back to filtered PostgREST queries…[/yellow]"
+        )
+        from services.news.scoring.score_cli import (
+            _rescore_fetch_incomplete_ids,
+            _rescore_fetch_unscored_ids,
+        )
 
-    # All article IDs
-    all_rows = _paginate(client, "news_articles", "id")
-    all_article_ids = {row["id"] for row in all_rows}
-
-    # Article IDs that have at least one head with non-empty scores_json → scored
-    scored_rows = _paginate(client, "news_impact_heads", "article_id",
-                            filters={"scores_json": "{}"})
-    scored_ids = {row["article_id"] for row in scored_rows}
-
-    unscored = sorted(all_article_ids - scored_ids)
+        unscored = sorted(
+            set(_rescore_fetch_unscored_ids(client))
+            | set(_rescore_fetch_incomplete_ids(client)),
+            reverse=True,
+        )
     console.print(
-        f"[dim]Found {len(all_article_ids)} articles total, "
-        f"{len(scored_ids)} with non-empty heads → [bold]{len(unscored)} to rescore[/bold][/dim]"
+        f"[dim]Found [bold]{len(unscored)}[/bold] article(s) to rescore[/dim]"
     )
     return unscored
 

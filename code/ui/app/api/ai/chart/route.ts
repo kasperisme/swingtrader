@@ -1,6 +1,9 @@
 import { createClient } from "@/lib/supabase/server";
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { normalizeSearchTag, tagsFromQuery } from "@/lib/news/search-tags";
+import {
+  expandSearchTagCandidates,
+  tagCandidatesFromQuery,
+} from "@/lib/news/search-tags";
 import type { ChartAnnotation, AnnotationRole } from "@/components/ticker-charts/types";
 import type { OhlcBar } from "@/components/ticker-charts/types";
 import type Anthropic from "@anthropic-ai/sdk";
@@ -274,12 +277,13 @@ async function searchTickerNews(
   const includeTicker = args.include_ticker === undefined ? true : Boolean(args.include_ticker);
 
   const explicit = Array.isArray(args.tags)
-    ? (args.tags as unknown[]).map((t) => normalizeSearchTag(String(t))).filter(Boolean)
+    ? (args.tags as unknown[]).flatMap((t) => expandSearchTagCandidates(String(t)))
     : [];
-  const fromQuery = typeof args.query === "string" ? tagsFromQuery(args.query) : [];
+  const fromQuery =
+    typeof args.query === "string" ? tagCandidatesFromQuery(args.query) : [];
 
   const tagSet = new Set<string>();
-  if (includeTicker) tagSet.add(normalizeSearchTag(ticker));
+  if (includeTicker) for (const c of expandSearchTagCandidates(ticker)) tagSet.add(c);
   for (const t of explicit) tagSet.add(t);
   for (const t of fromQuery) tagSet.add(t);
   const tagFilter = [...tagSet];

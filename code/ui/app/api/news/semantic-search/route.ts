@@ -1,7 +1,10 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { embedQuery } from "@/lib/embeddings/query-embedding";
-import { normalizeSearchTag, tagsFromQuery } from "@/lib/news/search-tags";
+import {
+  expandSearchTagCandidates,
+  tagCandidatesFromQuery,
+} from "@/lib/news/search-tags";
 
 type SemanticSearchRow = {
   article_id: number;
@@ -33,13 +36,20 @@ export async function POST(req: Request) {
   const mode: "tags" | "semantic" | "hybrid" =
     rawMode === "tags" || rawMode === "semantic" ? rawMode : "hybrid";
 
+  // Expand each requested tag into its plausible stored forms (lowercase theme
+  // slug + uppercase ticker) so the GIN overlap matches regardless of how the
+  // token was cased on input (e.g. "japan" → ["japan", "JAPAN"]).
   const explicitTags = Array.isArray(body?.tags)
-    ? body.tags
-        .map((t: unknown) => normalizeSearchTag(String(t)))
-        .filter(Boolean)
+    ? [
+        ...new Set(
+          body.tags.flatMap((t: unknown) =>
+            expandSearchTagCandidates(String(t)),
+          ),
+        ),
+      ]
     : [];
   const tagFilter =
-    explicitTags.length > 0 ? explicitTags : tagsFromQuery(query);
+    explicitTags.length > 0 ? explicitTags : tagCandidatesFromQuery(query);
 
   if (explicitTags.length === 0 && (!query || query.length < 3)) {
     return NextResponse.json({ results: [], note: "query_too_short" });
