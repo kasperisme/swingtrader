@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { createClient } from "@/lib/supabase/server";
+import { createServiceClient } from "@/lib/supabase/service";
 import { embedQuery } from "@/lib/embeddings/query-embedding";
 import {
   expandSearchTagCandidates,
@@ -20,11 +20,10 @@ type SemanticSearchRow = {
 };
 
 export async function POST(req: Request) {
-  const supabase = await createClient();
-  const { data: claims, error: claimsError } = await supabase.auth.getClaims();
-  if (claimsError || !claims?.claims) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
+  // Public endpoint: the /articles page is readable by logged-out visitors, so
+  // tag/semantic search must work for them too. Use the service-role client to
+  // bypass RLS on the swingtrader schema, matching how the page loads articles.
+  const supabase = createServiceClient();
 
   const body = await req.json().catch(() => ({}));
   const query = String(body?.query ?? "").trim();
