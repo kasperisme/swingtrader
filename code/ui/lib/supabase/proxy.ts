@@ -78,6 +78,7 @@ export async function updateSession(request: NextRequest) {
     pathname.startsWith("/docs") ||
     pathname.startsWith("/blog") ||
     pathname.startsWith("/articles") ||
+    pathname.startsWith("/api/news/semantic-search") ||  // public article search (tags + semantic), mirrors the public /articles page
     pathname === "/terms" ||
     pathname === "/privacy" ||
     pathname.startsWith("/api/v1") ||  // public API — uses its own Bearer auth
