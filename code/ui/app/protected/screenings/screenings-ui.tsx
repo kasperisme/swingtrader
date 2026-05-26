@@ -30,6 +30,7 @@ import {
   Calendar,
   Target,
   TrendingUp,
+  TrendingDown,
   Check as CheckIcon,
   Building2,
   ExternalLink,
@@ -291,6 +292,11 @@ function cavemanRangeToDates(
     granularity: preset.granularity,
   };
 }
+
+// Number of empty bar-slots projected past the last candle when a trade
+// proposal is present, so entry/TP/SL levels have room to the right instead of
+// jamming the chart edge. Does not change the chart's zoom/date window.
+const TRADE_FORWARD_BARS = 6;
 
 // Tinder-style index bar — renders as an inline row of three segments
 // showing carousel position. Caller decides where to place it; it does not
@@ -727,61 +733,146 @@ function CavemanMobileActionBar({
   );
 }
 
-// Tinder-style info cards. Rendered below the chart on mobile-caveman only,
-// when the user scrolls. Each card is a small white block with a small-caps
-// title and a few "label → value" rows. Builds context for non-technical
-// users in plain numeric form (snapshot, 52-week position, screen verdict).
+// ── Uniform info-card system ────────────────────────────────────────────────
+// Tinder-style stack rendered below the chart on mobile-caveman. One shell
+// (`InfoCard`) + a small set of primitives (`InfoRow`, `InfoNote`, `Pill`) so
+// every card — Trade plan, Company, Sentiment, Articles — shares the same
+// silhouette, spacing rhythm, and typographic scale. Built for non-technical
+// users: plain "label → value" rows, mono numerals, restrained accents.
+
+// Card shell. A hairline-bordered surface with a quiet header: a softly-tinted
+// icon tile, a tight title, and an optional right-aligned `meta` slot for a
+// headline value or status pill. The header divider keeps body content visually
+// distinct without the heavy filled band the old design used.
 function InfoCard({
   icon,
   title,
+  meta,
   children,
 }: {
   icon: ReactNode;
   title: string;
+  meta?: ReactNode;
   children: ReactNode;
 }) {
   return (
-    <section className="rounded-xl border border-border bg-card overflow-hidden flex flex-col shadow-sm">
-      {/* Header band — high-contrast Tinder-style section header. Solid
-          tinted background, inverted icon badge, sentence-case title at
-          text-sm/font-semibold so it reads as an unmistakable heading. */}
-      <header className="flex items-center gap-2.5 border-b border-border bg-muted/50 px-4 py-3">
-        <span className="flex h-7 w-7 items-center justify-center rounded-md bg-foreground text-background">
+    <section className="overflow-hidden rounded-2xl border border-border/70 bg-card shadow-[0_1px_3px_rgba(0,0,0,0.04)] transition-transform duration-200 active:scale-[0.995]">
+      <header className="flex items-center gap-2.5 border-b border-border/60 px-4 py-3">
+        <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-foreground/[0.06] text-foreground/80 ring-1 ring-inset ring-border/50 [&>svg]:h-3.5 [&>svg]:w-3.5">
           {icon}
         </span>
-        <h3 className="text-sm font-semibold text-foreground leading-none">
+        <h3 className="min-w-0 flex-1 truncate text-[13px] font-semibold tracking-tight text-foreground">
           {title}
         </h3>
+        {meta != null ? <div className="shrink-0">{meta}</div> : null}
       </header>
-      <div className="flex flex-col gap-2.5 px-4 py-4">{children}</div>
+      <div className="flex flex-col gap-2.5 px-4 py-3.5">{children}</div>
     </section>
   );
 }
 
+const ROW_TONE: Record<"default" | "positive" | "negative" | "muted", string> = {
+  default: "text-foreground",
+  positive: "text-emerald-500",
+  negative: "text-rose-500",
+  muted: "text-muted-foreground",
+};
+
+// A single "label → value" row. Baseline-aligned so a long wrapping label and
+// its mono numeral sit on the same line; value is right-aligned and tabular.
 function InfoRow({
   label,
   value,
-  tone,
+  tone = "default",
 }: {
   label: string;
   value: ReactNode;
   tone?: "default" | "positive" | "negative" | "muted";
 }) {
-  const toneCls =
-    tone === "positive"
-      ? "text-emerald-500"
-      : tone === "negative"
-        ? "text-rose-500"
-        : tone === "muted"
-          ? "text-muted-foreground"
-          : "text-foreground";
   return (
-    <div className="flex items-center justify-between gap-3">
-      <span className="text-xs text-muted-foreground">{label}</span>
-      <span className={`font-mono text-sm font-medium tabular-nums ${toneCls}`}>
+    <div className="flex items-baseline justify-between gap-3">
+      <span className="text-[13px] leading-snug text-muted-foreground">
+        {label}
+      </span>
+      <span
+        className={`text-right font-mono text-sm font-medium tabular-nums ${ROW_TONE[tone]}`}
+      >
         {value}
       </span>
     </div>
+  );
+}
+
+// Free-text note block (e.g. the user's trade thesis). Mono kicker + relaxed
+// body. `divided` draws a hairline above it when it follows other rows.
+function InfoNote({
+  children,
+  divided = false,
+}: {
+  children: ReactNode;
+  divided?: boolean;
+}) {
+  return (
+    <div className={divided ? "border-t border-border/60 pt-2.5" : ""}>
+      <p className="text-[10px] font-mono uppercase tracking-[0.12em] text-muted-foreground/80">
+        Note
+      </p>
+      <p className="mt-1 whitespace-pre-wrap text-sm leading-relaxed text-foreground">
+        {children}
+      </p>
+    </div>
+  );
+}
+
+// % move of a level relative to entry. Null when entry is missing/zero.
+function pctFromEntry(entry: number | null, level: number): number | null {
+  if (entry == null || Math.abs(entry) < 1e-9) return null;
+  return ((level - entry) / entry) * 100;
+}
+
+// A price with its signed %-from-entry trailing it in a muted, smaller weight.
+// The %-suffix inherits the InfoRow tone but at lower emphasis so the dollar
+// figure stays the anchor.
+function PriceWithPct({ price, pct }: { price: number; pct: number | null }) {
+  return (
+    <>
+      ${price.toFixed(2)}
+      {pct != null && (
+        <span className="ml-1.5 text-xs font-normal opacity-60">
+          {pct >= 0 ? "+" : ""}
+          {pct.toFixed(1)}%
+        </span>
+      )}
+    </>
+  );
+}
+
+// Compact status pill for card-header meta slots (e.g. trade direction) and
+// inline ratings. `warn` is the amber middle tier between negative and positive.
+function Pill({
+  tone,
+  icon,
+  children,
+}: {
+  tone: "positive" | "negative" | "neutral" | "warn";
+  icon?: ReactNode;
+  children: ReactNode;
+}) {
+  const cls =
+    tone === "positive"
+      ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
+      : tone === "negative"
+        ? "bg-rose-500/10 text-rose-600 dark:text-rose-400"
+        : tone === "warn"
+          ? "bg-amber-500/10 text-amber-600 dark:text-amber-400"
+          : "bg-muted text-muted-foreground";
+  return (
+    <span
+      className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.1em] [&>svg]:h-3 [&>svg]:w-3 ${cls}`}
+    >
+      {icon}
+      {children}
+    </span>
   );
 }
 
@@ -848,7 +939,7 @@ function ArticlesInfoCard({ symbol }: { symbol: string }) {
 
   return (
     <InfoCard
-      icon={<Newspaper className="w-3.5 h-3.5 text-muted-foreground" />}
+      icon={<Newspaper />}
       title="Recent articles"
     >
       {loading ? (
@@ -969,10 +1060,22 @@ function SentimentInfoCard({
     [rows, symbol],
   );
 
+  // Headline pill: the 30-day net, the most representative window for a
+  // glanceable read in the card header.
+  const net30 = stats.rows[1]?.total ?? 0;
+
   return (
     <InfoCard
-      icon={<Gauge className="w-3.5 h-3.5 text-muted-foreground" />}
+      icon={<Gauge />}
       title="Sentiment"
+      meta={
+        totalArticles > 0 && Math.abs(net30) >= 0.01 ? (
+          <Pill tone={net30 >= 0 ? "positive" : "negative"}>
+            {net30 >= 0 ? "+" : ""}
+            {net30.toFixed(2)} · 30d
+          </Pill>
+        ) : null
+      }
     >
       {totalArticles === 0 ? (
         <p className="text-xs text-muted-foreground">
@@ -1034,7 +1137,13 @@ function SentimentInfoCard({
 // Company card with expand/collapse for the (often long) FMP description.
 // Keeps the expanded state local so toggling doesn't disturb the other
 // info-card scroll positions in the parent stack.
-function CompanyInfoCard({ profile }: { profile: FmpCompanyProfile }) {
+function CompanyInfoCard({
+  profile,
+  marketCap,
+}: {
+  profile: FmpCompanyProfile;
+  marketCap?: number | null;
+}) {
   const [expanded, setExpanded] = useState(false);
   const employees =
     profile.fullTimeEmployees != null
@@ -1061,7 +1170,7 @@ function CompanyInfoCard({ profile }: { profile: FmpCompanyProfile }) {
 
   return (
     <InfoCard
-      icon={<Building2 className="w-3.5 h-3.5 text-muted-foreground" />}
+      icon={<Building2 />}
       title="Company"
     >
       {profile.companyName ? (
@@ -1117,6 +1226,9 @@ function CompanyInfoCard({ profile }: { profile: FmpCompanyProfile }) {
           value={profile.exchangeFullName ?? profile.exchange ?? "—"}
         />
       )}
+      {marketCap != null && (
+        <InfoRow label="Market cap" value={formatLargeNumber(marketCap, "$")} />
+      )}
       {(employeesLabel || ipoYear) && (
         <InfoRow
           label="Employees · IPO"
@@ -1146,140 +1258,122 @@ function CavemanInfoCards({
   quote,
   profile,
   sentimentRows,
+  entry,
+  note,
 }: {
   symbol: string;
   quote: FmpQuote | null | undefined;
   profile: FmpCompanyProfile | null;
   sentimentRows: ScreeningTickerSentimentHeadRow[];
+  entry?: EntryMarker | null;
+  note?: string | null;
 }) {
-  const yearLow = quote?.yearLow ?? null;
-  const yearHigh = quote?.yearHigh ?? null;
-  const price = quote?.price ?? null;
-  const pctFrom52wHigh =
-    yearHigh != null && price != null && yearHigh > 0
-      ? ((price - yearHigh) / yearHigh) * 100
+  const entryPrice = entry?.price ?? null;
+  const takeProfit = entry?.take_profit ?? null;
+  const stopLoss = entry?.stop_loss ?? null;
+  const direction = entry?.direction ?? null;
+  const trimmedNote = note?.trim() || null;
+  const hasTradePlan =
+    !!entry && (entryPrice != null || takeProfit != null || stopLoss != null);
+
+  // Risk:reward only makes sense with all three levels. Distances are absolute
+  // so the ratio reads the same for long and short setups.
+  const riskReward =
+    entryPrice != null && takeProfit != null && stopLoss != null
+      ? (() => {
+          const reward = Math.abs(takeProfit - entryPrice);
+          const risk = Math.abs(entryPrice - stopLoss);
+          return risk > 1e-9 ? reward / risk : null;
+        })()
       : null;
-  const positionPct =
-    yearLow != null &&
-    yearHigh != null &&
-    yearHigh > yearLow &&
-    price != null
-      ? ((price - yearLow) / (yearHigh - yearLow)) * 100
-      : null;
+
+  // Qualitative read on the ratio: < 1 loses money on average (Bad), 1–2 is a
+  // workable edge (Good), ≥ 2 is a strong setup (Excellent).
+  const rrRating =
+    riskReward == null
+      ? null
+      : riskReward >= 2
+        ? { label: "Excellent", tone: "positive" as const }
+        : riskReward >= 1
+          ? { label: "Good", tone: "warn" as const }
+          : { label: "Bad", tone: "negative" as const };
 
   return (
     <>
-      {profile && <CompanyInfoCard profile={profile} />}
+      {(hasTradePlan || trimmedNote) && (
+        <InfoCard
+          icon={<Target />}
+          title="Trade plan"
+          meta={
+            direction ? (
+              <Pill
+                tone={direction === "long" ? "positive" : "negative"}
+                icon={
+                  direction === "long" ? <TrendingUp /> : <TrendingDown />
+                }
+              >
+                {direction}
+              </Pill>
+            ) : null
+          }
+        >
+          {hasTradePlan && (
+            <>
+              <InfoRow
+                label="Entry"
+                value={entryPrice != null ? `$${entryPrice.toFixed(2)}` : "—"}
+              />
+              <InfoRow
+                label="Take profit"
+                value={
+                  takeProfit != null ? (
+                    <PriceWithPct
+                      price={takeProfit}
+                      pct={pctFromEntry(entryPrice, takeProfit)}
+                    />
+                  ) : (
+                    "—"
+                  )
+                }
+                tone={takeProfit != null ? "positive" : "muted"}
+              />
+              <InfoRow
+                label="Stop loss"
+                value={
+                  stopLoss != null ? (
+                    <PriceWithPct
+                      price={stopLoss}
+                      pct={pctFromEntry(entryPrice, stopLoss)}
+                    />
+                  ) : (
+                    "—"
+                  )
+                }
+                tone={stopLoss != null ? "negative" : "muted"}
+              />
+              {riskReward != null && rrRating != null && (
+                <InfoRow
+                  label="Risk : reward"
+                  value={
+                    <span className="inline-flex items-center gap-2">
+                      1 : {riskReward.toFixed(2)}
+                      <Pill tone={rrRating.tone}>{rrRating.label}</Pill>
+                    </span>
+                  }
+                />
+              )}
+            </>
+          )}
+          {trimmedNote && <InfoNote divided={hasTradePlan}>{trimmedNote}</InfoNote>}
+        </InfoCard>
+      )}
+
+      {profile && (
+        <CompanyInfoCard profile={profile} marketCap={quote?.marketCap ?? null} />
+      )}
 
       <SentimentInfoCard symbol={symbol} rows={sentimentRows} />
 
-      <InfoCard
-        icon={<Activity className="w-3.5 h-3.5 text-muted-foreground" />}
-        title="Snapshot"
-      >
-        <InfoRow
-          label="Today's range"
-          value={
-            quote?.dayLow != null && quote?.dayHigh != null
-              ? `$${quote.dayLow.toFixed(2)} – $${quote.dayHigh.toFixed(2)}`
-              : "—"
-          }
-        />
-        <InfoRow
-          label="Open"
-          value={quote?.open != null ? `$${quote.open.toFixed(2)}` : "—"}
-        />
-        <InfoRow
-          label="Volume"
-          value={
-            quote?.volume != null ? formatLargeNumber(quote.volume) : "—"
-          }
-        />
-        <InfoRow
-          label="Market cap"
-          value={
-            quote?.marketCap != null
-              ? formatLargeNumber(quote.marketCap, "$")
-              : "—"
-          }
-        />
-      </InfoCard>
-
-      <InfoCard
-        icon={<Calendar className="w-3.5 h-3.5 text-muted-foreground" />}
-        title="52-week position"
-      >
-        {positionPct != null && yearLow != null && yearHigh != null ? (
-          <div className="flex flex-col gap-1.5">
-            <div className="flex items-center justify-between text-[10px] font-mono uppercase tracking-[0.1em] text-muted-foreground">
-              <span>${yearLow.toFixed(2)}</span>
-              <span>${yearHigh.toFixed(2)}</span>
-            </div>
-            <div className="relative h-1.5 rounded-full bg-muted">
-              <div
-                className="absolute top-0 left-0 h-full rounded-full bg-foreground/30"
-                style={{
-                  width: `${Math.min(100, Math.max(0, positionPct))}%`,
-                }}
-              />
-              <div
-                className="absolute top-1/2 -translate-y-1/2 -translate-x-1/2 h-3 w-3 rounded-full bg-foreground border-2 border-background"
-                style={{
-                  left: `${Math.min(100, Math.max(0, positionPct))}%`,
-                }}
-                aria-label={`Current price at ${positionPct.toFixed(0)}% of 52-week range`}
-              />
-            </div>
-          </div>
-        ) : (
-          <p className="text-xs text-muted-foreground">No range data.</p>
-        )}
-        <InfoRow
-          label="From 52w high"
-          value={
-            pctFrom52wHigh != null ? `${pctFrom52wHigh.toFixed(1)}%` : "—"
-          }
-          tone={
-            pctFrom52wHigh == null
-              ? "muted"
-              : pctFrom52wHigh >= -10
-                ? "positive"
-                : pctFrom52wHigh >= -25
-                  ? "default"
-                  : "muted"
-          }
-        />
-        <InfoRow
-          label="vs 50-day MA"
-          value={
-            quote?.priceAvg50 != null && price != null
-              ? `${(((price - quote.priceAvg50) / quote.priceAvg50) * 100).toFixed(1)}%`
-              : "—"
-          }
-          tone={
-            quote?.priceAvg50 != null && price != null
-              ? price >= quote.priceAvg50
-                ? "positive"
-                : "negative"
-              : "muted"
-          }
-        />
-        <InfoRow
-          label="vs 200-day MA"
-          value={
-            quote?.priceAvg200 != null && price != null
-              ? `${(((price - quote.priceAvg200) / quote.priceAvg200) * 100).toFixed(1)}%`
-              : "—"
-          }
-          tone={
-            quote?.priceAvg200 != null && price != null
-              ? price >= quote.priceAvg200
-                ? "positive"
-                : "negative"
-              : "muted"
-          }
-        />
-      </InfoCard>
       {/* The Screen verdict + Fundamentals cards (RS Rank, Trend Template
           flags, EPS growth, ROE, …) used to render here. They surface the
           custom screening row data and the user explicitly asked to drop
@@ -1399,9 +1493,10 @@ export function ScreeningsUI({
     if (activeView !== "charts") setActiveView("charts");
   }, [isCaveman, activeView]);
 
-  // Sync caveman range → chart pipeline. Whenever the active caveman range
-  // changes (chip click on desktop, arrow tap on mobile), translate it to
-  // from/to + granularity for the chart fetch. Also runs on initial mount.
+  // Sync caveman range → chart pipeline. The active preset (chip click on
+  // desktop, swipe on mobile) is the single source of truth for the chart
+  // window; a trade proposal never changes the zoom (it only projects the
+  // chart a few ticks forward via `forwardBars`).
   useEffect(() => {
     if (!isCaveman) return;
     const r = cavemanRangeToDates(cavemanRangeId);
@@ -2064,6 +2159,19 @@ export function ScreeningsUI({
     if (!row) return null;
     return rowNotes.get(row.scan_row_id)?.comment ?? null;
   }
+
+  // Entry marker for the currently selected ticker (null when none). Memoised
+  // so it keeps a stable reference across unrelated re-renders.
+  const selectedEntryMarker = useMemo(() => {
+    if (!selectedTicker) return null;
+    const row = rowBySymbol.get(selectedTicker);
+    if (!row) return null;
+    return entryFromMetadata(rowNotes.get(row.scan_row_id)?.metadata_json);
+  }, [selectedTicker, rowBySymbol, rowNotes]);
+  // When a trade proposal exists we project the chart a few ticks past the last
+  // candle so entry/TP/SL levels have breathing room — WITHOUT changing the
+  // zoom. The window is always the active predefined range.
+  const hasTradeProposal = isCaveman && !!selectedEntryMarker;
 
   async function setTickerEntryMarker(
     ticker: string,
@@ -3207,6 +3315,7 @@ export function ScreeningsUI({
                               showSymbolHeadline={false}
                               showChartFrame={false}
                               fillContainer={isCaveman}
+                              forwardBars={hasTradeProposal ? TRADE_FORWARD_BARS : 0}
                               annotations={isCaveman ? [] : chartAnnotations}
                               onChartData={(rows: OhlcBar[]) => {
                                 ohlcvDataRef.current = rows;
@@ -3252,6 +3361,8 @@ export function ScreeningsUI({
                               quote={quotes[selectedTicker]}
                               profile={companyProfile}
                               sentimentRows={tickerSentimentRows}
+                              entry={getTickerEntryMarker(selectedTicker)}
+                              note={getTickerComment(selectedTicker)}
                             />
                           </div>
                         )}

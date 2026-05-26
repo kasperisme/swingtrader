@@ -131,7 +131,7 @@ body.screenings-fullscreen main {
   min-height: 0 !important;
 }
 
-body.screenings-fullscreen.hide-site-header header {
+body.screenings-fullscreen.hide-site-header .site-header {
   display: none !important;
 }
 

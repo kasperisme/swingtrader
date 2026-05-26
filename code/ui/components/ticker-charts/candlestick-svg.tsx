@@ -131,6 +131,7 @@ export function CandlestickSvg({
   dateRange,
   interval,
   fillContainer = false,
+  forwardBars = 0,
 }: {
   symbol: string;
   onPointChange?: (point: ChartPoint | null) => void;
@@ -149,6 +150,10 @@ export function CandlestickSvg({
   onAnnotationDelete?: (id: string) => void;
   dateRange?: { from: string; to: string };
   interval?: string;
+  /** Extra empty bar-slots padded to the right of the last bar when an explicit
+   * `dateRange` is supplied. Projects a trade a few ticks into the future so
+   * entry/TP/SL levels have room past the latest candle. */
+  forwardBars?: number;
   /** When true, the chart measures its wrapper and renders a viewBox that
    * matches container dimensions 1:1 — so it visually fills both axes with
    * no aspect-ratio letterboxing or text distortion. Used by the caveman
@@ -293,7 +298,7 @@ export function CandlestickSvg({
       setData(cachedRows);
       setLoading(false);
       if (dateRange != null) {
-        setViewportBars(cachedRows.length);
+        setViewportBars(cachedRows.length + Math.max(0, forwardBars));
         setViewStart(0);
       }
     } else {
@@ -328,7 +333,7 @@ export function CandlestickSvg({
         // visibly differ. Otherwise fall back to the cached zoom (if any) or a
         // sensible default viewport.
         if (dateRange != null) {
-          setViewportBars(n);
+          setViewportBars(n + Math.max(0, forwardBars));
           setViewStart(0);
         } else if (cached) {
           setViewportBars(cached.viewportBars);
@@ -346,7 +351,7 @@ export function CandlestickSvg({
         if (sym === symbolRef.current) setLoading(false);
       }
     })();
-  }, [symbol, dateRange?.from, dateRange?.to, interval]);
+  }, [symbol, dateRange?.from, dateRange?.to, interval, forwardBars]);
 
   // Debounced cache write — fires 600 ms after the view settles.
   // Uses refs inside the timeout so values are always current when it fires.
@@ -963,7 +968,7 @@ export function CandlestickSvg({
         viewBox={`0 0 ${W} ${H}`}
         width="100%"
         {...(fillContainer ? { height: "100%" } : {})}
-        className={`block select-none ${fillContainer ? "h-full w-full" : ""} ${
+        className={`block select-none touch-none ${fillContainer ? "h-full w-full" : ""} ${
           drawingMode !== "none"
             ? drawingFirstPoint ? "cursor-cell" : "cursor-crosshair"
             : isPanning

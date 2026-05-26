@@ -101,6 +101,11 @@ AS $$
 DECLARE
     or_query text;
     ts_q tsquery;
+    -- Rank at most this many matches. Common terms (e.g. "market") match 20k+
+    -- rows; reading every wide tsvector to rank them takes seconds (7s+). Cap to
+    -- the most-recent N matches first, then rank those — bounds latency to
+    -- sub-second while keeping recency-relevant results for the lookback window.
+    candidate_cap constant integer := 2000;
 BEGIN
     -- Build an OR tsquery from the stemmed, stopword-filtered lexemes. Using
     -- the lexemes (rather than raw input) keeps to_tsquery safe from operator
@@ -116,10 +121,31 @@ BEGIN
     ts_q := to_tsquery('english', or_query);
 
     RETURN QUERY
+    -- Stage 1: cheaply pick the most-recent matches via the GIN index, reading
+    -- only id/published_at (no tsvector detoast for the full match set).
+    WITH cand AS (
+        SELECT a.id
+        FROM swingtrader.news_articles a
+        WHERE a.fts @@ ts_q
+          AND (
+              lookback_hours IS NULL
+              OR lookback_hours <= 0
+              OR a.published_at IS NULL
+              OR a.published_at >= NOW() - (lookback_hours || ' hours')::interval
+          )
+          AND (
+              stream_filter IS NULL
+              OR btrim(stream_filter) = ''
+              OR a.article_stream = stream_filter
+          )
+        ORDER BY a.published_at DESC NULLS LAST, a.id DESC
+        LIMIT candidate_cap
+    )
+    -- Stage 2: rank only the capped candidate set; detoast fts for these rows.
+    -- title/url/source/slug are varchar; cast to text to match the declared
+    -- return type (plpgsql RETURN QUERY does not auto-widen varchar→text).
     SELECT
         a.id AS article_id,
-        -- title/url/source/slug are varchar; cast to text to match the declared
-        -- return type (plpgsql RETURN QUERY does not auto-widen varchar→text).
         a.title::text,
         a.url::text,
         a.source::text,
@@ -127,24 +153,9 @@ BEGIN
         a.image_url,
         a.article_stream,
         a.published_at,
-        ts_headline(
-            'english', left(a.body, 600), ts_q,
-            'StartSel=,StopSel=,MaxFragments=2,MaxWords=30,MinWords=10'
-        ) AS snippet,
+        left(a.body, 280) AS snippet,
         ts_rank_cd(a.fts, ts_q)::double precision AS similarity
-    FROM swingtrader.news_articles a
-    WHERE a.fts @@ ts_q
-      AND (
-          lookback_hours IS NULL
-          OR lookback_hours <= 0
-          OR a.published_at IS NULL
-          OR a.published_at >= NOW() - (lookback_hours || ' hours')::interval
-      )
-      AND (
-          stream_filter IS NULL
-          OR btrim(stream_filter) = ''
-          OR a.article_stream = stream_filter
-      )
+    FROM cand JOIN swingtrader.news_articles a ON a.id = cand.id
     ORDER BY similarity DESC, a.published_at DESC NULLS LAST, a.id DESC
     LIMIT GREATEST(1, LEAST(match_count, 100));
 END;

@@ -29,7 +29,7 @@ const navLinkClass =
   "text-sm font-medium text-muted-foreground transition-colors hover:text-foreground cursor-pointer";
 function HeaderShell({ children }: { children: React.ReactNode }) {
   return (
-    <header className="sticky top-0 z-50 px-4 pt-4 pb-2">
+    <header className="site-header sticky top-0 z-50 px-4 pt-4 pb-2">
       <div className="mx-auto flex h-14 w-full max-w-7xl items-center justify-between rounded-2xl border border-border bg-background/80 px-4 shadow-lg backdrop-blur-md lg:px-6">
         {children}
       </div>

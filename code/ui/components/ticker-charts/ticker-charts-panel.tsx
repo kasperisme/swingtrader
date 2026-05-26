@@ -79,6 +79,10 @@ export type TickerChartsPanelProps = {
   /** When true, the chart sizes its viewBox to the parent's actual pixels so
    * it fills both axes (used in the caveman Tinder-style card layout). */
   fillContainer?: boolean;
+  /** Extra empty bar-slots padded to the right of the last bar (only honoured
+   * with an explicit `dateRange`). Used to project a trade a few ticks forward
+   * so entry/TP/SL levels have breathing room past the latest candle. */
+  forwardBars?: number;
 };
 
 export function TickerChartsPanel({
@@ -110,6 +114,7 @@ export function TickerChartsPanel({
   interval,
   getReferenceClose,
   fillContainer = false,
+  forwardBars = 0,
 }: TickerChartsPanelProps) {
   const symbol = useMemo(() => {
     if (symbols.length === 0) return "";
@@ -560,6 +565,7 @@ export function TickerChartsPanel({
           dateRange={dateRange}
           interval={interval}
           fillContainer={fillContainer}
+          forwardBars={forwardBars}
         />
       </div>
 
