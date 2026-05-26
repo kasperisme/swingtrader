@@ -19,6 +19,15 @@ type SemanticSearchRow = {
   similarity: number;
 };
 
+// ts_rank_cd scores are unbounded small floats. The UI renders `similarity` as
+// a 0–1 match bar, so rescale relative to the top hit: best result = 1.0, the
+// rest proportional. Preserves ordering while making the bar meaningful.
+function normalizeSimilarity(rows: SemanticSearchRow[]): SemanticSearchRow[] {
+  const max = rows.reduce((m, r) => Math.max(m, r.similarity ?? 0), 0);
+  if (max <= 0) return rows;
+  return rows.map((r) => ({ ...r, similarity: (r.similarity ?? 0) / max }));
+}
+
 export async function POST(req: Request) {
   const supabase = await createClient();
   const { data: claims, error: claimsError } = await supabase.auth.getClaims();
@@ -51,17 +60,18 @@ export async function POST(req: Request) {
   const tagFilter =
     explicitTags.length > 0 ? explicitTags : tagCandidatesFromQuery(query);
 
-  if (explicitTags.length === 0 && (!query || query.length < 3)) {
+  if (explicitTags.length === 0 && (!query || query.length < 2)) {
     return NextResponse.json({ results: [], note: "query_too_short" });
   }
 
   const searchQuery = query || tagFilter.join(" ");
 
   try {
-    // Tag path (forced or hybrid-first): indexed GIN overlap, no embedding pod.
-    if (mode !== "semantic" && tagFilter.length > 0) {
+    // Explicit tag chips (e.g. a clicked ticker/theme) stay an exact GIN-overlap
+    // filter — precise and index-fast, no ranking needed.
+    if (mode !== "semantic" && explicitTags.length > 0) {
       const tagRpc = await supabase.schema("swingtrader").rpc("search_news_by_tags", {
-        tag_filter: tagFilter,
+        tag_filter: explicitTags,
         match_count: limit,
         lookback_hours: lookbackHours,
         stream_filter: streamFilter,
@@ -72,16 +82,38 @@ export async function POST(req: Request) {
         return NextResponse.json({
           results: tagRpc.data as SemanticSearchRow[],
           note: "tags",
-          tags: tagFilter,
+          tags: explicitTags,
         });
       }
       if (mode === "tags") {
-        // Explicit tag mode: no fallback to semantic.
         return NextResponse.json({
           results: [],
           note: "tags_no_match",
-          tags: tagFilter,
+          tags: explicitTags,
         });
+      }
+    }
+
+    // Free-text path (forced "tags"/keyword mode or hybrid-first): ranked
+    // full-text search over title + tags + body. ORs the query terms, so
+    // "iran oil crisis" matches iran OR oil OR crisis, ranked by ts_rank_cd.
+    if (mode !== "semantic" && explicitTags.length === 0 && query.length >= 2) {
+      const ftsRpc = await supabase.schema("swingtrader").rpc("search_news_fulltext", {
+        query_text: query,
+        match_count: limit,
+        lookback_hours: lookbackHours,
+        stream_filter: streamFilter,
+      });
+      if (ftsRpc.error) {
+        console.error("[semantic-search] fts rpc failed:", ftsRpc.error);
+      } else if (Array.isArray(ftsRpc.data) && ftsRpc.data.length > 0) {
+        return NextResponse.json({
+          results: normalizeSimilarity(ftsRpc.data as SemanticSearchRow[]),
+          note: "fulltext",
+        });
+      }
+      if (mode === "tags") {
+        return NextResponse.json({ results: [], note: "fulltext_no_match" });
       }
     }
 

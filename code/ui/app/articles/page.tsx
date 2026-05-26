@@ -68,7 +68,8 @@ export default async function ArticlesPage({
           </h1>
           <p className="mt-3 max-w-[55ch] text-sm leading-relaxed text-muted-foreground">
             Latest stories from the ingestion pipeline, ranked by recency. Use the
-            command bar to query the corpus semantically — 90-day lookback.
+            command bar to search headlines, tags, and body text — matches any
+            keyword, ranked by relevance. 90-day lookback.
           </p>
         </div>
         <div className="hidden items-baseline gap-3 font-mono text-[11px] uppercase tracking-[0.2em] text-muted-foreground md:flex">
