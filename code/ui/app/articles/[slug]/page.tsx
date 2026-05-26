@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { Suspense } from "react";
-import { ArrowLeft, ArrowUpRight, Lock } from "lucide-react";
+import { ArrowLeft, ArrowUpRight } from "lucide-react";
 import { createClient as createSupabaseClient } from "@supabase/supabase-js";
 
 import { createClient } from "@/lib/supabase/server";
@@ -143,7 +143,9 @@ function computeClusterProfile(impact: Record<string, number>) {
 async function fetchRankedStocks(impact: Record<string, number>) {
   if (Object.keys(impact).length === 0)
     return { winners: [] as RankedStock[], losers: [] as RankedStock[] };
-  const supabase = await createClient();
+  // Service-role client so logged-out visitors get the ranked exposures too
+  // (RLS blocks anon reads on the swingtrader schema).
+  const supabase = await createServerDataClient();
   const { data, error } = await supabase
     .schema("swingtrader")
     .from("company_vectors")
@@ -581,8 +583,6 @@ function AnalyticsRegion({
   storyKeyPoints,
   tickerSentiment,
   tickerRelationships,
-  locked,
-  lockHref,
 }: {
   clusterProfile: Array<{
     id: string;
@@ -602,18 +602,9 @@ function AnalyticsRegion({
     score: number;
     reason: string;
   }>;
-  locked: boolean;
-  lockHref: string;
 }) {
   return (
-    <div className="relative">
-      <div
-        className={
-          locked
-            ? "space-y-12 pointer-events-none select-none blur-[3px]"
-            : "space-y-12"
-        }
-      >
+    <div className="space-y-12">
         <section>
           <Eyebrow
             label="Story key points"
@@ -694,31 +685,6 @@ function AnalyticsRegion({
             </div>
           </div>
         </section>
-      </div>
-
-      {locked ? (
-        <Link
-          href={lockHref}
-          className="absolute inset-0 flex items-start justify-center pt-16"
-        >
-          <div className="sticky top-24 inline-flex flex-col items-center gap-3 rounded-lg border border-border/80 bg-background/95 px-6 py-5 text-center shadow-lg backdrop-blur">
-            <span className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-amber-500/40 bg-amber-500/10 text-amber-500">
-              <Lock size={14} />
-            </span>
-            <div>
-              <p className="font-mono text-[10px] uppercase tracking-[0.2em] text-amber-500/80">
-                The Tape · Members only
-              </p>
-              <p className="mt-2 text-sm font-medium text-foreground">
-                Sign up to unlock the full impact analysis
-              </p>
-              <p className="mt-1 max-w-[36ch] text-xs text-muted-foreground">
-                Cluster profile, ranked exposures, and ticker attribution heads.
-              </p>
-            </div>
-          </div>
-        </Link>
-      ) : null}
     </div>
   );
 }
@@ -728,45 +694,20 @@ async function ArticleData({ params }: { params: Promise<{ slug?: string }> }) {
   const slug = String(resolvedParams?.slug ?? "").trim();
   if (!slug) return <ArticlePageFallback />;
 
-  const authClient = await createClient();
+  // Articles and their impact analytics are fully public — no auth gate.
+  // Data is read with the service-role client (createServerDataClient), so an
+  // anonymous visitor gets the same content as a member.
   const dataClient = await createServerDataClient();
-  const [{ data: claims }, bySlug] = await Promise.all([
-    authClient.auth.getClaims(),
-    dataClient
-      .schema("swingtrader")
-      .from("news_articles")
-      .select(
-        "id, slug, title, url, source, published_at, created_at, image_url, publisher, search_tags",
-      )
-      .eq("slug", slug)
-      .single<ArticleRow>(),
-  ]);
-  const isAuthed = Boolean(claims?.claims);
+  const bySlug = await dataClient
+    .schema("swingtrader")
+    .from("news_articles")
+    .select(
+      "id, slug, title, url, source, published_at, created_at, image_url, publisher, search_tags",
+    )
+    .eq("slug", slug)
+    .single<ArticleRow>();
   const article = bySlug.data;
-  if (!article || bySlug.error) {
-    if (isAuthed) notFound();
-    return (
-      <div className="mx-auto max-w-5xl px-4 py-12 sm:px-6 sm:py-16">
-        <Eyebrow label="The Tape · Article preview" />
-        <h1 className="text-3xl font-bold leading-[1.05] tracking-tight md:text-5xl">
-          Sign in to view this article
-        </h1>
-        <p className="mt-4 max-w-[55ch] text-sm leading-relaxed text-muted-foreground">
-          Members get the full impact analysis: cluster profile, market reaction
-          ledger, and per-ticker attribution.
-        </p>
-        <div className="mt-6">
-          <Link
-            href={`/auth/login?next=/articles/${slug}`}
-            className="inline-flex items-center gap-2 rounded-md border border-amber-500/40 bg-amber-500/10 px-4 py-2 text-sm font-medium text-amber-500 transition-colors hover:bg-amber-500/15"
-          >
-            <Lock size={14} />
-            Sign in to unlock
-          </Link>
-        </div>
-      </div>
-    );
-  }
+  if (!article || bySlug.error) notFound();
 
   const [vector, headsRes] = await Promise.all([
     dataClient
@@ -934,8 +875,6 @@ async function ArticleData({ params }: { params: Promise<{ slug?: string }> }) {
           storyKeyPoints={storyKeyPoints}
           tickerSentiment={tickerSentiment}
           tickerRelationships={tickerRelationships}
-          locked={!isAuthed}
-          lockHref={`/auth/sign-up?next=/articles/${slug}`}
         />
       </div>
     </div>
