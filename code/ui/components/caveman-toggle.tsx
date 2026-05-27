@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import { useCavemanMode } from "@/lib/caveman-mode";
 import { cn } from "@/lib/utils";
 
@@ -47,13 +48,20 @@ type Props = {
 
 export function CavemanToggle({ showLabels = false, className }: Props) {
   const { isCaveman, toggle } = useCavemanMode();
+  // SiteHeader hydrates inside its own Suspense boundary, so by the time this
+  // toggle hydrates the provider's localStorage effect may already have flipped
+  // isCaveman — which would mismatch the server-rendered (default) HTML. Gate on
+  // this component's own mount so the hydration render always matches the server.
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => setMounted(true), []);
+  const caveman = mounted && isCaveman;
 
   return (
     <button
       type="button"
       onClick={toggle}
-      title={isCaveman ? "Back to normal (businessman mode)" : "Go prehistoric (caveman mode)"}
-      aria-label={isCaveman ? "Disable caveman mode" : "Enable caveman mode"}
+      title={caveman ? "Back to normal (businessman mode)" : "Go prehistoric (caveman mode)"}
+      aria-label={caveman ? "Disable caveman mode" : "Enable caveman mode"}
       className={cn(
         "group relative inline-flex items-center rounded-full border border-border bg-muted/40 p-1 transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
         className,
@@ -63,7 +71,7 @@ export function CavemanToggle({ showLabels = false, className }: Props) {
       <span
         className={cn(
           "absolute top-1 bottom-1 w-[calc(50%-4px)] rounded-full transition-all duration-200 ease-in-out",
-          isCaveman
+          caveman
             ? "left-[calc(50%+3px)] bg-amber-500/20 dark:bg-amber-500/25"
             : "left-1 bg-background shadow-sm",
         )}
@@ -74,7 +82,7 @@ export function CavemanToggle({ showLabels = false, className }: Props) {
       <span
         className={cn(
           "relative z-10 flex items-center gap-1.5 px-2 py-0.5 text-xs font-medium transition-colors",
-          !isCaveman ? "text-foreground" : "text-muted-foreground",
+          !caveman ? "text-foreground" : "text-muted-foreground",
         )}
       >
         <BriefcaseIcon className="h-4 w-4 shrink-0" />
@@ -85,7 +93,7 @@ export function CavemanToggle({ showLabels = false, className }: Props) {
       <span
         className={cn(
           "relative z-10 flex items-center gap-1.5 px-2 py-0.5 text-xs font-medium transition-colors",
-          isCaveman
+          caveman
             ? "text-amber-600 dark:text-amber-400"
             : "text-muted-foreground",
         )}

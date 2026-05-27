@@ -617,6 +617,24 @@ function AnalyticsRegion({
         </section>
 
         <section>
+          <Eyebrow label="Ticker attribution" meta="Model heads" />
+          <div className="grid gap-10 md:grid-cols-2">
+            <div>
+              <h2 className="mb-5 text-base font-semibold tracking-tight text-foreground/90">
+                Sentiment in this article
+              </h2>
+              <TickerSentimentList rows={tickerSentiment} />
+            </div>
+            <div className="md:border-l md:border-border/40 md:pl-10">
+              <h2 className="mb-5 text-base font-semibold tracking-tight text-foreground/90">
+                Relationships in this article
+              </h2>
+              <TickerRelationshipList rows={tickerRelationships} />
+            </div>
+          </div>
+        </section>
+
+        <section>
           <Eyebrow
             label="Impact vectors"
             meta={`${topDimensions.length} dimensions · ${clusterProfile.length} clusters`}
@@ -664,24 +682,6 @@ function AnalyticsRegion({
                 </span>
               </div>
               <StockLedger rows={losers} tone="neg" />
-            </div>
-          </div>
-        </section>
-
-        <section>
-          <Eyebrow label="Ticker attribution" meta="Model heads" />
-          <div className="grid gap-10 md:grid-cols-2">
-            <div>
-              <h2 className="mb-5 text-base font-semibold tracking-tight text-foreground/90">
-                Sentiment in this article
-              </h2>
-              <TickerSentimentList rows={tickerSentiment} />
-            </div>
-            <div className="md:border-l md:border-border/40 md:pl-10">
-              <h2 className="mb-5 text-base font-semibold tracking-tight text-foreground/90">
-                Relationships in this article
-              </h2>
-              <TickerRelationshipList rows={tickerRelationships} />
             </div>
           </div>
         </section>

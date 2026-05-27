@@ -26,6 +26,7 @@ import {
   type ArticleGridItem,
 } from "@/components/articles-grid";
 import { EarlyAccessSignupForm } from "@/components/early-access-signup-form";
+import { InstagramSection } from "@/components/instagram-section";
 import { PricingTierSwitcher } from "@/components/pricing-tier-switcher";
 import { isSanityConfigured, sanityFetch } from "@/lib/sanity/client";
 import { landingPageQuery } from "@/lib/sanity/queries";
@@ -460,6 +461,9 @@ export default async function Home() {
         </div>
       </section>
 
+      {/* ── INSTAGRAM ────────────────────────────────────────────── */}
+      <InstagramSection />
+
       {/* ── HOW IT WORKS ─────────────────────────────────────────── */}
       <section id="how-it-works" className="border-t border-border py-16 md:py-24">
         <div className="mx-auto max-w-6xl px-4 sm:px-6 lg:px-8">
@@ -468,23 +472,27 @@ export default async function Home() {
           </p>
           <h2 className="mt-3 text-2xl font-bold tracking-tight sm:text-3xl">{howItWorksHeading}</h2>
 
-          <div className="relative mt-10">
-            <div
-              aria-hidden
-              className="absolute top-5 left-0 right-0 hidden h-px bg-gradient-to-r from-transparent via-amber-500/30 to-transparent md:block"
-            />
-            <div className="relative grid gap-8 md:grid-cols-3">
-              {howItWorksSteps.map((step, index) => (
-                <div key={step.label} className="flex flex-col">
-                  <div className="relative z-10 flex h-10 w-10 items-center justify-center rounded-full border border-amber-500/30 bg-amber-500/10 text-sm font-bold text-amber-400">
-                    {index + 1}
-                  </div>
-                  <h3 className="mt-5 text-base font-semibold">{step.label}</h3>
-                  <p className="mt-2 text-sm leading-6 text-muted-foreground">{step.detail}</p>
-                </div>
-              ))}
-            </div>
-          </div>
+          <ol className="mt-12">
+            {howItWorksSteps.map((step, index) => (
+              <li
+                key={step.label}
+                className="group grid grid-cols-[3rem_1fr] items-baseline gap-x-5 gap-y-1 border-t border-border py-8 transition-colors last:border-b hover:bg-amber-500/[0.03] md:grid-cols-[6rem_minmax(0,16rem)_1fr] md:gap-x-10"
+              >
+                <span
+                  aria-hidden
+                  className="font-mono text-3xl font-semibold tabular-nums text-amber-500/35 transition-colors group-hover:text-amber-500/70 md:text-5xl"
+                >
+                  {String(index + 1).padStart(2, "0")}
+                </span>
+                <h3 className="col-start-2 self-baseline text-lg font-semibold tracking-tight md:text-xl">
+                  {step.label}
+                </h3>
+                <p className="col-span-2 col-start-1 mt-1 max-w-prose text-sm leading-6 text-muted-foreground md:col-span-1 md:col-start-3 md:mt-0">
+                  {step.detail}
+                </p>
+              </li>
+            ))}
+          </ol>
         </div>
       </section>
 
@@ -641,35 +649,6 @@ export default async function Home() {
             >
               Browse all public screenings →
             </Link>
-          </div>
-        </div>
-      </section>
-
-      {/* ── PODCAST ──────────────────────────────────────────────── */}
-      <section id="podcast" className="border-t border-border py-16 md:py-24">
-        <div className="mx-auto max-w-3xl px-4 sm:px-6 lg:px-8">
-          <p className="text-xs font-semibold uppercase tracking-widest text-amber-500">
-            Daily podcast
-          </p>
-          <h2 className="mt-3 text-2xl font-bold tracking-tight sm:text-3xl">
-            Listen to the daily market briefing
-          </h2>
-          <p className="mt-3 max-w-xl text-sm leading-6 text-muted-foreground">
-            A short, two-host walkthrough of the day&apos;s regime, top story, and watchlist setups — generated from the same data the screener runs on.
-          </p>
-          <div className="mt-8">
-            <iframe
-              data-testid="embed-iframe"
-              title="News Impact Screener — daily podcast on Spotify"
-              src="https://open.spotify.com/embed/show/40s2Y2bN4kT39ITmp3Ifp5?utm_source=generator"
-              width="100%"
-              height="352"
-              frameBorder={0}
-              allowFullScreen
-              allow="autoplay; clipboard-write; encrypted-media; fullscreen; picture-in-picture"
-              loading="lazy"
-              style={{ borderRadius: 12 }}
-            />
           </div>
         </div>
       </section>

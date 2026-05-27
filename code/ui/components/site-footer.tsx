@@ -7,7 +7,8 @@ const X_HANDLE = "@newsimpactscrnr";
 
 /** Canonical Instagram profile for metadata and footer links. */
 export const SITE_INSTAGRAM_PROFILE_URL = "https://instagram.com/newsimpactscreener";
-const INSTAGRAM_HANDLE = "@newsimpactscreener";
+export const SITE_INSTAGRAM_HANDLE = "@newsimpactscreener";
+const INSTAGRAM_HANDLE = SITE_INSTAGRAM_HANDLE;
 
 export function SiteFooter() {
   return (
