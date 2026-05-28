@@ -15,15 +15,15 @@ OpenClaw: screening-tick (every minute, UTC)
 ```
 
 ```
-OpenClaw: public-screening-tick (every minute, UTC)   ← separate cron
-  └─ services.public_screenings.cli tick
-       └─ subprocess: services.public_screenings.cli run <id> --result-id <uuid>
-                           └─ public_screenings/runner.py (scripts + fan-out)
+OpenClaw: market-screening-tick (every minute, UTC)   ← separate cron
+  └─ services.market_screenings.cli tick
+       └─ subprocess: services.market_screenings.cli run <id> --result-id <uuid>
+                           └─ market_screenings/runner.py (scripts + fan-out)
 ```
 
 Both schedulers import **`shared.screening_schedule`** for the same `next_run_at` semantics. `python -m services.agent.cli setup-cron` registers **both** OpenClaw jobs when missing.
 
-Single **user** tick replaces per-screening crons to avoid rate limits; **public** screenings use their own tick for isolation.
+Single **user** tick replaces per-screening crons to avoid rate limits; **market** screenings use their own tick for isolation.
 
 ---
 
@@ -33,7 +33,7 @@ Single **user** tick replaces per-screening crons to avoid rate limits; **public
 # Install dependencies
 pip install -r requirements.txt
 
-# Register OpenClaw crons (screening-tick + public-screening-tick) — run once
+# Register OpenClaw crons (screening-tick + market-screening-tick) — run once
 python -m services.agent.cli setup-cron
 ```
 
@@ -61,9 +61,9 @@ python -m services.agent.cli setup-cron
 python -m services.agent.cli fmp-test
 ```
 
-**Public script screenings** are scheduled by [`../public_screenings/scheduler.py`](../public_screenings/scheduler.py) (`public_screenings.cli tick`), not this CLI. After upgrading, run `setup-cron` once if `public-screening-tick` is missing.
+**Public script screenings** are scheduled by [`../market_screenings/scheduler.py`](../market_screenings/scheduler.py) (`market_screenings.cli tick`), not this CLI. After upgrading, run `setup-cron` once if `market-screening-tick` is missing.
 
-See [`../public_screenings/README.md`](../public_screenings/README.md).
+See [`../market_screenings/README.md`](../market_screenings/README.md).
 
 ---
 
@@ -163,7 +163,7 @@ DB row status:  running → done | error
 | File | Purpose |
 |------|---------|
 | `scheduler.py` | User queue + dispatch only (`user_screening_results`). |
-| `sync_crons.py` | OpenClaw: `screening-tick` + ensures `public-screening-tick` exists |
+| `sync_crons.py` | OpenClaw: `screening-tick` + ensures `market-screening-tick` exists |
 | `engine.py` | LLM agent loop (Ollama), `run_screening`, `persist_and_deliver` |
 | `cli.py` | CLI entrypoint |
 | `sync_crons.py` | One-time OpenClaw tick cron setup + old cron cleanup |

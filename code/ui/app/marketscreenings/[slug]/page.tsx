@@ -9,11 +9,11 @@ import {
 } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import {
-  getLatestPublicScreeningResultRows,
+  getLatestMarketScreeningResultRows,
   getMySubscription,
-  getPublicScreeningBySlug,
-  getPublicScreeningResults,
-} from "@/app/actions/public-screenings";
+  getMarketScreeningBySlug,
+  getMarketScreeningResults,
+} from "@/app/actions/market-screenings";
 import { humanizeCron } from "@/lib/cron-format";
 import {
   ScreeningResultsTable,
@@ -26,14 +26,14 @@ type Props = { params: Promise<{ slug: string }> };
 
 export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const { slug } = await params;
-  const s = await getPublicScreeningBySlug(slug);
+  const s = await getMarketScreeningBySlug(slug);
   if (!s) return { title: "Screening not found" };
   const description =
     s.description ??
     `${s.name} — curated swing-trading screening that runs on ${humanizeCron(s.schedule)}.`;
   const canonical = `/marketscreenings/${s.slug}`;
   return {
-    title: `${s.name} | Public Screenings`,
+    title: `${s.name} | Market Screenings`,
     description,
     alternates: { canonical },
     openGraph: {
@@ -80,9 +80,9 @@ function stripHtml(input: string): string {
   return input.replace(/<[^>]+>/g, "");
 }
 
-export default async function PublicScreeningDetailPage({ params }: Props) {
+export default async function MarketScreeningDetailPage({ params }: Props) {
   const { slug } = await params;
-  const screening = await getPublicScreeningBySlug(slug);
+  const screening = await getMarketScreeningBySlug(slug);
   if (!screening) notFound();
 
   const supabase = await createClient();
@@ -90,11 +90,11 @@ export default async function PublicScreeningDetailPage({ params }: Props) {
   const isAuthed = Boolean(claims?.claims?.sub);
 
   const [results, subscription, latestRows] = await Promise.all([
-    getPublicScreeningResults(screening.id, 10),
+    getMarketScreeningResults(screening.id, 10),
     isAuthed
       ? getMySubscription(screening.id)
       : Promise.resolve({ isSubscribed: false, notificationsEnabled: false }),
-    getLatestPublicScreeningResultRows(screening.id),
+    getLatestMarketScreeningResultRows(screening.id),
   ]);
 
   const tableRows: BasicScreeningRow[] = latestRows.rows.map((r) => ({
@@ -237,7 +237,7 @@ export default async function PublicScreeningDetailPage({ params }: Props) {
                     label="CSV"
                   />
                   <ToolbarAction
-                    href={`/api/public-screenings/${screening.slug}`}
+                    href={`/api/market-screenings/${screening.slug}`}
                     external
                     icon={<CodeIcon className="h-3.5 w-3.5" />}
                     label="JSON"
@@ -262,7 +262,7 @@ export default async function PublicScreeningDetailPage({ params }: Props) {
               <div className="mt-3 space-y-2 text-muted-foreground">
                 <p>Fetch the latest results as JSON:</p>
                 <pre className="overflow-x-auto rounded-md border border-border/60 bg-background p-3 font-mono text-[11px] leading-5 text-foreground">
-{`curl https://newsimpactscreener.com/api/public-screenings/${screening.slug}`}
+{`curl https://newsimpactscreener.com/api/market-screenings/${screening.slug}`}
                 </pre>
                 <p>
                   Response includes the screening metadata, the latest run

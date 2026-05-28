@@ -42,11 +42,11 @@ def _get_tick_job() -> dict | None:
     return None
 
 
-def setup_public_bulk_analysis_tick_cron() -> dict:
+def setup_market_bulk_analysis_tick_cron() -> dict:
     """Ensure exactly one ``public-bulk-analysis-tick`` cron exists."""
     existing = _get_tick_job()
     tick_command = (
-        f"{_VENV_PYTHON} -m services.public_screening_bulk_analytics.cli tick"
+        f"{_VENV_PYTHON} -m services.market_screening_bulk_analytics.cli tick"
     )
 
     if existing:

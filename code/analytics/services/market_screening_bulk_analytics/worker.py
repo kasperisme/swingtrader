@@ -1,7 +1,7 @@
 """
-Public-screening bulk LLM analytics worker.
+Market-screening bulk LLM analytics worker.
 
-For one queued `public_screening_results` row:
+For one queued `market_screening_results` row:
   - load the parent screening (for `llm_prompt`) and the per-ticker rows
   - fetch FMP daily candles + SMAs (reused from services.bulk_analysis.fetch)
   - call the LLM once per ticker (bounded concurrency)
@@ -24,10 +24,10 @@ from shared.llm import client as llm_client
 # Reuse the existing single-pass technical-analysis pipeline. The parser
 # and user-prompt builder are shared with services.bulk_analysis; the
 # SYSTEM prompt is screening-specific (no baked-in status semantics) so
-# each public screening's `llm_prompt` can define its own status rubric
+# each market screening's `llm_prompt` can define its own status rubric
 # (e.g. momentum screenings using statuses as a breakout timeline).
 from services.bulk_analysis import fetch, prompt as bulk_prompt
-from services.public_screenings.runner import fan_out_from_db
+from services.market_screenings.runner import fan_out_from_db
 
 from . import prompt as ps_prompt
 
@@ -53,8 +53,8 @@ def _load_result(result_id: str) -> dict | None:
     client = get_supabase_client()
     res = (
         client.schema(SCHEMA)
-        .table("public_screening_results")
-        .select("id, public_screening_id, status, bulk_analysis_status")
+        .table("market_screening_results")
+        .select("id, market_screening_id, status, bulk_analysis_status")
         .eq("id", result_id)
         .limit(1)
         .execute()
@@ -66,7 +66,7 @@ def _load_screening(screening_id: str) -> dict | None:
     client = get_supabase_client()
     res = (
         client.schema(SCHEMA)
-        .table("public_screenings")
+        .table("market_screenings")
         .select("id, name, llm_prompt")
         .eq("id", screening_id)
         .limit(1)
@@ -79,7 +79,7 @@ def _load_result_rows(result_id: str) -> list[dict]:
     client = get_supabase_client()
     res = (
         client.schema(SCHEMA)
-        .table("public_screening_result_rows")
+        .table("market_screening_result_rows")
         .select("id, symbol, row_data")
         .eq("result_id", result_id)
         .execute()
@@ -101,7 +101,7 @@ def _load_result_rows(result_id: str) -> list[dict]:
 
 def _set_result(result_id: str, **fields: Any) -> None:
     client = get_supabase_client()
-    client.schema(SCHEMA).table("public_screening_results").update(fields).eq(
+    client.schema(SCHEMA).table("market_screening_results").update(fields).eq(
         "id", result_id
     ).execute()
 
@@ -142,7 +142,7 @@ def _merge_analysis_into_row(
 
 def _write_row_data(row_id: int, row_data: dict) -> None:
     client = get_supabase_client()
-    client.schema(SCHEMA).table("public_screening_result_rows").update(
+    client.schema(SCHEMA).table("market_screening_result_rows").update(
         {"row_data": row_data}
     ).eq("id", row_id).execute()
 
@@ -261,7 +261,7 @@ def run_pass(result_id: str) -> dict:
             "current_status": result.get("bulk_analysis_status"),
         }
 
-    screening = _load_screening(result["public_screening_id"])
+    screening = _load_screening(result["market_screening_id"])
     if not screening:
         _set_result(
             result_id,

@@ -1,7 +1,7 @@
 """
-Scheduler tick for public screenings only.
+Scheduler tick for market screenings only.
 
-Queue + dispatch due ``public_screening_results`` rows. Independent from
+Queue + dispatch due ``market_screening_results`` rows. Independent from
 ``services.agent.scheduler`` but uses the same cron helpers in
 ``shared.screening_schedule``.
 """
@@ -26,7 +26,7 @@ if not os.path.exists(_VENV_PYTHON):
 
 MAX_CONCURRENT = int(
     os.environ.get(
-        "PUBLIC_SCREENING_MAX_CONCURRENT",
+        "MARKET_SCREENING_MAX_CONCURRENT",
         os.environ.get("SCREENING_MAX_CONCURRENT", "1"),
     )
 )
@@ -34,10 +34,10 @@ STUCK_TIMEOUT_MINUTES = int(os.environ.get("SCREENING_STUCK_TIMEOUT_MINUTES", "2
 _SCHEMA = "swingtrader"
 
 
-def _queue_due_public_screenings(
+def _queue_due_market_screenings(
     client, screenings: list[dict], now_utc: datetime, schema: str
 ) -> int:
-    """Insert due rows for published public screenings; advance next_run_at."""
+    """Insert due rows for published market screenings; advance next_run_at."""
     queued = 0
 
     for s in screenings:
@@ -49,11 +49,11 @@ def _queue_due_public_screenings(
             last = to_utc(s.get("last_run_at") or s.get("created_at"))
             start = last or now_utc
             first_next = next_run_after(schedule, tz, start)
-            client.schema(schema).table("public_screenings").update(
+            client.schema(schema).table("market_screenings").update(
                 {"next_run_at": first_next.isoformat()}
             ).eq("id", sid).execute()
             log.info(
-                "Initialized next_run_at for public screening %s → %s",
+                "Initialized next_run_at for market screening %s → %s",
                 sid,
                 first_next.isoformat(),
             )
@@ -63,9 +63,9 @@ def _queue_due_public_screenings(
             continue
 
         try:
-            client.schema(schema).table("public_screening_results").insert(
+            client.schema(schema).table("market_screening_results").insert(
                 {
-                    "public_screening_id": sid,
+                    "market_screening_id": sid,
                     "run_at": next_run_at.isoformat(),
                     "status": "due",
                     "triggered": False,
@@ -74,15 +74,15 @@ def _queue_due_public_screenings(
             ).execute()
             queued += 1
             log.info(
-                "Queued public screening %s (scheduled %s)",
+                "Queued market screening %s (scheduled %s)",
                 sid,
                 next_run_at.isoformat(),
             )
         except Exception as exc:
-            log.warning("Failed to queue public screening %s: %s", sid, exc)
+            log.warning("Failed to queue market screening %s: %s", sid, exc)
 
         new_next = next_run_after(schedule, tz, next_run_at)
-        client.schema(schema).table("public_screenings").update(
+        client.schema(schema).table("market_screenings").update(
             {"next_run_at": new_next.isoformat()}
         ).eq("id", sid).execute()
 
@@ -92,18 +92,18 @@ def _queue_due_public_screenings(
         sid = s["id"]
         existing = (
             client.schema(schema)
-            .table("public_screening_results")
+            .table("market_screening_results")
             .select("id", count="exact")
-            .eq("public_screening_id", sid)
+            .eq("market_screening_id", sid)
             .in_("status", ["due", "running"])
             .execute()
         )
         if (existing.count or 0) > 0:
             continue
         try:
-            client.schema(schema).table("public_screening_results").insert(
+            client.schema(schema).table("market_screening_results").insert(
                 {
-                    "public_screening_id": sid,
+                    "market_screening_id": sid,
                     "run_at": now_utc.isoformat(),
                     "status": "due",
                     "triggered": False,
@@ -111,7 +111,7 @@ def _queue_due_public_screenings(
                 }
             ).execute()
             queued += 1
-            log.info("Queued manual trigger for public screening %s", sid)
+            log.info("Queued manual trigger for market screening %s", sid)
         except Exception as exc:
             log.warning("Failed to queue manual trigger for public %s: %s", sid, exc)
 
@@ -124,8 +124,8 @@ def _dispatch_due_public(client, available: int, now_utc: datetime, schema: str)
 
     due_res = (
         client.schema(schema)
-        .table("public_screening_results")
-        .select("id, public_screening_id, is_test")
+        .table("market_screening_results")
+        .select("id, market_screening_id, is_test")
         .eq("status", "due")
         .order("run_at", desc=False)
         .limit(available)
@@ -136,9 +136,9 @@ def _dispatch_due_public(client, available: int, now_utc: datetime, schema: str)
 
     for row in due_rows:
         result_id = row["id"]
-        screening_id = row["public_screening_id"]
+        screening_id = row["market_screening_id"]
 
-        client.schema(schema).table("public_screening_results").update(
+        client.schema(schema).table("market_screening_results").update(
             {
                 "status": "running",
                 "started_at": now_utc.isoformat(),
@@ -148,7 +148,7 @@ def _dispatch_due_public(client, available: int, now_utc: datetime, schema: str)
         cmd = [
             _VENV_PYTHON,
             "-m",
-            "services.public_screenings.cli",
+            "services.market_screenings.cli",
             "run",
             screening_id,
             "--result-id",
@@ -158,7 +158,7 @@ def _dispatch_due_public(client, available: int, now_utc: datetime, schema: str)
             cmd.append("--is-test")
 
         subprocess.Popen(cmd, cwd=str(_ANALYTICS))
-        log.info("Dispatched public screening %s (result %s)", screening_id, result_id)
+        log.info("Dispatched market screening %s (result %s)", screening_id, result_id)
         launched += 1
 
     return launched
@@ -174,37 +174,37 @@ def run_tick(max_concurrent: int | None = None) -> dict:
 
     stuck_cutoff = (now_utc - timedelta(minutes=STUCK_TIMEOUT_MINUTES)).isoformat()
     try:
-        client.schema(_SCHEMA).table("public_screening_results").update(
+        client.schema(_SCHEMA).table("market_screening_results").update(
             {"status": "error", "summary": "Job timed out (stuck detection)"}
         ).eq("status", "running").lt("started_at", stuck_cutoff).execute()
     except Exception as exc:
-        log.warning("Stuck-job cleanup failed for public_screening_results: %s", exc)
+        log.warning("Stuck-job cleanup failed for market_screening_results: %s", exc)
 
     running_count = (
         client.schema(_SCHEMA)
-        .table("public_screening_results")
+        .table("market_screening_results")
         .select("id", count="exact")
         .eq("status", "running")
         .execute()
     ).count or 0
     available = limit - running_count
 
-    public_screenings = (
+    market_screenings = (
         client.schema(_SCHEMA)
-        .table("public_screenings")
+        .table("market_screenings")
         .select("*")
         .eq("is_active", True)
         .eq("is_published", True)
         .execute()
     ).data or []
 
-    queued = _queue_due_public_screenings(
-        client, public_screenings, now_utc, _SCHEMA
+    queued = _queue_due_market_screenings(
+        client, market_screenings, now_utc, _SCHEMA
     )
     launched = _dispatch_due_public(client, available, now_utc, _SCHEMA)
 
     log.info(
-        "Public screening tick: queued=%d launched=%d running_before=%d",
+        "Market screening tick: queued=%d launched=%d running_before=%d",
         queued,
         launched,
         running_count,

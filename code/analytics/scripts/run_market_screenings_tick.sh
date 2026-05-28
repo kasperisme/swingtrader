@@ -1,17 +1,17 @@
 #!/usr/bin/env bash
-# run_public_screenings_tick.sh — shell wrapper for system crontab.
+# run_market_screenings_tick.sh — shell wrapper for system crontab.
 #
-# Queues due public_screenings and dispatches public_screening_results jobs
-# (same logic as OpenClaw job public-screening-tick).
+# Queues due market_screenings and dispatches market_screening_results jobs
+# (same logic as OpenClaw job market-screening-tick).
 #
 # Add to crontab (crontab -e), every minute:
-#   * * * * *  /path/to/swingtrader/code/analytics/scripts/run_public_screenings_tick.sh >> /path/to/logs/public_screenings_tick.log 2>&1
+#   * * * * *  /path/to/swingtrader/code/analytics/scripts/run_market_screenings_tick.sh >> /path/to/logs/market_screenings_tick.log 2>&1
 #
 # Use the real absolute path to this repo (not ~ unless your cron supports it).
 #
 # Env: load code/analytics/.env automatically via the Python entrypoint.
 # Tunables in .env:
-#   PUBLIC_SCREENING_MAX_CONCURRENT — parallel public runs (falls back to SCREENING_MAX_CONCURRENT)
+#   MARKET_SCREENING_MAX_CONCURRENT — parallel public runs (falls back to SCREENING_MAX_CONCURRENT)
 #   SCREENING_MAX_CONCURRENT        — fallback default 1
 #   SCREENING_STUCK_TIMEOUT_MINUTES — stuck running → error (default 20)
 
@@ -27,4 +27,4 @@ fi
 
 cd "$ANALYTICS_DIR"
 
-"$VENV_PYTHON" -m services.public_screenings.cli tick
+"$VENV_PYTHON" -m services.market_screenings.cli tick

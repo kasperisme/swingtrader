@@ -8,7 +8,7 @@ import { captureServer } from "@/lib/analytics/server";
 
 const SCHEMA = "swingtrader";
 
-export type PublicScreening = {
+export type MarketScreening = {
   id: string;
   slug: string;
   name: string;
@@ -23,7 +23,7 @@ export type PublicScreening = {
   llm_prompt: string | null;
 };
 
-export type PublicScreeningResult = {
+export type MarketScreeningResult = {
   id: string;
   run_at: string;
   triggered: boolean;
@@ -31,7 +31,7 @@ export type PublicScreeningResult = {
   status: string;
 };
 
-export type PublicScreeningResultRow = {
+export type MarketScreeningResultRow = {
   id: number;
   symbol: string | null;
   dataset: string;
@@ -45,9 +45,9 @@ type ActionResult<T> = Promise<{ ok: true; data: T } | { ok: false; error: strin
 // Fields known to exist after every migration is applied. download_count was
 // added in 20260513010000 and we degrade gracefully if a deployment is ahead
 // of the DB (column-missing error code 42703).
-const PUBLIC_FIELDS_FULL =
+const MARKET_FIELDS_FULL =
   "id, slug, name, description, category, schedule, timezone, last_run_at, last_triggered, created_at, download_count, llm_prompt";
-const PUBLIC_FIELDS_LEGACY =
+const MARKET_FIELDS_LEGACY =
   "id, slug, name, description, category, schedule, timezone, last_run_at, last_triggered, created_at";
 
 // supabase-js puts error fields on a class instance whose own props aren't
@@ -75,26 +75,26 @@ const validEmail = (raw: string): boolean =>
 
 // ── Reads (server-side, public) ─────────────────────────────────────────────
 
-async function selectPublicScreeningsWithFallback(
+async function selectMarketScreeningsWithFallback(
   builder: (fields: string) => Promise<{ data: unknown; error: unknown }>,
 ): Promise<{ data: unknown; error: unknown }> {
-  const first = await builder(PUBLIC_FIELDS_FULL);
+  const first = await builder(MARKET_FIELDS_FULL);
   if (first.error && isMissingColumnError(first.error)) {
     console.warn(
-      "[public-screenings] download_count missing — falling back. Apply migration 20260513010000.",
+      "[market-screenings] download_count missing — falling back. Apply migration 20260513010000.",
     );
-    return builder(PUBLIC_FIELDS_LEGACY);
+    return builder(MARKET_FIELDS_LEGACY);
   }
   return first;
 }
 
-export async function listPublicScreenings(): Promise<PublicScreening[]> {
+export async function listMarketScreenings(): Promise<MarketScreening[]> {
   const client = createServiceClient();
-  const { data, error } = await selectPublicScreeningsWithFallback(
+  const { data, error } = await selectMarketScreeningsWithFallback(
     (fields) =>
       client
         .schema(SCHEMA)
-        .from("public_screenings")
+        .from("market_screenings")
         .select(fields)
         .eq("is_published", true)
         .order("created_at", { ascending: false }) as unknown as Promise<{
@@ -104,25 +104,25 @@ export async function listPublicScreenings(): Promise<PublicScreening[]> {
   );
 
   if (error) {
-    console.error("[public-screenings] list failed", describePgError(error));
+    console.error("[market-screenings] list failed", describePgError(error));
     return [];
   }
-  return ((data ?? []) as Partial<PublicScreening>[]).map((r) => ({
+  return ((data ?? []) as Partial<MarketScreening>[]).map((r) => ({
     download_count: 0,
     llm_prompt: null,
     ...r,
-  })) as PublicScreening[];
+  })) as MarketScreening[];
 }
 
-export async function getPublicScreeningBySlug(
+export async function getMarketScreeningBySlug(
   slug: string,
-): Promise<PublicScreening | null> {
+): Promise<MarketScreening | null> {
   const client = createServiceClient();
-  const { data, error } = await selectPublicScreeningsWithFallback(
+  const { data, error } = await selectMarketScreeningsWithFallback(
     (fields) =>
       client
         .schema(SCHEMA)
-        .from("public_screenings")
+        .from("market_screenings")
         .select(fields)
         .eq("slug", slug)
         .eq("is_published", true)
@@ -134,15 +134,15 @@ export async function getPublicScreeningBySlug(
   );
 
   if (error) {
-    console.error("[public-screenings] getBySlug failed", describePgError(error));
+    console.error("[market-screenings] getBySlug failed", describePgError(error));
     return null;
   }
   if (!data) return null;
   return {
     download_count: 0,
     llm_prompt: null,
-    ...(data as Partial<PublicScreening>),
-  } as PublicScreening;
+    ...(data as Partial<MarketScreening>),
+  } as MarketScreening;
 }
 
 function normalizeRowDataForTable(raw: unknown): Record<string, unknown> {
@@ -162,21 +162,21 @@ function normalizeRowDataForTable(raw: unknown): Record<string, unknown> {
   return {};
 }
 
-export async function getLatestPublicScreeningResultRows(
+export async function getLatestMarketScreeningResultRows(
   screeningId: string,
 ): Promise<{
   resultId: string | null;
   runAt: string | null;
-  rows: PublicScreeningResultRow[];
+  rows: MarketScreeningResultRow[];
 }> {
   const client = createServiceClient();
 
   // Latest done result for this screening.
   const { data: latestResult } = await client
     .schema(SCHEMA)
-    .from("public_screening_results")
+    .from("market_screening_results")
     .select("id, run_at, data_used")
-    .eq("public_screening_id", screeningId)
+    .eq("market_screening_id", screeningId)
     .eq("status", "done")
     .order("run_at", { ascending: false })
     .limit(1)
@@ -186,14 +186,14 @@ export async function getLatestPublicScreeningResultRows(
     return { resultId: null, runAt: null, rows: [] };
   }
 
-  // Primary path: read from public_screening_result_rows (the canonical
+  // Primary path: read from market_screening_result_rows (the canonical
   // per-ticker table). May not exist yet for runs that pre-date that
   // migration — we fall back to data_used.symbols below.
-  let parsed: PublicScreeningResultRow[] = [];
+  let parsed: MarketScreeningResultRow[] = [];
   try {
     const { data: rows, error } = await client
       .schema(SCHEMA)
-      .from("public_screening_result_rows")
+      .from("market_screening_result_rows")
       .select("id, symbol, dataset, row_data, run_at, scan_date")
       .eq("result_id", latestResult.id)
       .order("id", { ascending: true });
@@ -210,7 +210,7 @@ export async function getLatestPublicScreeningResultRows(
     }));
   } catch (e) {
     console.warn(
-      "[public-screenings] public_screening_result_rows read failed, falling back",
+      "[market-screenings] market_screening_result_rows read failed, falling back",
       e,
     );
   }
@@ -246,24 +246,24 @@ export async function getLatestPublicScreeningResultRows(
   };
 }
 
-export async function getPublicScreeningResults(
+export async function getMarketScreeningResults(
   screeningId: string,
   limit = 10,
-): Promise<PublicScreeningResult[]> {
+): Promise<MarketScreeningResult[]> {
   const client = createServiceClient();
   const { data, error } = await client
     .schema(SCHEMA)
-    .from("public_screening_results")
+    .from("market_screening_results")
     .select("id, run_at, triggered, summary, status")
-    .eq("public_screening_id", screeningId)
+    .eq("market_screening_id", screeningId)
     .eq("status", "done")
     .order("run_at", { ascending: false })
     .limit(limit);
   if (error) {
-    console.error("[public-screenings] getResults failed", error);
+    console.error("[market-screenings] getResults failed", error);
     return [];
   }
-  return (data ?? []) as PublicScreeningResult[];
+  return (data ?? []) as MarketScreeningResult[];
 }
 
 // ── Early access signup ─────────────────────────────────────────────────────
@@ -283,7 +283,7 @@ export async function submitEarlyAccessSignup(input: {
   // Resolve the screening (must exist and be published).
   const { data: screening } = await service
     .schema(SCHEMA)
-    .from("public_screenings")
+    .from("market_screenings")
     .select("id, name")
     .eq("slug", input.screeningSlug)
     .eq("is_published", true)
@@ -313,7 +313,7 @@ export async function submitEarlyAccessSignup(input: {
     .from("early_access_signups")
     .insert({
       email,
-      public_screening_id: screening.id,
+      market_screening_id: screening.id,
       user_id: userId,
       source: input.source || "gallery_subscribe",
       referrer,
@@ -326,7 +326,7 @@ export async function submitEarlyAccessSignup(input: {
       insertRes.error.code === "23505" ||
       /duplicate key/i.test(insertRes.error.message);
     if (!isDup) {
-      console.error("[public-screenings] signup insert failed", insertRes.error);
+      console.error("[market-screenings] signup insert failed", insertRes.error);
       return { ok: false, error: "Could not record signup. Please try again." };
     }
     captureServer(userId ?? email, "early_access_signup_duplicate", {
@@ -355,7 +355,7 @@ export async function submitEarlyAccessSignup(input: {
  * event. Called from the CSV export route. Best-effort: any failure is logged
  * but never blocks the download response.
  */
-export async function recordPublicScreeningDownload(input: {
+export async function recordMarketScreeningDownload(input: {
   screeningId: string;
   screeningSlug: string;
   screeningName: string;
@@ -375,14 +375,14 @@ export async function recordPublicScreeningDownload(input: {
   try {
     const { error } = await service
       .schema(SCHEMA)
-      .rpc("increment_public_screening_download", {
+      .rpc("increment_market_screening_download", {
         p_id: input.screeningId,
       });
     if (error) {
-      console.error("[public-screenings] increment download failed", error);
+      console.error("[market-screenings] increment download failed", error);
     }
   } catch (e) {
-    console.error("[public-screenings] increment download threw", e);
+    console.error("[market-screenings] increment download threw", e);
   }
 
   let referrer: string | null = null;
@@ -393,7 +393,7 @@ export async function recordPublicScreeningDownload(input: {
     referrer = null;
   }
 
-  captureServer(userId ?? `anon:${input.screeningSlug}`, "public_screening_downloaded", {
+  captureServer(userId ?? `anon:${input.screeningSlug}`, "market_screening_downloaded", {
     screening_id: input.screeningId,
     screening_slug: input.screeningSlug,
     screening_name: input.screeningName,
@@ -413,19 +413,19 @@ export async function getMySubscriptionIds(): Promise<string[]> {
 
   const { data, error } = await supabase
     .schema(SCHEMA)
-    .from("public_screening_subscriptions")
-    .select("public_screening_id")
+    .from("market_screening_subscriptions")
+    .select("market_screening_id")
     .eq("user_id", userId);
 
   if (error) {
     console.error(
-      "[public-screenings] getMySubscriptionIds failed",
+      "[market-screenings] getMySubscriptionIds failed",
       describePgError(error),
     );
     return [];
   }
   return (data ?? []).map(
-    (r: { public_screening_id: string }) => r.public_screening_id,
+    (r: { market_screening_id: string }) => r.market_screening_id,
   );
 }
 
@@ -439,10 +439,10 @@ export async function getMySubscription(
 
   const { data } = await supabase
     .schema(SCHEMA)
-    .from("public_screening_subscriptions")
+    .from("market_screening_subscriptions")
     .select("notifications_enabled")
     .eq("user_id", userId)
-    .eq("public_screening_id", screeningId)
+    .eq("market_screening_id", screeningId)
     .limit(1)
     .maybeSingle();
 
@@ -453,7 +453,7 @@ export async function getMySubscription(
   };
 }
 
-export async function subscribeToPublicScreening(
+export async function subscribeToMarketScreening(
   screeningSlug: string,
 ): ActionResult<{ alreadySubscribed: boolean }> {
   const supabase = await createClient();
@@ -466,7 +466,7 @@ export async function subscribeToPublicScreening(
   const service = createServiceClient();
   const { data: screening } = await service
     .schema(SCHEMA)
-    .from("public_screenings")
+    .from("market_screenings")
     .select("id, name")
     .eq("slug", screeningSlug)
     .eq("is_published", true)
@@ -477,16 +477,16 @@ export async function subscribeToPublicScreening(
     return { ok: false, error: "Screening not found." };
   }
 
-  // public_screening_subscriptions is the only subscription record we keep.
-  // Public screenings are platform-managed; results land in user_scan_runs +
+  // market_screening_subscriptions is the only subscription record we keep.
+  // Market screenings are platform-managed; results land in user_scan_runs +
   // user_scan_rows + user_screening_results at execution time, not as a
   // user_scheduled_screenings row.
   const subRes = await supabase
     .schema(SCHEMA)
-    .from("public_screening_subscriptions")
+    .from("market_screening_subscriptions")
     .insert({
       user_id: userId,
-      public_screening_id: screening.id,
+      market_screening_id: screening.id,
     });
 
   if (subRes.error) {
@@ -494,14 +494,14 @@ export async function subscribeToPublicScreening(
       subRes.error.code === "23505" ||
       /duplicate key/i.test(subRes.error.message);
     if (!isDup) {
-      console.error("[public-screenings] subscribe failed", subRes.error);
+      console.error("[market-screenings] subscribe failed", subRes.error);
       return { ok: false, error: "Could not subscribe. Please try again." };
     }
     revalidatePath(`/marketscreenings/${screeningSlug}`);
     return { ok: true, data: { alreadySubscribed: true } };
   }
 
-  captureServer(userId, "public_screening_subscribed", {
+  captureServer(userId, "market_screening_subscribed", {
     screening_id: screening.id,
     screening_slug: screeningSlug,
     screening_name: screening.name,
@@ -512,7 +512,7 @@ export async function subscribeToPublicScreening(
 }
 
 /**
- * Mirror the Python public-screening fan-out for a single user. Used by the
+ * Mirror the Python market-screening fan-out for a single user. Used by the
  * post-subscribe "import latest results" prompt so a brand-new subscriber can
  * see the current state of the screening immediately instead of waiting for
  * the next scheduled run.
@@ -520,9 +520,9 @@ export async function subscribeToPublicScreening(
  * Writes: user_scan_jobs + user_scan_runs + user_scan_rows. For every ticker
  * whose row_data has llm_analysis.analysis_markdown, also read-modify-write
  * upserts user_ticker_chart_workspace with a user+assistant pair tagged
- * source: "public_screening" (matches services/public_screenings/runner.py).
+ * source: "market_screening" (matches services/market_screenings/runner.py).
  */
-export async function importLatestPublicScreeningResultForMe(
+export async function importLatestMarketScreeningResultForMe(
   screeningSlug: string,
 ): ActionResult<{
   imported: boolean;
@@ -542,7 +542,7 @@ export async function importLatestPublicScreeningResultForMe(
   const service = createServiceClient();
   const { data: screening } = await service
     .schema(SCHEMA)
-    .from("public_screenings")
+    .from("market_screenings")
     .select("id, name, slug, script_key, llm_prompt")
     .eq("slug", screeningSlug)
     .eq("is_published", true)
@@ -555,7 +555,7 @@ export async function importLatestPublicScreeningResultForMe(
 
   const screeningId = (screening as { id: string }).id;
   const scriptKey =
-    (screening as { script_key: string | null }).script_key || "public_screening";
+    (screening as { script_key: string | null }).script_key || "market_screening";
   const llmPrompt = (
     (screening as { llm_prompt: string | null }).llm_prompt || ""
   ).trim();
@@ -563,9 +563,9 @@ export async function importLatestPublicScreeningResultForMe(
   // Latest done result for this screening.
   const { data: latestResult } = await service
     .schema(SCHEMA)
-    .from("public_screening_results")
+    .from("market_screening_results")
     .select("id, run_at, data_used, summary, triggered, status, is_test")
-    .eq("public_screening_id", screeningId)
+    .eq("market_screening_id", screeningId)
     .eq("status", "done")
     .order("run_at", { ascending: false })
     .limit(1)
@@ -590,7 +590,7 @@ export async function importLatestPublicScreeningResultForMe(
   const dataUsedRaw = (latestResult as { data_used: unknown }).data_used;
   const dataUsed = normalizeRowDataForTable(dataUsedRaw);
 
-  // Per-ticker rows. Canonical source is public_screening_result_rows; we
+  // Per-ticker rows. Canonical source is market_screening_result_rows; we
   // fall back to data_used.symbols for legacy result rows that pre-date
   // that table.
   type RowPayload = { symbol: string | null; rowData: Record<string, unknown> };
@@ -598,14 +598,14 @@ export async function importLatestPublicScreeningResultForMe(
 
   const { data: dbRows, error: dbRowsErr } = await service
     .schema(SCHEMA)
-    .from("public_screening_result_rows")
+    .from("market_screening_result_rows")
     .select("symbol, row_data")
     .eq("result_id", resultId)
     .order("id", { ascending: true });
 
   if (dbRowsErr) {
     console.warn(
-      "[public-screenings] import: result_rows read failed, falling back",
+      "[market-screenings] import: result_rows read failed, falling back",
       describePgError(dbRowsErr),
     );
   } else if (dbRows && dbRows.length > 0) {
@@ -632,8 +632,8 @@ export async function importLatestPublicScreeningResultForMe(
 
   const nowIso = new Date().toISOString();
   const scanDateStr = nowIso.slice(0, 10);
-  const sourceLabel = `public_screening:${screeningSlug}`;
-  const scriptRel = `services/public_screenings/scripts/${scriptKey}.py`;
+  const sourceLabel = `market_screening:${screeningSlug}`;
+  const scriptRel = `services/market_screenings/scripts/${scriptKey}.py`;
 
   // 1. user_scan_jobs — job metadata. RLS expects auth.uid() = user_id.
   await supabase
@@ -675,7 +675,7 @@ export async function importLatestPublicScreeningResultForMe(
 
   if (runErr || !runIns) {
     console.error(
-      "[public-screenings] import: user_scan_runs insert failed",
+      "[market-screenings] import: user_scan_runs insert failed",
       describePgError(runErr),
     );
     return { ok: false, error: "Could not import results. Please try again." };
@@ -705,7 +705,7 @@ export async function importLatestPublicScreeningResultForMe(
       .select("id");
     if (rowsErr) {
       console.error(
-        "[public-screenings] import: user_scan_rows insert failed",
+        "[market-screenings] import: user_scan_rows insert failed",
         describePgError(rowsErr),
       );
     } else {
@@ -716,7 +716,7 @@ export async function importLatestPublicScreeningResultForMe(
 
   // 3b. user_scan_row_notes — copy each ticker's llm_analysis verdict (status,
   // comment, entry metadata) into the subscriber's workflow state, mirroring
-  // services/public_screenings/runner.py. Every note carries metadata_json
+  // services/market_screenings/runner.py. Every note carries metadata_json
   // (default {}) so the bulk upsert keys stay uniform — PostgREST rejects a
   // batch whose objects don't all share the same keys, which would otherwise
   // drop every note as soon as one ticker has an entry and another doesn't.
@@ -791,7 +791,7 @@ export async function importLatestPublicScreeningResultForMe(
         .upsert(notes, { onConflict: "scan_row_id,user_id" });
       if (notesErr) {
         console.warn(
-          "[public-screenings] import: user_scan_row_notes upsert failed",
+          "[market-screenings] import: user_scan_row_notes upsert failed",
           describePgError(notesErr),
         );
       }
@@ -799,7 +799,7 @@ export async function importLatestPublicScreeningResultForMe(
   }
 
   // 4. Chart workspace chat turns. Per ticker, append one user+assistant pair
-  // tagged source: "public_screening", mirroring runner.py's fan-out.
+  // tagged source: "market_screening", mirroring runner.py's fan-out.
   // Sequential per-ticker round-trips blow the serverless function timeout
   // on screenings with many LLM-analysed tickers — the rows from steps 1–3
   // land, but the action never returns, so the client dialog hangs at
@@ -849,14 +849,14 @@ export async function importLatestPublicScreeningResultForMe(
         messages.push({
           role: "user",
           content: userMessage,
-          source: "public_screening",
+          source: "market_screening",
         });
         messages.push({
           role: "assistant",
           content: analysisMarkdown,
           chartAnnotations: [],
           personaReports: [],
-          source: "public_screening",
+          source: "market_screening",
         });
 
         const { error: wsErr } = await supabase
@@ -874,7 +874,7 @@ export async function importLatestPublicScreeningResultForMe(
           );
         if (wsErr) {
           console.warn(
-            "[public-screenings] import: chart workspace upsert failed",
+            "[market-screenings] import: chart workspace upsert failed",
             sym,
             describePgError(wsErr),
           );
@@ -883,7 +883,7 @@ export async function importLatestPublicScreeningResultForMe(
         return true;
       } catch (e) {
         console.warn(
-          "[public-screenings] import: chart workspace threw",
+          "[market-screenings] import: chart workspace threw",
           sym,
           e,
         );
@@ -899,7 +899,7 @@ export async function importLatestPublicScreeningResultForMe(
     }
   }
 
-  captureServer(userId, "public_screening_imported_latest", {
+  captureServer(userId, "market_screening_imported_latest", {
     screening_id: screeningId,
     screening_slug: screeningSlug,
     screening_name: (screening as { name: string }).name,
@@ -923,7 +923,7 @@ export async function importLatestPublicScreeningResultForMe(
   };
 }
 
-export async function unsubscribeFromPublicScreening(
+export async function unsubscribeFromMarketScreening(
   screeningSlug: string,
 ): ActionResult<{ removed: boolean }> {
   const supabase = await createClient();
@@ -936,7 +936,7 @@ export async function unsubscribeFromPublicScreening(
   const service = createServiceClient();
   const { data: screening } = await service
     .schema(SCHEMA)
-    .from("public_screenings")
+    .from("market_screenings")
     .select("id")
     .eq("slug", screeningSlug)
     .limit(1)
@@ -948,17 +948,17 @@ export async function unsubscribeFromPublicScreening(
 
   const del = await supabase
     .schema(SCHEMA)
-    .from("public_screening_subscriptions")
+    .from("market_screening_subscriptions")
     .delete()
     .eq("user_id", userId)
-    .eq("public_screening_id", screening.id);
+    .eq("market_screening_id", screening.id);
 
   if (del.error) {
-    console.error("[public-screenings] unsubscribe failed", del.error);
+    console.error("[market-screenings] unsubscribe failed", del.error);
     return { ok: false, error: "Could not unsubscribe. Please try again." };
   }
 
-  captureServer(userId, "public_screening_unsubscribed", {
+  captureServer(userId, "market_screening_unsubscribed", {
     screening_id: screening.id,
     screening_slug: screeningSlug,
   });

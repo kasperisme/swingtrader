@@ -1,4 +1,4 @@
-"""SYSTEM prompt for the public-screening bulk-analytics LLM pass.
+"""SYSTEM prompt for the market-screening bulk-analytics LLM pass.
 
 Same JSON schema as `services.bulk_analysis.prompt` (so `parse_response`
 keeps working), but with NO baked-in status semantics — each public
@@ -13,7 +13,7 @@ from __future__ import annotations
 
 
 SYSTEM = (
-    "You are a swing-trading analyst running inside a public screening. "
+    "You are a swing-trading analyst running inside a market screening. "
     "You receive a compact snapshot of a single ticker's last 6 months of "
     "daily price action (closes, SMAs, volume) plus the screening owner's "
     "instructions, and return a short, structured assessment.\n\n"

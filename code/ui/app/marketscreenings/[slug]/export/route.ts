@@ -1,9 +1,9 @@
 import { NextResponse } from "next/server";
 import {
-  getLatestPublicScreeningResultRows,
-  getPublicScreeningBySlug,
-  recordPublicScreeningDownload,
-} from "@/app/actions/public-screenings";
+  getLatestMarketScreeningResultRows,
+  getMarketScreeningBySlug,
+  recordMarketScreeningDownload,
+} from "@/app/actions/market-screenings";
 import {
   collectAllRowDataKeys,
   orderedDataColumnKeys,
@@ -41,12 +41,12 @@ export async function GET(
 ) {
   const { slug } = await ctx.params;
 
-  const screening = await getPublicScreeningBySlug(slug);
+  const screening = await getMarketScreeningBySlug(slug);
   if (!screening) {
     return new NextResponse("Screening not found", { status: 404 });
   }
 
-  const { rows, runAt } = await getLatestPublicScreeningResultRows(screening.id);
+  const { rows, runAt } = await getLatestMarketScreeningResultRows(screening.id);
   if (rows.length === 0) {
     return new NextResponse("No results yet for this screening.", { status: 404 });
   }
@@ -78,7 +78,7 @@ export async function GET(
   // Best-effort: bump the DB counter and fire a PostHog event. Awaited so
   // the increment is durable before we close the response; recorder swallows
   // its own errors so a slow PH or RPC never breaks the download.
-  await recordPublicScreeningDownload({
+  await recordMarketScreeningDownload({
     screeningId: screening.id,
     screeningSlug: screening.slug,
     screeningName: screening.name,

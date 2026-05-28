@@ -1,4 +1,4 @@
-"""Shared types for public screening scripts."""
+"""Shared types for market screening scripts."""
 
 from __future__ import annotations
 
@@ -8,9 +8,9 @@ from typing import Any
 
 @dataclass
 class ScreeningResult:
-    """The return contract every public screening script must satisfy.
+    """The return contract every market screening script must satisfy.
 
-    Fields mirror the persisted columns on public_screening_results.
+    Fields mirror the persisted columns on market_screening_results.
     `ticker_count` is used by the Telegram fan-out to render a tight
     "name + count" notification; set it to the number of tickers in the result
     (passing tickers, alerts, however the script wants to count).

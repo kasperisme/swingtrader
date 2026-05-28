@@ -1,4 +1,4 @@
-"""Run a public screening script, persist the result, fan out to subscribers."""
+"""Run a market screening script, persist the result, fan out to subscribers."""
 
 from __future__ import annotations
 
@@ -46,7 +46,7 @@ def _format_telegram_message(
 # ── Execution ───────────────────────────────────────────────────────────────
 
 
-def run_public_screening(
+def run_market_screening(
     screening: dict, *, dry_run: bool = False, is_test: bool = False
 ) -> dict[str, Any]:
     """Look up the script for `screening` and execute it.
@@ -81,7 +81,7 @@ def run_public_screening(
     except (
         Exception
     ) as exc:  # noqa: BLE001 — surface any script failure as error result
-        log.exception("Public screening %s (%s) failed", screening["id"], script_key)
+        log.exception("Market screening %s (%s) failed", screening["id"], script_key)
         return {
             "screening_id": screening["id"],
             "name": screening.get("name") or script_key,
@@ -114,8 +114,8 @@ def _split_symbols_from_data_used(
     data_used: dict[str, Any] | None,
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     """Pop `symbols` out of `data_used` so the per-ticker payload can be
-    persisted in public_screening_result_rows instead of bloating the JSONB
-    on public_screening_results. Returns (symbols, lean_data_used).
+    persisted in market_screening_result_rows instead of bloating the JSONB
+    on market_screening_results. Returns (symbols, lean_data_used).
     """
     src = data_used or {}
     symbols_raw = src.get("symbols")
@@ -124,21 +124,21 @@ def _split_symbols_from_data_used(
     return symbols, lean
 
 
-def _write_public_screening_result_rows(
+def _write_market_screening_result_rows(
     client,
     *,
-    public_screening_id: str,
+    market_screening_id: str,
     result_id: str,
     scan_date_str: str,
     dataset: str,
     symbols: list[dict[str, Any]],
 ) -> int:
-    """Insert one public_screening_result_rows row per ticker. Returns inserted count."""
+    """Insert one market_screening_result_rows row per ticker. Returns inserted count."""
     if not result_id or not symbols:
         return 0
     rows = [
         {
-            "public_screening_id": public_screening_id,
+            "market_screening_id": market_screening_id,
             "result_id": result_id,
             "scan_date": scan_date_str,
             "dataset": dataset,
@@ -148,11 +148,11 @@ def _write_public_screening_result_rows(
         for s in symbols
     ]
     try:
-        client.schema(_SCHEMA).table("public_screening_result_rows").insert(rows).execute()
+        client.schema(_SCHEMA).table("market_screening_result_rows").insert(rows).execute()
         return len(rows)
     except Exception as exc:
         log.warning(
-            "Failed to insert public_screening_result_rows for result=%s: %s",
+            "Failed to insert market_screening_result_rows for result=%s: %s",
             result_id, exc,
         )
         return 0
@@ -172,13 +172,13 @@ def persist_and_deliver_public(
     status = "error" if error else "done"
 
     # Split the per-ticker symbols out of data_used. Symbols go to the
-    # public_screening_result_rows table; data_used keeps only summary stats.
+    # market_screening_result_rows table; data_used keeps only summary stats.
     symbols, lean_data_used = _split_symbols_from_data_used(result.get("data_used"))
     dataset = "trend_template"  # matches the convention used by user_scan_rows
 
     if result_id:
         try:
-            client.schema(_SCHEMA).table("public_screening_results").update(
+            client.schema(_SCHEMA).table("market_screening_results").update(
                 {
                     "triggered": triggered,
                     "summary": result.get("summary"),
@@ -189,12 +189,12 @@ def persist_and_deliver_public(
             ).eq("id", result_id).execute()
         except Exception as exc:
             log.error(
-                "Failed to update public_screening_results %s: %s", result_id, exc
+                "Failed to update market_screening_results %s: %s", result_id, exc
             )
             return
     else:
         row = {
-            "public_screening_id": result["screening_id"],
+            "market_screening_id": result["screening_id"],
             "run_at": now,
             "started_at": now,
             "triggered": triggered,
@@ -207,27 +207,27 @@ def persist_and_deliver_public(
         try:
             ins = (
                 client.schema(_SCHEMA)
-                .table("public_screening_results")
+                .table("market_screening_results")
                 .insert(row)
                 .execute()
             )
             result_id = (ins.data or [{}])[0].get("id")
         except Exception as exc:
-            log.error("Failed to persist public_screening_results: %s", exc)
+            log.error("Failed to persist market_screening_results: %s", exc)
             return
 
     # Persist the per-ticker rows into the canonical table.
     if result_id:
-        inserted = _write_public_screening_result_rows(
+        inserted = _write_market_screening_result_rows(
             client,
-            public_screening_id=result["screening_id"],
+            market_screening_id=result["screening_id"],
             result_id=result_id,
             scan_date_str=scan_date_str,
             dataset=dataset,
             symbols=symbols,
         )
         log.info(
-            "Public screening %s: persisted %d/%d row(s) into public_screening_result_rows",
+            "Market screening %s: persisted %d/%d row(s) into market_screening_result_rows",
             result["screening_id"], inserted, len(symbols),
         )
 
@@ -238,7 +238,7 @@ def persist_and_deliver_public(
     }
     if is_test:
         update_fields["run_requested_at"] = None
-    client.schema(_SCHEMA).table("public_screenings").update(
+    client.schema(_SCHEMA).table("market_screenings").update(
         update_fields,
     ).eq("id", result["screening_id"]).execute()
 
@@ -252,11 +252,11 @@ def persist_and_deliver_public(
     )
     if should_queue_bulk:
         try:
-            client.schema(_SCHEMA).table("public_screening_results").update(
+            client.schema(_SCHEMA).table("market_screening_results").update(
                 {"bulk_analysis_status": "queued"}
             ).eq("id", result_id).execute()
             log.info(
-                "Public screening %s: queued result %s for LLM bulk-analysis (%d tickers); fan-out deferred",
+                "Market screening %s: queued result %s for LLM bulk-analysis (%d tickers); fan-out deferred",
                 result["screening_id"], result_id, len(symbols),
             )
         except Exception as exc:
@@ -276,7 +276,7 @@ def persist_and_deliver_public(
 def fan_out_from_db(result_id: str) -> None:
     """Rebuild the fan-out payload from persisted rows and deliver to subscribers.
 
-    Called by the public_screening_bulk_analytics worker after it has enriched
+    Called by the market_screening_bulk_analytics worker after it has enriched
     the per-ticker `row_data` with LLM analysis. Subscribers get the enriched
     rows copied into their `user_scan_rows`, so they only see (and get notified
     about) results that include the analysis.
@@ -285,9 +285,9 @@ def fan_out_from_db(result_id: str) -> None:
 
     res_row = (
         client.schema(_SCHEMA)
-        .table("public_screening_results")
+        .table("market_screening_results")
         .select(
-            "id, public_screening_id, triggered, summary, data_used, status, is_test"
+            "id, market_screening_id, triggered, summary, data_used, status, is_test"
         )
         .eq("id", result_id)
         .limit(1)
@@ -300,7 +300,7 @@ def fan_out_from_db(result_id: str) -> None:
 
     rows_res = (
         client.schema(_SCHEMA)
-        .table("public_screening_result_rows")
+        .table("market_screening_result_rows")
         .select("symbol, row_data")
         .eq("result_id", result_id)
         .execute()
@@ -312,9 +312,9 @@ def fan_out_from_db(result_id: str) -> None:
 
     ps_res = (
         client.schema(_SCHEMA)
-        .table("public_screenings")
+        .table("market_screenings")
         .select("name, script_key")
-        .eq("id", result_row["public_screening_id"])
+        .eq("id", result_row["market_screening_id"])
         .limit(1)
         .execute()
     )
@@ -324,8 +324,8 @@ def fan_out_from_db(result_id: str) -> None:
     data_used["symbols"] = symbols
 
     payload = {
-        "screening_id": result_row["public_screening_id"],
-        "name": ps_meta.get("name") or "Public screening",
+        "screening_id": result_row["market_screening_id"],
+        "name": ps_meta.get("name") or "Market screening",
         "script_key": ps_meta.get("script_key"),
         "triggered": bool(result_row.get("triggered")),
         "summary": result_row.get("summary"),
@@ -337,7 +337,7 @@ def fan_out_from_db(result_id: str) -> None:
     fan_out_to_subscribers(payload)
 
 
-def _append_public_screening_chat_turn(
+def _append_market_screening_chat_turn(
     client,
     *,
     user_id: str,
@@ -346,7 +346,7 @@ def _append_public_screening_chat_turn(
     analysis_markdown: str,
 ) -> None:
     """Append one user+assistant chat turn to a subscriber's chart workspace,
-    tagged as a public-screening result.
+    tagged as a market-screening result.
 
     Mirrors the bulk-analysis pattern in
     `services.bulk_analysis.worker._append_chat_turn`. Race conditions with a
@@ -371,7 +371,7 @@ def _append_public_screening_chat_turn(
     annotations = list((existing or {}).get("annotations") or [])
 
     messages.append(
-        {"role": "user", "content": user_message, "source": "public_screening"}
+        {"role": "user", "content": user_message, "source": "market_screening"}
     )
     messages.append(
         {
@@ -379,7 +379,7 @@ def _append_public_screening_chat_turn(
             "content": analysis_markdown,
             "chartAnnotations": [],
             "personaReports": [],
-            "source": "public_screening",
+            "source": "market_screening",
         }
     )
 
@@ -423,7 +423,7 @@ def _write_scan_artefacts_for_subscriber(
     """
     payload = data_used or {}
     symbols = payload.get("symbols") if isinstance(payload.get("symbols"), list) else []
-    script_rel = f"services/public_screenings/scripts/{script_key}.py"
+    script_rel = f"services/market_screenings/scripts/{script_key}.py"
     job_status = "completed" if status == "done" else "failed"
     exit_code = 0 if status == "done" else 1
 
@@ -487,7 +487,7 @@ def _write_scan_artefacts_for_subscriber(
     inserted_rows: list[dict] = []
     if run_id and symbols:
         # The /protected/screenings UI filters user_scan_rows by
-        # dataset IN ('public_screening', 'passed_stocks', 'charts_page').
+        # dataset IN ('market_screening', 'passed_stocks', 'charts_page').
         # The script_key is preserved on user_scan_runs.source.
         # row_data is JSONB — pass the dict directly so PostgREST stores it
         # natively (no double-encoding).
@@ -604,7 +604,7 @@ def _write_scan_artefacts_for_subscriber(
 def fan_out_to_subscribers(result: dict[str, Any]) -> None:
     client = get_supabase_client()
     screening_id = result["screening_id"]
-    name = result.get("name") or "Public screening"
+    name = result.get("name") or "Market screening"
     triggered = bool(result.get("triggered"))
     error = bool(result.get("error"))
     summary = result.get("summary")
@@ -616,28 +616,28 @@ def fan_out_to_subscribers(result: dict[str, Any]) -> None:
 
     subs_res = (
         client.schema(_SCHEMA)
-        .table("public_screening_subscriptions")
+        .table("market_screening_subscriptions")
         .select("user_id, notifications_enabled")
-        .eq("public_screening_id", screening_id)
+        .eq("market_screening_id", screening_id)
         .execute()
     )
     subscribers = subs_res.data or []
     if not subscribers:
-        log.info("Public screening %s: no subscribers", screening_id)
+        log.info("Market screening %s: no subscribers", screening_id)
         return
 
     ps_res = (
         client.schema(_SCHEMA)
-        .table("public_screenings")
+        .table("market_screenings")
         .select("name, slug, script_key, llm_prompt")
         .eq("id", screening_id)
         .limit(1)
         .execute()
     )
-    public_meta = (ps_res.data or [{}])[0]
-    source_label = f"public_screening:{public_meta.get('slug') or screening_id}"
-    dataset_key = public_meta.get("script_key") or "public_screening"
-    llm_prompt = (public_meta.get("llm_prompt") or "").strip()
+    market_meta = (ps_res.data or [{}])[0]
+    source_label = f"market_screening:{market_meta.get('slug') or screening_id}"
+    dataset_key = market_meta.get("script_key") or "market_screening"
+    llm_prompt = (market_meta.get("llm_prompt") or "").strip()
 
     # Pre-extract symbols enriched with LLM analysis so we can fan them out
     # into each subscriber's chart-workspace chat. Symbols without
@@ -666,9 +666,9 @@ def fan_out_to_subscribers(result: dict[str, Any]) -> None:
         error_summary=summary if error else None,
     )
     message_type = (
-        "public_screening_error"
+        "market_screening_error"
         if error
-        else "public_screening_alert" if triggered else "public_screening_no_trigger"
+        else "market_screening_alert" if triggered else "market_screening_no_trigger"
     )
 
     scan_jobs_written = 0
@@ -680,7 +680,7 @@ def fan_out_to_subscribers(result: dict[str, Any]) -> None:
     failed = 0
 
     log.info(
-        "Public screening %s: starting fan-out to %d subscriber(s)",
+        "Market screening %s: starting fan-out to %d subscriber(s)",
         screening_id,
         len(subscribers),
     )
@@ -718,13 +718,13 @@ def fan_out_to_subscribers(result: dict[str, Any]) -> None:
 
             # 2. Per-ticker chat turn — for every symbol the bulk-analytics
             #    worker enriched with LLM analysis, append a synthetic chat
-            #    turn (tagged source="public_screening") to this subscriber's
+            #    turn (tagged source="market_screening") to this subscriber's
             #    user_ticker_chart_workspace so the analysis shows up in their
             #    chat the next time they open that ticker. Mirrors the
             #    services.bulk_analysis pattern. Best-effort per ticker.
             for sym, analysis_markdown in symbols_for_chat:
                 try:
-                    _append_public_screening_chat_turn(
+                    _append_market_screening_chat_turn(
                         client,
                         user_id=user_id,
                         ticker=sym,
@@ -789,7 +789,7 @@ def fan_out_to_subscribers(result: dict[str, Any]) -> None:
             )
 
     log.info(
-        "Public screening %s fan-out done: subscribers=%d scan_jobs=%d scan_runs=%d notes=%d chat_turns=%d telegram_delivered=%d telegram_skipped=%d telegram_failed=%d",
+        "Market screening %s fan-out done: subscribers=%d scan_jobs=%d scan_runs=%d notes=%d chat_turns=%d telegram_delivered=%d telegram_skipped=%d telegram_failed=%d",
         screening_id,
         len(subscribers),
         scan_jobs_written,

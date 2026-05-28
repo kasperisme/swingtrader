@@ -1,14 +1,14 @@
 """
-public_screenings.cli — script-backed public screenings.
+market_screenings.cli — script-backed market screenings.
 
-``tick`` is invoked every minute by the ``public-screening-tick`` OpenClaw cron.
+``tick`` is invoked every minute by the ``market-screening-tick`` OpenClaw cron.
 ``run`` executes one screening (queued by ``tick`` or invoked manually).
 
 Usage:
-    python -m services.public_screenings.cli tick [--max-concurrent N]
-    python -m services.public_screenings.cli run <public-screening-id> \\
+    python -m services.market_screenings.cli tick [--max-concurrent N]
+    python -m services.market_screenings.cli run <market-screening-id> \\
         [--result-id UUID] [--is-test] [--dry-run]
-    python -m services.public_screenings.cli setup-cron
+    python -m services.market_screenings.cli setup-cron
 """
 
 from __future__ import annotations
@@ -37,11 +37,11 @@ from shared.db import get_supabase_client
 from shared.health import JobHeartbeat
 
 
-def _get_public_screening(screening_id: str) -> dict | None:
+def _get_market_screening(screening_id: str) -> dict | None:
     client = get_supabase_client()
     res = (
         client.schema("swingtrader")
-        .table("public_screenings")
+        .table("market_screenings")
         .select("*")
         .eq("id", screening_id)
         .limit(1)
@@ -58,17 +58,17 @@ def cmd_tick(args: argparse.Namespace) -> None:
 
 
 def cmd_run(args: argparse.Namespace) -> None:
-    from .runner import persist_and_deliver_public, run_public_screening
+    from .runner import persist_and_deliver_public, run_market_screening
 
-    screening = _get_public_screening(args.screening_id)
+    screening = _get_market_screening(args.screening_id)
     if not screening:
-        print(f"Public screening {args.screening_id} not found", file=sys.stderr)
+        print(f"Market screening {args.screening_id} not found", file=sys.stderr)
         sys.exit(1)
 
     is_test = args.is_test or bool(screening.get("run_requested_at"))
 
-    with JobHeartbeat("public_screening_run", expected_interval=0.25):
-        result = run_public_screening(screening, dry_run=args.dry_run, is_test=is_test)
+    with JobHeartbeat("market_screening_run", expected_interval=0.25):
+        result = run_market_screening(screening, dry_run=args.dry_run, is_test=is_test)
         if not args.dry_run:
             persist_and_deliver_public(result, result_id=args.result_id)
 
@@ -76,38 +76,38 @@ def cmd_run(args: argparse.Namespace) -> None:
 
 
 def cmd_setup_cron(_args: argparse.Namespace) -> None:
-    from .sync_crons import setup_public_screening_tick_cron
+    from .sync_crons import setup_market_screening_tick_cron
 
-    result = setup_public_screening_tick_cron()
+    result = setup_market_screening_tick_cron()
     print(json.dumps(result))
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Public screenings — script-backed shared runs",
+        description="Market screenings — script-backed shared runs",
     )
     sub = parser.add_subparsers(dest="command")
 
     p_tick = sub.add_parser(
         "tick",
-        help="Run one scheduler tick (called every minute by OpenClaw public-screening-tick)",
+        help="Run one scheduler tick (called every minute by OpenClaw market-screening-tick)",
     )
     p_tick.add_argument(
         "--max-concurrent",
         type=int,
         default=None,
-        help="Max concurrent runs (default: PUBLIC_SCREENING_MAX_CONCURRENT or SCREENING_MAX_CONCURRENT, else 1)",
+        help="Max concurrent runs (default: MARKET_SCREENING_MAX_CONCURRENT or SCREENING_MAX_CONCURRENT, else 1)",
     )
 
     p_run = sub.add_parser(
         "run",
-        help="Run one public screening (normally invoked by tick)",
+        help="Run one market screening (normally invoked by tick)",
     )
-    p_run.add_argument("screening_id", help="UUID of the public_screenings row")
+    p_run.add_argument("screening_id", help="UUID of the market_screenings row")
     p_run.add_argument(
         "--result-id",
         default=None,
-        help="UUID of a pre-inserted public_screening_results row to update",
+        help="UUID of a pre-inserted market_screening_results row to update",
     )
     p_run.add_argument(
         "--is-test",
@@ -118,7 +118,7 @@ def main() -> None:
 
     sub.add_parser(
         "setup-cron",
-        help="Register only the public-screening-tick OpenClaw cron",
+        help="Register only the market-screening-tick OpenClaw cron",
     )
 
     args = parser.parse_args()

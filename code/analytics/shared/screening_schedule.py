@@ -1,7 +1,7 @@
 """Cron / timezone helpers shared by screening schedulers (agent + public).
 
 Keeps next_run_at logic identical across user_scheduled_screenings and
-public_screenings without coupling the two scheduler packages.
+market_screenings without coupling the two scheduler packages.
 """
 
 from __future__ import annotations

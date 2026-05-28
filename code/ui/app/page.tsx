@@ -31,7 +31,7 @@ import { PricingTierSwitcher } from "@/components/pricing-tier-switcher";
 import { isSanityConfigured, sanityFetch } from "@/lib/sanity/client";
 import { landingPageQuery } from "@/lib/sanity/queries";
 import type { LandingPage, LandingCardItem, LandingStep, LandingPricingPlan } from "@/lib/sanity/types";
-import { listPublicScreenings } from "@/app/actions/public-screenings";
+import { listMarketScreenings } from "@/app/actions/market-screenings";
 import { humanizeCron } from "@/lib/cron-format";
 
 // ── Icon mapping ──────────────────────────────────────────────────────────────
@@ -360,13 +360,13 @@ export default async function Home() {
   const tickerThemes = cms?.tickerThemes?.length ? cms.tickerThemes : DEFAULT_TICKER_THEMES;
   const doubledTicker = [...tickerThemes, ...tickerThemes];
 
-  // Public screenings preview — up to 3 to highlight on the landing page.
-  let publicScreeningsPreview: Awaited<ReturnType<typeof listPublicScreenings>> = [];
+  // Market screenings preview — up to 3 to highlight on the landing page.
+  let marketScreeningsPreview: Awaited<ReturnType<typeof listMarketScreenings>> = [];
   try {
-    const all = await listPublicScreenings();
-    publicScreeningsPreview = all.slice(0, 3);
+    const all = await listMarketScreenings();
+    marketScreeningsPreview = all.slice(0, 3);
   } catch {
-    publicScreeningsPreview = [];
+    marketScreeningsPreview = [];
   }
 
   return (
@@ -591,11 +591,11 @@ export default async function Home() {
         </div>
       </section>
 
-      {/* ── PUBLIC SCREENINGS ────────────────────────────────────── */}
-      <section id="public-screenings" className="border-t border-border py-16 md:py-24">
+      {/* ── MARKET SCREENINGS ────────────────────────────────────── */}
+      <section id="market-screenings" className="border-t border-border py-16 md:py-24">
         <div className="mx-auto max-w-6xl px-4 sm:px-6 lg:px-8">
           <p className="text-xs font-semibold uppercase tracking-widest text-amber-500">
-            Free public screenings
+            Free market screenings
           </p>
           <h2 className="mt-3 text-2xl font-bold tracking-tight sm:text-3xl">
             Curated screenings, free to subscribe
@@ -604,9 +604,9 @@ export default async function Home() {
             Platform-managed screenings — Stage 2 setups, technicals, fundamentals — run on a schedule. Subscribe once and the results land in your inbox and Telegram, no setup required.
           </p>
 
-          {publicScreeningsPreview.length > 0 ? (
+          {marketScreeningsPreview.length > 0 ? (
             <div className="mt-10 grid gap-4 sm:grid-cols-2 md:grid-cols-3">
-              {publicScreeningsPreview.map((s) => (
+              {marketScreeningsPreview.map((s) => (
                 <Link
                   key={s.id}
                   href={`/marketscreenings/${s.slug}`}
@@ -647,7 +647,7 @@ export default async function Home() {
               href="/marketscreenings"
               className="inline-flex items-center gap-1.5 text-sm font-medium text-amber-400 hover:underline"
             >
-              Browse all public screenings →
+              Browse all market screenings →
             </Link>
           </div>
         </div>
