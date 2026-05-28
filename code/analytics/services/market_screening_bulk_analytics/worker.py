@@ -161,6 +161,14 @@ async def _process_ticker(
         if not snapshot:
             raise RuntimeError("no candles returned")
 
+        # Inject any screen-derived fields the script left in row_data so the
+        # LLM sees the same data we filtered on (e.g. nis_fundamentals leaves
+        # 10y ROE/ROIC/FCF metrics there). Screen-agnostic — any market
+        # screening that puts useful data in row_data benefits. Kept under a
+        # dedicated `screen_data` key so the price snapshot keys stay clean.
+        if isinstance(row_data, dict) and row_data:
+            snapshot = {**snapshot, "screen_data": row_data}
+
         text, _latency = await llm_client.chat(
             prompt=bulk_prompt.build_user_prompt(ticker, snapshot, llm_prompt),
             system=ps_prompt.SYSTEM,
@@ -168,7 +176,18 @@ async def _process_ticker(
             model=DEFAULT_MODEL,
             timeout=DEFAULT_PER_TICKER_TIMEOUT,
         )
-        parsed = bulk_prompt.parse_response(text)
+        try:
+            parsed = bulk_prompt.parse_response(text)
+        except Exception as parse_exc:
+            # Surface the model's actual output so we can see WHY it failed
+            # (e.g. analysis_markdown missing, JSON malformed, prose outside
+            # the JSON). Truncated to keep log lines bounded.
+            log.warning(
+                "[%s] %s parse failed: %s — raw head: %s",
+                result_id[:8], ticker, parse_exc,
+                (text or "").strip().replace("\n", " ")[:400],
+            )
+            raise
 
         merged = _merge_analysis_into_row(row_data, parsed, snapshot=snapshot)
         await asyncio.to_thread(_write_row_data, row_id, merged)
