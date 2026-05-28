@@ -6,6 +6,10 @@ import { createClient as createSupabaseClient } from "@supabase/supabase-js";
 
 import { createClient } from "@/lib/supabase/server";
 import { CLUSTERS, DIMENSION_MAP } from "@/app/protected/vectors/dimensions";
+import {
+  fetchRelatedArticles,
+  RelatedArticles,
+} from "./_components/related-articles";
 
 type ArticleRow = {
   id: number;
@@ -783,6 +787,18 @@ async function ArticleData({ params }: { params: Promise<{ slug?: string }> }) {
     (article.search_tags?.length ? article.search_tags : null) ??
     buildSearchTagsFromHeads(heads);
 
+  // Related articles: shares ≥1 search_tag, within last 30 days, ranked by
+  // overlap count + recency. Returns [] when no tags exist or no matches found
+  // — the component renders nothing in that case, so no layout shift.
+  const relatedArticles = await fetchRelatedArticles({
+    articleId: article.id,
+    tags: searchTags,
+    limit: 6,
+    windowDays: 30,
+  });
+  const siteBaseUrl =
+    process.env.NEXT_PUBLIC_SITE_URL ?? "https://newsimpactscreener.com";
+
   return (
     <div className="mx-auto w-full max-w-5xl px-4 py-8 sm:px-6 sm:py-10">
       <div className="mb-8">
@@ -877,6 +893,8 @@ async function ArticleData({ params }: { params: Promise<{ slug?: string }> }) {
           tickerRelationships={tickerRelationships}
         />
       </div>
+
+      <RelatedArticles related={relatedArticles} baseUrl={siteBaseUrl} />
     </div>
   );
 }
