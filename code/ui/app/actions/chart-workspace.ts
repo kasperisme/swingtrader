@@ -25,7 +25,7 @@ export type PersonaReport = {
 export type ChartAiChatMessageSource =
   | "ai_chat"
   | "bulk_analysis"
-  | "public_screening";
+  | "market_screening";
 
 export type ChartAiChatMessage = {
   role: "user" | "assistant";
@@ -86,7 +86,7 @@ function parseMessages(raw: unknown): ChartAiChatMessage[] {
     if (
       o.source === "ai_chat" ||
       o.source === "bulk_analysis" ||
-      o.source === "public_screening"
+      o.source === "market_screening"
     ) {
       msg.source = o.source;
     }

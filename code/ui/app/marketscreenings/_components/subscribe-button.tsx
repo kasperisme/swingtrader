@@ -15,11 +15,11 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 import {
-  importLatestPublicScreeningResultForMe,
+  importLatestMarketScreeningResultForMe,
   submitEarlyAccessSignup,
-  subscribeToPublicScreening,
-  unsubscribeFromPublicScreening,
-} from "@/app/actions/public-screenings";
+  subscribeToMarketScreening,
+  unsubscribeFromMarketScreening,
+} from "@/app/actions/market-screenings";
 
 type Props = {
   screeningSlug: string;
@@ -86,7 +86,7 @@ function AuthedSubscribeButton({
     setSubscribed(next);
     startTransition(async () => {
       if (next) {
-        const res = await subscribeToPublicScreening(screeningSlug);
+        const res = await subscribeToMarketScreening(screeningSlug);
         if (!res.ok) {
           setSubscribed(false);
           setError(res.error);
@@ -100,7 +100,7 @@ function AuthedSubscribeButton({
           setImportPromptOpen(true);
         }
       } else {
-        const res = await unsubscribeFromPublicScreening(screeningSlug);
+        const res = await unsubscribeFromMarketScreening(screeningSlug);
         if (!res.ok) {
           setSubscribed(true);
           setError(res.error);
@@ -113,7 +113,7 @@ function AuthedSubscribeButton({
     setImportStatus({ kind: "pending" });
     startTransition(async () => {
       try {
-        const res = await importLatestPublicScreeningResultForMe(screeningSlug);
+        const res = await importLatestMarketScreeningResultForMe(screeningSlug);
         if (!res.ok) {
           setImportStatus({ kind: "error", message: res.error });
           return;
@@ -319,7 +319,7 @@ function EarlyAccessButton({
         <DialogHeader>
           <DialogTitle>Request early access</DialogTitle>
           <DialogDescription>
-            Public screenings are in early access. Drop your email and
+            Market screenings are in early access. Drop your email and
             we’ll notify you when subscriptions to{" "}
             <span className="font-medium text-foreground">{screeningName}</span>{" "}
             open.

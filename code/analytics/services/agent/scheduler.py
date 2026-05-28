@@ -10,8 +10,8 @@ Called every minute by one OpenClaw cron job. Two phases per tick:
   2. Dispatch: Pick the oldest due rows up to MAX_CONCURRENT - running_count,
                flip them to status='running', launch subprocesses.
 
-Public script screenings use ``services.public_screenings.scheduler.run_tick``
-and a separate OpenClaw cron (``public-screening-tick``).
+Public script screenings use ``services.market_screenings.scheduler.run_tick``
+and a separate OpenClaw cron (``market-screening-tick``).
 """
 
 from __future__ import annotations

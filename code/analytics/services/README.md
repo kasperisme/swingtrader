@@ -43,7 +43,7 @@ Python service packages for the swingtrader analytics backend. Each subdirectory
 |---|---|---|
 | [`agent_core/`](agent_core/README.md) | Shared LLM plumbing — streaming Ollama tool-call loop, tool registry, base market tools. Used by every other LLM-calling service. | `simple_chat`, `run_tool_loop`, `build_market_registry` |
 | [`agent/`](agent/README.md) | Scheduled **user** screening agent (LLM + Telegram). Own OpenClaw cron `screening-tick` → `agent.cli tick`. | `python -m services.agent.cli {tick,run,setup-cron,fmp-test}` |
-| [`public_screenings/`](public_screenings/README.md) | Script-backed shared screenings: own scheduler + OpenClaw cron `public-screening-tick`; cron date logic shared via `shared/screening_schedule.py`. | `python -m services.public_screenings.cli {tick,run,setup-cron}` |
+| [`market_screenings/`](market_screenings/README.md) | Script-backed shared screenings: own scheduler + OpenClaw cron `market-screening-tick`; cron date logic shared via `shared/screening_schedule.py`. | `python -m services.market_screenings.cli {tick,run,setup-cron}` |
 | [`bulk_analysis/`](bulk_analysis/README.md) | Per-ticker technical-analysis worker. UI inserts a job row → cron tick dispatches a subprocess that fetches OHLCV, runs LLM analysis, writes to chat workspace. | `python -m services.bulk_analysis.cli {tick,run}` |
 | [`news/`](news/README.md) | News ingestion + impact scoring + embeddings + daily narrative. The factor-scoring core that feeds every other service. | `score_cli`, `embeddings_cli`, `narrative_generator` |
 | [`podcast/`](podcast/README.md) | Daily audio digest: LLM script → ElevenLabs → MP3 → RSS. Telegram approval gate. | `python scripts/run_podcast.py` |
@@ -69,7 +69,7 @@ News ingestion (news/scoring) ─▶ news_articles + news_impact_vectors
 
 The screener (`services/screener/`) lives outside this graph — it's a pure FMP-driven scan that produces `scan_jobs` rows independently of the news pipeline. Other services consume those rows (e.g. bulk_analysis joins user-pinned tickers from a scan run).
 
-**Public screenings** use a **separate** OpenClaw minute cron (`public-screening-tick`) → `services.public_screenings.cli tick` → queue/dispatch `public_screening_results` → `public_screenings.cli run` for each job. They share **`shared/screening_schedule.py`** with the agent for identical `next_run_at` / croniter behavior (see [`public_screenings/README.md`](public_screenings/README.md)).
+**Market screenings** use a **separate** OpenClaw minute cron (`market-screening-tick`) → `services.market_screenings.cli tick` → queue/dispatch `market_screening_results` → `market_screenings.cli run` for each job. They share **`shared/screening_schedule.py`** with the agent for identical `next_run_at` / croniter behavior (see [`market_screenings/README.md`](market_screenings/README.md)).
 
 ---
 
@@ -78,7 +78,7 @@ The screener (`services/screener/`) lives outside this graph — it's a pure FMP
 These live in `shared/` (sibling to `services/`), not in any one service:
 
 - `shared/db.py` — Supabase client factory, `_as_json` helper, `swingtrader` schema constant
-- `shared/screening_schedule.py` — cron + timezone helpers for `services.agent.scheduler` and `services.public_screenings.scheduler`
+- `shared/screening_schedule.py` — cron + timezone helpers for `services.agent.scheduler` and `services.market_screenings.scheduler`
 - `shared/logging.py` — structured logger
 - `shared/telegram.py` — Telegram chat lookup + chunked send + delivery logging
 - `shared/health.py` — `JobHeartbeat` context manager for cron jobs
@@ -93,7 +93,7 @@ When in doubt about where a helper belongs: if **two or more services** would ne
 - **No direct Ollama calls in new code.** Use `services.agent_core.simple_chat` (one-shot) or `run_tool_loop` (tool-calling). The package handles streaming + retry + heartbeat. See [`agent_core/README.md`](agent_core/README.md).
 - **Read-only data access goes through `rag/`.** If you need cluster trends, ticker sentiment, top articles, semantic news search, or company vectors, import from `services.rag` rather than re-querying Supabase.
 - **One CLI per service, exposed via `python -m services.{name}.cli`.** Subcommands like `tick` (cron tick) and `run <id>` (one job) are the standard pattern.
-- **Cron tick + subprocess dispatch is the standard scheduler shape.** See `services/agent/scheduler.py`, `services/public_screenings/scheduler.py`, and `services/bulk_analysis/scheduler.py` — same skeleton (cleanup stuck jobs, count running, dispatch subprocesses up to a concurrency cap).
+- **Cron tick + subprocess dispatch is the standard scheduler shape.** See `services/agent/scheduler.py`, `services/market_screenings/scheduler.py`, and `services/bulk_analysis/scheduler.py` — same skeleton (cleanup stuck jobs, count running, dispatch subprocesses up to a concurrency cap).
 
 ---
 

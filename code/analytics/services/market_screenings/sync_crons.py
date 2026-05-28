@@ -1,4 +1,4 @@
-"""Register the public-screening scheduler tick in OpenClaw (every minute)."""
+"""Register the market-screening scheduler tick in OpenClaw (every minute)."""
 
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ import subprocess
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger(__name__)
 
-_TICK_JOB_NAME = "public-screening-tick"
+_TICK_JOB_NAME = "market-screening-tick"
 _ANALYTICS = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 _VENV_PYTHON = os.path.join(_ANALYTICS, ".venv", "bin", "python")
 if not os.path.exists(_VENV_PYTHON):
@@ -42,13 +42,13 @@ def _get_tick_job() -> dict | None:
     return None
 
 
-def setup_public_screening_tick_cron() -> dict:
-    """Ensure exactly one ``public-screening-tick`` cron exists."""
+def setup_market_screening_tick_cron() -> dict:
+    """Ensure exactly one ``market-screening-tick`` cron exists."""
     existing = _get_tick_job()
-    tick_command = f"{_VENV_PYTHON} -m services.public_screenings.cli tick"
+    tick_command = f"{_VENV_PYTHON} -m services.market_screenings.cli tick"
 
     if existing:
-        log.info("Public screening tick cron already registered (id=%s)", existing.get("id"))
+        log.info("Market screening tick cron already registered (id=%s)", existing.get("id"))
         return {"status": "already_exists", "job": existing}
 
     r = subprocess.run(
@@ -75,7 +75,7 @@ def setup_public_screening_tick_cron() -> dict:
         timeout=30,
     )
     if r.returncode != 0:
-        log.error("Failed to register public screening tick cron: %s", r.stderr[:300])
+        log.error("Failed to register market screening tick cron: %s", r.stderr[:300])
         return {"status": "error", "detail": r.stderr[:300]}
 
     try:
@@ -83,5 +83,5 @@ def setup_public_screening_tick_cron() -> dict:
     except json.JSONDecodeError:
         result = {}
 
-    log.info("Registered public screening tick cron (id=%s)", result.get("id"))
+    log.info("Registered market screening tick cron (id=%s)", result.get("id"))
     return {"status": "created", "job": result}

@@ -2,7 +2,7 @@
 sync_crons.py — Register OpenClaw minute crons for screening schedulers.
 
 Registers ``screening-tick`` (LLM user screenings → ``services.agent.cli tick``)
-and ensures ``public-screening-tick`` exists (→ ``services.public_screenings.cli tick``).
+and ensures ``market-screening-tick`` exists (→ ``services.market_screenings.cli tick``).
 
 Run once (or after infra changes):
     python -m services.agent.cli setup-cron
@@ -69,7 +69,7 @@ def _remove_old_per_screening_crons() -> int:
 
 
 def setup_tick_cron() -> dict:
-    """Ensure ``screening-tick`` and ``public-screening-tick`` OpenClaw crons exist."""
+    """Ensure ``screening-tick`` and ``market-screening-tick`` OpenClaw crons exist."""
     removed = _remove_old_per_screening_crons()
     existing = _get_tick_job()
     tick_command = f"{_VENV_PYTHON} -m services.agent.cli tick"
@@ -108,17 +108,17 @@ def setup_tick_cron() -> dict:
 
     public_tick: dict = {}
     try:
-        from services.public_screenings.sync_crons import setup_public_screening_tick_cron
+        from services.market_screenings.sync_crons import setup_market_screening_tick_cron
 
-        public_tick = setup_public_screening_tick_cron()
+        public_tick = setup_market_screening_tick_cron()
     except Exception as exc:
-        log.warning("Public screening tick registration failed: %s", exc)
+        log.warning("Market screening tick registration failed: %s", exc)
         public_tick = {"status": "error", "detail": str(exc)}
 
     out = {
         **agent_result,
         "old_crons_removed": removed,
-        "public_screening_tick": public_tick,
+        "market_screening_tick": public_tick,
     }
     return out
 

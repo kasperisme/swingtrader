@@ -1,8 +1,8 @@
 import type { Metadata } from "next";
 import {
   getMySubscriptionIds,
-  listPublicScreenings,
-} from "@/app/actions/public-screenings";
+  listMarketScreenings,
+} from "@/app/actions/market-screenings";
 import { ScreeningsGalleryList } from "./_components/screenings-gallery-list";
 
 const GALLERY_DESCRIPTION =
@@ -40,7 +40,7 @@ function formatRelative(iso: string | null): string {
 
 export default async function ScreeningsGalleryPage() {
   const [screenings, subscribedIds] = await Promise.all([
-    listPublicScreenings(),
+    listMarketScreenings(),
     getMySubscriptionIds(),
   ]);
 

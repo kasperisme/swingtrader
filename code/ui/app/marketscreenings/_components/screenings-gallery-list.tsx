@@ -13,10 +13,10 @@ import {
 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { humanizeCron } from "@/lib/cron-format";
-import type { PublicScreening } from "@/app/actions/public-screenings";
+import type { MarketScreening } from "@/app/actions/market-screenings";
 
 type Props = {
-  screenings: PublicScreening[];
+  screenings: MarketScreening[];
   subscribedIds: string[];
 };
 
@@ -140,7 +140,7 @@ export function ScreeningsGalleryList({ screenings, subscribedIds }: Props) {
           <p className="mt-2 text-sm text-foreground">
             {query || activeCategory
               ? "Try a different search or clear the filter."
-              : "No public screenings published yet — check back soon."}
+              : "No market screenings published yet — check back soon."}
           </p>
         </div>
       ) : (
@@ -232,7 +232,7 @@ function ScreeningRow({
   sortKey,
   isSubscribed,
 }: {
-  screening: PublicScreening;
+  screening: MarketScreening;
   index: number;
   sortKey: SortKey;
   isSubscribed: boolean;
@@ -347,7 +347,7 @@ function ScreeningRow({
               </span>
             </a>
             <SecondaryAction
-              href={`/api/public-screenings/${screening.slug}`}
+              href={`/api/market-screenings/${screening.slug}`}
               title="Fetch latest results as JSON"
               external
             >

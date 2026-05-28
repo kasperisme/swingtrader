@@ -1,13 +1,13 @@
 """
-public_screening_bulk_analytics.cli — entry point for the post-screening LLM pass.
+market_screening_bulk_analytics.cli — entry point for the post-screening LLM pass.
 
 Usage:
-    python -m services.public_screening_bulk_analytics.cli tick [--max-concurrent N]
-    python -m services.public_screening_bulk_analytics.cli run <result-id>
+    python -m services.market_screening_bulk_analytics.cli tick [--max-concurrent N]
+    python -m services.market_screening_bulk_analytics.cli run <result-id>
 
 `tick` is invoked every minute by the OpenClaw cron registered via
-`services.public_screening_bulk_analytics.sync_crons`; it picks up queued
-`public_screening_results` rows and dispatches a subprocess per row that
+`services.market_screening_bulk_analytics.sync_crons`; it picks up queued
+`market_screening_results` rows and dispatches a subprocess per row that
 calls `run`.
 """
 
@@ -46,21 +46,21 @@ def cmd_tick(args: argparse.Namespace) -> None:
 def cmd_run(args: argparse.Namespace) -> None:
     from .worker import run_pass
 
-    with JobHeartbeat("public_bulk_analysis_run", expected_interval=0.25):
+    with JobHeartbeat("market_bulk_analysis_run", expected_interval=0.25):
         result = run_pass(args.result_id)
     print(json.dumps(result, indent=2, default=str))
 
 
 def cmd_setup_cron(_args: argparse.Namespace) -> None:
-    from .sync_crons import setup_public_bulk_analysis_tick_cron
+    from .sync_crons import setup_market_bulk_analysis_tick_cron
 
-    result = setup_public_bulk_analysis_tick_cron()
+    result = setup_market_bulk_analysis_tick_cron()
     print(json.dumps(result))
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Public-screening bulk LLM analytics worker",
+        description="Market-screening bulk LLM analytics worker",
     )
     sub = parser.add_subparsers(dest="command")
 
@@ -73,9 +73,9 @@ def main() -> None:
     )
 
     p_run = sub.add_parser(
-        "run", help="Run one bulk-analysis pass for a public_screening_results row"
+        "run", help="Run one bulk-analysis pass for a market_screening_results row"
     )
-    p_run.add_argument("result_id", help="UUID of a public_screening_results row")
+    p_run.add_argument("result_id", help="UUID of a market_screening_results row")
 
     sub.add_parser(
         "setup-cron",

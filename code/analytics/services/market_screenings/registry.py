@@ -1,9 +1,9 @@
 """Registry mapping script_key → callable.
 
-To add a new public screening:
+To add a new market screening:
   1. Write `scripts/<key>.py` exporting `def run(client, screening) -> ScreeningResult`
   2. Register it below.
-  3. Insert a row in public_screenings with script_key = "<key>" via the admin UI.
+  3. Insert a row in market_screenings with script_key = "<key>" via the admin UI.
 """
 
 from __future__ import annotations

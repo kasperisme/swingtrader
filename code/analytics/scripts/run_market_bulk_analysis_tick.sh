@@ -1,15 +1,15 @@
 #!/usr/bin/env bash
-# run_public_bulk_analysis_tick.sh — shell wrapper for system crontab.
+# run_market_bulk_analysis_tick.sh — shell wrapper for system crontab.
 #
-# Picks up public_screening_results rows with bulk_analysis_status='queued'
-# and dispatches one subprocess per row (services.public_screening_bulk_analytics.worker).
+# Picks up market_screening_results rows with bulk_analysis_status='queued'
+# and dispatches one subprocess per row (services.market_screening_bulk_analytics.worker).
 # Per-ticker concurrency is capped inside each worker (asyncio.Semaphore).
 #
 # Same logic as the OpenClaw job public-bulk-analysis-tick — register one
 # OR the other, never both, to avoid double-dispatching.
 #
 # Add to crontab (crontab -e), every minute:
-#   * * * * *  /path/to/swingtrader/code/analytics/scripts/run_public_bulk_analysis_tick.sh >> /path/to/logs/public_bulk_analysis_tick.log 2>&1
+#   * * * * *  /path/to/swingtrader/code/analytics/scripts/run_market_bulk_analysis_tick.sh >> /path/to/logs/market_bulk_analysis_tick.log 2>&1
 #
 # Use the real absolute path to this repo (not ~ unless your cron supports it).
 #
@@ -33,4 +33,4 @@ fi
 
 cd "$ANALYTICS_DIR"
 
-"$VENV_PYTHON" -m services.public_screening_bulk_analytics.cli tick
+"$VENV_PYTHON" -m services.market_screening_bulk_analytics.cli tick

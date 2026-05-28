@@ -1,8 +1,8 @@
 """
-Scheduler tick for the public-screening bulk-analytics worker.
+Scheduler tick for the market-screening bulk-analytics worker.
 
 Mirrors `services.bulk_analysis.scheduler` in shape, scoped to
-`public_screening_results.bulk_analysis_status` instead of
+`market_screening_results.bulk_analysis_status` instead of
 `user_bulk_analysis_jobs.status`.
 
   1. Stuck-pass cleanup: rows with bulk_analysis_status='running' older than
@@ -47,7 +47,7 @@ def run_tick(max_concurrent: int | None = None) -> dict:
 
     stuck_cutoff = (now - timedelta(minutes=STUCK_TIMEOUT_MINUTES)).isoformat()
     try:
-        client.schema(SCHEMA).table("public_screening_results").update(
+        client.schema(SCHEMA).table("market_screening_results").update(
             {
                 "bulk_analysis_status": "error",
                 "bulk_analysis_error": "Pass timed out (stuck detection)",
@@ -61,7 +61,7 @@ def run_tick(max_concurrent: int | None = None) -> dict:
 
     running_res = (
         client.schema(SCHEMA)
-        .table("public_screening_results")
+        .table("market_screening_results")
         .select("id", count="exact")
         .eq("bulk_analysis_status", "running")
         .execute()
@@ -77,8 +77,8 @@ def run_tick(max_concurrent: int | None = None) -> dict:
 
     queued_res = (
         client.schema(SCHEMA)
-        .table("public_screening_results")
-        .select("id, public_screening_id")
+        .table("market_screening_results")
+        .select("id, market_screening_id")
         .eq("bulk_analysis_status", "queued")
         .order("run_at", desc=False)
         .limit(available)
@@ -90,7 +90,7 @@ def run_tick(max_concurrent: int | None = None) -> dict:
     for row in queued:
         result_id = row["id"]
         # Flip to running here so a slow worker startup doesn't double-dispatch.
-        client.schema(SCHEMA).table("public_screening_results").update(
+        client.schema(SCHEMA).table("market_screening_results").update(
             {
                 "bulk_analysis_status": "running",
                 "bulk_analysis_started_at": now.isoformat(),
@@ -100,7 +100,7 @@ def run_tick(max_concurrent: int | None = None) -> dict:
         cmd = [
             _VENV_PYTHON,
             "-m",
-            "services.public_screening_bulk_analytics.cli",
+            "services.market_screening_bulk_analytics.cli",
             "run",
             result_id,
         ]

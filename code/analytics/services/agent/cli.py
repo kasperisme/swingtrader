@@ -3,12 +3,12 @@ screen_agent.cli — command-line interface for the scheduled screening agent.
 
 A single OpenClaw cron calls `tick` every minute; it evaluates due user
 screenings and launches individual `run` subprocesses. Public script
-screenings use a separate OpenClaw cron → `services.public_screenings.cli tick`.
+screenings use a separate OpenClaw cron → `services.market_screenings.cli tick`.
 
 Usage:
     python -m services.agent.cli tick [--max-concurrent N]
     python -m services.agent.cli run <screening-id> [--result-id UUID] [--is-test] [--dry-run]
-    python -m services.agent.cli setup-cron        # register screening-tick + public-screening-tick in OpenClaw
+    python -m services.agent.cli setup-cron        # register screening-tick + market-screening-tick in OpenClaw
     python -m services.agent.cli fmp-test
 """
 
@@ -106,7 +106,7 @@ def main():
 
     sub.add_parser(
         "setup-cron",
-        help="Register OpenClaw crons: screening-tick (agent) + public-screening-tick",
+        help="Register OpenClaw crons: screening-tick (agent) + market-screening-tick",
     )
     sub.add_parser("fmp-test", help="Test FMP MCP connectivity and list available tools")
 

@@ -2,7 +2,7 @@
 
 Returns AAPL as a single passing ticker every run. No external calls, no
 heavy compute — instant. Use this to validate the full flow:
-  - public_screening_results row inserted
+  - market_screening_results row inserted
   - user_screening_results fan-out to subscribers
   - Telegram notification fired
 """

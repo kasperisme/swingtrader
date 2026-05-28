@@ -24,7 +24,7 @@ import {
 
 /**
  * Slim, screen-agnostic row shape. Both user_scan_rows and
- * public_screening_result_rows can be projected into this.
+ * market_screening_result_rows can be projected into this.
  */
 export type BasicScreeningRow = {
   id: string | number;

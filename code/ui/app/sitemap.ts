@@ -1,7 +1,7 @@
 import type { MetadataRoute } from "next";
 import { isSanityConfigured, sanityFetch } from "@/lib/sanity/client";
 import { docPageSlugListQuery, blogPostSlugListQuery } from "@/lib/sanity/queries";
-import { listPublicScreenings } from "@/app/actions/public-screenings";
+import { listMarketScreenings } from "@/app/actions/market-screenings";
 import { createServiceClient } from "@/lib/supabase/service";
 
 const baseUrl = process.env.NEXT_PUBLIC_SITE_URL ?? "https://newsimpactscreener.com";
@@ -27,7 +27,7 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
   // Per-screening pages — independent of Sanity config.
   let screeningRoutes: MetadataRoute.Sitemap = [];
   try {
-    const screenings = await listPublicScreenings();
+    const screenings = await listMarketScreenings();
     screeningRoutes = screenings.map((s) => ({
       url: `${baseUrl}/marketscreenings/${s.slug}`,
       lastModified: s.last_run_at ? new Date(s.last_run_at) : now,
@@ -35,7 +35,7 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
       priority: 0.7,
     }));
   } catch (e) {
-    console.warn("[sitemap] failed to list public screenings", e);
+    console.warn("[sitemap] failed to list market screenings", e);
   }
 
   // Per-article pages — sourced from the news_articles table, freshest first.

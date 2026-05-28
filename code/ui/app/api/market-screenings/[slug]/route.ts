@@ -1,8 +1,8 @@
 import { NextResponse } from "next/server";
 import {
-  getLatestPublicScreeningResultRows,
-  getPublicScreeningBySlug,
-} from "@/app/actions/public-screenings";
+  getLatestMarketScreeningResultRows,
+  getMarketScreeningBySlug,
+} from "@/app/actions/market-screenings";
 
 const CORS_HEADERS = {
   "Access-Control-Allow-Origin": "*",
@@ -20,7 +20,7 @@ export async function GET(
 ) {
   const { slug } = await ctx.params;
 
-  const screening = await getPublicScreeningBySlug(slug);
+  const screening = await getMarketScreeningBySlug(slug);
   if (!screening) {
     return NextResponse.json(
       { error: "Screening not found" },
@@ -29,7 +29,7 @@ export async function GET(
   }
 
   const { resultId, runAt, rows } =
-    await getLatestPublicScreeningResultRows(screening.id);
+    await getLatestMarketScreeningResultRows(screening.id);
 
   return NextResponse.json(
     {
