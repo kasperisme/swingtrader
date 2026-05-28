@@ -359,6 +359,32 @@ class fmp:
             df = df.sort_values("date").reset_index(drop=True)
         return df
 
+    def cash_flow_statement_quarterly(self, ticker: str, limit: int = 40) -> pd.DataFrame:
+        """
+        Quarterly cash-flow statements (operatingCashFlow, freeCashFlow,
+        capitalExpenditure, netIncome) — last {limit} quarters.
+
+        Used by the NIS Fundamentals screener for FCF/NI quality (10y earnings
+        quality ratio) and the count of years with positive FCF.
+        """
+        url = "https://financialmodelingprep.com/stable/cash-flow-statement"
+        r = requests.get(url, params={
+            "apikey": self.APIKEY,
+            "symbol": ticker,
+            "period": "quarter",
+            "limit": limit,
+        })
+        if r.status_code != 200:
+            raise RequestError(r.content)
+        data = r.json()
+        if not data:
+            return pd.DataFrame()
+        df = pd.DataFrame(data)
+        if not df.empty and "date" in df.columns:
+            df["date"] = pd.to_datetime(df["date"])
+            df = df.sort_values("date").reset_index(drop=True)
+        return df
+
     def earnings_calendar_range(self, from_date: str, to_date: str) -> pd.DataFrame:
         """
         Earnings calendar for a date range (all tickers).

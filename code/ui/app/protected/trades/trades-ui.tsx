@@ -1,10 +1,12 @@
 "use client";
 
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
-import { Briefcase, Loader2, Plus, Trash2 } from "lucide-react";
+import { Briefcase, Loader2, Plus, Sparkles, Trash2 } from "lucide-react";
 import { buildPortfolioFromTrades, type PortfolioPosition } from "./portfolio-from-trades";
+import { closingTradeIdSet } from "@/lib/trades/closed-positions";
 import { fmpGetPriceAtDate, fmpGetQuote, fmpSearchSymbol } from "@/app/actions/fmp";
 import { track } from "@/lib/analytics/events";
 
@@ -539,6 +541,23 @@ export function TradesUI({ initialTrades }: { initialTrades: UserTradeRow[] }) {
     [filteredTrades],
   );
 
+  const closingIds = useMemo(
+    () =>
+      closingTradeIdSet(
+        trades.map((t) => ({
+          id: t.id,
+          ticker: t.ticker,
+          currency: t.currency,
+          quantity: t.quantity,
+          price_per_unit: t.price_per_unit,
+          side: t.side,
+          executed_at: t.executed_at,
+          is_paper: !!t.is_paper,
+        })),
+      ),
+    [trades],
+  );
+
   const paperCount = useMemo(
     () => trades.reduce((n, t) => (t.is_paper ? n + 1 : n), 0),
     [trades],
@@ -845,6 +864,7 @@ export function TradesUI({ initialTrades }: { initialTrades: UserTradeRow[] }) {
                   <th className="px-3 py-2 text-right text-xs font-medium text-muted-foreground">Price</th>
                   <th className="px-3 py-2 text-left text-xs font-medium text-muted-foreground">CCY</th>
                   <th className="px-3 py-2 text-left text-xs font-medium text-muted-foreground">Notes</th>
+                  <th className="px-3 py-2 w-20" />
                   <th className="px-3 py-2 w-10" />
                 </tr>
               </thead>
@@ -874,6 +894,18 @@ export function TradesUI({ initialTrades }: { initialTrades: UserTradeRow[] }) {
                     <td className="px-3 py-2">{row.currency}</td>
                     <td className="px-3 py-2 max-w-[200px] truncate text-muted-foreground" title={row.notes ?? ""}>
                       {row.notes || "—"}
+                    </td>
+                    <td className="px-3 py-2">
+                      {closingIds.has(row.id) ? (
+                        <Link
+                          href={`/protected/trades/positions/${row.id}/review`}
+                          className="inline-flex items-center gap-1 rounded-md border border-amber-500/30 bg-amber-500/10 px-2 py-1 text-[11px] font-medium text-amber-700 dark:text-amber-400 hover:bg-amber-500/20"
+                          title="AI post-trade review"
+                        >
+                          <Sparkles className="h-3 w-3" />
+                          Review
+                        </Link>
+                      ) : null}
                     </td>
                     <td className="px-3 py-2">
                       <button
