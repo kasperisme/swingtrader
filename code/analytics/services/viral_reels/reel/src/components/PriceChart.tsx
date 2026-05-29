@@ -54,17 +54,35 @@ export const PriceChart: React.FC<Props> = ({
   const closes = points.map((p) => p.close);
   const lows = points.map((p) => (p.low ?? p.close));
   const highs = points.map((p) => (p.high ?? p.close));
-  const min = Math.min(...lows);
-  const max = Math.max(...highs);
-  const pad = (max - min) * 0.12 || 1;
-  const lo = min - pad;
-  const hi = max + pad;
 
   const innerW = width - PAD_L - PAD_R;
   const innerH = height - PAD_T - PAD_B;
   const baseline = PAD_T + innerH;
 
   const reveal = clamp(progress, 0, 1) * (points.length - 1);
+  const last = Math.floor(reveal);
+  const frac = reveal - last;
+  const nextIdx = Math.min(last + 1, points.length - 1);
+  const curClose = lerp(closes[last], closes[nextIdx], frac);
+
+  // Both axes grow with the reveal: the y-range is the running min/max over the
+  // data revealed so far (incl. the live point), so the viewer can't see the
+  // whole range up front — it expands as new highs/lows arrive. A small minimum
+  // band keeps the very first points from being wildly amplified.
+  const revLows = lows.slice(0, last + 1).concat(curClose);
+  const revHighs = highs.slice(0, last + 1).concat(curClose);
+  let min = Math.min(...revLows);
+  let max = Math.max(...revHighs);
+  const minSpan = curClose * 0.02;
+  if (max - min < minSpan) {
+    const mid = (max + min) / 2;
+    min = mid - minSpan / 2;
+    max = mid + minSpan / 2;
+  }
+  const pad = (max - min) * 0.12 || 1;
+  const lo = min - pad;
+  const hi = max + pad;
+
   // The revealed data always fills the full width: the visible domain is
   // [0, reveal], so the leading edge stays pinned to the right and earlier
   // points compress/shift left as the chart grows.
@@ -72,12 +90,8 @@ export const PriceChart: React.FC<Props> = ({
   const x = (i: number) => PAD_L + (i / dom) * innerW;
   const y = (v: number) => PAD_T + (1 - (v - lo) / (hi - lo)) * innerH;
 
-  const last = Math.floor(reveal);
-  const frac = reveal - last;
-  const nextIdx = Math.min(last + 1, points.length - 1);
   const curX = lerp(x(last), x(nextIdx), frac);
-  const curY = lerp(y(closes[last]), y(closes[nextIdx]), frac);
-  const curClose = lerp(closes[last], closes[nextIdx], frac);
+  const curY = y(curClose);
 
   let line = `M ${x(0)} ${y(closes[0])}`;
   for (let i = 1; i <= last; i++) line += ` L ${x(i)} ${y(closes[i])}`;
