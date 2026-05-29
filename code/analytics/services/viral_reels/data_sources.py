@@ -353,6 +353,119 @@ def price_overlay(ticker: str, window_days: int = 30) -> dict[str, Any]:
 
 
 # ---------------------------------------------------------------------------
+# Price + News format — price history (OHLC) and the news events to plot on it
+# ---------------------------------------------------------------------------
+
+
+def price_history(ticker: str, window_days: int = 30) -> dict[str, Any]:
+    """Daily OHLC history for a ticker via FMP, shaped for the price-news chart."""
+    ticker = ticker.upper().strip()
+    to = datetime.now(timezone.utc).date()
+    frm = to - timedelta(days=window_days)
+    url = f"https://financialmodelingprep.com/api/v3/historical-price-full/{ticker}"
+    resp = requests.get(
+        url,
+        params={"from": frm.isoformat(), "to": to.isoformat(), "apikey": _fmp_key()},
+        timeout=30,
+    )
+    if resp.status_code != 200:
+        raise RuntimeError(f"FMP historical-price returned {resp.status_code}: {resp.text[:200]}")
+    historical = (resp.json() or {}).get("historical", []) or []
+    points = sorted(
+        (
+            {
+                "t": str(r.get("date"))[:10],
+                "close": _round(r.get("close") or 0),
+                "open": _round(r.get("open") or 0),
+                "high": _round(r.get("high") or 0),
+                "low": _round(r.get("low") or 0),
+            }
+            for r in historical
+            if r.get("date") is not None and r.get("close") is not None
+        ),
+        key=lambda p: p["t"],
+    )
+    return {"ticker": ticker, "label": ticker, "valuePrefix": "$", "points": points}
+
+
+def news_events(
+    ticker: str,
+    window_days: int = 30,
+    max_events: int = 5,
+    points: list[dict[str, Any]] | None = None,
+) -> list[dict[str, Any]]:
+    """Strongest per-day news events for a ticker, to plot on the price line.
+
+    Sourced from ``ticker_sentiment_heads_v``. Keeps the highest-magnitude
+    article per day, takes the top ``max_events`` by |sentiment|, and (if
+    ``points`` are given) annotates each with the next-day price move.
+    """
+    client, schema = _supabase()
+    since = datetime.now(timezone.utc) - timedelta(days=window_days)
+    rows = (
+        client.schema(schema)
+        .table("ticker_sentiment_heads_v")
+        .select("ticker,sentiment_score,title,url,published_at")
+        .eq("ticker", ticker.upper().strip())
+        .gte("published_at", since.isoformat())
+        .order("published_at", desc=False)
+        .limit(2000)
+        .execute()
+        .data
+        or []
+    )
+
+    # Keep the strongest article per day.
+    best_by_day: dict[str, dict] = {}
+    for r in rows:
+        pub = r.get("published_at")
+        if not pub or not (r.get("title") or "").strip():
+            continue
+        day = str(pub)[:10]
+        score = abs(float(r.get("sentiment_score") or 0))
+        if day not in best_by_day or score > best_by_day[day]["_mag"]:
+            best_by_day[day] = {**r, "_mag": score}
+
+    ranked = sorted(best_by_day.values(), key=lambda r: r["_mag"], reverse=True)[:max_events]
+    ranked.sort(key=lambda r: str(r.get("published_at")))
+
+    close_by_day = {p["t"]: p["close"] for p in (points or [])}
+    days_sorted = sorted(close_by_day.keys())
+
+    def _next_day_move(day: str) -> str | None:
+        if day not in close_by_day or not days_sorted:
+            # snap to nearest known trading day
+            later = [d for d in days_sorted if d >= day]
+            if not later:
+                return None
+            day = later[0]
+        i = days_sorted.index(day)
+        if i + 1 >= len(days_sorted):
+            return None
+        c0, c1 = close_by_day[days_sorted[i]], close_by_day[days_sorted[i + 1]]
+        if not c0:
+            return None
+        pct = (c1 - c0) / c0 * 100
+        return f"{pct:+.1f}% next day"
+
+    events: list[dict[str, Any]] = []
+    for r in ranked:
+        day = str(r.get("published_at"))[:10]
+        events.append(
+            {
+                "t": day,
+                "title": (r.get("title") or "").strip(),
+                "source": _source_label(None, r.get("url")),
+                "url": r.get("url"),
+                "sentiment": _round(r.get("sentiment_score") or 0),
+                "age": _age_since(r.get("published_at")),
+                "move": _next_day_move(day),
+            }
+        )
+    return events
+
+
+# ---------------------------------------------------------------------------
 # Headlines — the real articles behind a viral area (UI-styled cards in the reel)
 # ---------------------------------------------------------------------------
 

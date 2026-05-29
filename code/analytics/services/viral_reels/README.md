@@ -1,9 +1,16 @@
 # viral_reels — data-driven reel generator
 
 Turns the **News Impact Screener** data foundation (plus external sources like
-FMP price/OHLC) into short **vertical bar-chart-race reels** in the style of
+FMP price/OHLC) into short **vertical data-reels** in the style of
 r/dataisbeautiful. A ~20-second reel should convey its entire point through the
-animation alone — the bars race, overtake, and resolve into a takeaway.
+animation alone.
+
+Two formats (each a Remotion composition):
+
+| Format | Composition | Answers |
+|--------|-------------|---------|
+| **Bar chart race** | `BarChartRace` | "Which viral area is winning over time?" — clusters / dimensions / tickers race by article volume, with optional price overlay + headline cards. |
+| **Price + News** | `PriceNewsChart` | "Did the news actually move the stock?" — an animated price line with scored news events plotted on it, each headline popping a sentiment-coloured pin + a callout showing the price reaction. |
 
 ## Who does what
 
@@ -59,10 +66,24 @@ python -m services.viral_reels.cli headlines --window-days 14 --limit 5 \
 python -m services.viral_reels.cli scaffold --kind cluster --window-days 14 \
     --overlay-ticker NVDA --headlines 5 --out out/reel_spec.json
 
-# 5. Validate + render
+# 5. Validate + render (render infers the composition from the spec shape)
 python -m services.viral_reels.cli validate out/reel_spec.json
 python -m services.viral_reels.cli render   out/reel_spec.json --out out/reel.mp4
 ```
+
+### Price + News format
+
+```bash
+# Scaffold a price line + scored news events for a ticker, then edit the copy
+python -m services.viral_reels.cli price-news --ticker NVDA --window-days 30 \
+    --max-events 5 --out out/price_news_spec.json
+python -m services.viral_reels.cli render out/price_news_spec.json --out out/price_news.mp4
+```
+
+The price line draws left-to-right; each news event pops a pin on the line
+(green = positive sentiment, red = negative) and a callout card with the
+headline, source, and the next-day price move — so it's obvious which headlines
+moved the stock.
 
 `series`, marks of value:
 

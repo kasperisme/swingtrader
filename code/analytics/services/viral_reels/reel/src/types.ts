@@ -90,3 +90,48 @@ export interface ReelSpec {
 export type BarChartRaceProps = {
   spec: ReelSpec;
 };
+
+// ---------------------------------------------------------------------------
+// Format 2: Price + News — an animated price line with news events plotted on
+// it, to show whether headlines moved the stock.
+// ---------------------------------------------------------------------------
+
+export interface OHLCPoint {
+  t: string; // ISO date
+  close: number;
+  open?: number;
+  high?: number;
+  low?: number;
+}
+
+export interface NewsEvent {
+  t: string; // ISO date the news hit (snaps to the nearest price point)
+  title: string;
+  source?: string;
+  url?: string;
+  sentiment?: number; // -1..1; colours the marker green/red
+  age?: string;
+  move?: string; // optional pre-baked reaction, e.g. "+3.2% next day"
+}
+
+export interface PriceNewsChartSpec {
+  ticker: string;
+  label: string;
+  valuePrefix?: string; // e.g. "$"
+  points: OHLCPoint[];
+  events: NewsEvent[];
+}
+
+export interface PriceNewsSpec {
+  version: number;
+  format: ReelFormat;
+  theme: string;
+  intro?: IntroSpec;
+  chart: PriceNewsChartSpec;
+  outro?: OutroSpec;
+  sources?: string[];
+}
+
+export type PriceNewsProps = {
+  spec: PriceNewsSpec;
+};

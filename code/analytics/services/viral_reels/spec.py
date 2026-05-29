@@ -100,8 +100,69 @@ def build_spec(
     }
 
 
+def build_price_news_spec(
+    *,
+    chart: dict[str, Any],
+    theme: str = "midnight",
+    title: str = "",
+    kicker: str = "NEWS IMPACT SCREENER",
+    subtitle: str = "",
+    outro_title: str = "",
+    outro_takeaway: str = "",
+    cta: str = "newsimpactscreener.com",
+    sources: list[str] | None = None,
+    format_overrides: dict[str, Any] | None = None,
+    intro_seconds: float = 2.5,
+    outro_seconds: float = 3.0,
+) -> dict[str, Any]:
+    """Assemble a price+news ReelSpec. ``chart`` holds ticker/points/events
+    from the data layer; the director supplies the copy."""
+    fmt = {**DEFAULT_FORMAT, **(format_overrides or {})}
+    return {
+        "version": VERSION,
+        "format": fmt,
+        "theme": theme,
+        "intro": {
+            "kicker": kicker,
+            "title": title,
+            "subtitle": subtitle,
+            "durationInSeconds": intro_seconds,
+        },
+        "chart": chart,
+        "outro": {
+            "title": outro_title,
+            "takeaway": outro_takeaway,
+            "cta": cta,
+            "durationInSeconds": outro_seconds,
+        },
+        "sources": sources or ["News Impact Screener", "Financial Modeling Prep"],
+    }
+
+
+def _validate_format_and_timing(spec: dict[str, Any], errors: list[str]) -> None:
+    fmt = spec.get("format") or {}
+    for key in ("width", "height", "fps", "durationInSeconds"):
+        if not isinstance(fmt.get(key), (int, float)) or fmt.get(key) <= 0:
+            errors.append(f"format.{key} must be a positive number")
+    intro_s = (spec.get("intro") or {}).get("durationInSeconds", 0) or 0
+    outro_s = (spec.get("outro") or {}).get("durationInSeconds", 0) or 0
+    total_s = fmt.get("durationInSeconds", 0) or 0
+    if intro_s + outro_s >= total_s:
+        errors.append(
+            f"intro ({intro_s}s) + outro ({outro_s}s) must leave room for the main "
+            f"section within the total {total_s}s"
+        )
+
+
 def validate(spec: dict[str, Any]) -> list[str]:
-    """Return a list of human-readable problems. Empty list == valid."""
+    """Validate either reel format. Empty list == valid.
+
+    Dispatches on shape: a ``chart`` key means the price+news format, a ``race``
+    key means the bar-chart-race format.
+    """
+    if "chart" in spec and "race" not in spec:
+        return validate_price_news(spec)
+
     errors: list[str] = []
 
     fmt = spec.get("format") or {}
@@ -156,6 +217,39 @@ def validate(spec: dict[str, Any]) -> list[str]:
         )
 
     return errors
+
+
+def validate_price_news(spec: dict[str, Any]) -> list[str]:
+    """Validate a price+news ReelSpec."""
+    errors: list[str] = []
+    _validate_format_and_timing(spec, errors)
+
+    chart = spec.get("chart") or {}
+    if not (chart.get("ticker") or "").strip():
+        errors.append("chart.ticker is required")
+    points = chart.get("points") or []
+    if len(points) < 2:
+        errors.append("chart.points needs at least 2 points to draw a line")
+    for i, p in enumerate(points):
+        if not p.get("t") or not isinstance(p.get("close"), (int, float)):
+            errors.append(f"chart.points[{i}] needs 't' and numeric 'close'")
+            break
+
+    for i, e in enumerate(chart.get("events") or []):
+        if not e.get("t"):
+            errors.append(f"chart.events[{i}] needs 't' (ISO date)")
+        if not (e.get("title") or "").strip():
+            errors.append(f"chart.events[{i}] needs a non-empty 'title'")
+        sent = e.get("sentiment")
+        if sent is not None and not (-1.0 <= float(sent) <= 1.0):
+            errors.append(f"chart.events[{i}].sentiment must be within [-1, 1]")
+
+    return errors
+
+
+def composition_for(spec: dict[str, Any]) -> str:
+    """Remotion composition id for a spec, by shape."""
+    return "PriceNewsChart" if ("chart" in spec and "race" not in spec) else "BarChartRace"
 
 
 def load(path: str | Path) -> dict[str, Any]:

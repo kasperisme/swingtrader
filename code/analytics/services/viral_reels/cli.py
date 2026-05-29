@@ -149,6 +149,29 @@ def cmd_scaffold(args):
     _emit(spec, args.out)
 
 
+def cmd_price_news(args):
+    """Scaffold a price+news ReelSpec: price line + scored news events on it."""
+    chart = ds.price_history(args.ticker, window_days=args.window_days)
+    chart["events"] = ds.news_events(
+        args.ticker,
+        window_days=args.window_days,
+        max_events=args.max_events,
+        points=chart["points"],
+    )
+    spec = spec_mod.build_price_news_spec(
+        chart=chart,
+        theme=args.theme,
+        title=f"<EDIT: did the news move {args.ticker.upper()}?>",
+        subtitle=f"Price vs. AI-scored headlines · last {args.window_days} days",
+        outro_title="<EDIT: the takeaway>",
+        outro_takeaway="<EDIT: which headlines moved it, and how much>",
+    )
+    problems = spec_mod.validate(spec)
+    if problems:
+        log.warning("price-news scaffold has issues:\n- %s", "\n- ".join(problems))
+    _emit(spec, args.out)
+
+
 def cmd_validate(args):
     spec = spec_mod.load(args.spec)
     problems = spec_mod.validate(spec)
@@ -191,12 +214,13 @@ def cmd_render(args):
     props_path = out_path.parent / "_remotion_props.json"
     props_path.write_text(json.dumps({"spec": spec}))
 
+    composition = args.composition or spec_mod.composition_for(spec)
     cmd = [
         "npx",
         "remotion",
         "render",
         "src/index.ts",
-        args.composition,
+        composition,
         str(out_path),
         f"--props={props_path}",
     ]
@@ -250,13 +274,21 @@ def main():
     p_scaf.add_argument("--dimension-key", default=None, help="rank headlines by this dimension")
     p_scaf.add_argument("--out", default=str(_PKG_DIR / "out" / "reel_spec.json"))
 
+    p_pn = sub.add_parser("price-news", help="Scaffold a price+news chart reel (price line + events)")
+    p_pn.add_argument("--ticker", required=True)
+    p_pn.add_argument("--window-days", type=int, default=30)
+    p_pn.add_argument("--max-events", type=int, default=5)
+    p_pn.add_argument("--theme", default="midnight")
+    p_pn.add_argument("--out", default=str(_PKG_DIR / "out" / "price_news_spec.json"))
+
     p_val = sub.add_parser("validate", help="Validate a ReelSpec JSON file")
     p_val.add_argument("spec")
 
     p_render = sub.add_parser("render", help="Render a ReelSpec to MP4 via Remotion")
     p_render.add_argument("spec")
     p_render.add_argument("--out", default=None)
-    p_render.add_argument("--composition", default="BarChartRace")
+    p_render.add_argument("--composition", default=None,
+                          help="override the composition (default: inferred from the spec shape)")
     p_render.add_argument("--force", action="store_true", help="render even if validation fails")
 
     args = parser.parse_args()
@@ -267,6 +299,7 @@ def main():
         "prices": cmd_prices,
         "headlines": cmd_headlines,
         "scaffold": cmd_scaffold,
+        "price-news": cmd_price_news,
         "validate": cmd_validate,
         "render": cmd_render,
     }

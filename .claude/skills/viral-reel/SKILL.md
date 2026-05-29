@@ -22,6 +22,26 @@ the hook, the captions, and the takeaway.
 Service: `code/analytics/services/viral_reels/` · Renderer: `.../viral_reels/reel/`
 Read its `README.md` once before your first run.
 
+## Two formats — pick the one that fits the story
+
+- **Bar chart race** (`BarChartRace`) — "which viral area is winning over time?"
+  Clusters / dimensions / tickers race by article volume. Default; the rest of
+  this doc covers it.
+- **Price + News** (`PriceNewsChart`) — "did the news actually move the stock?"
+  An animated price line with scored news events plotted on it (green/red pins +
+  callouts showing the next-day move). Use when the user names a ticker and
+  wants to show news → price reaction. Scaffold it directly:
+
+  ```bash
+  python -m services.viral_reels.cli price-news --ticker NVDA --window-days 30 \
+      --max-events 5 --out out/price_news_spec.json
+  ```
+  Then edit the copy (intro hook, outro takeaway), `validate`, and `render` (the
+  render command infers the composition from the spec shape). You own the same
+  creative calls: the hook, which events matter, and the so-what takeaway. The
+  data layer fills `chart.points` and `chart.events` (with sentiment + move) —
+  don't invent price points or moves by hand.
+
 ## The pipeline
 
 Run everything from `code/analytics` (the Python package root).

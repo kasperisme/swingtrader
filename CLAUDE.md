@@ -90,7 +90,10 @@ Key files:
 See `.claude/skills/viral-reel/SKILL.md` and `code/analytics/services/viral_reels/README.md`.
 
 Turns the news-impact data foundation (+ FMP price/OHLC) into ~20s vertical
-**bar chart race** video reels (r/dataisbeautiful style). Split:
+video reels (r/dataisbeautiful style). Two formats: **bar chart race**
+(`BarChartRace` — viral areas racing by volume) and **price + news**
+(`PriceNewsChart` — a price line with scored news events plotted on it to show
+which headlines moved the stock). Split:
 - **Python** (`services/viral_reels/`) — deterministic data: builds race
   keyframes from `news_trends_*_daily_v` views + ticker sentiment, fetches the
   FMP price overlay, ranks candidate "viral" stories. No creative choices.
@@ -102,8 +105,9 @@ Key files:
 - `code/analytics/services/viral_reels/data_sources.py` — race-keyframe builders + FMP overlay
 - `code/analytics/services/viral_reels/spec.py` — `ReelSpec` contract + validation (mirror of `reel/src/types.ts`)
 - `code/analytics/services/viral_reels/story_finder.py` — heuristic story candidates
-- `code/analytics/services/viral_reels/cli.py` — `stories|snapshot|series|prices|scaffold|validate|render`
-- `code/analytics/services/viral_reels/reel/src/compositions/BarChartRace.tsx` — the animation
+- `code/analytics/services/viral_reels/cli.py` — `stories|snapshot|series|prices|headlines|scaffold|price-news|validate|render`
+- `code/analytics/services/viral_reels/reel/src/compositions/BarChartRace.tsx` — bar-chart-race animation
+- `code/analytics/services/viral_reels/reel/src/compositions/PriceNewsChart.tsx` — price line + news events animation
 
 ## Sanity Studio
 
