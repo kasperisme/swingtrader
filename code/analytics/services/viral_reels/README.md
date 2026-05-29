@@ -77,10 +77,16 @@ npm run studio              # interactive preview of the sample spec
 npm run render:sample       # render the bundled sample to out/reel.mp4
 ```
 
-Render an arbitrary spec:
+Render an arbitrary spec. **The CLI `render` command is the supported path** —
+it wraps the spec correctly. If you call Remotion directly, note that input
+props must match the composition's prop shape `{"spec": <ReelSpec>}`, *not* a
+bare ReelSpec (a bare spec silently loses to the default props during Remotion's
+merge):
 
 ```bash
-npx remotion render src/index.ts BarChartRace out/reel.mp4 --props=/abs/path/reel_spec.json
+# wrap the bare ReelSpec first
+node -e "const s=require('/abs/path/reel_spec.json');process.stdout.write(JSON.stringify({spec:s}))" > props.json
+npx remotion render src/index.ts BarChartRace out/reel.mp4 --props=props.json
 ```
 
 The composition reads `format` from the spec via `calculateMetadata`, so

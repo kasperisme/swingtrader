@@ -6,7 +6,7 @@
   "scripts": {
     "studio": "remotion studio src/index.ts",
     "render": "remotion render src/index.ts BarChartRace out/reel.mp4",
-    "render:sample": "remotion render src/index.ts BarChartRace out/reel.mp4 --props=samples/sample_spec.json",
+    "render:sample": "remotion render src/index.ts BarChartRace out/reel.mp4",
     "still": "remotion still src/index.ts BarChartRace out/frame.png --frame=180",
     "upgrade": "remotion upgrade",
     "typecheck": "tsc --noEmit"

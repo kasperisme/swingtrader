@@ -136,7 +136,8 @@ def cmd_render(args):
     if not spec_path.exists():
         print(f"spec not found: {spec_path}", file=sys.stderr)
         sys.exit(1)
-    problems = spec_mod.validate(spec_mod.load(spec_path))
+    spec = spec_mod.load(spec_path)
+    problems = spec_mod.validate(spec)
     if problems and not args.force:
         print("Refusing to render an invalid spec (use --force to override):", file=sys.stderr)
         for p in problems:
@@ -154,6 +155,13 @@ def cmd_render(args):
         )
         sys.exit(1)
 
+    # Remotion input props must match the composition's prop shape, i.e.
+    # {"spec": <ReelSpec>} — passing a bare ReelSpec silently loses to the
+    # default props during the merge. Write a wrapped props file next to the
+    # spec and hand that to Remotion.
+    props_path = out_path.parent / "_remotion_props.json"
+    props_path.write_text(json.dumps({"spec": spec}))
+
     cmd = [
         "npx",
         "remotion",
@@ -161,7 +169,7 @@ def cmd_render(args):
         "src/index.ts",
         args.composition,
         str(out_path),
-        f"--props={spec_path}",
+        f"--props={props_path}",
     ]
     log.info("rendering: %s (cwd=%s)", " ".join(cmd), _REEL_DIR)
     result = subprocess.run(cmd, cwd=_REEL_DIR)

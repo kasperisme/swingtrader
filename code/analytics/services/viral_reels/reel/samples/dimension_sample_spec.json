@@ -1,0 +1,101 @@
+{
+  "version": 1,
+  "format": {"width": 1080, "height": 1920, "fps": 30, "durationInSeconds": 20},
+  "theme": "midnight",
+  "intro": {
+    "kicker": "NEWS IMPACT SCREENER",
+    "title": "Which risk is the news pricing in?",
+    "subtitle": "AI-scored impact dimensions · last 7 days",
+    "durationInSeconds": 2.5
+  },
+  "race": {
+    "metricLabel": "Articles scored",
+    "valueFormat": "count",
+    "barsVisible": 6,
+    "keyframes": [
+      {"t": "2026-05-15", "label": "May 15", "entries": [
+        {"id": "interest_rate_sensitivity_duration", "label": "Interest Rate (Duration)", "value": 30},
+        {"id": "tariff_sensitivity", "label": "Tariff Sensitivity", "value": 8},
+        {"id": "china_revenue_exposure", "label": "China Exposure", "value": 6},
+        {"id": "inflation_sensitivity", "label": "Inflation Sensitivity", "value": 18},
+        {"id": "price_momentum", "label": "Price Momentum", "value": 12},
+        {"id": "earnings_revision_trend", "label": "Earnings Revisions", "value": 10},
+        {"id": "dollar_sensitivity", "label": "Dollar Sensitivity", "value": 5},
+        {"id": "supplier_bargaining_power", "label": "Supplier Bargaining Power", "value": 4}
+      ]},
+      {"t": "2026-05-16", "label": "May 16", "entries": [
+        {"id": "interest_rate_sensitivity_duration", "label": "Interest Rate (Duration)", "value": 52},
+        {"id": "tariff_sensitivity", "label": "Tariff Sensitivity", "value": 16},
+        {"id": "china_revenue_exposure", "label": "China Exposure", "value": 14},
+        {"id": "inflation_sensitivity", "label": "Inflation Sensitivity", "value": 33},
+        {"id": "price_momentum", "label": "Price Momentum", "value": 24},
+        {"id": "earnings_revision_trend", "label": "Earnings Revisions", "value": 19},
+        {"id": "dollar_sensitivity", "label": "Dollar Sensitivity", "value": 12},
+        {"id": "supplier_bargaining_power", "label": "Supplier Bargaining Power", "value": 8}
+      ]},
+      {"t": "2026-05-17", "label": "May 17", "entries": [
+        {"id": "interest_rate_sensitivity_duration", "label": "Interest Rate (Duration)", "value": 68},
+        {"id": "tariff_sensitivity", "label": "Tariff Sensitivity", "value": 30},
+        {"id": "china_revenue_exposure", "label": "China Exposure", "value": 26},
+        {"id": "inflation_sensitivity", "label": "Inflation Sensitivity", "value": 45},
+        {"id": "price_momentum", "label": "Price Momentum", "value": 35},
+        {"id": "earnings_revision_trend", "label": "Earnings Revisions", "value": 28},
+        {"id": "dollar_sensitivity", "label": "Dollar Sensitivity", "value": 22},
+        {"id": "supplier_bargaining_power", "label": "Supplier Bargaining Power", "value": 13}
+      ]},
+      {"t": "2026-05-18", "label": "May 18", "entries": [
+        {"id": "interest_rate_sensitivity_duration", "label": "Interest Rate (Duration)", "value": 80},
+        {"id": "tariff_sensitivity", "label": "Tariff Sensitivity", "value": 52},
+        {"id": "china_revenue_exposure", "label": "China Exposure", "value": 44},
+        {"id": "inflation_sensitivity", "label": "Inflation Sensitivity", "value": 55},
+        {"id": "price_momentum", "label": "Price Momentum", "value": 47},
+        {"id": "earnings_revision_trend", "label": "Earnings Revisions", "value": 36},
+        {"id": "dollar_sensitivity", "label": "Dollar Sensitivity", "value": 33},
+        {"id": "supplier_bargaining_power", "label": "Supplier Bargaining Power", "value": 18}
+      ]},
+      {"t": "2026-05-19", "label": "May 19", "entries": [
+        {"id": "interest_rate_sensitivity_duration", "label": "Interest Rate (Duration)", "value": 90},
+        {"id": "tariff_sensitivity", "label": "Tariff Sensitivity", "value": 78},
+        {"id": "china_revenue_exposure", "label": "China Exposure", "value": 63},
+        {"id": "inflation_sensitivity", "label": "Inflation Sensitivity", "value": 66},
+        {"id": "price_momentum", "label": "Price Momentum", "value": 56},
+        {"id": "earnings_revision_trend", "label": "Earnings Revisions", "value": 45},
+        {"id": "dollar_sensitivity", "label": "Dollar Sensitivity", "value": 45},
+        {"id": "supplier_bargaining_power", "label": "Supplier Bargaining Power", "value": 23}
+      ]},
+      {"t": "2026-05-20", "label": "May 20", "entries": [
+        {"id": "interest_rate_sensitivity_duration", "label": "Interest Rate (Duration)", "value": 98},
+        {"id": "tariff_sensitivity", "label": "Tariff Sensitivity", "value": 104},
+        {"id": "china_revenue_exposure", "label": "China Exposure", "value": 82},
+        {"id": "inflation_sensitivity", "label": "Inflation Sensitivity", "value": 74},
+        {"id": "price_momentum", "label": "Price Momentum", "value": 66},
+        {"id": "earnings_revision_trend", "label": "Earnings Revisions", "value": 53},
+        {"id": "dollar_sensitivity", "label": "Dollar Sensitivity", "value": 58},
+        {"id": "supplier_bargaining_power", "label": "Supplier Bargaining Power", "value": 29}
+      ]},
+      {"t": "2026-05-21", "label": "May 21", "entries": [
+        {"id": "interest_rate_sensitivity_duration", "label": "Interest Rate (Duration)", "value": 105},
+        {"id": "tariff_sensitivity", "label": "Tariff Sensitivity", "value": 132},
+        {"id": "china_revenue_exposure", "label": "China Exposure", "value": 101},
+        {"id": "inflation_sensitivity", "label": "Inflation Sensitivity", "value": 83},
+        {"id": "price_momentum", "label": "Price Momentum", "value": 77},
+        {"id": "earnings_revision_trend", "label": "Earnings Revisions", "value": 61},
+        {"id": "dollar_sensitivity", "label": "Dollar Sensitivity", "value": 70},
+        {"id": "supplier_bargaining_power", "label": "Supplier Bargaining Power", "value": 35}
+      ]}
+    ]
+  },
+  "overlay": null,
+  "captions": [
+    {"atSeconds": 3.5, "text": "Rate-cut bets led the tape early"},
+    {"atSeconds": 9.0, "text": "Then tariffs take over as trade-war headlines hit"},
+    {"atSeconds": 14.0, "text": "China exposure climbs from the bottom of the board"}
+  ],
+  "outro": {
+    "title": "Tariffs are the new driver",
+    "takeaway": "News is repricing trade-exposed names over rate-sensitive ones. Watch tariff & China plays.",
+    "cta": "newsimpactscreener.com",
+    "durationInSeconds": 3
+  },
+  "sources": ["News Impact Screener"]
+}
