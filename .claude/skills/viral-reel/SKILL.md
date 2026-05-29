@@ -85,6 +85,9 @@ parts are already populated). The full contract is in
 
 You own:
 - `intro.title` — the **hook** (≤7 words). A question or a claim, not a label.
+  There is no hero slide: the hook renders as a text caption overlaid on the
+  start of the animation, then fades — so the chart gets the full runtime.
+  `intro.durationInSeconds` controls how long the caption holds before fading.
 - `intro.kicker` / `intro.subtitle` — brand + what/when (e.g. "AI-scored news impact · last 14 days").
 - `race.metricLabel` + `race.valueFormat` — what the numbers mean (`count`,
   `score`, `percent`, `currency`, `signed`).

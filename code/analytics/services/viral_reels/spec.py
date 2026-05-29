@@ -11,7 +11,9 @@ Shape
   "version": 1,
   "format":  {"width": 1080, "height": 1920, "fps": 30, "durationInSeconds": 20},
   "theme":   "midnight",                 # key in reel/src/theme.ts
-  "intro":   {"kicker", "title", "subtitle", "durationInSeconds"},
+  "intro":   {"kicker", "title", "subtitle", "durationInSeconds"},  # rendered as
+             # an on-reel text caption over the start (not a separate slide);
+             # durationInSeconds = how long the caption holds before fading.
   "race": {
     "metricLabel": "Articles",
     "valueFormat": "count",              # count | score | percent | currency | signed

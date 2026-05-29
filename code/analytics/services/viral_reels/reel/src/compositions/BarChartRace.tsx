@@ -3,7 +3,7 @@ import {AbsoluteFill, Sequence, useCurrentFrame, useVideoConfig} from 'remotion'
 import {BarChartRaceProps} from '../types';
 import {getTheme} from '../theme';
 import {Background} from '../components/Background';
-import {TitleCard} from '../components/TitleCard';
+import {TitleCaption} from '../components/TitleCaption';
 import {OutroCard} from '../components/OutroCard';
 import {RaceBoard} from '../components/RaceBoard';
 import {PriceSpark} from '../components/PriceSpark';
@@ -124,29 +124,27 @@ export const BarChartRace: React.FC<BarChartRaceProps> = ({spec}) => {
   const {fps, durationInFrames} = useVideoConfig();
   const theme = getTheme(spec.theme);
 
-  const introF = spec.intro ? Math.round(spec.intro.durationInSeconds * fps) : 0;
+  // No hero slide: the race runs from frame 0 (reclaiming that time) and the
+  // hook shows as an on-reel caption overlay instead.
   const outroF = spec.outro ? Math.round(spec.outro.durationInSeconds * fps) : 0;
-  const raceF = Math.max(1, durationInFrames - introF - outroF);
+  const raceF = Math.max(1, durationInFrames - outroF);
 
   return (
     <AbsoluteFill>
       <Background theme={theme} />
 
-      {spec.intro ? (
-        <Sequence from={0} durationInFrames={introF}>
-          <TitleCard intro={spec.intro} theme={theme} />
-        </Sequence>
-      ) : null}
-
-      <Sequence from={introF} durationInFrames={raceF}>
+      <Sequence from={0} durationInFrames={raceF}>
         <RaceSection spec={spec} raceFrames={raceF} />
       </Sequence>
 
       {spec.outro ? (
-        <Sequence from={introF + raceF} durationInFrames={outroF}>
+        <Sequence from={raceF} durationInFrames={outroF}>
           <OutroCard outro={spec.outro} theme={theme} />
         </Sequence>
       ) : null}
+
+      {/* Hook caption overlays the start of the race (replaces the hero slide). */}
+      {spec.intro ? <TitleCaption intro={spec.intro} theme={theme} /> : null}
 
       {/* Captions overlay the whole timeline (atSeconds are absolute).
           Headlines own the bottom band when present, so captions defer. */}

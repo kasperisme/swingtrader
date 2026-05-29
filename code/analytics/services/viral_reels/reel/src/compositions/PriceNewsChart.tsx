@@ -3,7 +3,7 @@ import {AbsoluteFill, Sequence, interpolate, useCurrentFrame, useVideoConfig} fr
 import {PriceNewsProps} from '../types';
 import {getTheme} from '../theme';
 import {Background} from '../components/Background';
-import {TitleCard} from '../components/TitleCard';
+import {TitleCaption} from '../components/TitleCaption';
 import {OutroCard} from '../components/OutroCard';
 import {PriceChart} from '../components/PriceChart';
 import {EventCallout} from '../components/EventCallout';
@@ -125,29 +125,27 @@ export const PriceNewsChart: React.FC<PriceNewsProps> = ({spec}) => {
   const {fps, durationInFrames} = useVideoConfig();
   const theme = getTheme(spec.theme);
 
-  const introF = spec.intro ? Math.round(spec.intro.durationInSeconds * fps) : 0;
+  // No hero slide: the chart draws from frame 0 (reclaiming that time) and the
+  // hook shows as an on-reel caption overlay instead.
   const outroF = spec.outro ? Math.round(spec.outro.durationInSeconds * fps) : 0;
-  const mainF = Math.max(1, durationInFrames - introF - outroF);
+  const mainF = Math.max(1, durationInFrames - outroF);
 
   return (
     <AbsoluteFill>
       <Background theme={theme} />
 
-      {spec.intro ? (
-        <Sequence from={0} durationInFrames={introF}>
-          <TitleCard intro={spec.intro} theme={theme} />
-        </Sequence>
-      ) : null}
-
-      <Sequence from={introF} durationInFrames={mainF}>
+      <Sequence from={0} durationInFrames={mainF}>
         <ChartSection spec={spec} mainFrames={mainF} />
       </Sequence>
 
       {spec.outro ? (
-        <Sequence from={introF + mainF} durationInFrames={outroF}>
+        <Sequence from={mainF} durationInFrames={outroF}>
           <OutroCard outro={spec.outro} theme={theme} />
         </Sequence>
       ) : null}
+
+      {/* Hook caption overlays the start of the draw (replaces the hero slide). */}
+      {spec.intro ? <TitleCaption intro={spec.intro} theme={theme} /> : null}
     </AbsoluteFill>
   );
 };
