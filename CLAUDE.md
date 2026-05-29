@@ -69,6 +69,7 @@ The caveman/businessman toggle is global (localStorage-backed via `lib/caveman-m
 | `caveman` | Writing `cavemanBody` for any blog post or doc page |
 | `ui-ux-pro-max` | Designing or reviewing UI components, layouts, styles |
 | `taste-skill` | Building any UI — enforces premium design standards, kills generic AI patterns |
+| `viral-reel` | Producing short vertical data-reels (bar chart race videos) from the news-impact data foundation; Claude directs the story, Remotion renders |
 
 ## Scheduled Screenings (Agent)
 
@@ -83,6 +84,26 @@ Key files:
 - `code/analytics/screen_agent/cli.py` — CLI: `run <id>`, `sync`
 - `code/ui/app/actions/screenings-agent.ts` — Server actions + plan gates
 - `code/ui/app/protected/agents/` — UI for managing agents
+
+## Viral Reels (Data-Reel Generator)
+
+See `.claude/skills/viral-reel/SKILL.md` and `code/analytics/services/viral_reels/README.md`.
+
+Turns the news-impact data foundation (+ FMP price/OHLC) into ~20s vertical
+**bar chart race** video reels (r/dataisbeautiful style). Split:
+- **Python** (`services/viral_reels/`) — deterministic data: builds race
+  keyframes from `news_trends_*_daily_v` views + ticker sentiment, fetches the
+  FMP price overlay, ranks candidate "viral" stories. No creative choices.
+- **Claude Code** (`viral-reel` skill) — the director: picks the story, writes
+  hook/captions/takeaway, assembles the `ReelSpec`.
+- **Remotion** (`services/viral_reels/reel/`) — renders the `ReelSpec` to MP4.
+
+Key files:
+- `code/analytics/services/viral_reels/data_sources.py` — race-keyframe builders + FMP overlay
+- `code/analytics/services/viral_reels/spec.py` — `ReelSpec` contract + validation (mirror of `reel/src/types.ts`)
+- `code/analytics/services/viral_reels/story_finder.py` — heuristic story candidates
+- `code/analytics/services/viral_reels/cli.py` — `stories|snapshot|series|prices|scaffold|validate|render`
+- `code/analytics/services/viral_reels/reel/src/compositions/BarChartRace.tsx` — the animation
 
 ## Sanity Studio
 
