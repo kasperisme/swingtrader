@@ -28,7 +28,13 @@ export const ArticleCard: React.FC<{
         ? theme.negative
         : theme.accent;
   const arrow = !hasSentiment ? '' : sentiment! > 0.05 ? '▲' : sentiment! < -0.05 ? '▼' : '◆';
-  const thumb = Math.min(height - 32, 150);
+  // Sizes scale with the card height so a bigger card gets a bigger image,
+  // larger type, and more title lines.
+  const thumb = height - 36;
+  const big = height >= 210;
+  const titleSize = big ? 42 : 36;
+  const sourceSize = big ? 27 : 24;
+  const titleLines = big ? 3 : 2;
 
   return (
     <div
@@ -81,10 +87,10 @@ export const ArticleCard: React.FC<{
               color: theme.accent,
               fontFamily: theme.numberFontFamily,
               fontWeight: 700,
-              fontSize: 24,
+              fontSize: sourceSize,
               letterSpacing: 2.5,
               textTransform: 'uppercase',
-              marginBottom: 8,
+              marginBottom: 10,
               whiteSpace: 'nowrap',
               overflow: 'hidden',
               textOverflow: 'ellipsis',
@@ -98,10 +104,10 @@ export const ArticleCard: React.FC<{
             color: theme.text,
             fontFamily: theme.fontFamily,
             fontWeight: 700,
-            fontSize: 36,
+            fontSize: titleSize,
             lineHeight: 1.18,
             display: '-webkit-box',
-            WebkitLineClamp: 2,
+            WebkitLineClamp: titleLines,
             WebkitBoxOrient: 'vertical',
             overflow: 'hidden',
           }}

@@ -204,8 +204,9 @@ export const PriceChart: React.FC<Props> = ({
       {rightInset > 0
         ? (() => {
             const pct = ((curClose - closes[0]) / closes[0]) * 100;
+            const ticker = spec.label || spec.ticker;
             const pillW = Math.max(120, rightInset - 20);
-            const pillH = 100;
+            const pillH = 138;
             const gap = 16;
             const pillX = curX + gap;
             const pillY = clamp(curY - pillH / 2, padT, baseline - pillH);
@@ -215,12 +216,17 @@ export const PriceChart: React.FC<Props> = ({
               <g>
                 <line x1={curX} y1={curY} x2={pillX} y2={connY} stroke={lineColor} strokeWidth={3} />
                 <rect x={pillX} y={pillY} width={pillW} height={pillH} rx={18} fill={lineColor} />
-                <text x={cx} y={pillY + 44} textAnchor="middle" fill={theme.bg}
-                  fontFamily={theme.numberFontFamily} fontSize={38} fontWeight={800}>
+                <text x={cx} y={pillY + 42} textAnchor="middle" fill={theme.bg}
+                  fontFamily={theme.fontFamily} fontSize={28} fontWeight={800}
+                  letterSpacing={2} opacity={0.85}>
+                  {ticker}
+                </text>
+                <text x={cx} y={pillY + 88} textAnchor="middle" fill={theme.bg}
+                  fontFamily={theme.numberFontFamily} fontSize={40} fontWeight={800}>
                   {(spec.valuePrefix ?? '') + curClose.toFixed(2)}
                 </text>
-                <text x={cx} y={pillY + 80} textAnchor="middle" fill={theme.bg}
-                  fontFamily={theme.numberFontFamily} fontSize={28} fontWeight={800}>
+                <text x={cx} y={pillY + 122} textAnchor="middle" fill={theme.bg}
+                  fontFamily={theme.numberFontFamily} fontSize={27} fontWeight={800}>
                   {(pct >= 0 ? '+' : '') + pct.toFixed(1) + '%'}
                 </text>
               </g>

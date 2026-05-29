@@ -93,9 +93,10 @@ The price line draws left-to-right at a steady pace; **both axes grow with the
 reveal** — the x-axis expands (earlier points compress left) and the y-range is
 the running min/max of the data shown so far, so the viewer can't see the whole
 range up front and it expands as new highs/lows arrive. Dates run along the
-chart's x-axis; price gridline values sit on the left, and the **live price
-rides a tag on the right edge that follows the leading point up/down** (green/red
-by direction) instead of sitting in the header. Each news event pops a pin on the line (green = positive sentiment,
+chart's x-axis; price gridline values sit on the left, and the **live price tag
+on the right edge (ticker + price + %Δ) follows the leading point up/down**
+(green/red by direction) — there is no top header, so the article card gets the
+extra space. Each news event pops a pin on the line (green = positive sentiment,
 red = negative) and an article card that floats **over the graph** with the
 headline, source, and the next-day price move — so it's obvious which headlines
 moved the stock. `price-news` trims the empty pre-news run-up so the first

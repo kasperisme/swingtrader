@@ -25,7 +25,7 @@ const ChartSection: React.FC<PriceNewsProps & {mainFrames: number}> = ({spec, ma
   const frame = useCurrentFrame();
   const {width, height, fps} = useVideoConfig();
   const theme = getTheme(spec.theme);
-  const {points, events, ticker, label} = spec.chart;
+  const {points, events} = spec.chart;
   const n = points.length;
 
   // Each event's pass-frame is when the line reaches its date (linear draw).
@@ -52,9 +52,12 @@ const ChartSection: React.FC<PriceNewsProps & {mainFrames: number}> = ({spec, ma
     }
   }
 
-  const chartTop = 300;
+  // No top header — the ticker now lives in the price tag, freeing space for a
+  // taller chart and a bigger article card.
+  const chartTop = 120;
   const chartHeight = height - chartTop - 120; // dates live on the chart's x-axis
-  const cardHeight = 176;
+  const cardHeight = 250;
+  const cardTopOffset = 24;
 
   // Catch beat: entrance, then a spotlight pulse on the live price edge ~1.5–3.7s.
   const enter = spring({frame, fps, config: {damping: 200}});
@@ -62,31 +65,24 @@ const ChartSection: React.FC<PriceNewsProps & {mainFrames: number}> = ({spec, ma
 
   return (
     <AbsoluteFill style={{opacity: enter, transform: `translateY(${interpolate(enter, [0, 1], [28, 0])}px)`}}>
-      {/* header — just the ticker; the live price rides the chart as a tag */}
-      <div style={{position: 'absolute', top: 70, left: 56, right: 56}}>
-        <div style={{color: theme.text, fontFamily: theme.fontFamily, fontWeight: 900, fontSize: 64, letterSpacing: -1}}>
-          {label || ticker}
-        </div>
-      </div>
-
-      {/* chart (date ticks on the x-axis, live price tag on the right) */}
+      {/* chart (date ticks on the x-axis, live price+ticker tag on the right) */}
       <div style={{position: 'absolute', top: chartTop, left: 40, width: width - 80, height: chartHeight}}>
         <PriceChart
           spec={spec.chart}
           progress={progress}
           activeEventIndex={active ? active.i : null}
           pulse={spotlight}
-          topInset={events.length ? 28 + cardHeight + 18 : 0}
-          rightInset={190}
+          topInset={events.length ? cardTopOffset + cardHeight + 16 : 0}
+          rightInset={200}
           theme={theme}
           width={width - 80}
           height={chartHeight}
         />
       </div>
 
-      {/* article callout — floats OVER the graph (upper area, usually clear) */}
+      {/* article callout — floats OVER the graph (bigger, upper area) */}
       {active ? (
-        <div style={{position: 'absolute', top: chartTop + 28, left: 56, width: width - 112, opacity: activeOpacity}}>
+        <div style={{position: 'absolute', top: chartTop + cardTopOffset, left: 44, width: width - 88, opacity: activeOpacity}}>
           <ArticleCard
             title={active.e.title}
             source={active.e.source}
@@ -94,7 +90,7 @@ const ChartSection: React.FC<PriceNewsProps & {mainFrames: number}> = ({spec, ma
             sentiment={active.e.sentiment ?? 0}
             move={active.e.move}
             theme={theme}
-            width={width - 112}
+            width={width - 88}
             height={cardHeight}
           />
         </div>
