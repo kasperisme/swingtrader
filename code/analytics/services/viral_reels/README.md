@@ -90,9 +90,11 @@ python -m services.viral_reels.cli render out/price_news_spec.json --out out/pri
 ```
 
 The price line draws left-to-right; each news event pops a pin on the line
-(green = positive sentiment, red = negative) and a callout card with the
+(green = positive sentiment, red = negative) and an article card with the
 headline, source, and the next-day price move — so it's obvious which headlines
-moved the stock.
+moved the stock. The draw eases to the **first** event by ~2.6s (compressing the
+empty pre-news lead-in) so an article is always on the chart within the first
+~3s, then the news-rich remainder plays at a steady pace.
 
 `series`, marks of value:
 

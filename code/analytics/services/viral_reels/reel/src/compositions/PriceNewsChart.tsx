@@ -36,7 +36,35 @@ const ChartSection: React.FC<PriceNewsProps & {mainFrames: number}> = ({spec, ma
 
   const closes = points.map((p) => p.close);
   const n = points.length;
-  const progress = clamp(frame / Math.max(1, mainFrames - 1), 0, 1);
+
+  // Event timing: each event's pass-frame is when the line reaches its date.
+  const eventsWithIndex = useMemo(
+    () => events.map((e, i) => ({e, i, idx: indexForDate(points, e.t)})),
+    [events, points],
+  );
+
+  // Guarantee an article is on the chart within the first ~3s: ease the line to
+  // the FIRST event by ~2.6s (compressing only the empty pre-news lead-in), then
+  // draw the news-rich remainder at a steady pace. No event ⇒ plain linear draw.
+  const firstIdx = eventsWithIndex.length ? Math.min(...eventsWithIndex.map((x) => x.idx)) : 0;
+  const lastF = Math.max(1, mainFrames - 1);
+  const introF = Math.min(Math.round(2.6 * fps), Math.floor(lastF * 0.35));
+  const firstProg = n > 1 ? firstIdx / (n - 1) : 0;
+  const remapped = firstIdx > 0 && firstProg > 0;
+  const smooth = (t: number) => (t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2);
+  const progAt = (f: number): number => {
+    if (!remapped) return clamp(f / lastF, 0, 1);
+    if (f <= introF) return firstProg * smooth(clamp(f / introF, 0, 1));
+    return firstProg + (1 - firstProg) * clamp((f - introF) / Math.max(1, lastF - introF), 0, 1);
+  };
+  const passFrameFor = (idx: number): number => {
+    const tp = n > 1 ? idx / (n - 1) : 0;
+    if (!remapped) return tp * lastF;
+    if (tp <= firstProg) return introF;
+    return introF + ((tp - firstProg) / (1 - firstProg)) * (lastF - introF);
+  };
+
+  const progress = progAt(frame);
   const reveal = progress * (n - 1);
   const last = Math.floor(reveal);
   const frac = reveal - last;
@@ -47,16 +75,11 @@ const ChartSection: React.FC<PriceNewsProps & {mainFrames: number}> = ({spec, ma
   const moveColor = up ? theme.positive : theme.negative;
   const curDate = dateLabel(points[Math.round(clamp(reveal, 0, n - 1))].t);
 
-  // Event timing: each event's pass-frame is when the line reaches its date.
-  const eventsWithIndex = useMemo(
-    () => events.map((e, i) => ({e, i, idx: indexForDate(points, e.t)})),
-    [events, points],
-  );
-  const holdFrames = Math.min(3.2 * fps, mainFrames / Math.max(1, events.length));
+  const holdFrames = Math.min(3.2 * fps, lastF / Math.max(1, events.length));
   let active: {e: (typeof events)[number]; i: number} | null = null;
   let activeOpacity = 0;
   for (const {e, i, idx} of eventsWithIndex) {
-    const passFrame = (idx / (n - 1)) * (mainFrames - 1);
+    const passFrame = passFrameFor(idx);
     if (frame >= passFrame && frame <= passFrame + holdFrames) {
       active = {e, i};
       activeOpacity = interpolate(
