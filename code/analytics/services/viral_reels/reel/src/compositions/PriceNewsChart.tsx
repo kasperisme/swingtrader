@@ -97,6 +97,7 @@ const ChartSection: React.FC<PriceNewsProps & {mainFrames: number}> = ({spec, ma
           progress={progress}
           activeEventIndex={active ? active.i : null}
           pulse={spotlight}
+          topInset={events.length ? 28 + cardHeight + 18 : 0}
           theme={theme}
           width={width - 80}
           height={chartHeight}

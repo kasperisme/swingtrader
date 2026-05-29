@@ -8,6 +8,7 @@ interface Props {
   progress: number; // 0..1 line-draw progress
   activeEventIndex: number | null; // pin to emphasize
   pulse?: number; // 0..1 catch-beat glow on the leading edge
+  topInset?: number; // reserved headroom at the top (keeps the line below the card)
   theme: Theme;
   width: number;
   height: number;
@@ -44,6 +45,7 @@ export const PriceChart: React.FC<Props> = ({
   progress,
   activeEventIndex,
   pulse = 0,
+  topInset = 0,
   theme,
   width,
   height,
@@ -55,9 +57,10 @@ export const PriceChart: React.FC<Props> = ({
   const lows = points.map((p) => (p.low ?? p.close));
   const highs = points.map((p) => (p.high ?? p.close));
 
+  const padT = PAD_T + topInset; // headroom so the line's peak stays below the card
   const innerW = width - PAD_L - PAD_R;
-  const innerH = height - PAD_T - PAD_B;
-  const baseline = PAD_T + innerH;
+  const innerH = height - padT - PAD_B;
+  const baseline = padT + innerH;
 
   const reveal = clamp(progress, 0, 1) * (points.length - 1);
   const last = Math.floor(reveal);
@@ -88,7 +91,7 @@ export const PriceChart: React.FC<Props> = ({
   // points compress/shift left as the chart grows.
   const dom = Math.max(reveal, 1e-6);
   const x = (i: number) => PAD_L + (i / dom) * innerW;
-  const y = (v: number) => PAD_T + (1 - (v - lo) / (hi - lo)) * innerH;
+  const y = (v: number) => padT + (1 - (v - lo) / (hi - lo)) * innerH;
 
   const curX = lerp(x(last), x(nextIdx), frac);
   const curY = y(curClose);
