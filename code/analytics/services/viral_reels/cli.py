@@ -158,6 +158,8 @@ def cmd_price_news(args):
         max_events=args.max_events,
         points=chart["points"],
     )
+    # Put the first article on the 2nd rendered date so it shows up early.
+    chart = ds.align_first_event_to_second_point(chart, lead=1)
     spec = spec_mod.build_price_news_spec(
         chart=chart,
         theme=args.theme,

@@ -483,6 +483,30 @@ def news_events(
     return events
 
 
+def align_first_event_to_second_point(chart: dict[str, Any], lead: int = 1) -> dict[str, Any]:
+    """Trim leading price points so the earliest event lands on the ``lead``-th
+    rendered date (default: the 2nd point).
+
+    Drops only the empty pre-news run-up, keeping ``lead`` context point(s)
+    before the first article so it appears early in the reel without any pacing
+    tricks. No-op when there are no events or no room to trim.
+    """
+    points = chart.get("points") or []
+    events = chart.get("events") or []
+    if len(points) < 2 or not events:
+        return chart
+
+    def _d(s: str) -> date:
+        return date.fromisoformat(str(s)[:10])
+
+    target = _d(min(str(e["t"]) for e in events if e.get("t")))
+    nearest = min(range(len(points)), key=lambda i: abs((_d(points[i]["t"]) - target).days))
+    start = max(0, nearest - lead)
+    if start > 0:
+        chart = {**chart, "points": points[start:]}
+    return chart
+
+
 # ---------------------------------------------------------------------------
 # Headlines — the real articles behind a viral area (UI-styled cards in the reel)
 # ---------------------------------------------------------------------------

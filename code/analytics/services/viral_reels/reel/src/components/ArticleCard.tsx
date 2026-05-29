@@ -39,12 +39,13 @@ export const ArticleCard: React.FC<{
         display: 'flex',
         alignItems: 'center',
         gap: 24,
-        background: theme.trackBg,
+        // opaque panel so it reads cleanly when floated over the chart
+        background: theme.bgAccent,
         border: `1px solid ${theme.grid}`,
         borderLeft: hasSentiment ? `8px solid ${color}` : `1px solid ${theme.grid}`,
         borderRadius: 22,
         padding: 18,
-        boxShadow: '0 12px 40px rgba(0,0,0,0.30)',
+        boxShadow: '0 16px 48px rgba(0,0,0,0.45)',
       }}
     >
       {/* thumbnail — real article image with a graceful fallback behind it */}

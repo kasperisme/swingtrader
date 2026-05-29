@@ -16,7 +16,13 @@ interface Props {
 const PAD_L = 24;
 const PAD_R = 24;
 const PAD_T = 16;
-const PAD_B = 44;
+const PAD_B = 76; // room for date ticks on the x-axis
+
+const dateLabel = (t: string): string => {
+  const d = new Date(t);
+  if (Number.isNaN(d.getTime())) return t;
+  return d.toLocaleDateString('en-US', {month: 'short', day: 'numeric', timeZone: 'UTC'});
+};
 
 /** Snap an ISO date to the nearest price-point index. */
 const indexForDate = (points: {t: string}[], t: string): number => {
@@ -104,6 +110,25 @@ export const PriceChart: React.FC<Props> = ({
           </text>
         </g>
       ))}
+
+      {/* x-axis date ticks */}
+      {Array.from({length: Math.min(5, points.length)}).map((_, i, arr) => {
+        const idx = Math.round((i * (points.length - 1)) / Math.max(1, arr.length - 1));
+        const anchor = i === 0 ? 'start' : i === arr.length - 1 ? 'end' : 'middle';
+        return (
+          <text
+            key={i}
+            x={x(idx)}
+            y={baseline + 46}
+            textAnchor={anchor}
+            fill={theme.textMuted}
+            fontFamily={theme.numberFontFamily}
+            fontSize={24}
+          >
+            {dateLabel(points[idx].t)}
+          </text>
+        );
+      })}
 
       {/* area + line */}
       <path d={area} fill="url(#priceArea)" />

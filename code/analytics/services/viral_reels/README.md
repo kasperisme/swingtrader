@@ -89,12 +89,12 @@ python -m services.viral_reels.cli price-news --ticker NVDA --window-days 30 \
 python -m services.viral_reels.cli render out/price_news_spec.json --out out/price_news.mp4
 ```
 
-The price line draws left-to-right; each news event pops a pin on the line
-(green = positive sentiment, red = negative) and an article card with the
+The price line draws left-to-right at a steady pace; dates run along the chart's
+x-axis. Each news event pops a pin on the line (green = positive sentiment,
+red = negative) and an article card that floats **over the graph** with the
 headline, source, and the next-day price move — so it's obvious which headlines
-moved the stock. The draw eases to the **first** event by ~2.6s (compressing the
-empty pre-news lead-in) so an article is always on the chart within the first
-~3s, then the news-rich remainder plays at a steady pace.
+moved the stock. `price-news` trims the empty pre-news run-up so the first
+article lands on the **2nd rendered date** (on screen within ~2s).
 
 `series`, marks of value:
 
