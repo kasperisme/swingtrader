@@ -51,9 +51,13 @@ python -m services.viral_reels.cli series --kind ticker    --top 8 --value-mode 
 # 3. External overlay (FMP price/OHLC)
 python -m services.viral_reels.cli prices --ticker NVDA --window-days 30
 
+# 3b. Real headlines behind the trend (UI-styled article cards)
+python -m services.viral_reels.cli headlines --window-days 14 --limit 5 \
+    --dimension-key tariff_sensitivity
+
 # 4. One-shot starter spec (director then edits copy + captions)
 python -m services.viral_reels.cli scaffold --kind cluster --window-days 14 \
-    --overlay-ticker NVDA --out out/reel_spec.json
+    --overlay-ticker NVDA --headlines 5 --out out/reel_spec.json
 
 # 5. Validate + render
 python -m services.viral_reels.cli validate out/reel_spec.json

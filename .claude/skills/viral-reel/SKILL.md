@@ -46,13 +46,16 @@ Build the race keyframes for your chosen subject (`cluster` | `dimension` |
 ```bash
 python -m services.viral_reels.cli series --kind cluster --window-days 14 --out out/series.json
 python -m services.viral_reels.cli prices --ticker NVDA --window-days 30 --out out/overlay.json
+# real headlines behind the trend (UI-styled article cards, with source)
+python -m services.viral_reels.cli headlines --window-days 14 --limit 5 \
+    --dimension-key tariff_sensitivity --out out/headlines.json
 ```
 
 Or scaffold a starter spec in one shot, then edit it:
 
 ```bash
 python -m services.viral_reels.cli scaffold --kind cluster --window-days 14 \
-    --overlay-ticker NVDA --out out/reel_spec.json
+    --overlay-ticker NVDA --headlines 5 --out out/reel_spec.json
 ```
 
 ### 3. Direct the reel — edit `out/reel_spec.json`
@@ -67,6 +70,11 @@ You own:
   `score`, `percent`, `currency`, `signed`).
 - `captions[]` — 2–4 timed beats (`atSeconds`, `text`) narrating the overtakes
   so the video reads silently. Land them on the moments where ranks change.
+- `headlines[]` — the real article cards behind the trend (`title`, `source`,
+  `age`, optional `imageUrl`), styled like the app's news feed. They cycle in
+  the lower band during the race and **take precedence over captions** (don't
+  set both — use headlines for evidence, captions for narration). This is the
+  strongest way to ground the abstract race in actual news.
 - `outro.title` + `outro.takeaway` — the **so-what**. What should a trader do
   with this? One line.
 - `theme` — `midnight` (default), `paper`, or `neon`.

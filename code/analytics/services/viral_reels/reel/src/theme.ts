@@ -8,6 +8,7 @@ export interface Theme {
   text: string;
   textMuted: string;
   trackBg: string;
+  accent: string; // amber-ish, matches the app's article-card source label
   palette: string[]; // categorical, cycled by stable entity index
   positive: string;
   negative: string;
@@ -44,6 +45,7 @@ export const THEMES: Record<string, Theme> = {
     text: '#F5F7FF',
     textMuted: 'rgba(245,247,255,0.55)',
     trackBg: 'rgba(255,255,255,0.05)',
+    accent: '#F5A623',
     palette: VIVID,
     positive: '#3DD68C',
     negative: '#FF6B6B',
@@ -57,6 +59,7 @@ export const THEMES: Record<string, Theme> = {
     text: '#1B1B1B',
     textMuted: 'rgba(27,27,27,0.55)',
     trackBg: 'rgba(0,0,0,0.05)',
+    accent: '#B45309',
     palette: VIVID,
     positive: '#1B9E5A',
     negative: '#D6453C',
@@ -70,6 +73,7 @@ export const THEMES: Record<string, Theme> = {
     text: '#EAF6FF',
     textMuted: 'rgba(234,246,255,0.6)',
     trackBg: 'rgba(120,200,255,0.06)',
+    accent: '#00E5FF',
     palette: [
       '#00E5FF',
       '#FF2D9B',

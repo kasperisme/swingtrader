@@ -20,6 +20,7 @@ Shape
   },
   "overlay": {"type":"priceSpark","ticker","label","points":[{t,close}]} | null,
   "captions": [ {"atSeconds": 3.0, "text": "..."} ],
+  "headlines": [ {"title","source","url","publishedAt","age","imageUrl"} ],
   "outro":   {"title", "takeaway", "cta", "durationInSeconds"},
   "sources": ["News Impact Screener", "Financial Modeling Prep"]
 }
@@ -56,6 +57,7 @@ def build_spec(
     outro_takeaway: str = "",
     cta: str = "newsimpactscreener.com",
     captions: list[dict[str, Any]] | None = None,
+    headlines: list[dict[str, Any]] | None = None,
     overlay: dict[str, Any] | None = None,
     bars_visible: int = 6,
     sources: list[str] | None = None,
@@ -87,6 +89,7 @@ def build_spec(
         },
         "overlay": overlay,
         "captions": captions or [],
+        "headlines": headlines or [],
         "outro": {
             "title": outro_title,
             "takeaway": outro_takeaway,
@@ -138,6 +141,10 @@ def validate(spec: dict[str, Any]) -> list[str]:
             errors.append("overlay.type must be 'priceSpark' (only type supported)")
         elif len(overlay.get("points") or []) < 2:
             errors.append("overlay.points needs at least 2 points")
+
+    for i, h in enumerate(spec.get("headlines") or []):
+        if not (h.get("title") or "").strip():
+            errors.append(f"headlines[{i}] needs a non-empty 'title'")
 
     intro_s = (spec.get("intro") or {}).get("durationInSeconds", 0) or 0
     outro_s = (spec.get("outro") or {}).get("durationInSeconds", 0) or 0

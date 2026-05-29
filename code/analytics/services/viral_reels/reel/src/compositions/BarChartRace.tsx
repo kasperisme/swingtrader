@@ -8,6 +8,7 @@ import {OutroCard} from '../components/OutroCard';
 import {RaceBoard} from '../components/RaceBoard';
 import {PriceSpark} from '../components/PriceSpark';
 import {Captions} from '../components/Caption';
+import {Headlines} from '../components/Headlines';
 import {Footer} from '../components/Footer';
 import {
   prepareKeyframes,
@@ -101,6 +102,19 @@ const RaceSection: React.FC<BarChartRaceProps & {raceFrames: number}> = ({spec, 
         />
       </div>
 
+      {/* real headlines behind the trend, cycling in the reserved band */}
+      {spec.headlines && spec.headlines.length ? (
+        <div style={{position: 'absolute', left: 56, right: 56, bottom: 92, height: 156}}>
+          <Headlines
+            items={spec.headlines}
+            theme={theme}
+            width={width - 112}
+            height={156}
+            raceFrames={raceFrames}
+          />
+        </div>
+      ) : null}
+
       <Footer sources={spec.sources ?? ['News Impact Screener']} theme={theme} width={width} />
     </AbsoluteFill>
   );
@@ -134,8 +148,9 @@ export const BarChartRace: React.FC<BarChartRaceProps> = ({spec}) => {
         </Sequence>
       ) : null}
 
-      {/* Captions overlay the whole timeline (atSeconds are absolute). */}
-      {spec.captions && spec.captions.length ? (
+      {/* Captions overlay the whole timeline (atSeconds are absolute).
+          Headlines own the bottom band when present, so captions defer. */}
+      {spec.captions && spec.captions.length && !(spec.headlines && spec.headlines.length) ? (
         <Captions captions={spec.captions} theme={theme} />
       ) : null}
     </AbsoluteFill>

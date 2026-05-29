@@ -87,6 +87,23 @@ def cmd_prices(args):
     _emit(ds.price_overlay(args.ticker, window_days=args.window_days), args.out)
 
 
+def cmd_headlines(args):
+    tickers = (
+        [t.strip().upper() for t in args.tickers.split(",") if t.strip()]
+        if args.tickers
+        else None
+    )
+    _emit(
+        ds.headlines(
+            window_days=args.window_days,
+            limit=args.limit,
+            dimension_key=args.dimension_key,
+            tickers=tickers,
+        ),
+        args.out,
+    )
+
+
 def cmd_scaffold(args):
     builder = ds.SERIES_BUILDERS[args.kind]
     kwargs = {"window_days": args.window_days, "value_mode": args.value_mode}
@@ -101,6 +118,17 @@ def cmd_scaffold(args):
         except Exception as exc:
             log.warning("price overlay skipped: %s", exc)
 
+    headlines = []
+    if args.headlines:
+        try:
+            headlines = ds.headlines(
+                window_days=args.window_days,
+                limit=args.headlines,
+                dimension_key=args.dimension_key,
+            )
+        except Exception as exc:
+            log.warning("headlines skipped: %s", exc)
+
     metric_label = "Articles" if args.kind != "ticker" else "Mentions"
     spec = spec_mod.build_spec(
         keyframes=keyframes,
@@ -112,6 +140,7 @@ def cmd_scaffold(args):
         outro_title="<EDIT: the takeaway>",
         outro_takeaway="<EDIT: one-line so-what>",
         captions=[],
+        headlines=headlines,
         overlay=overlay,
     )
     problems = spec_mod.validate(spec)
@@ -203,6 +232,13 @@ def main():
     p_prices.add_argument("--window-days", type=int, default=30)
     p_prices.add_argument("--out", default=None)
 
+    p_hl = sub.add_parser("headlines", help="Top article headlines behind a window (UI-styled cards)")
+    p_hl.add_argument("--window-days", type=int, default=14)
+    p_hl.add_argument("--limit", type=int, default=5)
+    p_hl.add_argument("--dimension-key", default=None, help="rank by load on this dimension")
+    p_hl.add_argument("--tickers", default=None, help="comma list to scope by ticker")
+    p_hl.add_argument("--out", default=None)
+
     p_scaf = sub.add_parser("scaffold", help="Build a starter ReelSpec to edit")
     p_scaf.add_argument("--kind", choices=list(ds.SERIES_BUILDERS), default="cluster")
     p_scaf.add_argument("--window-days", type=int, default=14)
@@ -210,6 +246,8 @@ def main():
     p_scaf.add_argument("--value-mode", choices=ds.VALUE_MODES, default="cumulative_articles")
     p_scaf.add_argument("--theme", default="midnight")
     p_scaf.add_argument("--overlay-ticker", default=None)
+    p_scaf.add_argument("--headlines", type=int, default=0, help="include N real headline cards")
+    p_scaf.add_argument("--dimension-key", default=None, help="rank headlines by this dimension")
     p_scaf.add_argument("--out", default=str(_PKG_DIR / "out" / "reel_spec.json"))
 
     p_val = sub.add_parser("validate", help="Validate a ReelSpec JSON file")
@@ -227,6 +265,7 @@ def main():
         "snapshot": cmd_snapshot,
         "series": cmd_series,
         "prices": cmd_prices,
+        "headlines": cmd_headlines,
         "scaffold": cmd_scaffold,
         "validate": cmd_validate,
         "render": cmd_render,

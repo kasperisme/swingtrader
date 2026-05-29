@@ -61,6 +61,15 @@ export interface Caption {
   text: string;
 }
 
+export interface HeadlineItem {
+  title: string;
+  source?: string; // shown uppercased, e.g. "REUTERS.COM" or the raw URL
+  url?: string;
+  publishedAt?: string; // ISO; used to derive age if `age` absent
+  age?: string; // pre-baked relative age, e.g. "2h ago"
+  imageUrl?: string; // optional thumbnail
+}
+
 export interface ReelSpec {
   version: number;
   format: ReelFormat;
@@ -69,6 +78,7 @@ export interface ReelSpec {
   race: RaceSpec;
   overlay?: Overlay;
   captions?: Caption[];
+  headlines?: HeadlineItem[];
   outro?: OutroSpec;
   sources?: string[];
 }

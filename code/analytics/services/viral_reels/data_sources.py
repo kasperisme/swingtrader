@@ -62,6 +62,39 @@ def _round(v: float) -> float:
     return round(float(v), 4)
 
 
+def _age_since(iso: str | None) -> str:
+    """Relative age baked at build time, mirroring the UI's formatAgeSince."""
+    if not iso:
+        return ""
+    try:
+        dt = datetime.fromisoformat(str(iso).replace("Z", "+00:00"))
+    except ValueError:
+        return ""
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    diff = (datetime.now(timezone.utc) - dt).total_seconds()
+    if diff < 0:
+        return "just now"
+    minute, hour, day, week = 60, 3600, 86400, 604800
+    if diff < hour:
+        return f"{max(1, int(diff // minute))}m ago"
+    if diff < day:
+        return f"{int(diff // hour)}h ago"
+    if diff < week:
+        return f"{int(diff // day)}d ago"
+    return f"{int(diff // week)}w ago"
+
+
+def _source_label(source: str | None, url: str | None) -> str:
+    """Prefer the stored source; else derive a host from the url."""
+    if source and source.strip():
+        return source.strip()
+    if url:
+        host = url.split("//")[-1].split("/")[0]
+        return host or url
+    return ""
+
+
 # ---------------------------------------------------------------------------
 # Generic keyframe builder
 # ---------------------------------------------------------------------------
@@ -317,6 +350,78 @@ def price_overlay(ticker: str, window_days: int = 30) -> dict[str, Any]:
         "label": f"{ticker} close",
         "points": points,
     }
+
+
+# ---------------------------------------------------------------------------
+# Headlines — the real articles behind a viral area (UI-styled cards in the reel)
+# ---------------------------------------------------------------------------
+
+
+def headlines(
+    window_days: int = 14,
+    limit: int = 5,
+    dimension_key: str | None = None,
+    tickers: list[str] | None = None,
+) -> list[dict[str, Any]]:
+    """Top article headlines driving the window, as reel-ready cards.
+
+    Pulled from ``news_trends_article_base_v`` (title/source/url/image +
+    per-article impact vector). When ``dimension_key`` is given, articles are
+    ranked by how strongly they load on that dimension; otherwise by overall
+    scoring confidence. Each card carries a pre-baked relative ``age``.
+    """
+    client, schema = _supabase()
+    since = datetime.now(timezone.utc) - timedelta(days=window_days)
+    rows = (
+        client.schema(schema)
+        .table("news_trends_article_base_v")
+        .select("article_id,title,url,source,image_url,published_at,impact_jsonb,confidence_mean")
+        .gte("published_at", since.isoformat())
+        .order("published_at", desc=True)
+        .limit(400)
+        .execute()
+        .data
+        or []
+    )
+
+    def _impact(row: dict) -> dict:
+        v = row.get("impact_jsonb")
+        if isinstance(v, dict):
+            return v
+        try:
+            import json
+
+            return json.loads(v) if v else {}
+        except (TypeError, ValueError):
+            return {}
+
+    if dimension_key:
+        scored = [
+            (abs(float(_impact(r).get(dimension_key, 0) or 0)), r)
+            for r in rows
+            if dimension_key in _impact(r)
+        ]
+        scored.sort(key=lambda x: x[0], reverse=True)
+        picked = [r for _, r in scored]
+    else:
+        picked = sorted(rows, key=lambda r: float(r.get("confidence_mean") or 0), reverse=True)
+
+    out: list[dict[str, Any]] = []
+    for r in picked[:limit]:
+        title = (r.get("title") or "").strip()
+        if not title:
+            continue
+        out.append(
+            {
+                "title": title,
+                "source": _source_label(r.get("source"), r.get("url")),
+                "url": r.get("url"),
+                "publishedAt": r.get("published_at"),
+                "age": _age_since(r.get("published_at")),
+                "imageUrl": r.get("image_url"),
+            }
+        )
+    return out
 
 
 # ---------------------------------------------------------------------------
