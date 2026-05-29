@@ -1,36 +1,33 @@
 import React from 'react';
-import {interpolate, useCurrentFrame} from 'remotion';
+import {interpolate} from 'remotion';
 import {Theme} from '../theme';
 import {HeadlineItem} from '../types';
 import {ArticleCard} from './ArticleCard';
 
 /**
- * Cycles the real headlines behind the trend, one card at a time, across the
- * race. Rendered inside the race Sequence, so useCurrentFrame() is local
- * (0 .. raceFrames-1).
+ * Cycles the real headlines behind the trend, one card at a time. Timing is
+ * driven by the caller (`localFrame` over `spanFrames`) so it only runs during
+ * the detailed replay — not during the fast reward "peek".
  */
 export const Headlines: React.FC<{
   items: HeadlineItem[];
   theme: Theme;
   width: number;
   height: number;
-  raceFrames: number;
-}> = ({items, theme, width, height, raceFrames}) => {
-  const frame = useCurrentFrame();
-  if (!items.length) return null;
+  localFrame: number;
+  spanFrames: number;
+}> = ({items, theme, width, height, localFrame, spanFrames}) => {
+  if (!items.length || localFrame < 0) return null;
 
-  const slot = raceFrames / items.length;
-  const idx = Math.min(items.length - 1, Math.floor(frame / slot));
-  const local = frame - idx * slot;
+  const slot = spanFrames / items.length;
+  const idx = Math.min(items.length - 1, Math.floor(localFrame / slot));
+  const local = localFrame - idx * slot;
 
-  // fade/slide in at the start of each slot, out at the end
   const fade = 8;
-  const opacity = interpolate(
-    local,
-    [0, fade, slot - fade, slot],
-    [0, 1, 1, 0],
-    {extrapolateLeft: 'clamp', extrapolateRight: 'clamp'},
-  );
+  const opacity = interpolate(local, [0, fade, slot - fade, slot], [0, 1, 1, 0], {
+    extrapolateLeft: 'clamp',
+    extrapolateRight: 'clamp',
+  });
   const y = interpolate(local, [0, fade], [18, 0], {
     extrapolateLeft: 'clamp',
     extrapolateRight: 'clamp',

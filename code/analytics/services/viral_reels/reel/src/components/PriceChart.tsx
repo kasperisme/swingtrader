@@ -7,6 +7,7 @@ interface Props {
   spec: PriceNewsChartSpec;
   progress: number; // 0..1 line-draw progress
   activeEventIndex: number | null; // pin to emphasize
+  pulse?: number; // 0..1 catch-beat glow on the leading edge
   theme: Theme;
   width: number;
   height: number;
@@ -36,6 +37,7 @@ export const PriceChart: React.FC<Props> = ({
   spec,
   progress,
   activeEventIndex,
+  pulse = 0,
   theme,
   width,
   height,
@@ -136,9 +138,10 @@ export const PriceChart: React.FC<Props> = ({
         );
       })}
 
-      {/* leading edge dot */}
-      <circle cx={curX} cy={curY} r={12} fill={lineColor} />
-      <circle cx={curX} cy={curY} r={22} fill={lineColor} opacity={0.22} />
+      {/* leading edge dot (glows during the catch beat) */}
+      {pulse > 0.02 ? <circle cx={curX} cy={curY} r={22 + 46 * pulse} fill={lineColor} opacity={0.18 * pulse} /> : null}
+      <circle cx={curX} cy={curY} r={12 + 4 * pulse} fill={lineColor} />
+      <circle cx={curX} cy={curY} r={22 + 10 * pulse} fill={lineColor} opacity={0.22} />
     </svg>
   );
 };

@@ -13,6 +13,8 @@ interface Props {
   theme: Theme;
   width: number;
   height: number;
+  heroId?: string; // the eventual winner — spotlighted during the catch beat
+  spotlight?: number; // 0..1 intensity of the spotlight pulse
 }
 
 const LEFT_PAD = 56;
@@ -27,6 +29,8 @@ export const RaceBoard: React.FC<Props> = ({
   theme,
   width,
   height,
+  heroId,
+  spotlight = 0,
 }) => {
   const rowHeight = height / barsVisible;
   const barHeight = rowHeight * 0.62;
@@ -52,6 +56,9 @@ export const RaceBoard: React.FC<Props> = ({
         const valueStr = formatValue(s.value, valueFormat);
         const valueWidth = valueStr.length * labelFontSize * 0.92 * 0.6;
 
+        const isHero = heroId != null && s.id === heroId;
+        const glow = isHero ? spotlight : 0;
+
         return (
           <div
             key={s.id}
@@ -62,6 +69,8 @@ export const RaceBoard: React.FC<Props> = ({
               height: barHeight,
               width: trackWidth + VALUE_RESERVE,
               opacity,
+              transform: `scale(${1 + 0.05 * glow})`,
+              transformOrigin: 'left center',
             }}
           >
             {/* bar */}
@@ -74,7 +83,11 @@ export const RaceBoard: React.FC<Props> = ({
                 width: barLen,
                 background: `linear-gradient(90deg, ${color} 0%, ${color}D9 100%)`,
                 borderRadius: barHeight / 4,
-                boxShadow: `0 6px 24px ${color}40`,
+                boxShadow:
+                  glow > 0
+                    ? `0 6px 24px ${color}40, 0 0 ${40 + 60 * glow}px ${color}${Math.round(120 + 100 * glow).toString(16)}`
+                    : `0 6px 24px ${color}40`,
+                outline: glow > 0.02 ? `${Math.round(3 * glow)}px solid ${color}` : undefined,
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: labelInside ? 'flex-start' : 'flex-end',

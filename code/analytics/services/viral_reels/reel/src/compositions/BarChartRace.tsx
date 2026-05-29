@@ -1,5 +1,5 @@
 import React, {useMemo} from 'react';
-import {AbsoluteFill, Sequence, useCurrentFrame, useVideoConfig} from 'remotion';
+import {AbsoluteFill, Sequence, interpolate, spring, useCurrentFrame, useVideoConfig} from 'remotion';
 import {BarChartRaceProps} from '../types';
 import {getTheme} from '../theme';
 import {Background} from '../components/Background';
@@ -14,11 +14,12 @@ import {
   labelMap,
   stateAtProgress,
   clamp,
+  bump,
 } from '../util/interp';
 
 const RaceSection: React.FC<BarChartRaceProps & {raceFrames: number}> = ({spec, raceFrames}) => {
   const frame = useCurrentFrame();
-  const {width, height} = useVideoConfig();
+  const {width, height, fps} = useVideoConfig();
   const theme = getTheme(spec.theme);
   const {keyframes, metricLabel, valueFormat, barsVisible} = spec.race;
 
@@ -27,15 +28,23 @@ const RaceSection: React.FC<BarChartRaceProps & {raceFrames: number}> = ({spec, 
   const labels = useMemo(() => labelMap(keyframes), [keyframes]);
 
   const K = keyframes.length;
-  // frame is local to the race Sequence (0 .. raceFrames-1).
-  const denom = Math.max(1, raceFrames - 1);
-  const progressFraction = clamp(frame / denom, 0, 1);
+  // Natural pace, linear over the race.
+  const progressFraction = clamp(frame / Math.max(1, raceFrames - 1), 0, 1);
   const p = progressFraction * (K - 1);
 
   const states = stateAtProgress(prepared, allIds, labels, p);
   const leader = states.length ? states[0].value : 1;
   const maxValue = leader * 1.08;
   const dateLabel = keyframes[Math.round(clamp(p, 0, K - 1))].label;
+
+  // Catch beat: punchy entrance, then a spotlight pulse on the eventual winner
+  // (the bar that ends on top) ~1.5–3.7s in — a moment that grabs the viewer.
+  const enter = spring({frame, fps, config: {damping: 200}});
+  const spotlight = bump(frame, 1.5 * fps, 2.5 * fps, 3.7 * fps);
+  const heroId = useMemo(() => {
+    const last = keyframes[keyframes.length - 1].entries;
+    return last.reduce((a, b) => (b.value > a.value ? b : a), last[0]).id;
+  }, [keyframes]);
 
   const hasOverlay = spec.overlay && spec.overlay.type === 'priceSpark';
   const sparkTop = 300;
@@ -45,7 +54,7 @@ const RaceSection: React.FC<BarChartRaceProps & {raceFrames: number}> = ({spec, 
   const boardHeight = height - boardTop - 250;
 
   return (
-    <AbsoluteFill>
+    <AbsoluteFill style={{opacity: enter, transform: `translateY(${interpolate(enter, [0, 1], [28, 0])}px)`}}>
       {/* header */}
       <div style={{position: 'absolute', top: 70, left: 56, right: 56}}>
         <div
@@ -97,6 +106,8 @@ const RaceSection: React.FC<BarChartRaceProps & {raceFrames: number}> = ({spec, 
           theme={theme}
           width={width}
           height={boardHeight}
+          heroId={heroId}
+          spotlight={spotlight}
         />
       </div>
 
@@ -108,7 +119,8 @@ const RaceSection: React.FC<BarChartRaceProps & {raceFrames: number}> = ({spec, 
             theme={theme}
             width={width - 112}
             height={156}
-            raceFrames={raceFrames}
+            localFrame={frame}
+            spanFrames={raceFrames}
           />
         </div>
       ) : null}

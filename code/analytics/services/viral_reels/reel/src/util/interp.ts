@@ -4,6 +4,20 @@ export const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.mi
 
 export const lerp = (a: number, b: number, t: number) => a + (b - a) * t;
 
+const easeOutCubic = (t: number) => 1 - Math.pow(1 - t, 3);
+const easeInOutCubic = (t: number) => (t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2);
+
+/**
+ * A 0 -> 1 -> 0 attention "bump" over [startF, peakF, endF] (in frames). Used to
+ * fire a discrete spotlight beat early in the reel that catches the viewer,
+ * without altering the animation's natural pace.
+ */
+export const bump = (frame: number, startF: number, peakF: number, endF: number): number => {
+  if (frame <= startF || frame >= endF) return 0;
+  if (frame < peakF) return easeOutCubic((frame - startF) / (peakF - startF));
+  return 1 - easeInOutCubic((frame - peakF) / (endF - peakF));
+};
+
 export interface EntityState {
   id: string;
   label: string;

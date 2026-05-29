@@ -17,6 +17,10 @@ title + meta) and show the real article images. **No hook/takeaway text is
 burned into the reel** — that's added afterwards in Instagram/edits; `intro`/
 `outro` in a spec are ignored by the renderer.
 
+Both open with a built-in **catch beat** (~1.5–3.7s): a punchy entrance plus a
+spotlight pulse on the eventual hero (the winning bar / the live price edge) to
+grab the viewer early — the rest plays at its natural pace.
+
 ## Who does what
 
 ```

@@ -1,12 +1,12 @@
 import React, {useMemo} from 'react';
-import {AbsoluteFill, Sequence, interpolate, useCurrentFrame, useVideoConfig} from 'remotion';
+import {AbsoluteFill, Sequence, interpolate, spring, useCurrentFrame, useVideoConfig} from 'remotion';
 import {PriceNewsProps} from '../types';
 import {getTheme} from '../theme';
 import {Background} from '../components/Background';
 import {PriceChart} from '../components/PriceChart';
 import {ArticleCard} from '../components/ArticleCard';
 import {Footer} from '../components/Footer';
-import {clamp, lerp} from '../util/interp';
+import {clamp, lerp, bump} from '../util/interp';
 
 const dateLabel = (t: string): string => {
   const d = new Date(t);
@@ -73,11 +73,15 @@ const ChartSection: React.FC<PriceNewsProps & {mainFrames: number}> = ({spec, ma
   const calloutTop = chartTop + chartHeight + 40;
   const calloutHeight = 172;
 
+  // Catch beat: entrance, then a spotlight pulse on the live price edge ~1.5–3.7s.
+  const enter = spring({frame, fps, config: {damping: 200}});
+  const spotlight = bump(frame, 1.5 * fps, 2.5 * fps, 3.7 * fps);
+
   return (
-    <AbsoluteFill>
+    <AbsoluteFill style={{opacity: enter, transform: `translateY(${interpolate(enter, [0, 1], [28, 0])}px)`}}>
       {/* header */}
       <div style={{position: 'absolute', top: 66, left: 56, right: 56, display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start'}}>
-        <div>
+        <div style={{transform: `scale(${1 + 0.05 * spotlight})`, transformOrigin: 'left center'}}>
           <div style={{color: theme.textMuted, fontFamily: theme.fontFamily, fontWeight: 800, fontSize: 30, letterSpacing: 5, textTransform: 'uppercase'}}>
             {label || ticker}
           </div>
@@ -101,6 +105,7 @@ const ChartSection: React.FC<PriceNewsProps & {mainFrames: number}> = ({spec, ma
           spec={spec.chart}
           progress={progress}
           activeEventIndex={active ? active.i : null}
+          pulse={spotlight}
           theme={theme}
           width={width - 80}
           height={chartHeight}
