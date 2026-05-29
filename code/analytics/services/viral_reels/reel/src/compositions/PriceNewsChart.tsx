@@ -5,7 +5,6 @@ import {getTheme} from '../theme';
 import {Background} from '../components/Background';
 import {PriceChart} from '../components/PriceChart';
 import {ArticleCard} from '../components/ArticleCard';
-import {Footer} from '../components/Footer';
 import {clamp, lerp, bump} from '../util/interp';
 
 const indexForDate = (points: {t: string}[], t: string): number => {
@@ -119,8 +118,6 @@ const ChartSection: React.FC<PriceNewsProps & {mainFrames: number}> = ({spec, ma
           />
         </div>
       ) : null}
-
-      <Footer sources={spec.sources ?? ['News Impact Screener', 'Financial Modeling Prep']} theme={theme} width={width} />
     </AbsoluteFill>
   );
 };

@@ -7,7 +7,6 @@ import {RaceBoard} from '../components/RaceBoard';
 import {PriceSpark} from '../components/PriceSpark';
 import {Captions} from '../components/Caption';
 import {Headlines} from '../components/Headlines';
-import {Footer} from '../components/Footer';
 import {
   prepareKeyframes,
   collectIds,
@@ -123,10 +122,7 @@ const RaceSection: React.FC<BarChartRaceProps & {raceFrames: number}> = ({spec, 
             spanFrames={raceFrames}
           />
         </div>
-      ) : null}
-
-      <Footer sources={spec.sources ?? ['News Impact Screener']} theme={theme} width={width} />
-    </AbsoluteFill>
+      ) : null}    </AbsoluteFill>
   );
 };
 

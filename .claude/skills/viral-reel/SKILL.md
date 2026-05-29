@@ -86,7 +86,7 @@ parts are already populated). The full contract is in
 **No editorial text is burned into the reel** — no hero/title slide and no
 takeaway slide. The hook and takeaway are added afterwards in Instagram / edits.
 The reel is pure visualization: the animated chart, data labels (metric/date or
-ticker/price), the article cards, and small footer branding. So `intro`/`outro`
+ticker/price) and the article cards. So `intro`/`outro`
 are ignored by the renderer; don't spend effort on them.
 
 You own:
