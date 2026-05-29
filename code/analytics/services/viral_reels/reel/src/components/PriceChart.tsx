@@ -111,10 +111,12 @@ export const PriceChart: React.FC<Props> = ({
         </g>
       ))}
 
-      {/* x-axis date ticks */}
+      {/* x-axis date ticks — each fades in as the line draws past its date */}
       {Array.from({length: Math.min(5, points.length)}).map((_, i, arr) => {
         const idx = Math.round((i * (points.length - 1)) / Math.max(1, arr.length - 1));
         const anchor = i === 0 ? 'start' : i === arr.length - 1 ? 'end' : 'middle';
+        const tickOpacity = clamp((reveal - idx + 0.5) * 2, 0, 1);
+        if (tickOpacity <= 0) return null;
         return (
           <text
             key={i}
@@ -122,6 +124,7 @@ export const PriceChart: React.FC<Props> = ({
             y={baseline + 46}
             textAnchor={anchor}
             fill={theme.textMuted}
+            fillOpacity={tickOpacity}
             fontFamily={theme.numberFontFamily}
             fontSize={24}
           >
