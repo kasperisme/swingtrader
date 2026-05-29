@@ -36,21 +36,19 @@ const ChartSection: React.FC<PriceNewsProps & {mainFrames: number}> = ({spec, ma
   const lastF = Math.max(1, mainFrames - 1);
   const progress = clamp(frame / lastF, 0, 1);
 
-  const holdFrames = Math.min(3.2 * fps, lastF / Math.max(1, events.length));
-  let active: {e: (typeof events)[number]; i: number} | null = null;
-  let activeOpacity = 0;
-  for (const {e, i, idx} of eventsWithIndex) {
-    const passFrame = (idx / Math.max(1, n - 1)) * lastF;
-    if (frame >= passFrame && frame <= passFrame + holdFrames) {
-      active = {e, i};
-      activeOpacity = interpolate(
-        frame,
-        [passFrame, passFrame + 8, passFrame + holdFrames - 12, passFrame + holdFrames],
-        [0, 1, 1, 0],
-        {extrapolateLeft: 'clamp', extrapolateRight: 'clamp'},
-      );
-    }
-  }
+  // A card appears when the line reaches its date and then STAYS — the next
+  // event's card animates in on top of it. Cards are opaque, so the newest
+  // fully covers the prior (which peeks out behind it). No fade-outs, so an
+  // article is always on screen once the first one has landed.
+  const passed = eventsWithIndex
+    .map(({e, i, idx}) => ({e, i, passFrame: (idx / Math.max(1, n - 1)) * lastF}))
+    .filter((x) => frame >= x.passFrame - 1e-3)
+    .sort((a, b) => a.passFrame - b.passFrame);
+  const current = passed.length ? passed[passed.length - 1] : null;
+  const beneath = passed.length > 1 ? passed[passed.length - 2] : null;
+
+  const FADE = 12; // frames for the incoming card to settle on top
+  const tIn = current ? clamp((frame - current.passFrame) / FADE, 0, 1) : 0;
 
   // No top header — the ticker now lives in the price tag, freeing space for a
   // taller chart and a bigger article card.
@@ -70,7 +68,7 @@ const ChartSection: React.FC<PriceNewsProps & {mainFrames: number}> = ({spec, ma
         <PriceChart
           spec={spec.chart}
           progress={progress}
-          activeEventIndex={active ? active.i : null}
+          activeEventIndex={current ? current.i : null}
           pulse={spotlight}
           topInset={events.length ? cardTopOffset + cardHeight + 16 : 0}
           rightInset={200}
@@ -80,15 +78,40 @@ const ChartSection: React.FC<PriceNewsProps & {mainFrames: number}> = ({spec, ma
         />
       </div>
 
-      {/* article callout — floats OVER the graph (bigger, upper area) */}
-      {active ? (
-        <div style={{position: 'absolute', top: chartTop + cardTopOffset, left: 44, width: width - 88, opacity: activeOpacity}}>
+      {/* article callouts — float OVER the graph (upper area). The previous
+          card stays put, offset behind; the current one settles on top of it,
+          so headlines stack rather than blink in and out. */}
+      {beneath ? (
+        <div style={{position: 'absolute', top: chartTop + cardTopOffset + 14, left: 44 + 14, width: width - 88}}>
           <ArticleCard
-            title={active.e.title}
-            source={active.e.source}
-            imageUrl={active.e.imageUrl}
-            sentiment={active.e.sentiment ?? 0}
-            move={active.e.move}
+            title={beneath.e.title}
+            source={beneath.e.source}
+            imageUrl={beneath.e.imageUrl}
+            sentiment={beneath.e.sentiment ?? 0}
+            move={beneath.e.move}
+            theme={theme}
+            width={width - 88}
+            height={cardHeight}
+          />
+        </div>
+      ) : null}
+      {current ? (
+        <div
+          style={{
+            position: 'absolute',
+            top: chartTop + cardTopOffset,
+            left: 44,
+            width: width - 88,
+            opacity: tIn,
+            transform: `translateY(${interpolate(tIn, [0, 1], [-16, 0])}px)`,
+          }}
+        >
+          <ArticleCard
+            title={current.e.title}
+            source={current.e.source}
+            imageUrl={current.e.imageUrl}
+            sentiment={current.e.sentiment ?? 0}
+            move={current.e.move}
             theme={theme}
             width={width - 88}
             height={cardHeight}

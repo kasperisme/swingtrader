@@ -43,6 +43,24 @@ log = logging.getLogger(__name__)
 _ANALYTICS = pathlib.Path(__file__).resolve().parent.parent.parent
 _PKG_DIR = pathlib.Path(__file__).resolve().parent
 _REEL_DIR = _PKG_DIR / "reel"
+# Generated specs + reels land in the repo's conventional output dir
+# (alongside carousels/, podcast/, screening/), organised per project rather
+# than as one flat pile:
+#   output/viral_reels/<TICKER>/data/*.json   raw source pulls (catalysts, fmp…)
+#   output/viral_reels/<TICKER>/spec.json     the assembled ReelSpec
+#   output/viral_reels/<TICKER>/reel.mp4      the render (lands next to its spec)
+#   output/viral_reels/race/                  bar-chart-race (not ticker-scoped)
+_OUT_DIR = _ANALYTICS / "output" / "viral_reels"
+
+
+def _proj_dir(slug: str) -> pathlib.Path:
+    """Per-project output folder, e.g. output/viral_reels/NVDA/."""
+    return _OUT_DIR / ((slug or "").upper().strip() or "_misc")
+
+
+def _data_out(ticker: str, name: str) -> str:
+    """Default path for a raw source pull under a ticker's data/ folder."""
+    return str(_proj_dir(ticker) / "data" / name)
 
 from dotenv import load_dotenv
 
@@ -84,7 +102,8 @@ def cmd_series(args):
 
 
 def cmd_prices(args):
-    _emit(ds.price_overlay(args.ticker, window_days=args.window_days), args.out)
+    _emit(ds.price_overlay(args.ticker, window_days=args.window_days),
+          args.out or _data_out(args.ticker, "overlay.json"))
 
 
 def cmd_headlines(args):
@@ -176,7 +195,77 @@ def cmd_price_news(args):
     problems = spec_mod.validate(spec)
     if problems:
         log.warning("price-news scaffold has issues:\n- %s", "\n- ".join(problems))
-    _emit(spec, args.out)
+    _emit(spec, args.out or str(_proj_dir(args.ticker) / "spec.json"))
+
+
+def cmd_news_candidates(args):
+    """Dump the full pool of plottable news events for a ticker.
+
+    This is the director's input: Claude Code reviews the pool (each day's
+    strongest headline, its next-day move and an advisory ``impact`` score) and
+    hand-picks which events to drop into a price-news spec's ``chart.events``.
+    """
+    chart = ds.price_history(args.ticker, window_days=args.window_days)
+    pool = ds.news_candidates(
+        args.ticker,
+        window_days=args.window_days,
+        points=chart["points"],
+    )
+    _emit(pool, args.out or _data_out(args.ticker, "candidates.json"))
+
+
+def cmd_catalysts(args):
+    """Dump the biggest price moves, each with the headlines that could explain it.
+
+    Price-aware director input: for each of the largest close-to-close moves,
+    lists the articles published on the session that produced it (the news just
+    *before* the move), so the director can pick the catalyst behind each drop
+    or gain when curating a price-news spec.
+    """
+    chart = ds.price_history(args.ticker, window_days=args.window_days)
+    catalysts = ds.move_catalysts(
+        args.ticker,
+        window_days=args.window_days,
+        points=chart["points"],
+        top_moves=args.top_moves,
+        per_move=args.per_move,
+    )
+    _emit(catalysts, args.out or _data_out(args.ticker, "catalysts.json"))
+
+
+def cmd_fmp_news(args):
+    """Dump FMP stock-news headlines for a ticker as plottable events.
+
+    Broader/fresher coverage than the internal feed (and always an article
+    image). Sentiment is recovered from internal scores by url where possible;
+    otherwise neutral. The next-day price move is annotated from FMP OHLC.
+    """
+    chart = ds.price_history(args.ticker, window_days=args.window_days)
+    news = ds.fmp_stock_news(
+        args.ticker,
+        window_days=args.window_days,
+        limit=args.limit,
+        points=chart["points"],
+        enrich_sentiment=not args.no_sentiment,
+    )
+    _emit(news, args.out or _data_out(args.ticker, "fmp_news.json"))
+
+
+def cmd_fmp_press(args):
+    """Dump FMP company press releases for a ticker as plottable events.
+
+    The company's own catalysts at their exact timestamp — best for anchoring a
+    price move to its true cause (e.g. an earnings release) when third-party
+    write-ups lag a day. No image/sentiment; next-day move annotated from OHLC.
+    """
+    chart = ds.price_history(args.ticker, window_days=args.window_days)
+    press = ds.fmp_press_releases(
+        args.ticker,
+        window_days=args.window_days,
+        limit=args.limit,
+        points=chart["points"],
+    )
+    _emit(press, args.out or _data_out(args.ticker, "fmp_press.json"))
 
 
 def cmd_validate(args):
@@ -203,7 +292,8 @@ def cmd_render(args):
             print(f"  - {p}", file=sys.stderr)
         sys.exit(1)
 
-    out_path = pathlib.Path(args.out or (_PKG_DIR / "out" / "reel.mp4")).resolve()
+    # Default the render next to its spec (e.g. output/viral_reels/NVDA/reel.mp4).
+    out_path = pathlib.Path(args.out or (spec_path.parent / "reel.mp4")).resolve()
     out_path.parent.mkdir(parents=True, exist_ok=True)
 
     if not (_REEL_DIR / "node_modules").exists():
@@ -279,7 +369,7 @@ def main():
     p_scaf.add_argument("--overlay-ticker", default=None)
     p_scaf.add_argument("--headlines", type=int, default=0, help="include N real headline cards")
     p_scaf.add_argument("--dimension-key", default=None, help="rank headlines by this dimension")
-    p_scaf.add_argument("--out", default=str(_PKG_DIR / "out" / "reel_spec.json"))
+    p_scaf.add_argument("--out", default=str(_OUT_DIR / "race" / "reel_spec.json"))
 
     p_ai = sub.add_parser("article-images", help="Look up id/title/source/image_url for article ids")
     p_ai.add_argument("--ids", required=True, help="comma-separated news_articles ids, e.g. 117422,117510")
@@ -290,7 +380,38 @@ def main():
     p_pn.add_argument("--window-days", type=int, default=45)
     p_pn.add_argument("--max-events", type=int, default=8)
     p_pn.add_argument("--theme", default="midnight")
-    p_pn.add_argument("--out", default=str(_PKG_DIR / "out" / "price_news_spec.json"))
+    p_pn.add_argument("--out", default=None,
+                      help="defaults to output/viral_reels/<TICKER>/spec.json")
+
+    p_nc = sub.add_parser("news-candidates",
+                          help="Dump the full pool of plottable news events (director picks from this)")
+    p_nc.add_argument("--ticker", required=True)
+    p_nc.add_argument("--window-days", type=int, default=30)
+    p_nc.add_argument("--out", default=None)
+
+    p_cat = sub.add_parser("catalysts",
+                          help="Biggest price moves + the headlines that could explain each (director input)")
+    p_cat.add_argument("--ticker", required=True)
+    p_cat.add_argument("--window-days", type=int, default=30)
+    p_cat.add_argument("--top-moves", type=int, default=8, help="how many of the largest moves to surface")
+    p_cat.add_argument("--per-move", type=int, default=4, help="candidate articles per move")
+    p_cat.add_argument("--out", default=None)
+
+    p_fn = sub.add_parser("fmp-news",
+                          help="FMP stock-news headlines as plottable events (broader coverage)")
+    p_fn.add_argument("--ticker", required=True)
+    p_fn.add_argument("--window-days", type=int, default=30)
+    p_fn.add_argument("--limit", type=int, default=100)
+    p_fn.add_argument("--no-sentiment", action="store_true",
+                      help="skip recovering internal AI sentiment by url match")
+    p_fn.add_argument("--out", default=None)
+
+    p_fp = sub.add_parser("fmp-press",
+                          help="FMP company press releases as plottable events (exact catalyst timing)")
+    p_fp.add_argument("--ticker", required=True)
+    p_fp.add_argument("--window-days", type=int, default=30)
+    p_fp.add_argument("--limit", type=int, default=100)
+    p_fp.add_argument("--out", default=None)
 
     p_val = sub.add_parser("validate", help="Validate a ReelSpec JSON file")
     p_val.add_argument("spec")
@@ -312,6 +433,10 @@ def main():
         "article-images": cmd_article_images,
         "scaffold": cmd_scaffold,
         "price-news": cmd_price_news,
+        "news-candidates": cmd_news_candidates,
+        "catalysts": cmd_catalysts,
+        "fmp-news": cmd_fmp_news,
+        "fmp-press": cmd_fmp_press,
         "validate": cmd_validate,
         "render": cmd_render,
     }

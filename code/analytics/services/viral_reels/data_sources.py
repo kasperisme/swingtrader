@@ -388,24 +388,236 @@ def price_history(ticker: str, window_days: int = 30) -> dict[str, Any]:
     return {"ticker": ticker, "label": ticker, "valuePrefix": "$", "points": points}
 
 
-def news_events(
+def _next_day_move_str(points: list[dict[str, Any]] | None, day: str) -> str | None:
+    """Next-day close-to-close move for an event landing on/just-before ``day``."""
+    close_by_day = {p["t"]: p["close"] for p in (points or [])}
+    days = sorted(close_by_day)
+    if not days:
+        return None
+    if day not in close_by_day:
+        later = [d for d in days if d >= day]
+        if not later:
+            return None
+        day = later[0]
+    i = days.index(day)
+    if i + 1 >= len(days):
+        return None
+    c0, c1 = close_by_day[days[i]], close_by_day[days[i + 1]]
+    if not c0:
+        return None
+    return f"{(c1 - c0) / c0 * 100:+.1f}% next day"
+
+
+def _fmp_sentiment_by_url(ticker: str, urls: list[str]) -> dict[str, float]:
+    """Recover internal AI sentiment for FMP articles already scored in our DB.
+
+    FMP news carries no sentiment; when the same article (by url) exists in
+    ``ticker_sentiment_heads_v`` we reuse its per-ticker score so the pin keeps
+    its sentiment colour. Best-effort — unmatched urls just stay neutral.
+    """
+    urls = [u for u in urls if u]
+    if not urls:
+        return {}
+    try:
+        client, schema = _supabase()
+        rows = (
+            client.schema(schema)
+            .table("ticker_sentiment_heads_v")
+            .select("article_url,sentiment_score")
+            .eq("ticker", ticker.upper().strip())
+            .in_("article_url", urls)
+            .execute()
+            .data
+            or []
+        )
+    except Exception:  # noqa: BLE001 — enrichment is best-effort, never fatal
+        return {}
+    return {r["article_url"]: r.get("sentiment_score") for r in rows if r.get("article_url")}
+
+
+def fmp_stock_news(
     ticker: str,
     window_days: int = 30,
-    max_events: int = 5,
+    limit: int = 100,
+    points: list[dict[str, Any]] | None = None,
+    enrich_sentiment: bool = True,
+) -> list[dict[str, Any]]:
+    """Stock-news headlines for a ticker via FMP (stable ``news/stock``).
+
+    Broader / fresher coverage than the internal feed — useful to fill gaps for
+    thinly-covered tickers and to ground the reel in real article cards (FMP
+    always supplies an image). FMP carries no sentiment; when ``enrich_sentiment``
+    is set we recover the internal AI score by url match (otherwise the pin is
+    neutral). Returns one event per article (oldest→newest), shaped like
+    :func:`news_candidates` output so the director can fold them into a spec.
+    """
+    ticker = ticker.upper().strip()
+    to = datetime.now(timezone.utc).date()
+    frm = to - timedelta(days=window_days)
+    resp = requests.get(
+        "https://financialmodelingprep.com/stable/news/stock",
+        params={
+            "symbols": ticker,
+            "from": frm.isoformat(),
+            "to": to.isoformat(),
+            "limit": limit,
+            "apikey": _fmp_key(),
+        },
+        timeout=30,
+    )
+    if resp.status_code != 200:
+        raise RuntimeError(f"FMP news/stock returned {resp.status_code}: {resp.text[:200]}")
+    rows = resp.json() or []
+
+    senti = (
+        _fmp_sentiment_by_url(ticker, [r.get("url") for r in rows]) if enrich_sentiment else {}
+    )
+    events: list[dict[str, Any]] = []
+    for r in rows:
+        pub = r.get("publishedDate")
+        title = (r.get("title") or "").strip()
+        if not pub or not title:
+            continue
+        day = str(pub)[:10]
+        score = senti.get(r.get("url"))
+        events.append(
+            {
+                "t": day,
+                "articleId": None,
+                "title": title,
+                "source": _source_label(r.get("publisher") or r.get("site"), r.get("url")),
+                "url": r.get("url"),
+                "imageUrl": r.get("image"),
+                "sentiment": None if score is None else _round(score),
+                "age": _age_since(pub),
+                "move": _next_day_move_str(points, day),
+            }
+        )
+    events.sort(key=lambda e: e["t"])
+    return events
+
+
+def fmp_press_releases(
+    ticker: str,
+    window_days: int = 30,
+    limit: int = 100,
     points: list[dict[str, Any]] | None = None,
 ) -> list[dict[str, Any]]:
-    """Strongest per-day news events for a ticker, to plot on the price line.
+    """Official company press releases via FMP (v3 ``press-releases/{ticker}``).
 
-    Sourced from ``ticker_sentiment_heads_v``. Keeps the highest-magnitude
-    article per day, takes the top ``max_events`` by |sentiment|, and (if
-    ``points`` are given) annotates each with the next-day price move.
+    The company's own catalysts (earnings, guidance, product) at their exact
+    timestamp — the cleanest way to anchor a price move to its true cause when
+    the third-party write-up lands a day late. No image/url/sentiment, so cards
+    use the fallback thumbnail and a neutral pin. Filtered to the window and
+    shaped like :func:`news_candidates` output. (FMP's *stable* press-release
+    search is plan-restricted, so this uses the v3 path, which works on the
+    standard plan.)
+    """
+    ticker = ticker.upper().strip()
+    resp = requests.get(
+        f"https://financialmodelingprep.com/api/v3/press-releases/{ticker}",
+        params={"page": 0, "apikey": _fmp_key()},
+        timeout=30,
+    )
+    if resp.status_code != 200:
+        raise RuntimeError(f"FMP press-releases returned {resp.status_code}: {resp.text[:200]}")
+    rows = resp.json() or []
+    cutoff = (datetime.now(timezone.utc).date() - timedelta(days=window_days)).isoformat()
+
+    events: list[dict[str, Any]] = []
+    for r in rows:
+        date = r.get("date")
+        title = (r.get("title") or "").strip()
+        if not date or not title:
+            continue
+        day = str(date)[:10]
+        if day < cutoff:
+            continue
+        events.append(
+            {
+                "t": day,
+                "articleId": None,
+                "title": title,
+                "source": f"{ticker} press release",
+                "url": None,
+                "imageUrl": None,
+                "sentiment": None,
+                "age": _age_since(date),
+                "move": _next_day_move_str(points, day),
+            }
+        )
+        if len(events) >= limit:
+            break
+    events.sort(key=lambda e: e["t"])
+    return events
+
+
+def _distribute_events_over_time(
+    candidates: list[dict[str, Any]], k: int
+) -> list[dict[str, Any]]:
+    """Pick ``k`` candidates spread across their date span.
+
+    Splits the ``[earliest, latest]`` day range into ``k`` equal-time buckets
+    and takes the highest-``_impact`` candidate from each. Empty buckets are
+    backfilled with the strongest still-unused candidates, so the result has
+    up to ``k`` events that cover the whole window instead of clustering where
+    articles happen to be densest. Each candidate must carry ``_day`` (ISO
+    ``YYYY-MM-DD``) and ``_impact`` (float).
+    """
+    if k <= 0 or not candidates:
+        return []
+    if len(candidates) <= k:
+        return list(candidates)
+
+    days = sorted(c["_day"] for c in candidates)
+    start = date.fromisoformat(days[0]).toordinal()
+    span = max(date.fromisoformat(days[-1]).toordinal() - start, 1)
+
+    buckets: list[list[dict[str, Any]]] = [[] for _ in range(k)]
+    for c in candidates:
+        o = date.fromisoformat(c["_day"]).toordinal()
+        idx = min(int((o - start) / span * k), k - 1)
+        buckets[idx].append(c)
+
+    chosen: list[dict[str, Any]] = []
+    used: set[str] = set()
+    for b in buckets:
+        if b:
+            best = max(b, key=lambda c: c["_impact"])
+            chosen.append(best)
+            used.add(best["_day"])
+
+    if len(chosen) < k:
+        rest = sorted(
+            (c for c in candidates if c["_day"] not in used),
+            key=lambda c: c["_impact"],
+            reverse=True,
+        )
+        chosen.extend(rest[: k - len(chosen)])
+    return chosen
+
+
+def news_candidates(
+    ticker: str,
+    window_days: int = 30,
+    points: list[dict[str, Any]] | None = None,
+) -> list[dict[str, Any]]:
+    """The full pool of plottable news events for a ticker — one per day.
+
+    Returns every day's strongest article as a ready-to-plot event dict (same
+    shape the spec expects), annotated with its next-day price ``move`` and a
+    heuristic ``impact`` score (``|next-day move| × |sentiment|``, or
+    ``|sentiment|`` when the move can't be computed). This is the **director's
+    pool**: Claude Code reviews it and picks which events tell the clearest
+    story across the window, rather than relying on a fixed heuristic. Events
+    are sorted oldest→newest. ``impact`` is advisory ranking, not a filter.
     """
     client, schema = _supabase()
     since = datetime.now(timezone.utc) - timedelta(days=window_days)
     rows = (
         client.schema(schema)
         .table("ticker_sentiment_heads_v")
-        .select("article_id,ticker,sentiment_score,title,url,published_at")
+        .select("article_id,ticker,sentiment_score,article_title,article_url,article_source,published_at")
         .eq("ticker", ticker.upper().strip())
         .gte("published_at", since.isoformat())
         .order("published_at", desc=False)
@@ -419,22 +631,19 @@ def news_events(
     best_by_day: dict[str, dict] = {}
     for r in rows:
         pub = r.get("published_at")
-        if not pub or not (r.get("title") or "").strip():
+        if not pub or not (r.get("article_title") or "").strip():
             continue
         day = str(pub)[:10]
         score = abs(float(r.get("sentiment_score") or 0))
         if day not in best_by_day or score > best_by_day[day]["_mag"]:
             best_by_day[day] = {**r, "_mag": score}
 
-    ranked = sorted(best_by_day.values(), key=lambda r: r["_mag"], reverse=True)[:max_events]
-    ranked.sort(key=lambda r: str(r.get("published_at")))
-
     close_by_day = {p["t"]: p["close"] for p in (points or [])}
     days_sorted = sorted(close_by_day.keys())
 
-    def _next_day_move(day: str) -> str | None:
+    def _next_day_move_pct(day: str) -> float | None:
         if day not in close_by_day or not days_sorted:
-            # snap to nearest known trading day
+            # snap to nearest known trading day on/after the article
             later = [d for d in days_sorted if d >= day]
             if not later:
                 return None
@@ -445,12 +654,11 @@ def news_events(
         c0, c1 = close_by_day[days_sorted[i]], close_by_day[days_sorted[i + 1]]
         if not c0:
             return None
-        pct = (c1 - c0) / c0 * 100
-        return f"{pct:+.1f}% next day"
+        return (c1 - c0) / c0 * 100
 
-    # Pull image_url + source for the chosen articles (the sentiment view has
+    # Pull image_url + source for every candidate (the sentiment view has
     # neither). One batched lookup against news_articles.
-    article_ids = [r.get("article_id") for r in ranked if r.get("article_id") is not None]
+    article_ids = [r.get("article_id") for r in best_by_day.values() if r.get("article_id") is not None]
     meta_by_id: dict[Any, dict] = {}
     if article_ids:
         meta_rows = (
@@ -465,23 +673,166 @@ def news_events(
         meta_by_id = {m["id"]: m for m in meta_rows}
 
     events: list[dict[str, Any]] = []
-    for r in ranked:
-        day = str(r.get("published_at"))[:10]
+    for day, r in best_by_day.items():
+        mv = _next_day_move_pct(day)
+        # Impact weights a real price move by how strongly the headline scored,
+        # so a strongly-scored headline that coincided with a move outranks a
+        # near-neutral one that merely landed on a big day.
+        impact = abs(mv) * r["_mag"] if mv is not None else r["_mag"]
         meta = meta_by_id.get(r.get("article_id"), {})
         events.append(
             {
                 "t": day,
                 "articleId": r.get("article_id"),
-                "title": (r.get("title") or "").strip(),
-                "source": _source_label(meta.get("source"), r.get("url")),
-                "url": r.get("url"),
+                "title": (r.get("article_title") or "").strip(),
+                "source": _source_label(meta.get("source") or r.get("article_source"), r.get("article_url")),
+                "url": r.get("article_url"),
                 "imageUrl": meta.get("image_url"),
                 "sentiment": _round(r.get("sentiment_score") or 0),
                 "age": _age_since(r.get("published_at")),
-                "move": _next_day_move(day),
+                "move": None if mv is None else f"{mv:+.1f}% next day",
+                "impact": round(impact, 2),
             }
         )
+    events.sort(key=lambda e: e["t"])
     return events
+
+
+def news_events(
+    ticker: str,
+    window_days: int = 30,
+    max_events: int = 5,
+    points: list[dict[str, Any]] | None = None,
+) -> list[dict[str, Any]]:
+    """Auto-selected events: a sensible default when no director curates them.
+
+    Pulls the full :func:`news_candidates` pool, then picks ``max_events`` that
+    are **distributed across the window** (time-bucketed) and, within each
+    bucket, ranked by ``impact``. This keeps the standalone scaffold usable, but
+    the director (Claude Code) is expected to override ``chart.events`` from the
+    full pool — ranking by a fixed heuristic alone tends to miss the story.
+    """
+    pool = news_candidates(ticker, window_days=window_days, points=points)
+    for e in pool:
+        e["_day"] = e["t"]
+        e["_impact"] = e["impact"]
+    chosen = _distribute_events_over_time(pool, max_events)
+    chosen.sort(key=lambda e: e["_day"])
+    return [{k: v for k, v in e.items() if not k.startswith("_") and k != "impact"} for e in chosen]
+
+
+def price_daily_moves(points: list[dict[str, Any]] | None) -> list[dict[str, Any]]:
+    """Close-to-close % move for each consecutive pair of price points.
+
+    Returns ``{"from", "to", "pct"}`` per trading-day transition, oldest first.
+    """
+    pts = sorted((p for p in (points or []) if p.get("close") is not None), key=lambda p: p["t"])
+    moves: list[dict[str, Any]] = []
+    for a, b in zip(pts, pts[1:]):
+        c0, c1 = a.get("close"), b.get("close")
+        if not c0:
+            continue
+        moves.append({"from": a["t"], "to": b["t"], "pct": (c1 - c0) / c0 * 100})
+    return moves
+
+
+def move_catalysts(
+    ticker: str,
+    window_days: int = 30,
+    points: list[dict[str, Any]] | None = None,
+    top_moves: int = 8,
+    per_move: int = 4,
+) -> list[dict[str, Any]]:
+    """Biggest price moves, each paired with the headlines that could explain it.
+
+    Price-aware view for the director: ranks the largest close-to-close moves
+    in the window, then for each attaches the articles published on the
+    **session that produced the move** (close[from] → close[to]) — i.e. the
+    news *just before* the move — so the director can pick the catalyst that
+    explains each drop or gain. Articles per move are ranked by |sentiment| and
+    capped at ``per_move``. Returned oldest→newest with the strongest move
+    marked, so it reads as a timeline.
+    """
+    client, schema = _supabase()
+    since = datetime.now(timezone.utc) - timedelta(days=window_days)
+    rows = (
+        client.schema(schema)
+        .table("ticker_sentiment_heads_v")
+        .select("article_id,sentiment_score,article_title,article_url,article_source,published_at")
+        .eq("ticker", ticker.upper().strip())
+        .gte("published_at", since.isoformat())
+        .order("published_at", desc=False)
+        .limit(2000)
+        .execute()
+        .data
+        or []
+    )
+    by_day: dict[str, list[dict]] = defaultdict(list)
+    for r in rows:
+        pub = r.get("published_at")
+        if not pub or not (r.get("article_title") or "").strip():
+            continue
+        by_day[str(pub)[:10]].append(r)
+
+    moves = price_daily_moves(points)
+    ranked = sorted(moves, key=lambda m: abs(m["pct"]), reverse=True)[: max(top_moves, 0)]
+    rank_by_key = {(m["from"], m["to"]): i for i, m in enumerate(ranked)}
+
+    # Batch-fetch image_url + source for every article we'll surface.
+    picked_ids: list[Any] = []
+    arts_by_move: dict[tuple, list[dict]] = {}
+    for m in ranked:
+        arts = sorted(
+            by_day.get(m["from"], []),
+            key=lambda r: abs(float(r.get("sentiment_score") or 0)),
+            reverse=True,
+        )[: max(per_move, 0)]
+        arts_by_move[(m["from"], m["to"])] = arts
+        picked_ids += [a.get("article_id") for a in arts if a.get("article_id") is not None]
+
+    meta_by_id: dict[Any, dict] = {}
+    if picked_ids:
+        meta_rows = (
+            client.schema(schema)
+            .table("news_articles")
+            .select("id,image_url,source")
+            .in_("id", picked_ids)
+            .execute()
+            .data
+            or []
+        )
+        meta_by_id = {m["id"]: m for m in meta_rows}
+
+    out: list[dict[str, Any]] = []
+    for m in sorted(ranked, key=lambda m: m["from"]):
+        pct = m["pct"]
+        candidates = []
+        for a in arts_by_move[(m["from"], m["to"])]:
+            meta = meta_by_id.get(a.get("article_id"), {})
+            candidates.append(
+                {
+                    "t": str(a.get("published_at"))[:10],
+                    "articleId": a.get("article_id"),
+                    "title": (a.get("article_title") or "").strip(),
+                    "source": _source_label(meta.get("source") or a.get("article_source"), a.get("article_url")),
+                    "url": a.get("article_url"),
+                    "imageUrl": meta.get("image_url"),
+                    "sentiment": _round(a.get("sentiment_score") or 0),
+                    "age": _age_since(a.get("published_at")),
+                }
+            )
+        out.append(
+            {
+                "from": m["from"],
+                "to": m["to"],
+                "move": f"{pct:+.1f}%",
+                "pct": round(pct, 2),
+                "direction": "gain" if pct >= 0 else "drop",
+                "rank": rank_by_key[(m["from"], m["to"])] + 1,
+                "candidates": candidates,
+            }
+        )
+    return out
 
 
 def align_first_event_to_second_point(chart: dict[str, Any], lead: int = 1) -> dict[str, Any]:

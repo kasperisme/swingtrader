@@ -31,16 +31,115 @@ Read its `README.md` once before your first run.
 - **Price + News** (`PriceNewsChart`) — "did the news actually move the stock?"
   An animated price line with scored news events plotted on it (green/red pins +
   callouts showing the next-day move). Use when the user names a ticker and
-  wants to show news → price reaction. Scaffold it directly:
+  wants to show news → price reaction.
+
+  **You pick the events — don't ship the auto-selection.** The whole point is
+  news → price *causation*: pick the headline that plausibly caused each notable
+  move. So lead with the **price-aware catalyst view** — it ranks the biggest
+  close-to-close moves and, for each, lists the articles published on the
+  session that produced it (the news *just before* the move):
 
   ```bash
-  python -m services.viral_reels.cli price-news --ticker NVDA --window-days 30 \
-      --max-events 5 --out out/price_news_spec.json
+  python -m services.viral_reels.cli catalysts --ticker NVDA \
+      --window-days 30 --top-moves 12 --per-move 6
+  # → output/viral_reels/NVDA/data/catalysts.json (per-ticker; --out optional)
   ```
-  Then `validate` and `render` (the render command infers the composition from
-  the spec shape). The data layer fills `chart.points` and `chart.events` (with
-  sentiment, move, and the article `imageUrl`) — don't invent price points or
-  moves by hand. No on-reel hook/takeaway text; add it in IG.
+  Read `catalysts.json` and, for each notable drop/gain you want to feature,
+  pick the candidate that best *explains* it — the bullish fundamental headline
+  before a rip, the warning/de-risk headline before a drop. This is the
+  directorial judgement the heuristic can't make: a big move on a near-neutral
+  or off-topic headline is noise, and the loudest headline of a day is often not
+  the catalyst (e.g. prefer "Buy Nvidia Ahead Of Trump-Xi Summit" over a
+  tangential robot-deal headline that merely scored high). Aim for ~5 picks that
+  **spread across the window** and tell an arc (setup → catalyst → reaction →
+  resolution). `news-candidates` (one headline per day + advisory `impact`) is
+  the complementary day-by-day view if you want the full pool.
+
+  **Thin internal coverage? Pull from FMP too.** The internal feed is sparse for
+  some tickers (you'll see only a handful of days with news). Two extra sources
+  widen it — both emit events in the same shape as `news-candidates`, with the
+  next-day price `move` annotated:
+
+  ```bash
+  # FMP stock news — broad third-party coverage, always an article image.
+  # Internal AI sentiment is recovered by url match where the article exists in
+  # our DB (else the pin is neutral amber).
+  python -m services.viral_reels.cli fmp-news --ticker SNOW --window-days 30
+  # FMP company press releases — the company's OWN catalysts at their exact
+  # timestamp. Best for anchoring a move to its true cause: a third-party
+  # write-up of earnings often lands a day late, but "COMPANY REPORTS Q1
+  # RESULTS" is dated the session that actually moved the stock.
+  python -m services.viral_reels.cli fmp-press --ticker SNOW --window-days 45
+  # → output/viral_reels/SNOW/data/{fmp_news,fmp_press}.json
+  ```
+  Use press releases to fix attribution (e.g. SNOW's earnings press release is
+  dated the day *before* the +36% gap, where the news article was dated the day
+  *after*). Caveats: the press-release feed is noisy — law-firm "class action /
+  deadline alert" spam dominates many days; pick the real catalysts (earnings,
+  guidance, M&A, product). Press-release titles are often ALL-CAPS and have no
+  image — tidy the `title` and expect the card's fallback thumbnail. FMP events
+  carry no sentiment unless url-matched, so their pins read neutral; mix in
+  internal `catalysts`/`news-candidates` events when you want the green/red
+  sentiment colour. You can freely combine events from all sources in one
+  `chart["events"]` list — just keep each event's fields verbatim and sort by
+  `t` before building.
+
+  Build the spec from your chosen articles — sourced from the catalyst view so
+  the move and the headline are aligned (preserve each field verbatim; never
+  invent titles, moves, or prices):
+
+  ```python
+  from services.viral_reels import data_sources as ds, spec as spec_mod
+  chart = ds.price_history("NVDA", window_days=30)
+  cats  = ds.move_catalysts("NVDA", window_days=30, points=chart["points"],
+                            top_moves=40, per_move=10)
+  by_from = {m["from"]: m for m in cats}
+  # (move-day, substring of the catalyst headline you picked for that move)
+  picks = [("2026-05-05", "Cash Generation Soars"),
+           ("2026-05-14", "Strong Setup Ahead Of Earnings"), ...]
+  events = []
+  for day, needle in picks:
+      m = by_from[day]
+      hit = next(c for c in m["candidates"] if needle.lower() in c["title"].lower())
+      events.append({**hit, "move": f'{m["pct"]:+.1f}% next day'})  # align move to headline
+  events.sort(key=lambda e: e["t"])
+  chart["events"] = events
+  chart = ds.align_first_event_to_second_point(chart, lead=1)
+  spec = spec_mod.build_price_news_spec(chart=chart, theme="midnight",
+      title="<ignored>", subtitle="Price vs. AI-scored headlines · last 30 days",
+      outro_title="<ignored>", outro_takeaway="<ignored>")
+  import json; json.dump(spec, open("output/viral_reels/NVDA/spec.json", "w"), indent=2)
+  ```
+  Then `render` it — the mp4 lands next to the spec:
+  ```bash
+  python -m services.viral_reels.cli render output/viral_reels/NVDA/spec.json
+  # → output/viral_reels/NVDA/reel.mp4
+  ```
+
+  `price-news` (the one-shot scaffold) still exists and auto-selects a
+  distributed-by-impact set — fine for a quick draft, but treat its output as a
+  starting point to re-curate, not the final cut. Either way the data layer
+  fills `chart.points` and each event's sentiment/move/`imageUrl`. No on-reel
+  hook/takeaway text; add it in IG.
+
+### Output layout
+Everything for one reel lives in a **per-project folder** — never a flat dump:
+
+```
+output/viral_reels/
+  <TICKER>/                 # one folder per price+news reel (e.g. NVDA/, SNOW/)
+    data/                   # raw source pulls the director reads
+      catalysts.json  candidates.json  fmp_news.json  fmp_press.json  overlay.json
+    spec.json               # the assembled ReelSpec you build
+    reel.mp4                # the render (defaults next to its spec)
+  race/                     # bar-chart-race reels (not ticker-scoped)
+    reel_spec.json  reel.mp4
+```
+
+The CLI defaults every artifact into this tree (ticker commands → `<TICKER>/…`,
+`render` → next to the spec), so `--out` is optional. Keep new reels inside
+their own `<TICKER>/` (or `race/<subject>/`) folder — don't write loose files
+into `output/viral_reels/` directly.
 
 ## The pipeline
 
@@ -64,21 +163,21 @@ Build the race keyframes for your chosen subject (`cluster` | `dimension` |
 `ticker`), and the external overlay if it strengthens the story:
 
 ```bash
-python -m services.viral_reels.cli series --kind cluster --window-days 14 --out out/series.json
-python -m services.viral_reels.cli prices --ticker NVDA --window-days 30 --out out/overlay.json
+python -m services.viral_reels.cli series --kind cluster --window-days 14 --out output/viral_reels/series.json
+python -m services.viral_reels.cli prices --ticker NVDA --window-days 30 --out output/viral_reels/overlay.json
 # real headlines behind the trend (UI-styled article cards, with source)
 python -m services.viral_reels.cli headlines --window-days 14 --limit 5 \
-    --dimension-key tariff_sensitivity --out out/headlines.json
+    --dimension-key tariff_sensitivity --out output/viral_reels/headlines.json
 ```
 
 Or scaffold a starter spec in one shot, then edit it:
 
 ```bash
 python -m services.viral_reels.cli scaffold --kind cluster --window-days 14 \
-    --overlay-ticker NVDA --headlines 5 --out out/reel_spec.json
+    --overlay-ticker NVDA --headlines 5 --out output/viral_reels/reel_spec.json
 ```
 
-### 3. Direct the reel — edit `out/reel_spec.json`
+### 3. Direct the reel — edit `output/viral_reels/reel_spec.json`
 This is the creative work. Open the spec and fill in the human parts (the data
 parts are already populated). The full contract is in
 `services/viral_reels/spec.py` and `reel/src/types.ts`.
@@ -109,8 +208,8 @@ move, `imageUrl`). Same card design renders the active event.
 
 ### 4. Validate, then render
 ```bash
-python -m services.viral_reels.cli validate out/reel_spec.json
-python -m services.viral_reels.cli render   out/reel_spec.json --out out/reel.mp4
+python -m services.viral_reels.cli validate output/viral_reels/reel_spec.json
+python -m services.viral_reels.cli render   output/viral_reels/reel_spec.json --out output/viral_reels/reel.mp4
 ```
 First render only: `cd services/viral_reels/reel && npm install`.
 

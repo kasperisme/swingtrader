@@ -54,6 +54,10 @@ smooth overtakes. `spec.validate()` enforces this.
 
 ```bash
 cd code/analytics
+# Outputs are organised per project under code/analytics/output/viral_reels/
+# (so --out is optional — see "Output layout" below):
+#   <TICKER>/data/*.json  raw pulls   <TICKER>/spec.json   <TICKER>/reel.mp4
+#   race/                 bar-chart-race reels
 
 # 1. What's moving? Pick a subject.
 python -m services.viral_reels.cli stories  --window-days 14
@@ -73,21 +77,63 @@ python -m services.viral_reels.cli headlines --window-days 21 --limit 8 \
 
 # 4. One-shot starter spec (director then edits copy + captions)
 python -m services.viral_reels.cli scaffold --kind cluster --window-days 21 \
-    --overlay-ticker NVDA --headlines 5 --out out/reel_spec.json
+    --overlay-ticker NVDA --headlines 5          # → output/viral_reels/race/reel_spec.json
 
 # 5. Validate + render (render infers the composition from the spec shape)
-python -m services.viral_reels.cli validate out/reel_spec.json
-python -m services.viral_reels.cli render   out/reel_spec.json --out out/reel.mp4
+python -m services.viral_reels.cli validate output/viral_reels/race/reel_spec.json
+python -m services.viral_reels.cli render   output/viral_reels/race/reel_spec.json
+# → output/viral_reels/race/reel.mp4 (render defaults next to the spec)
 ```
 
 ### Price + News format
 
 ```bash
-# Scaffold a price line + scored news events for a ticker, then edit the copy
-python -m services.viral_reels.cli price-news --ticker NVDA --window-days 45 \
-    --max-events 8 --out out/price_news_spec.json
-python -m services.viral_reels.cli render out/price_news_spec.json --out out/price_news.mp4
+# Price-aware director input: biggest moves, each with the headlines that
+# could explain it (news just *before* the move) — pick the catalyst per move
+python -m services.viral_reels.cli catalysts --ticker NVDA --window-days 30 \
+    --top-moves 12 --per-move 6                  # → output/viral_reels/NVDA/data/catalysts.json
+# Or the full day-by-day pool (one headline per day + advisory impact score)
+python -m services.viral_reels.cli news-candidates --ticker NVDA --window-days 30
+
+# Widen thin internal coverage with FMP (events in the same shape):
+#   stock news — broad third-party coverage + article images (sentiment
+#   recovered by url match where the article is in our DB, else neutral)
+python -m services.viral_reels.cli fmp-news --ticker SNOW --window-days 30
+#   press releases — the company's own catalysts at exact timing (best for
+#   anchoring a move to its true cause when third-party write-ups lag a day)
+python -m services.viral_reels.cli fmp-press --ticker SNOW --window-days 45
+#   → output/viral_reels/SNOW/data/{fmp_news,fmp_press}.json
+
+# One-shot scaffold (auto-selects events; treat as a draft to re-curate)
+python -m services.viral_reels.cli price-news --ticker NVDA --window-days 45 --max-events 8
+python -m services.viral_reels.cli render output/viral_reels/NVDA/spec.json
+# → spec at output/viral_reels/NVDA/spec.json, render at output/viral_reels/NVDA/reel.mp4
 ```
+
+The director (Claude Code) is expected to choose the events: `catalysts`/
+`news-candidates` surface the data, then Claude picks the headline that best
+*explains* each move and builds the spec from those articles (see the
+`viral-reel` skill for the build snippet). `price-news` only provides a
+heuristic default.
+
+### Output layout
+
+Each reel is a **per-project folder** under `output/viral_reels/`, not a flat
+dump:
+
+```
+output/viral_reels/
+  <TICKER>/                 # one folder per price+news reel (NVDA/, SNOW/, …)
+    data/                   # raw source pulls (catalysts, candidates, fmp_news, fmp_press, overlay)
+    spec.json               # the assembled ReelSpec
+    reel.mp4                # the render (defaults next to its spec)
+  race/                     # bar-chart-race reels (not ticker-scoped)
+    reel_spec.json  reel.mp4
+```
+
+Ticker commands default their `--out` into `<TICKER>/data/`, `price-news` writes
+`<TICKER>/spec.json`, and `render` writes the mp4 next to the spec — so `--out`
+is optional and outputs stay organised.
 
 The price line draws left-to-right at a steady pace; **both axes grow with the
 reveal** — the x-axis expands (earlier points compress left) and the y-range is

@@ -20,6 +20,8 @@ export const ArticleCard: React.FC<{
   height: number;
 }> = ({title, source, imageUrl, age, sentiment, move, theme, width, height}) => {
   const hasSentiment = typeof sentiment === 'number';
+  // Sentiment toward the ticker drives the arrow + left-edge tint (and matches
+  // the pin colour on the price line): green bullish, red bearish, amber ~flat.
   const color = !hasSentiment
     ? theme.accent
     : sentiment! > 0.05
@@ -28,6 +30,16 @@ export const ArticleCard: React.FC<{
         ? theme.negative
         : theme.accent;
   const arrow = !hasSentiment ? '' : sentiment! > 0.05 ? '▲' : sentiment! < -0.05 ? '▼' : '◆';
+  // The price move is coloured by its OWN sign, not by sentiment — so a bullish
+  // headline that preceded a drop reads honestly (green ▲ sentiment, red move).
+  const moveNum = move ? parseFloat(move.replace('+', '')) : NaN;
+  const moveColor = Number.isNaN(moveNum)
+    ? theme.textMuted
+    : moveNum > 0
+      ? theme.positive
+      : moveNum < 0
+        ? theme.negative
+        : theme.textMuted;
   // Sizes scale with the card height so a bigger card gets a bigger image,
   // larger type, and more title lines.
   const thumb = height - 36;
@@ -123,7 +135,7 @@ export const ArticleCard: React.FC<{
           {move ? (
             <div
               style={{
-                color,
+                color: moveColor,
                 fontFamily: theme.numberFontFamily,
                 fontWeight: 800,
                 fontSize: 28,
