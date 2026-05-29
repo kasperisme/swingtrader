@@ -3,8 +3,6 @@ import {AbsoluteFill, Sequence, useCurrentFrame, useVideoConfig} from 'remotion'
 import {BarChartRaceProps} from '../types';
 import {getTheme} from '../theme';
 import {Background} from '../components/Background';
-import {TitleCaption} from '../components/TitleCaption';
-import {OutroCard} from '../components/OutroCard';
 import {RaceBoard} from '../components/RaceBoard';
 import {PriceSpark} from '../components/PriceSpark';
 import {Captions} from '../components/Caption';
@@ -121,33 +119,20 @@ const RaceSection: React.FC<BarChartRaceProps & {raceFrames: number}> = ({spec, 
 };
 
 export const BarChartRace: React.FC<BarChartRaceProps> = ({spec}) => {
-  const {fps, durationInFrames} = useVideoConfig();
+  const {durationInFrames} = useVideoConfig();
   const theme = getTheme(spec.theme);
 
-  // No hero slide: the race runs from frame 0 (reclaiming that time) and the
-  // hook shows as an on-reel caption overlay instead.
-  const outroF = spec.outro ? Math.round(spec.outro.durationInSeconds * fps) : 0;
-  const raceF = Math.max(1, durationInFrames - outroF);
-
+  // No editorial text slides — the race runs for the full runtime. Hook /
+  // takeaway text is added afterwards (Instagram / edits).
   return (
     <AbsoluteFill>
       <Background theme={theme} />
 
-      <Sequence from={0} durationInFrames={raceF}>
-        <RaceSection spec={spec} raceFrames={raceF} />
+      <Sequence from={0} durationInFrames={durationInFrames}>
+        <RaceSection spec={spec} raceFrames={durationInFrames} />
       </Sequence>
 
-      {spec.outro ? (
-        <Sequence from={raceF} durationInFrames={outroF}>
-          <OutroCard outro={spec.outro} theme={theme} />
-        </Sequence>
-      ) : null}
-
-      {/* Hook caption overlays the start of the race (replaces the hero slide). */}
-      {spec.intro ? <TitleCaption intro={spec.intro} theme={theme} /> : null}
-
-      {/* Captions overlay the whole timeline (atSeconds are absolute).
-          Headlines own the bottom band when present, so captions defer. */}
+      {/* Optional timed narration beats (off by default; headlines take the band). */}
       {spec.captions && spec.captions.length && !(spec.headlines && spec.headlines.length) ? (
         <Captions captions={spec.captions} theme={theme} />
       ) : null}

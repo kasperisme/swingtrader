@@ -9,8 +9,13 @@ Two formats (each a Remotion composition):
 
 | Format | Composition | Answers |
 |--------|-------------|---------|
-| **Bar chart race** | `BarChartRace` | "Which viral area is winning over time?" — clusters / dimensions / tickers race by article volume, with optional price overlay + headline cards. |
-| **Price + News** | `PriceNewsChart` | "Did the news actually move the stock?" — an animated price line with scored news events plotted on it, each headline popping a sentiment-coloured pin + a callout showing the price reaction. |
+| **Bar chart race** | `BarChartRace` | "Which viral area is winning over time?" — clusters / dimensions / tickers race by article volume, with optional price overlay + article cards. |
+| **Price + News** | `PriceNewsChart` | "Did the news actually move the stock?" — an animated price line with scored news events plotted on it, each headline popping a sentiment-coloured pin + an article card showing the price reaction. |
+
+Both formats share one **`ArticleCard`** design (thumbnail + uppercase source +
+title + meta) and show the real article images. **No hook/takeaway text is
+burned into the reel** — that's added afterwards in Instagram/edits; `intro`/
+`outro` in a spec are ignored by the renderer.
 
 ## Who does what
 

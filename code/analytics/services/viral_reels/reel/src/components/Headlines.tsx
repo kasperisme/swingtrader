@@ -2,7 +2,7 @@ import React from 'react';
 import {interpolate, useCurrentFrame} from 'remotion';
 import {Theme} from '../theme';
 import {HeadlineItem} from '../types';
-import {HeadlineCard} from './HeadlineCard';
+import {ArticleCard} from './ArticleCard';
 
 /**
  * Cycles the real headlines behind the trend, one card at a time, across the
@@ -36,9 +36,18 @@ export const Headlines: React.FC<{
     extrapolateRight: 'clamp',
   });
 
+  const item = items[idx];
   return (
     <div style={{opacity, transform: `translateY(${y}px)`}}>
-      <HeadlineCard item={items[idx]} theme={theme} width={width} height={height} />
+      <ArticleCard
+        title={item.title}
+        source={item.source}
+        imageUrl={item.imageUrl}
+        age={item.age}
+        theme={theme}
+        width={width}
+        height={height}
+      />
     </div>
   );
 };

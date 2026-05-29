@@ -11,9 +11,9 @@ Shape
   "version": 1,
   "format":  {"width": 1080, "height": 1920, "fps": 30, "durationInSeconds": 20},
   "theme":   "midnight",                 # key in reel/src/theme.ts
-  "intro":   {"kicker", "title", "subtitle", "durationInSeconds"},  # rendered as
-             # an on-reel text caption over the start (not a separate slide);
-             # durationInSeconds = how long the caption holds before fading.
+  "intro":   {...} / "outro": {...}   # NOT rendered — the reel carries no
+             # burned-in hook/takeaway text (added later in Instagram/edits).
+             # Kept as optional metadata only.
   "race": {
     "metricLabel": "Articles",
     "valueFormat": "count",              # count | score | percent | currency | signed

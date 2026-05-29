@@ -3,10 +3,8 @@ import {AbsoluteFill, Sequence, interpolate, useCurrentFrame, useVideoConfig} fr
 import {PriceNewsProps} from '../types';
 import {getTheme} from '../theme';
 import {Background} from '../components/Background';
-import {TitleCaption} from '../components/TitleCaption';
-import {OutroCard} from '../components/OutroCard';
 import {PriceChart} from '../components/PriceChart';
-import {EventCallout} from '../components/EventCallout';
+import {ArticleCard} from '../components/ArticleCard';
 import {Footer} from '../components/Footer';
 import {clamp, lerp} from '../util/interp';
 
@@ -112,7 +110,16 @@ const ChartSection: React.FC<PriceNewsProps & {mainFrames: number}> = ({spec, ma
       {/* event callout (the headline currently being passed) */}
       {active ? (
         <div style={{position: 'absolute', top: calloutTop, left: 56, width: width - 112, opacity: activeOpacity}}>
-          <EventCallout event={active.e} theme={theme} width={width - 112} height={calloutHeight} />
+          <ArticleCard
+            title={active.e.title}
+            source={active.e.source}
+            imageUrl={active.e.imageUrl}
+            sentiment={active.e.sentiment ?? 0}
+            move={active.e.move}
+            theme={theme}
+            width={width - 112}
+            height={calloutHeight}
+          />
         </div>
       ) : null}
 
@@ -122,30 +129,17 @@ const ChartSection: React.FC<PriceNewsProps & {mainFrames: number}> = ({spec, ma
 };
 
 export const PriceNewsChart: React.FC<PriceNewsProps> = ({spec}) => {
-  const {fps, durationInFrames} = useVideoConfig();
+  const {durationInFrames} = useVideoConfig();
   const theme = getTheme(spec.theme);
 
-  // No hero slide: the chart draws from frame 0 (reclaiming that time) and the
-  // hook shows as an on-reel caption overlay instead.
-  const outroF = spec.outro ? Math.round(spec.outro.durationInSeconds * fps) : 0;
-  const mainF = Math.max(1, durationInFrames - outroF);
-
+  // No editorial text slides — the chart draws for the full runtime. Hook /
+  // takeaway text is added afterwards (Instagram / edits).
   return (
     <AbsoluteFill>
       <Background theme={theme} />
-
-      <Sequence from={0} durationInFrames={mainF}>
-        <ChartSection spec={spec} mainFrames={mainF} />
+      <Sequence from={0} durationInFrames={durationInFrames}>
+        <ChartSection spec={spec} mainFrames={durationInFrames} />
       </Sequence>
-
-      {spec.outro ? (
-        <Sequence from={mainF} durationInFrames={outroF}>
-          <OutroCard outro={spec.outro} theme={theme} />
-        </Sequence>
-      ) : null}
-
-      {/* Hook caption overlays the start of the draw (replaces the hero slide). */}
-      {spec.intro ? <TitleCaption intro={spec.intro} theme={theme} /> : null}
     </AbsoluteFill>
   );
 };

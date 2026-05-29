@@ -14,10 +14,11 @@ description: >
 # viral-reel — you are the director
 
 You turn the News Impact Screener's unique data foundation into a ~20-second
-vertical **bar chart race** reel that conveys its entire point through the
-animation alone. Python fetches the data, Remotion renders the video — **you**
-make every creative decision in between: what story to tell, which metric races,
-the hook, the captions, and the takeaway.
+vertical reel that conveys its entire point through the animation alone. Python
+fetches the data, Remotion renders the video — **you** make the editorial calls:
+which story, which metric, which events. The reel carries **no burned-in
+hook/takeaway text** (that's added later in Instagram/edits); your job is to pick
+the most surprising, change-rich story and let the visualization tell it.
 
 Service: `code/analytics/services/viral_reels/` · Renderer: `.../viral_reels/reel/`
 Read its `README.md` once before your first run.
@@ -36,11 +37,10 @@ Read its `README.md` once before your first run.
   python -m services.viral_reels.cli price-news --ticker NVDA --window-days 30 \
       --max-events 5 --out out/price_news_spec.json
   ```
-  Then edit the copy (intro hook, outro takeaway), `validate`, and `render` (the
-  render command infers the composition from the spec shape). You own the same
-  creative calls: the hook, which events matter, and the so-what takeaway. The
-  data layer fills `chart.points` and `chart.events` (with sentiment + move) —
-  don't invent price points or moves by hand.
+  Then `validate` and `render` (the render command infers the composition from
+  the spec shape). The data layer fills `chart.points` and `chart.events` (with
+  sentiment, move, and the article `imageUrl`) — don't invent price points or
+  moves by hand. No on-reel hook/takeaway text; add it in IG.
 
 ## The pipeline
 
@@ -83,26 +83,29 @@ This is the creative work. Open the spec and fill in the human parts (the data
 parts are already populated). The full contract is in
 `services/viral_reels/spec.py` and `reel/src/types.ts`.
 
+**No editorial text is burned into the reel** — no hero/title slide and no
+takeaway slide. The hook and takeaway are added afterwards in Instagram / edits.
+The reel is pure visualization: the animated chart, data labels (metric/date or
+ticker/price), the article cards, and small footer branding. So `intro`/`outro`
+are ignored by the renderer; don't spend effort on them.
+
 You own:
-- `intro.title` — the **hook** (≤7 words). A question or a claim, not a label.
-  There is no hero slide: the hook renders as a text caption overlaid on the
-  start of the animation, then fades — so the chart gets the full runtime.
-  `intro.durationInSeconds` controls how long the caption holds before fading.
-- `intro.kicker` / `intro.subtitle` — brand + what/when (e.g. "AI-scored news impact · last 14 days").
 - `race.metricLabel` + `race.valueFormat` — what the numbers mean (`count`,
   `score`, `percent`, `currency`, `signed`).
-- `captions[]` — 2–4 timed beats (`atSeconds`, `text`) narrating the overtakes
-  so the video reads silently. Land them on the moments where ranks change.
 - `headlines[]` — the real article cards behind the trend (`title`, `source`,
-  `age`, optional `imageUrl`), styled like the app's news feed. They cycle in
-  the lower band during the race and **take precedence over captions** (don't
-  set both — use headlines for evidence, captions for narration). This is the
-  strongest way to ground the abstract race in actual news.
-- `outro.title` + `outro.takeaway` — the **so-what**. What should a trader do
-  with this? One line.
+  `age`, `imageUrl`), the same card design used in both formats. Always include
+  `imageUrl` (the article image) — the data layer fills it. They cycle in the
+  lower band during the race and are the strongest way to ground the abstract
+  race in actual news.
+- `captions[]` — optional timed narration beats; off when headlines are present.
+  Usually leave empty (text is added in IG).
 - `theme` — `midnight` (default), `paper`, or `neon`.
 - `overlay` — keep it only if the price line *explains* the race (e.g. the
   leading ticker's price ripping while it dominates news flow).
+
+For the **price+news** format you own the event selection and the chart copy
+implicitly; the data layer fills `chart.points`, `chart.events` (sentiment,
+move, `imageUrl`). Same card design renders the active event.
 
 ### 4. Validate, then render
 ```bash

@@ -405,7 +405,7 @@ def news_events(
     rows = (
         client.schema(schema)
         .table("ticker_sentiment_heads_v")
-        .select("ticker,sentiment_score,title,url,published_at")
+        .select("article_id,ticker,sentiment_score,title,url,published_at")
         .eq("ticker", ticker.upper().strip())
         .gte("published_at", since.isoformat())
         .order("published_at", desc=False)
@@ -448,15 +448,33 @@ def news_events(
         pct = (c1 - c0) / c0 * 100
         return f"{pct:+.1f}% next day"
 
+    # Pull image_url + source for the chosen articles (the sentiment view has
+    # neither). One batched lookup against news_articles.
+    article_ids = [r.get("article_id") for r in ranked if r.get("article_id") is not None]
+    meta_by_id: dict[Any, dict] = {}
+    if article_ids:
+        meta_rows = (
+            client.schema(schema)
+            .table("news_articles")
+            .select("id,image_url,source")
+            .in_("id", article_ids)
+            .execute()
+            .data
+            or []
+        )
+        meta_by_id = {m["id"]: m for m in meta_rows}
+
     events: list[dict[str, Any]] = []
     for r in ranked:
         day = str(r.get("published_at"))[:10]
+        meta = meta_by_id.get(r.get("article_id"), {})
         events.append(
             {
                 "t": day,
                 "title": (r.get("title") or "").strip(),
-                "source": _source_label(None, r.get("url")),
+                "source": _source_label(meta.get("source"), r.get("url")),
                 "url": r.get("url"),
+                "imageUrl": meta.get("image_url"),
                 "sentiment": _round(r.get("sentiment_score") or 0),
                 "age": _age_since(r.get("published_at")),
                 "move": _next_day_move(day),

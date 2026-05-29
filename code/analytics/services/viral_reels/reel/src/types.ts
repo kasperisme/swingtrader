@@ -109,6 +109,7 @@ export interface NewsEvent {
   title: string;
   source?: string;
   url?: string;
+  imageUrl?: string;
   sentiment?: number; // -1..1; colours the marker green/red
   age?: string;
   move?: string; // optional pre-baked reaction, e.g. "+3.2% next day"
