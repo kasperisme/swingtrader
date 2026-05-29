@@ -1,0 +1,590 @@
+{
+  "version": 1,
+  "format": {
+    "width": 1080,
+    "height": 1920,
+    "fps": 30,
+    "durationInSeconds": 20
+  },
+  "theme": "midnight",
+  "race": {
+    "metricLabel": "Articles scored",
+    "valueFormat": "count",
+    "barsVisible": 6,
+    "keyframes": [
+      {
+        "t": "2026-05-15",
+        "label": "May 15",
+        "entries": [
+          {
+            "id": "interest_rate_sensitivity_duration",
+            "label": "Interest Rate (Duration)",
+            "value": 30
+          },
+          {
+            "id": "tariff_sensitivity",
+            "label": "Tariff Sensitivity",
+            "value": 8
+          },
+          {
+            "id": "china_revenue_exposure",
+            "label": "China Exposure",
+            "value": 6
+          },
+          {
+            "id": "inflation_sensitivity",
+            "label": "Inflation Sensitivity",
+            "value": 18
+          },
+          {
+            "id": "price_momentum",
+            "label": "Price Momentum",
+            "value": 12
+          },
+          {
+            "id": "earnings_revision_trend",
+            "label": "Earnings Revisions",
+            "value": 10
+          },
+          {
+            "id": "dollar_sensitivity",
+            "label": "Dollar Sensitivity",
+            "value": 5
+          },
+          {
+            "id": "supplier_bargaining_power",
+            "label": "Supplier Bargaining Power",
+            "value": 4
+          }
+        ]
+      },
+      {
+        "t": "2026-05-16",
+        "label": "May 16",
+        "entries": [
+          {
+            "id": "interest_rate_sensitivity_duration",
+            "label": "Interest Rate (Duration)",
+            "value": 52
+          },
+          {
+            "id": "tariff_sensitivity",
+            "label": "Tariff Sensitivity",
+            "value": 16
+          },
+          {
+            "id": "china_revenue_exposure",
+            "label": "China Exposure",
+            "value": 14
+          },
+          {
+            "id": "inflation_sensitivity",
+            "label": "Inflation Sensitivity",
+            "value": 33
+          },
+          {
+            "id": "price_momentum",
+            "label": "Price Momentum",
+            "value": 24
+          },
+          {
+            "id": "earnings_revision_trend",
+            "label": "Earnings Revisions",
+            "value": 19
+          },
+          {
+            "id": "dollar_sensitivity",
+            "label": "Dollar Sensitivity",
+            "value": 12
+          },
+          {
+            "id": "supplier_bargaining_power",
+            "label": "Supplier Bargaining Power",
+            "value": 8
+          }
+        ]
+      },
+      {
+        "t": "2026-05-17",
+        "label": "May 17",
+        "entries": [
+          {
+            "id": "interest_rate_sensitivity_duration",
+            "label": "Interest Rate (Duration)",
+            "value": 68
+          },
+          {
+            "id": "tariff_sensitivity",
+            "label": "Tariff Sensitivity",
+            "value": 30
+          },
+          {
+            "id": "china_revenue_exposure",
+            "label": "China Exposure",
+            "value": 26
+          },
+          {
+            "id": "inflation_sensitivity",
+            "label": "Inflation Sensitivity",
+            "value": 45
+          },
+          {
+            "id": "price_momentum",
+            "label": "Price Momentum",
+            "value": 35
+          },
+          {
+            "id": "earnings_revision_trend",
+            "label": "Earnings Revisions",
+            "value": 28
+          },
+          {
+            "id": "dollar_sensitivity",
+            "label": "Dollar Sensitivity",
+            "value": 22
+          },
+          {
+            "id": "supplier_bargaining_power",
+            "label": "Supplier Bargaining Power",
+            "value": 13
+          }
+        ]
+      },
+      {
+        "t": "2026-05-18",
+        "label": "May 18",
+        "entries": [
+          {
+            "id": "interest_rate_sensitivity_duration",
+            "label": "Interest Rate (Duration)",
+            "value": 80
+          },
+          {
+            "id": "tariff_sensitivity",
+            "label": "Tariff Sensitivity",
+            "value": 52
+          },
+          {
+            "id": "china_revenue_exposure",
+            "label": "China Exposure",
+            "value": 44
+          },
+          {
+            "id": "inflation_sensitivity",
+            "label": "Inflation Sensitivity",
+            "value": 55
+          },
+          {
+            "id": "price_momentum",
+            "label": "Price Momentum",
+            "value": 47
+          },
+          {
+            "id": "earnings_revision_trend",
+            "label": "Earnings Revisions",
+            "value": 36
+          },
+          {
+            "id": "dollar_sensitivity",
+            "label": "Dollar Sensitivity",
+            "value": 33
+          },
+          {
+            "id": "supplier_bargaining_power",
+            "label": "Supplier Bargaining Power",
+            "value": 18
+          }
+        ]
+      },
+      {
+        "t": "2026-05-19",
+        "label": "May 19",
+        "entries": [
+          {
+            "id": "interest_rate_sensitivity_duration",
+            "label": "Interest Rate (Duration)",
+            "value": 90
+          },
+          {
+            "id": "tariff_sensitivity",
+            "label": "Tariff Sensitivity",
+            "value": 78
+          },
+          {
+            "id": "china_revenue_exposure",
+            "label": "China Exposure",
+            "value": 63
+          },
+          {
+            "id": "inflation_sensitivity",
+            "label": "Inflation Sensitivity",
+            "value": 66
+          },
+          {
+            "id": "price_momentum",
+            "label": "Price Momentum",
+            "value": 56
+          },
+          {
+            "id": "earnings_revision_trend",
+            "label": "Earnings Revisions",
+            "value": 45
+          },
+          {
+            "id": "dollar_sensitivity",
+            "label": "Dollar Sensitivity",
+            "value": 45
+          },
+          {
+            "id": "supplier_bargaining_power",
+            "label": "Supplier Bargaining Power",
+            "value": 23
+          }
+        ]
+      },
+      {
+        "t": "2026-05-20",
+        "label": "May 20",
+        "entries": [
+          {
+            "id": "interest_rate_sensitivity_duration",
+            "label": "Interest Rate (Duration)",
+            "value": 98
+          },
+          {
+            "id": "tariff_sensitivity",
+            "label": "Tariff Sensitivity",
+            "value": 104
+          },
+          {
+            "id": "china_revenue_exposure",
+            "label": "China Exposure",
+            "value": 82
+          },
+          {
+            "id": "inflation_sensitivity",
+            "label": "Inflation Sensitivity",
+            "value": 74
+          },
+          {
+            "id": "price_momentum",
+            "label": "Price Momentum",
+            "value": 66
+          },
+          {
+            "id": "earnings_revision_trend",
+            "label": "Earnings Revisions",
+            "value": 53
+          },
+          {
+            "id": "dollar_sensitivity",
+            "label": "Dollar Sensitivity",
+            "value": 58
+          },
+          {
+            "id": "supplier_bargaining_power",
+            "label": "Supplier Bargaining Power",
+            "value": 29
+          }
+        ]
+      },
+      {
+        "t": "2026-05-21",
+        "label": "May 21",
+        "entries": [
+          {
+            "id": "interest_rate_sensitivity_duration",
+            "label": "Interest Rate (Duration)",
+            "value": 105
+          },
+          {
+            "id": "tariff_sensitivity",
+            "label": "Tariff Sensitivity",
+            "value": 132
+          },
+          {
+            "id": "china_revenue_exposure",
+            "label": "China Exposure",
+            "value": 101
+          },
+          {
+            "id": "inflation_sensitivity",
+            "label": "Inflation Sensitivity",
+            "value": 83
+          },
+          {
+            "id": "price_momentum",
+            "label": "Price Momentum",
+            "value": 77
+          },
+          {
+            "id": "earnings_revision_trend",
+            "label": "Earnings Revisions",
+            "value": 61
+          },
+          {
+            "id": "dollar_sensitivity",
+            "label": "Dollar Sensitivity",
+            "value": 70
+          },
+          {
+            "id": "supplier_bargaining_power",
+            "label": "Supplier Bargaining Power",
+            "value": 35
+          }
+        ]
+      },
+      {
+        "t": "2026-05-22",
+        "label": "May 22",
+        "entries": [
+          {
+            "id": "interest_rate_sensitivity_duration",
+            "label": "Interest Rate (Duration)",
+            "value": 112
+          },
+          {
+            "id": "tariff_sensitivity",
+            "label": "Tariff Sensitivity",
+            "value": 160
+          },
+          {
+            "id": "china_revenue_exposure",
+            "label": "China Exposure",
+            "value": 120
+          },
+          {
+            "id": "inflation_sensitivity",
+            "label": "Inflation Sensitivity",
+            "value": 92
+          },
+          {
+            "id": "price_momentum",
+            "label": "Price Momentum",
+            "value": 88
+          },
+          {
+            "id": "earnings_revision_trend",
+            "label": "Earnings Revisions",
+            "value": 69
+          },
+          {
+            "id": "dollar_sensitivity",
+            "label": "Dollar Sensitivity",
+            "value": 82
+          },
+          {
+            "id": "supplier_bargaining_power",
+            "label": "Supplier Bargaining Power",
+            "value": 41
+          }
+        ]
+      },
+      {
+        "t": "2026-05-25",
+        "label": "May 25",
+        "entries": [
+          {
+            "id": "interest_rate_sensitivity_duration",
+            "label": "Interest Rate (Duration)",
+            "value": 119
+          },
+          {
+            "id": "tariff_sensitivity",
+            "label": "Tariff Sensitivity",
+            "value": 188
+          },
+          {
+            "id": "china_revenue_exposure",
+            "label": "China Exposure",
+            "value": 139
+          },
+          {
+            "id": "inflation_sensitivity",
+            "label": "Inflation Sensitivity",
+            "value": 101
+          },
+          {
+            "id": "price_momentum",
+            "label": "Price Momentum",
+            "value": 99
+          },
+          {
+            "id": "earnings_revision_trend",
+            "label": "Earnings Revisions",
+            "value": 77
+          },
+          {
+            "id": "dollar_sensitivity",
+            "label": "Dollar Sensitivity",
+            "value": 94
+          },
+          {
+            "id": "supplier_bargaining_power",
+            "label": "Supplier Bargaining Power",
+            "value": 47
+          }
+        ]
+      },
+      {
+        "t": "2026-05-26",
+        "label": "May 26",
+        "entries": [
+          {
+            "id": "interest_rate_sensitivity_duration",
+            "label": "Interest Rate (Duration)",
+            "value": 126
+          },
+          {
+            "id": "tariff_sensitivity",
+            "label": "Tariff Sensitivity",
+            "value": 216
+          },
+          {
+            "id": "china_revenue_exposure",
+            "label": "China Exposure",
+            "value": 158
+          },
+          {
+            "id": "inflation_sensitivity",
+            "label": "Inflation Sensitivity",
+            "value": 110
+          },
+          {
+            "id": "price_momentum",
+            "label": "Price Momentum",
+            "value": 110
+          },
+          {
+            "id": "earnings_revision_trend",
+            "label": "Earnings Revisions",
+            "value": 85
+          },
+          {
+            "id": "dollar_sensitivity",
+            "label": "Dollar Sensitivity",
+            "value": 106
+          },
+          {
+            "id": "supplier_bargaining_power",
+            "label": "Supplier Bargaining Power",
+            "value": 53
+          }
+        ]
+      },
+      {
+        "t": "2026-05-27",
+        "label": "May 27",
+        "entries": [
+          {
+            "id": "interest_rate_sensitivity_duration",
+            "label": "Interest Rate (Duration)",
+            "value": 133
+          },
+          {
+            "id": "tariff_sensitivity",
+            "label": "Tariff Sensitivity",
+            "value": 244
+          },
+          {
+            "id": "china_revenue_exposure",
+            "label": "China Exposure",
+            "value": 177
+          },
+          {
+            "id": "inflation_sensitivity",
+            "label": "Inflation Sensitivity",
+            "value": 119
+          },
+          {
+            "id": "price_momentum",
+            "label": "Price Momentum",
+            "value": 121
+          },
+          {
+            "id": "earnings_revision_trend",
+            "label": "Earnings Revisions",
+            "value": 93
+          },
+          {
+            "id": "dollar_sensitivity",
+            "label": "Dollar Sensitivity",
+            "value": 118
+          },
+          {
+            "id": "supplier_bargaining_power",
+            "label": "Supplier Bargaining Power",
+            "value": 59
+          }
+        ]
+      }
+    ]
+  },
+  "overlay": null,
+  "captions": [
+    {
+      "atSeconds": 3.5,
+      "text": "Rate-cut bets led the tape early"
+    },
+    {
+      "atSeconds": 9,
+      "text": "Then tariffs take over as trade-war headlines hit"
+    },
+    {
+      "atSeconds": 14,
+      "text": "China exposure climbs from the bottom of the board"
+    }
+  ],
+  "sources": [
+    "News Impact Screener"
+  ],
+  "headlines": [
+    {
+      "title": "In China, AMD CEO Lisa Su is understated while Nvidia's Huang is more razzmatazz",
+      "source": "REUTERS.COM",
+      "url": "https://www.reuters.com/world/",
+      "age": "1h ago",
+      "imageUrl": "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIzMjAiIGhlaWdodD0iMjU2Ij48ZGVmcz48bGluZWFyR3JhZGllbnQgaWQ9ImciIHgxPSIwIiB5MT0iMCIgeDI9IjEiIHkyPSIxIj48c3RvcCBvZmZzZXQ9IjAiIHN0b3AtY29sb3I9IiNGNTlFMEIiLz48c3RvcCBvZmZzZXQ9IjEiIHN0b3AtY29sb3I9IiNEOTc3MDYiLz48L2xpbmVhckdyYWRpZW50PjwvZGVmcz48cmVjdCB3aWR0aD0iMzIwIiBoZWlnaHQ9IjI1NiIgZmlsbD0idXJsKCNnKSIvPjx0ZXh0IHg9IjE2MCIgeT0iMTYyIiBmb250LWZhbWlseT0iQXJpYWwsIEhlbHZldGljYSwgc2Fucy1zZXJpZiIgZm9udC1zaXplPSIxMDQiIGZvbnQtd2VpZ2h0PSI3MDAiIGZpbGw9IiNmZmZmZmYiIGZpbGwtb3BhY2l0eT0iMC45MiIgdGV4dC1hbmNob3I9Im1pZGRsZSI+UjwvdGV4dD48L3N2Zz4="
+    },
+    {
+      "title": "AI Has Made Memory Chips More Valuable Than Oil",
+      "source": "WSJ.COM",
+      "url": "https://www.wsj.com/tech/ai/",
+      "age": "2h ago",
+      "imageUrl": "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIzMjAiIGhlaWdodD0iMjU2Ij48ZGVmcz48bGluZWFyR3JhZGllbnQgaWQ9ImciIHgxPSIwIiB5MT0iMCIgeDI9IjEiIHkyPSIxIj48c3RvcCBvZmZzZXQ9IjAiIHN0b3AtY29sb3I9IiMyNTYzRUIiLz48c3RvcCBvZmZzZXQ9IjEiIHN0b3AtY29sb3I9IiMxRTQwQUYiLz48L2xpbmVhckdyYWRpZW50PjwvZGVmcz48cmVjdCB3aWR0aD0iMzIwIiBoZWlnaHQ9IjI1NiIgZmlsbD0idXJsKCNnKSIvPjx0ZXh0IHg9IjE2MCIgeT0iMTYyIiBmb250LWZhbWlseT0iQXJpYWwsIEhlbHZldGljYSwgc2Fucy1zZXJpZiIgZm9udC1zaXplPSIxMDQiIGZvbnQtd2VpZ2h0PSI3MDAiIGZpbGw9IiNmZmZmZmYiIGZpbGwtb3BhY2l0eT0iMC45MiIgdGV4dC1hbmNob3I9Im1pZGRsZSI+VzwvdGV4dD48L3N2Zz4="
+    },
+    {
+      "title": "New tariffs on Chinese imports rattle industrial supply chains",
+      "source": "BLOOMBERG.COM",
+      "url": "https://www.bloomberg.com/",
+      "age": "3h ago",
+      "imageUrl": "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIzMjAiIGhlaWdodD0iMjU2Ij48ZGVmcz48bGluZWFyR3JhZGllbnQgaWQ9ImciIHgxPSIwIiB5MT0iMCIgeDI9IjEiIHkyPSIxIj48c3RvcCBvZmZzZXQ9IjAiIHN0b3AtY29sb3I9IiM3QzNBRUQiLz48c3RvcCBvZmZzZXQ9IjEiIHN0b3AtY29sb3I9IiM1QjIxQjYiLz48L2xpbmVhckdyYWRpZW50PjwvZGVmcz48cmVjdCB3aWR0aD0iMzIwIiBoZWlnaHQ9IjI1NiIgZmlsbD0idXJsKCNnKSIvPjx0ZXh0IHg9IjE2MCIgeT0iMTYyIiBmb250LWZhbWlseT0iQXJpYWwsIEhlbHZldGljYSwgc2Fucy1zZXJpZiIgZm9udC1zaXplPSIxMDQiIGZvbnQtd2VpZ2h0PSI3MDAiIGZpbGw9IiNmZmZmZmYiIGZpbGwtb3BhY2l0eT0iMC45MiIgdGV4dC1hbmNob3I9Im1pZGRsZSI+QjwvdGV4dD48L3N2Zz4="
+    },
+    {
+      "title": "China exposure back in focus as Beijing signals retaliation",
+      "source": "CNBC.COM",
+      "url": "https://www.cnbc.com/",
+      "age": "4h ago",
+      "imageUrl": "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIzMjAiIGhlaWdodD0iMjU2Ij48ZGVmcz48bGluZWFyR3JhZGllbnQgaWQ9ImciIHgxPSIwIiB5MT0iMCIgeDI9IjEiIHkyPSIxIj48c3RvcCBvZmZzZXQ9IjAiIHN0b3AtY29sb3I9IiMwRUE1RTkiLz48c3RvcCBvZmZzZXQ9IjEiIHN0b3AtY29sb3I9IiMwMzY5QTEiLz48L2xpbmVhckdyYWRpZW50PjwvZGVmcz48cmVjdCB3aWR0aD0iMzIwIiBoZWlnaHQ9IjI1NiIgZmlsbD0idXJsKCNnKSIvPjx0ZXh0IHg9IjE2MCIgeT0iMTYyIiBmb250LWZhbWlseT0iQXJpYWwsIEhlbHZldGljYSwgc2Fucy1zZXJpZiIgZm9udC1zaXplPSIxMDQiIGZvbnQtd2VpZ2h0PSI3MDAiIGZpbGw9IiNmZmZmZmYiIGZpbGwtb3BhY2l0eT0iMC45MiIgdGV4dC1hbmNob3I9Im1pZGRsZSI+QzwvdGV4dD48L3N2Zz4="
+    },
+    {
+      "title": "Dollar climbs to multi-week high as trade tensions escalate",
+      "source": "FT.COM",
+      "url": "https://www.ft.com/",
+      "age": "5h ago",
+      "imageUrl": "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIzMjAiIGhlaWdodD0iMjU2Ij48ZGVmcz48bGluZWFyR3JhZGllbnQgaWQ9ImciIHgxPSIwIiB5MT0iMCIgeDI9IjEiIHkyPSIxIj48c3RvcCBvZmZzZXQ9IjAiIHN0b3AtY29sb3I9IiNFQzQ4OTkiLz48c3RvcCBvZmZzZXQ9IjEiIHN0b3AtY29sb3I9IiNCRTE4NUQiLz48L2xpbmVhckdyYWRpZW50PjwvZGVmcz48cmVjdCB3aWR0aD0iMzIwIiBoZWlnaHQ9IjI1NiIgZmlsbD0idXJsKCNnKSIvPjx0ZXh0IHg9IjE2MCIgeT0iMTYyIiBmb250LWZhbWlseT0iQXJpYWwsIEhlbHZldGljYSwgc2Fucy1zZXJpZiIgZm9udC1zaXplPSIxMDQiIGZvbnQtd2VpZ2h0PSI3MDAiIGZpbGw9IiNmZmZmZmYiIGZpbGwtb3BhY2l0eT0iMC45MiIgdGV4dC1hbmNob3I9Im1pZGRsZSI+RjwvdGV4dD48L3N2Zz4="
+    },
+    {
+      "title": "Nvidia's Blackwell demand outstrips supply, channel checks show",
+      "source": "REUTERS.COM",
+      "age": "1h ago",
+      "imageUrl": "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIzMjAiIGhlaWdodD0iMjU2Ij48ZGVmcz48bGluZWFyR3JhZGllbnQgaWQ9ImciIHgxPSIwIiB5MT0iMCIgeDI9IjEiIHkyPSIxIj48c3RvcCBvZmZzZXQ9IjAiIHN0b3AtY29sb3I9IiNGNTlFMEIiLz48c3RvcCBvZmZzZXQ9IjEiIHN0b3AtY29sb3I9IiNEOTc3MDYiLz48L2xpbmVhckdyYWRpZW50PjwvZGVmcz48cmVjdCB3aWR0aD0iMzIwIiBoZWlnaHQ9IjI1NiIgZmlsbD0idXJsKCNnKSIvPjx0ZXh0IHg9IjE2MCIgeT0iMTYyIiBmb250LWZhbWlseT0iQXJpYWwsIEhlbHZldGljYSwgc2Fucy1zZXJpZiIgZm9udC1zaXplPSIxMDQiIGZvbnQtd2VpZ2h0PSI3MDAiIGZpbGw9IiNmZmZmZmYiIGZpbGwtb3BhY2l0eT0iMC45MiIgdGV4dC1hbmNob3I9Im1pZGRsZSI+UjwvdGV4dD48L3N2Zz4="
+    },
+    {
+      "title": "Beijing weighs broader export curbs on US chip toolmakers",
+      "source": "BLOOMBERG.COM",
+      "age": "2h ago",
+      "imageUrl": "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIzMjAiIGhlaWdodD0iMjU2Ij48ZGVmcz48bGluZWFyR3JhZGllbnQgaWQ9ImciIHgxPSIwIiB5MT0iMCIgeDI9IjEiIHkyPSIxIj48c3RvcCBvZmZzZXQ9IjAiIHN0b3AtY29sb3I9IiM3QzNBRUQiLz48c3RvcCBvZmZzZXQ9IjEiIHN0b3AtY29sb3I9IiM1QjIxQjYiLz48L2xpbmVhckdyYWRpZW50PjwvZGVmcz48cmVjdCB3aWR0aD0iMzIwIiBoZWlnaHQ9IjI1NiIgZmlsbD0idXJsKCNnKSIvPjx0ZXh0IHg9IjE2MCIgeT0iMTYyIiBmb250LWZhbWlseT0iQXJpYWwsIEhlbHZldGljYSwgc2Fucy1zZXJpZiIgZm9udC1zaXplPSIxMDQiIGZvbnQtd2VpZ2h0PSI3MDAiIGZpbGw9IiNmZmZmZmYiIGZpbGwtb3BhY2l0eT0iMC45MiIgdGV4dC1hbmNob3I9Im1pZGRsZSI+QjwvdGV4dD48L3N2Zz4="
+    }
+  ]
+}

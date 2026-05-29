@@ -1,0 +1,427 @@
+{
+  "version": 1,
+  "format": {
+    "width": 1080,
+    "height": 1920,
+    "fps": 30,
+    "durationInSeconds": 20
+  },
+  "theme": "midnight",
+  "race": {
+    "metricLabel": "Articles scored",
+    "valueFormat": "count",
+    "barsVisible": 6,
+    "keyframes": [
+      {
+        "t": "2026-05-15",
+        "label": "May 15",
+        "entries": [
+          {
+            "id": "MACRO_SENSITIVITY",
+            "label": "Macro Sensitivity",
+            "value": 22
+          },
+          {
+            "id": "SECTOR_ROTATION",
+            "label": "Sector Rotation",
+            "value": 14
+          },
+          {
+            "id": "GROWTH_PROFILE",
+            "label": "Growth Profile",
+            "value": 18
+          },
+          {
+            "id": "VALUATION_POSITIONING",
+            "label": "Valuation & Positioning",
+            "value": 9
+          },
+          {
+            "id": "FINANCIAL_STRUCTURE",
+            "label": "Financial Structure",
+            "value": 12
+          },
+          {
+            "id": "BUSINESS_MODEL",
+            "label": "Business Model",
+            "value": 7
+          },
+          {
+            "id": "GEOGRAPHY_TRADE",
+            "label": "Geography & Trade",
+            "value": 5
+          },
+          {
+            "id": "SUPPLY_CHAIN_EXPOSURE",
+            "label": "Supply Chain",
+            "value": 4
+          },
+          {
+            "id": "MARKET_BEHAVIOUR",
+            "label": "Market Behaviour",
+            "value": 6
+          }
+        ]
+      },
+      {
+        "t": "2026-05-16",
+        "label": "May 16",
+        "entries": [
+          {
+            "id": "MACRO_SENSITIVITY",
+            "label": "Macro Sensitivity",
+            "value": 41
+          },
+          {
+            "id": "SECTOR_ROTATION",
+            "label": "Sector Rotation",
+            "value": 30
+          },
+          {
+            "id": "GROWTH_PROFILE",
+            "label": "Growth Profile",
+            "value": 33
+          },
+          {
+            "id": "VALUATION_POSITIONING",
+            "label": "Valuation & Positioning",
+            "value": 19
+          },
+          {
+            "id": "FINANCIAL_STRUCTURE",
+            "label": "Financial Structure",
+            "value": 24
+          },
+          {
+            "id": "BUSINESS_MODEL",
+            "label": "Business Model",
+            "value": 15
+          },
+          {
+            "id": "GEOGRAPHY_TRADE",
+            "label": "Geography & Trade",
+            "value": 16
+          },
+          {
+            "id": "SUPPLY_CHAIN_EXPOSURE",
+            "label": "Supply Chain",
+            "value": 9
+          },
+          {
+            "id": "MARKET_BEHAVIOUR",
+            "label": "Market Behaviour",
+            "value": 11
+          }
+        ]
+      },
+      {
+        "t": "2026-05-17",
+        "label": "May 17",
+        "entries": [
+          {
+            "id": "MACRO_SENSITIVITY",
+            "label": "Macro Sensitivity",
+            "value": 55
+          },
+          {
+            "id": "SECTOR_ROTATION",
+            "label": "Sector Rotation",
+            "value": 52
+          },
+          {
+            "id": "GROWTH_PROFILE",
+            "label": "Growth Profile",
+            "value": 47
+          },
+          {
+            "id": "VALUATION_POSITIONING",
+            "label": "Valuation & Positioning",
+            "value": 33
+          },
+          {
+            "id": "FINANCIAL_STRUCTURE",
+            "label": "Financial Structure",
+            "value": 31
+          },
+          {
+            "id": "BUSINESS_MODEL",
+            "label": "Business Model",
+            "value": 26
+          },
+          {
+            "id": "GEOGRAPHY_TRADE",
+            "label": "Geography & Trade",
+            "value": 28
+          },
+          {
+            "id": "SUPPLY_CHAIN_EXPOSURE",
+            "label": "Supply Chain",
+            "value": 14
+          },
+          {
+            "id": "MARKET_BEHAVIOUR",
+            "label": "Market Behaviour",
+            "value": 17
+          }
+        ]
+      },
+      {
+        "t": "2026-05-18",
+        "label": "May 18",
+        "entries": [
+          {
+            "id": "MACRO_SENSITIVITY",
+            "label": "Macro Sensitivity",
+            "value": 70
+          },
+          {
+            "id": "SECTOR_ROTATION",
+            "label": "Sector Rotation",
+            "value": 78
+          },
+          {
+            "id": "GROWTH_PROFILE",
+            "label": "Growth Profile",
+            "value": 60
+          },
+          {
+            "id": "VALUATION_POSITIONING",
+            "label": "Valuation & Positioning",
+            "value": 44
+          },
+          {
+            "id": "FINANCIAL_STRUCTURE",
+            "label": "Financial Structure",
+            "value": 45
+          },
+          {
+            "id": "BUSINESS_MODEL",
+            "label": "Business Model",
+            "value": 35
+          },
+          {
+            "id": "GEOGRAPHY_TRADE",
+            "label": "Geography & Trade",
+            "value": 41
+          },
+          {
+            "id": "SUPPLY_CHAIN_EXPOSURE",
+            "label": "Supply Chain",
+            "value": 20
+          },
+          {
+            "id": "MARKET_BEHAVIOUR",
+            "label": "Market Behaviour",
+            "value": 22
+          }
+        ]
+      },
+      {
+        "t": "2026-05-19",
+        "label": "May 19",
+        "entries": [
+          {
+            "id": "MACRO_SENSITIVITY",
+            "label": "Macro Sensitivity",
+            "value": 88
+          },
+          {
+            "id": "SECTOR_ROTATION",
+            "label": "Sector Rotation",
+            "value": 101
+          },
+          {
+            "id": "GROWTH_PROFILE",
+            "label": "Growth Profile",
+            "value": 72
+          },
+          {
+            "id": "VALUATION_POSITIONING",
+            "label": "Valuation & Positioning",
+            "value": 58
+          },
+          {
+            "id": "FINANCIAL_STRUCTURE",
+            "label": "Financial Structure",
+            "value": 56
+          },
+          {
+            "id": "BUSINESS_MODEL",
+            "label": "Business Model",
+            "value": 47
+          },
+          {
+            "id": "GEOGRAPHY_TRADE",
+            "label": "Geography & Trade",
+            "value": 49
+          },
+          {
+            "id": "SUPPLY_CHAIN_EXPOSURE",
+            "label": "Supply Chain",
+            "value": 27
+          },
+          {
+            "id": "MARKET_BEHAVIOUR",
+            "label": "Market Behaviour",
+            "value": 29
+          }
+        ]
+      },
+      {
+        "t": "2026-05-20",
+        "label": "May 20",
+        "entries": [
+          {
+            "id": "MACRO_SENSITIVITY",
+            "label": "Macro Sensitivity",
+            "value": 99
+          },
+          {
+            "id": "SECTOR_ROTATION",
+            "label": "Sector Rotation",
+            "value": 128
+          },
+          {
+            "id": "GROWTH_PROFILE",
+            "label": "Growth Profile",
+            "value": 85
+          },
+          {
+            "id": "VALUATION_POSITIONING",
+            "label": "Valuation & Positioning",
+            "value": 70
+          },
+          {
+            "id": "FINANCIAL_STRUCTURE",
+            "label": "Financial Structure",
+            "value": 66
+          },
+          {
+            "id": "BUSINESS_MODEL",
+            "label": "Business Model",
+            "value": 55
+          },
+          {
+            "id": "GEOGRAPHY_TRADE",
+            "label": "Geography & Trade",
+            "value": 62
+          },
+          {
+            "id": "SUPPLY_CHAIN_EXPOSURE",
+            "label": "Supply Chain",
+            "value": 33
+          },
+          {
+            "id": "MARKET_BEHAVIOUR",
+            "label": "Market Behaviour",
+            "value": 34
+          }
+        ]
+      },
+      {
+        "t": "2026-05-21",
+        "label": "May 21",
+        "entries": [
+          {
+            "id": "MACRO_SENSITIVITY",
+            "label": "Macro Sensitivity",
+            "value": 112
+          },
+          {
+            "id": "SECTOR_ROTATION",
+            "label": "Sector Rotation",
+            "value": 150
+          },
+          {
+            "id": "GROWTH_PROFILE",
+            "label": "Growth Profile",
+            "value": 96
+          },
+          {
+            "id": "VALUATION_POSITIONING",
+            "label": "Valuation & Positioning",
+            "value": 83
+          },
+          {
+            "id": "FINANCIAL_STRUCTURE",
+            "label": "Financial Structure",
+            "value": 79
+          },
+          {
+            "id": "BUSINESS_MODEL",
+            "label": "Business Model",
+            "value": 64
+          },
+          {
+            "id": "GEOGRAPHY_TRADE",
+            "label": "Geography & Trade",
+            "value": 77
+          },
+          {
+            "id": "SUPPLY_CHAIN_EXPOSURE",
+            "label": "Supply Chain",
+            "value": 40
+          },
+          {
+            "id": "MARKET_BEHAVIOUR",
+            "label": "Market Behaviour",
+            "value": 41
+          }
+        ]
+      }
+    ]
+  },
+  "overlay": {
+    "type": "priceSpark",
+    "ticker": "NVDA",
+    "label": "NVDA close",
+    "points": [
+      {
+        "t": "2026-05-15",
+        "close": 902.3
+      },
+      {
+        "t": "2026-05-16",
+        "close": 915.8
+      },
+      {
+        "t": "2026-05-17",
+        "close": 908.1
+      },
+      {
+        "t": "2026-05-18",
+        "close": 931.4
+      },
+      {
+        "t": "2026-05-19",
+        "close": 949.7
+      },
+      {
+        "t": "2026-05-20",
+        "close": 962.2
+      },
+      {
+        "t": "2026-05-21",
+        "close": 978.5
+      }
+    ]
+  },
+  "captions": [
+    {
+      "atSeconds": 3.5,
+      "text": "Macro fear led the tape — at first"
+    },
+    {
+      "atSeconds": 9,
+      "text": "Then Sector Rotation overtakes as money hunts the next leader"
+    },
+    {
+      "atSeconds": 14,
+      "text": "Tariff headlines quietly push Geography & Trade up the board"
+    }
+  ],
+  "sources": [
+    "News Impact Screener",
+    "Financial Modeling Prep"
+  ]
+}
