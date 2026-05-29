@@ -9,6 +9,7 @@ interface Props {
   activeEventIndex: number | null; // pin to emphasize
   pulse?: number; // 0..1 catch-beat glow on the leading edge
   topInset?: number; // reserved headroom at the top (keeps the line below the card)
+  rightInset?: number; // reserved strip on the right for the moving price tag
   theme: Theme;
   width: number;
   height: number;
@@ -46,6 +47,7 @@ export const PriceChart: React.FC<Props> = ({
   activeEventIndex,
   pulse = 0,
   topInset = 0,
+  rightInset = 0,
   theme,
   width,
   height,
@@ -58,7 +60,7 @@ export const PriceChart: React.FC<Props> = ({
   const highs = points.map((p) => (p.high ?? p.close));
 
   const padT = PAD_T + topInset; // headroom so the line's peak stays below the card
-  const innerW = width - PAD_L - PAD_R;
+  const innerW = width - PAD_L - PAD_R - rightInset; // right strip for the price tag
   const innerH = height - padT - PAD_B;
   const baseline = padT + innerH;
 
@@ -115,14 +117,15 @@ export const PriceChart: React.FC<Props> = ({
         </linearGradient>
       </defs>
 
-      {/* horizontal gridlines + price labels */}
+      {/* horizontal gridlines + price labels (left side; the live price rides
+          the right strip as a moving tag) */}
       {gridVals.map((v, i) => (
         <g key={i}>
-          <line x1={PAD_L} y1={y(v)} x2={width - PAD_R} y2={y(v)} stroke={theme.grid} strokeWidth={1} />
+          <line x1={PAD_L} y1={y(v)} x2={PAD_L + innerW} y2={y(v)} stroke={theme.grid} strokeWidth={1} />
           <text
-            x={width - PAD_R}
+            x={PAD_L + 4}
             y={y(v) - 8}
-            textAnchor="end"
+            textAnchor="start"
             fill={theme.textMuted}
             fontFamily={theme.numberFontFamily}
             fontSize={22}
@@ -196,6 +199,34 @@ export const PriceChart: React.FC<Props> = ({
       {pulse > 0.02 ? <circle cx={curX} cy={curY} r={22 + 46 * pulse} fill={lineColor} opacity={0.18 * pulse} /> : null}
       <circle cx={curX} cy={curY} r={12 + 4 * pulse} fill={lineColor} />
       <circle cx={curX} cy={curY} r={22 + 10 * pulse} fill={lineColor} opacity={0.22} />
+
+      {/* live price tag — pinned to the right strip, rides up/down with the line */}
+      {rightInset > 0
+        ? (() => {
+            const pct = ((curClose - closes[0]) / closes[0]) * 100;
+            const pillW = Math.max(120, rightInset - 20);
+            const pillH = 100;
+            const gap = 16;
+            const pillX = curX + gap;
+            const pillY = clamp(curY - pillH / 2, padT, baseline - pillH);
+            const cx = pillX + pillW / 2;
+            const connY = clamp(curY, pillY + 12, pillY + pillH - 12);
+            return (
+              <g>
+                <line x1={curX} y1={curY} x2={pillX} y2={connY} stroke={lineColor} strokeWidth={3} />
+                <rect x={pillX} y={pillY} width={pillW} height={pillH} rx={18} fill={lineColor} />
+                <text x={cx} y={pillY + 44} textAnchor="middle" fill={theme.bg}
+                  fontFamily={theme.numberFontFamily} fontSize={38} fontWeight={800}>
+                  {(spec.valuePrefix ?? '') + curClose.toFixed(2)}
+                </text>
+                <text x={cx} y={pillY + 80} textAnchor="middle" fill={theme.bg}
+                  fontFamily={theme.numberFontFamily} fontSize={28} fontWeight={800}>
+                  {(pct >= 0 ? '+' : '') + pct.toFixed(1) + '%'}
+                </text>
+              </g>
+            );
+          })()
+        : null}
     </svg>
   );
 };

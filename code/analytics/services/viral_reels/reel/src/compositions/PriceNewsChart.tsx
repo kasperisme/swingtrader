@@ -5,7 +5,7 @@ import {getTheme} from '../theme';
 import {Background} from '../components/Background';
 import {PriceChart} from '../components/PriceChart';
 import {ArticleCard} from '../components/ArticleCard';
-import {clamp, lerp, bump} from '../util/interp';
+import {clamp, bump} from '../util/interp';
 
 const indexForDate = (points: {t: string}[], t: string): number => {
   let best = 0;
@@ -25,9 +25,7 @@ const ChartSection: React.FC<PriceNewsProps & {mainFrames: number}> = ({spec, ma
   const frame = useCurrentFrame();
   const {width, height, fps} = useVideoConfig();
   const theme = getTheme(spec.theme);
-  const {points, events, ticker, label, valuePrefix} = spec.chart;
-
-  const closes = points.map((p) => p.close);
+  const {points, events, ticker, label} = spec.chart;
   const n = points.length;
 
   // Each event's pass-frame is when the line reaches its date (linear draw).
@@ -36,16 +34,7 @@ const ChartSection: React.FC<PriceNewsProps & {mainFrames: number}> = ({spec, ma
     [events, points],
   );
   const lastF = Math.max(1, mainFrames - 1);
-
   const progress = clamp(frame / lastF, 0, 1);
-  const reveal = progress * (n - 1);
-  const last = Math.floor(reveal);
-  const frac = reveal - last;
-  const curClose = lerp(closes[last], closes[Math.min(last + 1, n - 1)], frac);
-  const startClose = closes[0];
-  const pct = ((curClose - startClose) / startClose) * 100;
-  const up = curClose >= startClose;
-  const moveColor = up ? theme.positive : theme.negative;
 
   const holdFrames = Math.min(3.2 * fps, lastF / Math.max(1, events.length));
   let active: {e: (typeof events)[number]; i: number} | null = null;
@@ -73,24 +62,14 @@ const ChartSection: React.FC<PriceNewsProps & {mainFrames: number}> = ({spec, ma
 
   return (
     <AbsoluteFill style={{opacity: enter, transform: `translateY(${interpolate(enter, [0, 1], [28, 0])}px)`}}>
-      {/* header — ticker + live price + % (date now lives on the x-axis) */}
-      <div style={{position: 'absolute', top: 66, left: 56, right: 56}}>
-        <div style={{transform: `scale(${1 + 0.05 * spotlight})`, transformOrigin: 'left center'}}>
-          <div style={{color: theme.textMuted, fontFamily: theme.fontFamily, fontWeight: 800, fontSize: 30, letterSpacing: 5, textTransform: 'uppercase'}}>
-            {label || ticker}
-          </div>
-          <div style={{display: 'flex', alignItems: 'baseline', gap: 18, marginTop: 8}}>
-            <div style={{color: theme.text, fontFamily: theme.numberFontFamily, fontWeight: 900, fontSize: 84, letterSpacing: -1, fontVariantNumeric: 'tabular-nums'}}>
-              {(valuePrefix ?? '') + curClose.toFixed(2)}
-            </div>
-            <div style={{color: moveColor, fontFamily: theme.numberFontFamily, fontWeight: 800, fontSize: 40, fontVariantNumeric: 'tabular-nums'}}>
-              {pct >= 0 ? '+' : ''}{pct.toFixed(1)}%
-            </div>
-          </div>
+      {/* header — just the ticker; the live price rides the chart as a tag */}
+      <div style={{position: 'absolute', top: 70, left: 56, right: 56}}>
+        <div style={{color: theme.text, fontFamily: theme.fontFamily, fontWeight: 900, fontSize: 64, letterSpacing: -1}}>
+          {label || ticker}
         </div>
       </div>
 
-      {/* chart (with date ticks along its x-axis) */}
+      {/* chart (date ticks on the x-axis, live price tag on the right) */}
       <div style={{position: 'absolute', top: chartTop, left: 40, width: width - 80, height: chartHeight}}>
         <PriceChart
           spec={spec.chart}
@@ -98,6 +77,7 @@ const ChartSection: React.FC<PriceNewsProps & {mainFrames: number}> = ({spec, ma
           activeEventIndex={active ? active.i : null}
           pulse={spotlight}
           topInset={events.length ? 28 + cardHeight + 18 : 0}
+          rightInset={190}
           theme={theme}
           width={width - 80}
           height={chartHeight}
