@@ -247,7 +247,7 @@ def main():
 
     p_series = sub.add_parser("series", help="Build race keyframes")
     p_series.add_argument("--kind", choices=list(ds.SERIES_BUILDERS), required=True)
-    p_series.add_argument("--window-days", type=int, default=14)
+    p_series.add_argument("--window-days", type=int, default=21)
     p_series.add_argument("--top", type=int, default=8)
     p_series.add_argument("--value-mode", choices=ds.VALUE_MODES, default="cumulative_articles")
     p_series.add_argument("--tickers", default=None, help="comma list (ticker kind only)")
@@ -259,15 +259,15 @@ def main():
     p_prices.add_argument("--out", default=None)
 
     p_hl = sub.add_parser("headlines", help="Top article headlines behind a window (UI-styled cards)")
-    p_hl.add_argument("--window-days", type=int, default=14)
-    p_hl.add_argument("--limit", type=int, default=5)
+    p_hl.add_argument("--window-days", type=int, default=21)
+    p_hl.add_argument("--limit", type=int, default=8)
     p_hl.add_argument("--dimension-key", default=None, help="rank by load on this dimension")
     p_hl.add_argument("--tickers", default=None, help="comma list to scope by ticker")
     p_hl.add_argument("--out", default=None)
 
     p_scaf = sub.add_parser("scaffold", help="Build a starter ReelSpec to edit")
     p_scaf.add_argument("--kind", choices=list(ds.SERIES_BUILDERS), default="cluster")
-    p_scaf.add_argument("--window-days", type=int, default=14)
+    p_scaf.add_argument("--window-days", type=int, default=21)
     p_scaf.add_argument("--top", type=int, default=8)
     p_scaf.add_argument("--value-mode", choices=ds.VALUE_MODES, default="cumulative_articles")
     p_scaf.add_argument("--theme", default="midnight")
@@ -278,8 +278,8 @@ def main():
 
     p_pn = sub.add_parser("price-news", help="Scaffold a price+news chart reel (price line + events)")
     p_pn.add_argument("--ticker", required=True)
-    p_pn.add_argument("--window-days", type=int, default=30)
-    p_pn.add_argument("--max-events", type=int, default=5)
+    p_pn.add_argument("--window-days", type=int, default=45)
+    p_pn.add_argument("--max-events", type=int, default=8)
     p_pn.add_argument("--theme", default="midnight")
     p_pn.add_argument("--out", default=str(_PKG_DIR / "out" / "price_news_spec.json"))
 

@@ -60,19 +60,19 @@ python -m services.viral_reels.cli stories  --window-days 14
 python -m services.viral_reels.cli snapshot --window-days 14
 
 # 2. Build race keyframes for the subject
-python -m services.viral_reels.cli series --kind cluster   --window-days 14
-python -m services.viral_reels.cli series --kind dimension --top 8
+python -m services.viral_reels.cli series --kind cluster   --window-days 21
+python -m services.viral_reels.cli series --kind dimension --top 8 --window-days 21
 python -m services.viral_reels.cli series --kind ticker    --top 8 --value-mode cumulative_articles
 
 # 3. External overlay (FMP price/OHLC)
-python -m services.viral_reels.cli prices --ticker NVDA --window-days 30
+python -m services.viral_reels.cli prices --ticker NVDA --window-days 45
 
 # 3b. Real headlines behind the trend (UI-styled article cards)
-python -m services.viral_reels.cli headlines --window-days 14 --limit 5 \
+python -m services.viral_reels.cli headlines --window-days 21 --limit 8 \
     --dimension-key tariff_sensitivity
 
 # 4. One-shot starter spec (director then edits copy + captions)
-python -m services.viral_reels.cli scaffold --kind cluster --window-days 14 \
+python -m services.viral_reels.cli scaffold --kind cluster --window-days 21 \
     --overlay-ticker NVDA --headlines 5 --out out/reel_spec.json
 
 # 5. Validate + render (render infers the composition from the spec shape)
@@ -84,8 +84,8 @@ python -m services.viral_reels.cli render   out/reel_spec.json --out out/reel.mp
 
 ```bash
 # Scaffold a price line + scored news events for a ticker, then edit the copy
-python -m services.viral_reels.cli price-news --ticker NVDA --window-days 30 \
-    --max-events 5 --out out/price_news_spec.json
+python -m services.viral_reels.cli price-news --ticker NVDA --window-days 45 \
+    --max-events 8 --out out/price_news_spec.json
 python -m services.viral_reels.cli render out/price_news_spec.json --out out/price_news.mp4
 ```
 
