@@ -64,10 +64,14 @@ export const PriceChart: React.FC<Props> = ({
   const innerH = height - PAD_T - PAD_B;
   const baseline = PAD_T + innerH;
 
-  const x = (i: number) => PAD_L + (i / (points.length - 1)) * innerW;
+  const reveal = clamp(progress, 0, 1) * (points.length - 1);
+  // The revealed data always fills the full width: the visible domain is
+  // [0, reveal], so the leading edge stays pinned to the right and earlier
+  // points compress/shift left as the chart grows.
+  const dom = Math.max(reveal, 1e-6);
+  const x = (i: number) => PAD_L + (i / dom) * innerW;
   const y = (v: number) => PAD_T + (1 - (v - lo) / (hi - lo)) * innerH;
 
-  const reveal = clamp(progress, 0, 1) * (points.length - 1);
   const last = Math.floor(reveal);
   const frac = reveal - last;
   const nextIdx = Math.min(last + 1, points.length - 1);
@@ -111,27 +115,32 @@ export const PriceChart: React.FC<Props> = ({
         </g>
       ))}
 
-      {/* x-axis date ticks — each fades in as the line draws past its date */}
-      {Array.from({length: Math.min(5, points.length)}).map((_, i, arr) => {
-        const idx = Math.round((i * (points.length - 1)) / Math.max(1, arr.length - 1));
-        const anchor = i === 0 ? 'start' : i === arr.length - 1 ? 'end' : 'middle';
-        const tickOpacity = clamp((reveal - idx + 0.5) * 2, 0, 1);
-        if (tickOpacity <= 0) return null;
-        return (
-          <text
-            key={i}
-            x={x(idx)}
-            y={baseline + 46}
-            textAnchor={anchor}
-            fill={theme.textMuted}
-            fillOpacity={tickOpacity}
-            fontFamily={theme.numberFontFamily}
-            fontSize={24}
-          >
-            {dateLabel(points[idx].t)}
-          </text>
-        );
-      })}
+      {/* x-axis date ticks — anchored to data points; they enter at the right
+          edge and slide/compress left as the domain expands (no fade). */}
+      {(() => {
+        const step = Math.max(1, Math.round((points.length - 1) / 5));
+        const idxs: number[] = [];
+        for (let idx = 0; idx < points.length; idx += step) idxs.push(idx);
+        return idxs
+          .filter((idx) => idx <= reveal + 1e-6)
+          .map((idx) => {
+            const px = x(idx);
+            const anchor = px <= PAD_L + 20 ? 'start' : px >= PAD_L + innerW - 20 ? 'end' : 'middle';
+            return (
+              <text
+                key={idx}
+                x={px}
+                y={baseline + 46}
+                textAnchor={anchor}
+                fill={theme.textMuted}
+                fontFamily={theme.numberFontFamily}
+                fontSize={24}
+              >
+                {dateLabel(points[idx].t)}
+              </text>
+            );
+          });
+      })()}
 
       {/* area + line */}
       <path d={area} fill="url(#priceArea)" />
