@@ -62,6 +62,7 @@ export interface Caption {
 }
 
 export interface HeadlineItem {
+  articleId?: number; // source news_articles.id (traceability; not rendered)
   title: string;
   source?: string; // shown uppercased, e.g. "REUTERS.COM" or the raw URL
   url?: string;
@@ -106,6 +107,7 @@ export interface OHLCPoint {
 
 export interface NewsEvent {
   t: string; // ISO date the news hit (snaps to the nearest price point)
+  articleId?: number; // source news_articles.id (traceability; not rendered)
   title: string;
   source?: string;
   url?: string;

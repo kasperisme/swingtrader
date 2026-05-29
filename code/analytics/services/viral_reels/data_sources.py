@@ -471,6 +471,7 @@ def news_events(
         events.append(
             {
                 "t": day,
+                "articleId": r.get("article_id"),
                 "title": (r.get("title") or "").strip(),
                 "source": _source_label(meta.get("source"), r.get("url")),
                 "url": r.get("url"),
@@ -568,6 +569,7 @@ def headlines(
             continue
         out.append(
             {
+                "articleId": r.get("article_id"),
                 "title": title,
                 "source": _source_label(r.get("source"), r.get("url")),
                 "url": r.get("url"),
@@ -577,6 +579,36 @@ def headlines(
             }
         )
     return out
+
+
+def article_images(ids: list[int]) -> list[dict[str, Any]]:
+    """Look up id/title/source/image_url for specific news_articles ids.
+
+    Diagnostic: confirm whether the articles a reel would use actually carry an
+    image_url in the DB.
+    """
+    if not ids:
+        return []
+    client, schema = _supabase()
+    rows = (
+        client.schema(schema)
+        .table("news_articles")
+        .select("id,title,source,image_url")
+        .in_("id", ids)
+        .execute()
+        .data
+        or []
+    )
+    return [
+        {
+            "id": r.get("id"),
+            "title": r.get("title"),
+            "source": r.get("source"),
+            "image_url": r.get("image_url"),
+            "has_image": bool((r.get("image_url") or "").strip()),
+        }
+        for r in rows
+    ]
 
 
 # ---------------------------------------------------------------------------

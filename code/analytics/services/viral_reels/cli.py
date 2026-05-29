@@ -149,6 +149,11 @@ def cmd_scaffold(args):
     _emit(spec, args.out)
 
 
+def cmd_article_images(args):
+    ids = [int(x) for x in args.ids.split(",") if x.strip()]
+    _emit(ds.article_images(ids), args.out)
+
+
 def cmd_price_news(args):
     """Scaffold a price+news ReelSpec: price line + scored news events on it."""
     chart = ds.price_history(args.ticker, window_days=args.window_days)
@@ -276,6 +281,10 @@ def main():
     p_scaf.add_argument("--dimension-key", default=None, help="rank headlines by this dimension")
     p_scaf.add_argument("--out", default=str(_PKG_DIR / "out" / "reel_spec.json"))
 
+    p_ai = sub.add_parser("article-images", help="Look up id/title/source/image_url for article ids")
+    p_ai.add_argument("--ids", required=True, help="comma-separated news_articles ids, e.g. 117422,117510")
+    p_ai.add_argument("--out", default=None)
+
     p_pn = sub.add_parser("price-news", help="Scaffold a price+news chart reel (price line + events)")
     p_pn.add_argument("--ticker", required=True)
     p_pn.add_argument("--window-days", type=int, default=45)
@@ -300,6 +309,7 @@ def main():
         "series": cmd_series,
         "prices": cmd_prices,
         "headlines": cmd_headlines,
+        "article-images": cmd_article_images,
         "scaffold": cmd_scaffold,
         "price-news": cmd_price_news,
         "validate": cmd_validate,

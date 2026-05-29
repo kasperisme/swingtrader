@@ -105,7 +105,7 @@ Key files:
 - `code/analytics/services/viral_reels/data_sources.py` — race-keyframe builders + FMP overlay
 - `code/analytics/services/viral_reels/spec.py` — `ReelSpec` contract + validation (mirror of `reel/src/types.ts`)
 - `code/analytics/services/viral_reels/story_finder.py` — heuristic story candidates
-- `code/analytics/services/viral_reels/cli.py` — `stories|snapshot|series|prices|headlines|scaffold|price-news|validate|render`
+- `code/analytics/services/viral_reels/cli.py` — `stories|snapshot|series|prices|headlines|article-images|scaffold|price-news|validate|render`
 - `code/analytics/services/viral_reels/reel/src/compositions/BarChartRace.tsx` — bar-chart-race animation
 - `code/analytics/services/viral_reels/reel/src/compositions/PriceNewsChart.tsx` — price line + news events animation
 
