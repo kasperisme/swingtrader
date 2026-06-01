@@ -212,6 +212,9 @@ def cmd_card(args):
         headline=args.headline,
         tag=args.tag,
         hero_image_url=args.hero_image_url,
+        # --no-nis forces an empty list (skip the DB lookup + hide the badge);
+        # otherwise auto-detect the screenings featuring this ticker.
+        nis_screenings=[] if args.no_nis else None,
     )
     spec = spec_mod.build_card_spec(card=card, theme=args.theme)
     problems = spec_mod.validate(spec)
@@ -425,6 +428,8 @@ def main():
     p_card.add_argument("--tag", default=None, help="pill under the headline, e.g. 'Earnings Beat'")
     p_card.add_argument("--hero-image-url", default=None,
                         help="CEO photo URL (director fetches it); falls back to the logo")
+    p_card.add_argument("--no-nis", action="store_true",
+                        help="skip the NIS-screening badge lookup (hide the badge)")
     p_card.add_argument("--theme", default="midnight")
     p_card.add_argument("--out", default=None,
                         help="defaults to output/viral_reels/<TICKER>/card.json")

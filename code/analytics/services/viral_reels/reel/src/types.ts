@@ -169,6 +169,9 @@ export interface CardSpec {
   tag?: string; // pill under the headline, e.g. "EARNINGS"
   badge?: CardBadge; // top-right rating
   stats: CardStat[]; // 1–4 stat cards
+  // Latest NIS screenings featuring this ticker (e.g. "NIS Momentum"). When
+  // present, the card shows a "NIS" credibility badge listing them.
+  nisScreenings?: string[];
   cta?: string; // e.g. "Swipe to Watch"
   footer?: string; // e.g. "newsimpactscreener.com"
 }

@@ -33,6 +33,12 @@ export const StockCard: React.FC<StockCardProps> = ({spec}) => {
   const PAD = 56;
   const stats = (card.stats || []).slice(0, 4);
 
+  // NIS credibility badge — the latest screenings this ticker is featured in.
+  // Show up to two named chips; collapse the rest into a "+N" pill.
+  const nisAll = (card.nisScreenings || []).filter((s) => (s || '').trim());
+  const nisShown = nisAll.slice(0, 2);
+  const nisExtra = nisAll.length - nisShown.length;
+
   return (
     <AbsoluteFill style={{backgroundColor: theme.bg, fontFamily: theme.fontFamily}}>
       {/* ---- hero layer ---- */}
@@ -100,6 +106,74 @@ export const StockCard: React.FC<StockCardProps> = ({spec}) => {
 
       {/* ---- headline (top-left) ---- */}
       <div style={{position: 'absolute', top: PAD, left: PAD, width: width - PAD - 280}}>
+        {/* NIS screening badge(s) — credibility flag above the hook */}
+        {nisShown.length ? (
+          <div style={{display: 'flex', flexWrap: 'wrap', gap: 12, marginBottom: 22}}>
+            {nisShown.map((name, i) => (
+              <div
+                key={i}
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 12,
+                  padding: '11px 20px 11px 14px',
+                  borderRadius: 999,
+                  background: 'rgba(11,11,15,0.55)',
+                  border: `1.5px solid ${theme.accent}`,
+                  boxShadow: '0 10px 28px rgba(0,0,0,0.4)',
+                }}
+              >
+                <span
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    width: 30,
+                    height: 30,
+                    borderRadius: 999,
+                    background: theme.accent,
+                    color: '#0B0B0F',
+                    fontWeight: 900,
+                    fontSize: 20,
+                    lineHeight: 1,
+                  }}
+                >
+                  ✓
+                </span>
+                <span
+                  style={{
+                    color: '#FFFFFF',
+                    fontWeight: 800,
+                    fontSize: 26,
+                    letterSpacing: 1,
+                    textTransform: 'uppercase',
+                    whiteSpace: 'nowrap',
+                  }}
+                >
+                  {name}
+                </span>
+              </div>
+            ))}
+            {nisExtra > 0 ? (
+              <div
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  padding: '11px 18px',
+                  borderRadius: 999,
+                  background: 'rgba(11,11,15,0.55)',
+                  border: `1.5px solid ${theme.accent}`,
+                  color: '#FFFFFF',
+                  fontWeight: 800,
+                  fontSize: 26,
+                  letterSpacing: 1,
+                }}
+              >
+                +{nisExtra}
+              </div>
+            ) : null}
+          </div>
+        ) : null}
         <div
           style={{
             color: '#FFFFFF',

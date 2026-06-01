@@ -1084,6 +1084,80 @@ def news_pulse(ticker: str, window_days: int = 14) -> dict[str, Any]:
     }
 
 
+def screening_memberships(ticker: str) -> list[dict[str, str]]:
+    """Latest market screenings that currently feature ``ticker``.
+
+    For every active ``market_screenings`` row we look at its most recent
+    completed result and check whether the ticker is one of that run's result
+    rows. Returns ``[{"name", "slug"}, …]`` in screening-name order. Test
+    screenings (name/slug contains "test") are skipped so promo cards only ever
+    carry real, public screenings. Best-effort: any DB error yields ``[]`` so a
+    card can still render offline.
+    """
+    tk = (ticker or "").upper().strip()
+    if not tk:
+        return []
+    try:
+        client, schema = _supabase()
+        screenings = (
+            client.schema(schema)
+            .table("market_screenings")
+            .select("id, name, slug, is_active")
+            .eq("is_active", True)
+            .execute()
+            .data
+            or []
+        )
+    except Exception as exc:  # network / auth / schema — never fatal for a card
+        log.warning("screening_memberships: could not list screenings: %s", exc)
+        return []
+
+    out: list[dict[str, str]] = []
+    for s in screenings:
+        name = (s.get("name") or "").strip()
+        slug = (s.get("slug") or "").strip()
+        if "test" in name.lower() or "test" in slug.lower():
+            continue
+        try:
+            latest = (
+                client.schema(schema)
+                .table("market_screening_results")
+                .select("id")
+                .eq("market_screening_id", s["id"])
+                .eq("status", "done")
+                .order("run_at", desc=True)
+                .limit(1)
+                .execute()
+                .data
+                or []
+            )
+            if not latest:
+                continue
+            hit = (
+                client.schema(schema)
+                .table("market_screening_result_rows")
+                .select("symbol")
+                .eq("result_id", latest[0]["id"])
+                .eq("symbol", tk)
+                .limit(1)
+                .execute()
+                .data
+                or []
+            )
+            if hit:
+                out.append({"name": name or slug or tk, "slug": slug})
+        except Exception as exc:
+            log.warning(
+                "screening_memberships: membership check failed for %s: %s",
+                slug or name,
+                exc,
+            )
+            continue
+
+    out.sort(key=lambda m: m["name"].lower())
+    return out
+
+
 def build_card(
     ticker: str,
     window_days: int = 14,
@@ -1093,6 +1167,7 @@ def build_card(
     hero_image_url: str | None = None,
     badge: dict[str, Any] | None = None,
     stats: list[dict[str, Any]] | None = None,
+    nis_screenings: list[str] | None = None,
 ) -> dict[str, Any]:
     """Assemble the data half of a stock-card spec for a ticker.
 
@@ -1134,6 +1209,12 @@ def build_card(
         tone = "positive" if avg > 0.05 else "negative" if avg < -0.05 else "neutral"
         badge = {"label": "Impact", "value": f'{pulse["impactScore"]:.1f}', "tone": tone}
 
+    # NIS credibility badge: the latest screenings this ticker is featured in
+    # (e.g. "NIS Momentum", "NIS Fundamentals"). Auto-detected from the DB unless
+    # the caller passes an explicit list.
+    if nis_screenings is None:
+        nis_screenings = [m["name"] for m in screening_memberships(ticker)]
+
     return {
         "ticker": ticker,
         "company": (profile.get("companyName") or ticker).strip(),
@@ -1148,6 +1229,7 @@ def build_card(
         "tag": (tag or "").strip() or None,
         "badge": badge,
         "stats": stats,
+        "nisScreenings": nis_screenings,
         "cta": "Swipe to Watch",
         "footer": "newsimpactscreener.com",
         "pulse": pulse,

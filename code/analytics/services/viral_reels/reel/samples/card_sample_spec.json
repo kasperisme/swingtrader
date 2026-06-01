@@ -13,6 +13,7 @@
     "headline": "NVIDIA Smashes Q1 Earnings",
     "tag": "Earnings Beat",
     "badge": {"label": "Impact", "value": "9.2", "tone": "positive"},
+    "nisScreenings": ["NIS Momentum", "NIS Fundamentals"],
     "stats": [
       {"label": "Price", "value": "$1,180"},
       {"label": "Change", "value": "+12.4%"},
