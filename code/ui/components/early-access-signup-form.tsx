@@ -3,10 +3,60 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 
+import {
+  getEngagement,
+  getSessionArticleViews,
+} from "@/lib/analytics/engagement";
+
+const UTM_KEYS = [
+  "utm_source",
+  "utm_medium",
+  "utm_campaign",
+  "utm_term",
+  "utm_content",
+  "gclid",
+  "fbclid",
+] as const;
+
+/** Read referrer, UTM params, path and engagement at submit time. */
+function collectClientContext() {
+  if (typeof window === "undefined") return undefined;
+  const params = new URLSearchParams(window.location.search);
+  const utm: Record<string, string> = {};
+  for (const k of UTM_KEYS) {
+    const v = params.get(k);
+    if (v) utm[k] = v.slice(0, 300);
+  }
+  return {
+    referrer: document.referrer || undefined,
+    page_path: window.location.pathname,
+    utm: Object.keys(utm).length ? utm : undefined,
+    engagement: getEngagement(),
+    session_article_views: getSessionArticleViews(),
+  };
+}
+
+/** Article the signup happened on — recorded so we know which story converted. */
+export type SignupArticle = {
+  slug?: string;
+  id?: number;
+  title?: string;
+  tickers?: string[];
+};
+
 type EarlyAccessSignupFormProps = {
   align?: "center" | "start";
   idSuffix?: string;
   source?: string;
+  /** Optional A/B test variant id — recorded with the signup for attribution. */
+  variant?: string;
+  /**
+   * Optional full CTA copy the user actually saw (heading/body/label etc.).
+   * Stored in the signup's metadata so we know the exact text that converted.
+   */
+  ctaText?: Record<string, string>;
+  /** Optional article context (which story the signup came from). */
+  article?: SignupArticle;
   ctaLabel?: string;
 };
 
@@ -14,6 +64,9 @@ export function EarlyAccessSignupForm({
   align = "center",
   idSuffix = "default",
   source = "landing",
+  variant,
+  ctaText,
+  article,
   ctaLabel = "Get Early Access",
 }: EarlyAccessSignupFormProps = {}) {
   const router = useRouter();
@@ -30,7 +83,14 @@ export function EarlyAccessSignupForm({
       const res = await fetch("/api/early-access", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email: email.trim(), source }),
+        body: JSON.stringify({
+          email: email.trim(),
+          source,
+          variant,
+          ctaText,
+          article,
+          context: collectClientContext(),
+        }),
       });
       const data = (await res.json().catch(() => ({}))) as { error?: string };
       if (!res.ok) {

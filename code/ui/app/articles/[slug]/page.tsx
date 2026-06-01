@@ -1,4 +1,5 @@
 import Link from "next/link";
+import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { Suspense } from "react";
 import { ArrowLeft, ArrowUpRight } from "lucide-react";
@@ -6,10 +7,22 @@ import { createClient as createSupabaseClient } from "@supabase/supabase-js";
 
 import { createClient } from "@/lib/supabase/server";
 import { CLUSTERS, DIMENSION_MAP } from "@/app/protected/vectors/dimensions";
+import { ShareButtons } from "@/app/blog/[slug]/share-buttons";
+import { ArticleEarlyAccessCTA } from "./_components/article-early-access-cta";
+import { FloatingCTA } from "./_components/floating-cta";
 import {
   fetchRelatedArticles,
   RelatedArticles,
 } from "./_components/related-articles";
+
+const SITE_BASE_URL =
+  process.env.NEXT_PUBLIC_SITE_URL ?? "https://www.newsimpactscreener.com";
+
+function clampText(s: string, max: number): string {
+  const t = s.trim().replace(/\s+/g, " ");
+  if (t.length <= max) return t;
+  return t.slice(0, max - 1).trimEnd() + "…";
+}
 
 type ArticleRow = {
   id: number;
@@ -587,6 +600,8 @@ function AnalyticsRegion({
   storyKeyPoints,
   tickerSentiment,
   tickerRelationships,
+  ctaTickers,
+  ctaArticle,
 }: {
   clusterProfile: Array<{
     id: string;
@@ -606,6 +621,8 @@ function AnalyticsRegion({
     score: number;
     reason: string;
   }>;
+  ctaTickers: string[];
+  ctaArticle: { slug: string; id: number; title: string };
 }) {
   return (
     <div className="space-y-12">
@@ -637,6 +654,8 @@ function AnalyticsRegion({
             </div>
           </div>
         </section>
+
+        <ArticleEarlyAccessCTA tickers={ctaTickers} article={ctaArticle} />
 
         <section>
           <Eyebrow
@@ -691,6 +710,72 @@ function AnalyticsRegion({
         </section>
     </div>
   );
+}
+
+type ArticleMetaRow = {
+  slug: string | null;
+  title: string | null;
+  image_url: string | null;
+  publisher: string | null;
+  published_at: string | null;
+  created_at: string;
+  search_tags: string[] | null;
+};
+
+export async function generateMetadata({
+  params,
+}: {
+  params: Promise<{ slug?: string }>;
+}): Promise<Metadata> {
+  const slug = String((await params)?.slug ?? "").trim();
+  if (!slug) return { title: "Article not found | News Impact Screener" };
+
+  const dataClient = await createServerDataClient();
+  const { data: article } = await dataClient
+    .schema("swingtrader")
+    .from("news_articles")
+    .select("slug, title, image_url, publisher, published_at, created_at, search_tags")
+    .eq("slug", slug)
+    .single<ArticleMetaRow>();
+
+  if (!article?.title) {
+    return { title: "Article not found | News Impact Screener" };
+  }
+
+  const canonical = `/articles/${slug}`;
+  const tickers = (article.search_tags ?? [])
+    .filter((t) => /^[A-Z]{1,6}$/.test(t))
+    .slice(0, 3);
+  const tickerHint = tickers.length
+    ? ` Tracked tickers: ${tickers.join(", ")}.`
+    : "";
+  const description = clampText(
+    `News-impact analysis of "${article.title}" — which stocks the story moves, the key claims, sentiment, and market reaction, scored by News Impact Screener.${tickerHint}`,
+    160,
+  );
+  const title = clampText(`${article.title} | News Impact Screener`, 70);
+  const publishedTime = article.published_at ?? article.created_at;
+  const images = article.image_url ? [{ url: article.image_url }] : undefined;
+
+  return {
+    title,
+    description,
+    alternates: { canonical },
+    openGraph: {
+      type: "article",
+      title: article.title,
+      description,
+      url: canonical,
+      publishedTime,
+      images,
+    },
+    twitter: {
+      card: "summary_large_image",
+      title: article.title,
+      description,
+      images: article.image_url ? [article.image_url] : undefined,
+    },
+  };
 }
 
 async function ArticleData({ params }: { params: Promise<{ slug?: string }> }) {
@@ -796,11 +881,43 @@ async function ArticleData({ params }: { params: Promise<{ slug?: string }> }) {
     limit: 6,
     windowDays: 30,
   });
-  const siteBaseUrl =
-    process.env.NEXT_PUBLIC_SITE_URL ?? "https://newsimpactscreener.com";
+  const siteBaseUrl = SITE_BASE_URL;
+  const canonicalUrl = `${siteBaseUrl.replace(/\/$/, "")}/articles/${article.slug ?? slug}`;
+  // Tickers carried by this story — drive the conversion CTA's "track these".
+  const ctaTickers = [
+    ...new Set([
+      ...tickerSentiment.map((t) => t.ticker),
+      ...searchTags.filter((t) => /^[A-Z]{1,6}$/.test(t)),
+    ]),
+  ].slice(0, 4);
+
+  // NewsArticle structured data — lets Google render this as a news result and
+  // attributes the analysis to us while crediting the original source.
+  const articleJsonLd = {
+    "@context": "https://schema.org",
+    "@type": "NewsArticle",
+    headline: clampText(article.title || "Untitled article", 110),
+    image: article.image_url ? [article.image_url] : undefined,
+    datePublished: publishedIso,
+    url: canonicalUrl,
+    mainEntityOfPage: { "@type": "WebPage", "@id": canonicalUrl },
+    publisher: {
+      "@type": "Organization",
+      name: "News Impact Screener",
+    },
+    isBasedOn: article.url || undefined,
+    description: clampText(
+      `News-impact analysis: which stocks "${article.title}" moves, key claims, sentiment, and market reaction.`,
+      200,
+    ),
+  };
 
   return (
     <div className="mx-auto w-full max-w-5xl px-4 py-8 sm:px-6 sm:py-10">
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{ __html: JSON.stringify(articleJsonLd) }}
+      />
       <div className="mb-8">
         <Link
           href="/articles"
@@ -816,67 +933,39 @@ async function ArticleData({ params }: { params: Promise<{ slug?: string }> }) {
           label={article.publisher || "Unknown source"}
           meta={`${formatUTC(publishedIso)} UTC · ${formatAgeSince(publishedIso)}`}
         />
+        {/* Headline stays on-page (no out-link) so search visitors land in the
+            analysis instead of bouncing straight to the third-party source. */}
         <h1 className="text-3xl font-bold leading-[1.05] tracking-tight md:text-5xl">
+          {article.title || "Untitled article"}
+        </h1>
+
+        <div className="mt-5 flex flex-wrap items-center justify-between gap-x-6 gap-y-3">
+          <ShareButtons title={article.title || "Article"} url={canonicalUrl} />
           {article.url ? (
             <Link
               href={article.url}
               target="_blank"
               rel="noreferrer"
-              className="transition-colors hover:text-amber-400"
+              className="group inline-flex items-center gap-2 font-mono text-[10px] uppercase tracking-[0.2em] text-muted-foreground transition-colors hover:text-amber-400"
             >
-              {article.title || "Untitled article"}
-            </Link>
-          ) : (
-            article.title || "Untitled article"
-          )}
-        </h1>
-
-        {article.url ? (
-          <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
-            <p className="font-mono text-[10px] uppercase tracking-[0.2em] text-muted-foreground">
-              Source · {article.source || article.publisher || "feed"}
-            </p>
-            <Link
-              href={article.url}
-              target="_blank"
-              rel="noreferrer"
-              className="group inline-flex items-center gap-2 rounded-md border border-border/80 bg-card/40 px-3.5 py-1.5 text-sm font-medium text-foreground transition-colors hover:border-amber-500/40 hover:bg-card/70 hover:text-amber-400"
-            >
-              Read source
+              Read original · {article.source || article.publisher || "feed"}
               <ArrowUpRight
-                size={14}
+                size={12}
                 className="transition-transform duration-200 group-hover:-translate-y-px group-hover:translate-x-px"
               />
             </Link>
-          </div>
-        ) : null}
+          ) : null}
+        </div>
 
         {article.image_url ? (
-          article.url ? (
-            <Link
-              href={article.url}
-              target="_blank"
-              rel="noreferrer"
-              aria-label={`Read source: ${article.title || "article"}`}
-              className="group relative mt-8 block overflow-hidden rounded-xl border border-border/60 bg-muted transition-colors hover:border-amber-500/40"
-            >
-              <img
-                src={article.image_url}
-                alt={article.title || "Article image"}
-                className="h-[240px] w-full object-cover transition-transform duration-200 group-hover:scale-[1.01] md:h-[420px]"
-              />
-              <div className="pointer-events-none absolute inset-0 bg-gradient-to-t from-background/40 via-transparent to-transparent" />
-            </Link>
-          ) : (
-            <div className="relative mt-8 overflow-hidden rounded-xl border border-border/60 bg-muted">
-              <img
-                src={article.image_url}
-                alt={article.title || "Article image"}
-                className="h-[240px] w-full object-cover md:h-[420px]"
-              />
-              <div className="pointer-events-none absolute inset-0 bg-gradient-to-t from-background/40 via-transparent to-transparent" />
-            </div>
-          )
+          <div className="relative mt-8 overflow-hidden rounded-xl border border-border/60 bg-muted">
+            <img
+              src={article.image_url}
+              alt={article.title || "Article image"}
+              className="h-[240px] w-full object-cover md:h-[420px]"
+            />
+            <div className="pointer-events-none absolute inset-0 bg-gradient-to-t from-background/40 via-transparent to-transparent" />
+          </div>
         ) : null}
 
         <ArticleTagsRow tags={searchTags} />
@@ -891,10 +980,18 @@ async function ArticleData({ params }: { params: Promise<{ slug?: string }> }) {
           storyKeyPoints={storyKeyPoints}
           tickerSentiment={tickerSentiment}
           tickerRelationships={tickerRelationships}
+          ctaTickers={ctaTickers}
+          ctaArticle={{
+            slug: article.slug ?? slug,
+            id: article.id,
+            title: article.title ?? "",
+          }}
         />
       </div>
 
       <RelatedArticles related={relatedArticles} baseUrl={siteBaseUrl} />
+
+      <FloatingCTA targetId="early-access" delayMs={4000} />
     </div>
   );
 }

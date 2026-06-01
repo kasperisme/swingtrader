@@ -26,6 +26,7 @@ import {
   type ArticleGridItem,
 } from "@/components/articles-grid";
 import { EarlyAccessSignupForm } from "@/components/early-access-signup-form";
+import { LandingHeroCta } from "@/components/landing-hero-cta";
 import { InstagramSection } from "@/components/instagram-section";
 import { PricingTierSwitcher } from "@/components/pricing-tier-switcher";
 import { isSanityConfigured, sanityFetch } from "@/lib/sanity/client";
@@ -382,20 +383,14 @@ export default async function Home() {
                 {heroBadgeText}
               </div>
 
-              <h1 className="mt-6 text-4xl font-bold tracking-tight sm:text-5xl lg:text-[3.25rem] lg:leading-[1.1]">
-                {heroHeadlinePart1}{" "}
-                <span className="text-amber-400">{heroHeadlineHighlight}</span>
-              </h1>
-
-              <p className="mt-5 max-w-lg text-base leading-7 text-muted-foreground sm:text-lg">
-                {heroDescription}
-              </p>
-
-              <EarlyAccessSignupForm
-                align="start"
-                idSuffix="hero"
-                source="landing-hero"
-                ctaLabel={heroPrimaryCtaLabel}
+              <LandingHeroCta
+                control={{
+                  id: "control",
+                  headline: heroHeadlinePart1,
+                  highlight: heroHeadlineHighlight,
+                  description: heroDescription,
+                  ctaLabel: heroPrimaryCtaLabel,
+                }}
               />
 
               <div className="mt-4 flex flex-wrap items-center gap-x-4 gap-y-2 text-xs">

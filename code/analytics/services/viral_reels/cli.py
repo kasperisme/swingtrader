@@ -212,6 +212,9 @@ def cmd_card(args):
         headline=args.headline,
         tag=args.tag,
         hero_image_url=args.hero_image_url,
+        # Auto-fetch a Wikipedia/Commons CEO portrait unless disabled or an
+        # explicit --hero-image-url was given.
+        fetch_ceo_photo=not args.no_ceo_photo,
         # --no-nis forces an empty list (skip the DB lookup + hide the badge);
         # otherwise auto-detect the screenings featuring this ticker.
         nis_screenings=[] if args.no_nis else None,
@@ -427,7 +430,9 @@ def main():
     p_card.add_argument("--headline", default=None, help="the big hook headline (else a placeholder)")
     p_card.add_argument("--tag", default=None, help="pill under the headline, e.g. 'Earnings Beat'")
     p_card.add_argument("--hero-image-url", default=None,
-                        help="CEO photo URL (director fetches it); falls back to the logo")
+                        help="explicit CEO photo URL; overrides the auto Wikipedia fetch")
+    p_card.add_argument("--no-ceo-photo", action="store_true",
+                        help="skip the Wikipedia/Commons CEO-portrait fetch (use the logo)")
     p_card.add_argument("--no-nis", action="store_true",
                         help="skip the NIS-screening badge lookup (hide the badge)")
     p_card.add_argument("--theme", default="midnight")

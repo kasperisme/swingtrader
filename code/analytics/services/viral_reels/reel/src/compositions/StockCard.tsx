@@ -33,11 +33,18 @@ export const StockCard: React.FC<StockCardProps> = ({spec}) => {
   const PAD = 56;
   const stats = (card.stats || []).slice(0, 4);
 
-  // NIS credibility badge — the latest screenings this ticker is featured in.
-  // Show up to two named chips; collapse the rest into a "+N" pill.
+  // NIS stamp of approval — the latest screenings this ticker cleared, rendered
+  // as a rubber-stamp seal. The ring's lower arc names the screening(s) (with
+  // the "NIS " prefix dropped, e.g. "MOMENTUM • FUNDAMENTALS").
   const nisAll = (card.nisScreenings || []).filter((s) => (s || '').trim());
-  const nisShown = nisAll.slice(0, 2);
-  const nisExtra = nisAll.length - nisShown.length;
+  const nisRingLabel = nisAll
+    .map((n) => n.replace(/^NIS\s+/i, '').toUpperCase())
+    .join(' • ');
+  // Size the lower-arc label so it always fits the ring (two screening names is
+  // long, e.g. "FUNDAMENTALS • MOMENTUM"); shrink font + tracking as it grows.
+  const nisLabelLen = nisRingLabel.length;
+  const nisBotFont = nisLabelLen > 18 ? 11.5 : nisLabelLen > 13 ? 13 : 15;
+  const nisBotLS = nisLabelLen > 18 ? 1 : nisLabelLen > 13 ? 1.4 : 2;
 
   return (
     <AbsoluteFill style={{backgroundColor: theme.bg, fontFamily: theme.fontFamily}}>
@@ -106,72 +113,54 @@ export const StockCard: React.FC<StockCardProps> = ({spec}) => {
 
       {/* ---- headline (top-left) ---- */}
       <div style={{position: 'absolute', top: PAD, left: PAD, width: width - PAD - 280}}>
-        {/* NIS screening badge(s) — credibility flag above the hook */}
-        {nisShown.length ? (
-          <div style={{display: 'flex', flexWrap: 'wrap', gap: 12, marginBottom: 22}}>
-            {nisShown.map((name, i) => (
-              <div
-                key={i}
-                style={{
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  gap: 12,
-                  padding: '11px 20px 11px 14px',
-                  borderRadius: 999,
-                  background: 'rgba(11,11,15,0.55)',
-                  border: `1.5px solid ${theme.accent}`,
-                  boxShadow: '0 10px 28px rgba(0,0,0,0.4)',
-                }}
-              >
-                <span
-                  style={{
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    width: 30,
-                    height: 30,
-                    borderRadius: 999,
-                    background: theme.accent,
-                    color: '#0B0B0F',
-                    fontWeight: 900,
-                    fontSize: 20,
-                    lineHeight: 1,
-                  }}
-                >
-                  ✓
-                </span>
-                <span
-                  style={{
-                    color: '#FFFFFF',
-                    fontWeight: 800,
-                    fontSize: 26,
-                    letterSpacing: 1,
-                    textTransform: 'uppercase',
-                    whiteSpace: 'nowrap',
-                  }}
-                >
-                  {name}
-                </span>
-              </div>
-            ))}
-            {nisExtra > 0 ? (
-              <div
-                style={{
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  padding: '11px 18px',
-                  borderRadius: 999,
-                  background: 'rgba(11,11,15,0.55)',
-                  border: `1.5px solid ${theme.accent}`,
-                  color: '#FFFFFF',
-                  fontWeight: 800,
-                  fontSize: 26,
-                  letterSpacing: 1,
-                }}
-              >
-                +{nisExtra}
-              </div>
-            ) : null}
+        {/* NIS stamp of approval — a rubber-stamp seal naming the screening(s)
+            this ticker cleared. Reads as an official "approved by the screener"
+            mark slapped above the hook. */}
+        {nisAll.length ? (
+          <div style={{marginBottom: 26}}>
+            <svg
+              width={214}
+              height={214}
+              viewBox="0 0 200 200"
+              style={{filter: 'drop-shadow(0 12px 30px rgba(0,0,0,0.5))'}}
+            >
+              <defs>
+                {/* ring-text arcs sit in the outer band (r78), just inside the
+                    outer ring — far from the centre emblem so the lettering and
+                    "APPROVED" never collide. Top arc reads over the top; bottom
+                    arc reads upright along the bottom. */}
+                <path id="nis-arc-top" d="M 22 100 A 78 78 0 0 1 178 100" fill="none" />
+                <path id="nis-arc-bot" d="M 22 100 A 78 78 0 0 0 178 100" fill="none" />
+              </defs>
+              <g transform="rotate(-7 100 100)">
+                {/* dark ink disc keeps the stamp legible over any photo */}
+                <circle cx="100" cy="100" r="94" fill="rgba(11,11,15,0.62)" />
+                {/* outer ring + a tight inner ring around the centre emblem */}
+                <circle cx="100" cy="100" r="92" fill="none" stroke={theme.accent} strokeWidth="3" />
+                <circle cx="100" cy="100" r="60" fill="none" stroke={theme.accent} strokeWidth="1.5" opacity="0.85" />
+                {/* ring lettering */}
+                <text fill={theme.accent} fontFamily={theme.fontFamily} fontWeight={800} fontSize="13" letterSpacing="2">
+                  <textPath href="#nis-arc-top" startOffset="50%" textAnchor="middle">
+                    NEWS IMPACT SCREENER
+                  </textPath>
+                </text>
+                {nisRingLabel ? (
+                  <text fill={theme.accent} fontFamily={theme.fontFamily} fontWeight={800} fontSize={nisBotFont} letterSpacing={nisBotLS}>
+                    <textPath href="#nis-arc-bot" startOffset="50%" textAnchor="middle">
+                      {nisRingLabel}
+                    </textPath>
+                  </text>
+                ) : null}
+                {/* dot separators where the two arcs meet */}
+                <circle cx="22" cy="100" r="2.4" fill={theme.accent} />
+                <circle cx="178" cy="100" r="2.4" fill={theme.accent} />
+                {/* centre mark (kept inside the inner ring) */}
+                <text x="100" y="92" textAnchor="middle" fill={theme.accent} fontSize="42" fontWeight={900}>✓</text>
+                <text x="100" y="118" textAnchor="middle" fill={theme.accent} fontFamily={theme.fontFamily} fontWeight={900} fontSize="15" letterSpacing="2">
+                  APPROVED
+                </text>
+              </g>
+            </svg>
           </div>
         ) : null}
         <div

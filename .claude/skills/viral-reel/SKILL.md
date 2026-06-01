@@ -18,7 +18,9 @@ vertical reel that conveys its entire point through the animation alone. Python
 fetches the data, Remotion renders the video — **you** make the editorial calls:
 which story, which metric, which events. The reel carries **no burned-in
 hook/takeaway text** (that's added later in Instagram/edits); your job is to pick
-the most surprising, change-rich story and let the visualization tell it.
+the most surprising, change-rich story, let the visualization tell it, **and
+write the post caption** that frames it (step 5) — the hook and takeaway live in
+the caption, not on the pixels.
 
 Service: `code/analytics/services/viral_reels/` · Renderer: `.../viral_reels/reel/`
 Read its `README.md` once before your first run.
@@ -150,8 +152,9 @@ output/viral_reels/
       catalysts.json  candidates.json  fmp_news.json  fmp_press.json  overlay.json
     spec.json               # the assembled ReelSpec you build
     reel.mp4                # the render (defaults next to its spec)
+    caption.md              # the post caption you write (step 5)
   race/                     # bar-chart-race reels (not ticker-scoped)
-    reel_spec.json  reel.mp4
+    reel_spec.json  reel.mp4  caption.md
 ```
 
 The CLI defaults every artifact into this tree (ticker commands → `<TICKER>/…`,
@@ -231,7 +234,32 @@ python -m services.viral_reels.cli render   output/viral_reels/reel_spec.json --
 ```
 First render only: `cd services/viral_reels/reel && npm install`.
 
-Then surface the MP4 to the user (use SendUserFile) and summarize the story.
+### 5. Write the reel caption
+The reel ships with **no on-screen words**, so the post caption carries the hook,
+the story, and the takeaway. Always produce one as the final deliverable and save
+it next to the reel:
+
+`output/viral_reels/<TICKER>/caption.md`  (race reels → `race/<subject>/caption.md`)
+
+Structure — caveman-tight, written assuming the viewer only reads line 1:
+- **Hook** — line 1, ≤125 chars (IG/TikTok truncate there). The single most
+  surprising thing the reel shows; lead with the number/turn, not the setup.
+- **The arc** — 2–4 short lines walking the story the animation tells
+  (setup → catalyst → reaction → resolution); one news→price beat per line.
+- **Takeaway** — the so-what: actionable and slightly contrarian (brand voice).
+- **CTA** — point at the product, e.g. `Scored headlines → newsimpactscreener.com`.
+- **Hashtags** — 5–10, broad + niche, and the **cashtag** (`$TER`) since IG/X
+  index it: `#swingtrading #stockmarket $TER #Teradyne #AItrading …`.
+- **Disclaimer** — one line: `Not financial advice.` (finance content needs it.)
+
+Rules: every number/date/ticker **verbatim from the spec** — never invent a price
+or move the reel doesn't show; active voice, no hedging; emoji sparingly (1–3, to
+mark beats, not decorate); keep the whole thing skimmable on a phone. Match the
+caption's beats to what's actually on screen so a viewer reading while watching
+sees them line up.
+
+Then surface **both** the MP4 and the caption to the user (use SendUserFile for
+the video) and summarize the story.
 
 ## Design principles (r/dataisbeautiful, applied)
 

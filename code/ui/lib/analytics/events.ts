@@ -26,6 +26,7 @@ type EventMap = {
   feature_viewed: { feature: string };
 
   waitlist_joined: { source: string };
+  cta_exposed: { cta: string; variant: string };
   checkout_initiated: { plan: string; interval: string };
   api_key_created: { scopes: string[] };
   api_key_revoked: Record<string, never>;

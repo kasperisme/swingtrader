@@ -1023,6 +1023,80 @@ def company_profile(ticker: str) -> dict[str, Any]:
         return {}
 
 
+_WIKI_API = "https://en.wikipedia.org/w/api.php"
+_WIKI_UA = {"User-Agent": "swingtrader-reel/1.0 (newsimpactscreener.com)"}
+_CEO_IMG_CACHE: dict[tuple[str, str], str | None] = {}
+
+
+def ceo_image_url(ceo: str, company: str) -> str | None:
+    """Best-effort CEO portrait from Wikipedia / Wikimedia Commons.
+
+    Searches Wikipedia for ``"<ceo> <company>"``, takes the top hit and returns
+    its lead photo — guarded by the company name (or "chief executive"/"ceo")
+    appearing in the page intro so we never grab a same-named actor or a
+    list/disambiguation page. Returns ``None`` when there's no confident,
+    license-clean match (e.g. small/mid-cap CEOs with no Wikipedia page); the
+    card then falls back to the company logo. Covers marquee names (Huang, Cook)
+    automatically; pass ``--hero-image-url`` to force a portrait for the rest.
+    """
+    ceo = (ceo or "").strip()
+    company = (company or "").strip()
+    if not ceo:
+        return None
+    key = (ceo.lower(), company.lower())
+    if key in _CEO_IMG_CACHE:
+        return _CEO_IMG_CACHE[key]
+
+    result: str | None = None
+    try:
+        search = requests.get(
+            _WIKI_API,
+            headers=_WIKI_UA,
+            params={
+                "action": "query",
+                "list": "search",
+                "srsearch": f"{ceo} {company}".strip(),
+                "srlimit": 3,
+                "format": "json",
+            },
+            timeout=15,
+        ).json()
+        hits = search.get("query", {}).get("search", [])
+        if hits:
+            title = hits[0]["title"]
+            page = requests.get(
+                _WIKI_API,
+                headers=_WIKI_UA,
+                params={
+                    "action": "query",
+                    "titles": title,
+                    "prop": "pageimages|extracts",
+                    "piprop": "thumbnail",
+                    "pithumbsize": 1080,
+                    "exintro": 1,
+                    "explaintext": 1,
+                    "format": "json",
+                },
+                timeout=15,
+            ).json()
+            pages = page.get("query", {}).get("pages", {})
+            p = next(iter(pages.values()), {})
+            extract = (p.get("extract") or "").lower()
+            img = (p.get("thumbnail") or {}).get("source")
+            # Disambiguation guard: the page intro must tie to the company or a
+            # CEO role, else the search matched the wrong person/page.
+            token = company.split(",")[0].split()[0].lower() if company else ""
+            ok = (token and token in extract) or "chief executive" in extract or "ceo" in extract
+            if img and ok:
+                result = img
+    except Exception as exc:  # noqa: BLE001 — portrait is best-effort
+        log.warning("ceo_image_url(%s, %s) failed: %s", ceo, company, exc)
+        result = None
+
+    _CEO_IMG_CACHE[key] = result
+    return result
+
+
 def fmp_quote(ticker: str) -> dict[str, Any]:
     """FMP full quote: price, changesPercentage, marketCap, pe, eps, volume, …
 
@@ -1165,6 +1239,7 @@ def build_card(
     headline: str | None = None,
     tag: str | None = None,
     hero_image_url: str | None = None,
+    fetch_ceo_photo: bool = True,
     badge: dict[str, Any] | None = None,
     stats: list[dict[str, Any]] | None = None,
     nis_screenings: list[str] | None = None,
@@ -1175,14 +1250,25 @@ def build_card(
     and the internal :func:`news_pulse`, then fills sensible defaults the
     director edits: a 4-up stat grid, an Impact badge, and identity fields.
 
-    The **hero portrait** is left to the director: pass ``hero_image_url`` with a
-    fetched CEO photo (the eyeball.football look). When absent the renderer falls
-    back to the company logo on a branded gradient.
+    The **hero portrait** resolves in this order: an explicit ``hero_image_url``
+    (the director's own pick) → an auto-fetched Wikipedia/Commons CEO photo (when
+    ``fetch_ceo_photo``; only marquee CEOs have one) → the company logo on a
+    branded gradient (the renderer's fallback). Pass ``hero_image_url`` to force
+    a portrait for a CEO Wikipedia doesn't cover.
     """
     ticker = ticker.upper().strip()
     profile = company_profile(ticker)
     quote = fmp_quote(ticker)
     pulse = news_pulse(ticker, window_days=window_days)
+
+    company_name = (profile.get("companyName") or ticker).strip()
+    ceo_name = (profile.get("ceo") or "").strip() or None
+
+    # Hero portrait: explicit override wins; otherwise try Wikipedia/Commons for
+    # the CEO. None → the renderer uses the company logo.
+    hero = hero_image_url
+    if not hero and fetch_ceo_photo and ceo_name:
+        hero = ceo_image_url(ceo_name, company_name)
 
     if stats is None:
         stats = []
@@ -1217,14 +1303,14 @@ def build_card(
 
     return {
         "ticker": ticker,
-        "company": (profile.get("companyName") or ticker).strip(),
-        "ceo": (profile.get("ceo") or "").strip() or None,
+        "company": company_name,
+        "ceo": ceo_name,
         "sector": (profile.get("sector") or "").strip() or None,
         "exchange": (profile.get("exchangeShortName") or "").strip() or None,
         "logoUrl": profile.get("image"),
-        # Director fetches a CEO photo and passes it; else the renderer uses the
-        # logo as the centrepiece on a branded gradient.
-        "heroImageUrl": hero_image_url,
+        # Resolved above: explicit URL → auto CEO photo → None (renderer uses the
+        # logo on a branded gradient).
+        "heroImageUrl": hero,
         "headline": (headline or "<EDIT: the hook headline>").strip(),
         "tag": (tag or "").strip() or None,
         "badge": badge,
