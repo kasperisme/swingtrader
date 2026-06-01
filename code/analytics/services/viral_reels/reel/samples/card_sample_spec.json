@@ -1,0 +1,26 @@
+{
+  "version": 1,
+  "format": {"width": 1080, "height": 1350, "fps": 30, "durationInSeconds": 6},
+  "theme": "midnight",
+  "card": {
+    "ticker": "NVDA",
+    "company": "NVIDIA Corporation",
+    "ceo": "Jensen Huang",
+    "sector": "Technology",
+    "exchange": "NASDAQ",
+    "logoUrl": "https://financialmodelingprep.com/image-stock/NVDA.png",
+    "heroImageUrl": null,
+    "headline": "NVIDIA Smashes Q1 Earnings",
+    "tag": "Earnings Beat",
+    "badge": {"label": "Impact", "value": "9.2", "tone": "positive"},
+    "stats": [
+      {"label": "Price", "value": "$1,180"},
+      {"label": "Change", "value": "+12.4%"},
+      {"label": "Market Cap", "value": "$2.9T"},
+      {"label": "News (14d)", "value": "47"}
+    ],
+    "cta": "Swipe to Watch",
+    "footer": "newsimpactscreener.com"
+  },
+  "sources": ["News Impact Screener", "Financial Modeling Prep"]
+}

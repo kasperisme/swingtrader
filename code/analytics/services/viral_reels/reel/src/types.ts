@@ -138,3 +138,49 @@ export interface PriceNewsSpec {
 export type PriceNewsProps = {
   spec: PriceNewsSpec;
 };
+
+// ---------------------------------------------------------------------------
+// Format 3: Stock card — a still poster (CEO/hero portrait + company logo + a
+// rating badge + headline + a stat grid), in the style of eyeball.football's
+// player cards. Rendered as a single PNG via Remotion `still`.
+// ---------------------------------------------------------------------------
+
+export interface CardStat {
+  label: string;
+  value: string;
+  sub?: string; // optional small line under the value
+}
+
+export interface CardBadge {
+  label?: string; // small caption, e.g. "Impact"
+  value: string; // the big number/word, e.g. "9.2"
+  tone?: 'positive' | 'negative' | 'neutral';
+}
+
+export interface CardSpec {
+  ticker: string;
+  company: string;
+  ceo?: string;
+  sector?: string;
+  exchange?: string;
+  logoUrl?: string;
+  heroImageUrl?: string; // CEO photo the director fetches; falls back to logo
+  headline: string; // big top hook (rendered uppercase)
+  tag?: string; // pill under the headline, e.g. "EARNINGS"
+  badge?: CardBadge; // top-right rating
+  stats: CardStat[]; // 1–4 stat cards
+  cta?: string; // e.g. "Swipe to Watch"
+  footer?: string; // e.g. "newsimpactscreener.com"
+}
+
+export interface CardReelSpec {
+  version: number;
+  format: ReelFormat;
+  theme: string;
+  card: CardSpec;
+  sources?: string[];
+}
+
+export type StockCardProps = {
+  spec: CardReelSpec;
+};

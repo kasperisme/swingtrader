@@ -1,7 +1,8 @@
-"""NIS Fundamentals — Buffett-style quality screen over the S&P 500.
+"""NIS Fundamentals — Buffett-style quality screen over the NYSE + NASDAQ.
 
-Identifies the ~30 S&P 500 companies that pass every Buffett-style quality
-gate:
+Universe is the full NYSE + NASDAQ listing (same source as NIS Momentum),
+minus the excluded sectors. Identifies the ~30 companies that pass every
+Buffett-style quality gate:
 
   • 10y avg ROE  ≥ 15%
   • 10y avg ROIC ≥ 12%
@@ -31,24 +32,31 @@ _SUMMARY_TOP_N = 25  # cap symbols in the Telegram summary for readability
 
 
 def run(client, screening: dict) -> ScreeningResult:  # noqa: ARG001 — FMP/REST is the data source
+    import pandas as pd
+
     bq = NISFundamentals()
 
-    # ── Universe: S&P 500 minus excluded sectors ───────────────────────────
-    sp500 = bq.fmp.sp500tickers()
-    if sp500.empty or "symbol" not in sp500.columns:
-        log.error("[nis_fundamentals] sp500tickers() returned no data")
+    # ── Universe: full NYSE + NASDAQ minus excluded sectors ────────────────
+    # Same listing source as NIS Momentum (see nis_momentum.py step 1).
+    df_col = []
+    for exch in ("NYSE", "NASDAQ"):
+        df_col.append(bq.fmp.exchange_tickers(exch))
+    universe = pd.concat(df_col, axis=0).dropna(subset=["symbol"])
+    universe = universe.drop_duplicates(subset=["symbol"])
+    if universe.empty or "symbol" not in universe.columns:
+        log.error("[nis_fundamentals] exchange_tickers() returned no data")
         return ScreeningResult(
             triggered=False,
-            summary="No S&P 500 universe data available.",
+            summary="No NYSE/NASDAQ universe data available.",
             ticker_count=0,
             data_used={"universe_size": 0, "passed": 0},
             error="empty_universe",
         )
 
-    pre_count = len(sp500)
-    if "sector" in sp500.columns:
-        sp500 = sp500[~sp500["sector"].isin(EXCLUDED_SECTORS)]
-    tickers = sp500["symbol"].dropna().tolist()
+    pre_count = len(universe)
+    if "sector" in universe.columns:
+        universe = universe[~universe["sector"].isin(EXCLUDED_SECTORS)]
+    tickers = universe["symbol"].dropna().tolist()
     log.info(
         "[nis_fundamentals] universe: %d → %d after sector exclusion",
         pre_count, len(tickers),
@@ -70,10 +78,15 @@ def run(client, screening: dict) -> ScreeningResult:  # noqa: ARG001 — FMP/RES
         )
 
     # Decorate with sector metadata for the gallery + Telegram summary.
-    sector_lookup = dict(zip(sp500["symbol"], sp500.get("sector", [])))
+    sector_lookup = dict(zip(universe["symbol"], universe.get("sector", [])))
+    sub_sector_col = (
+        "subSector" if "subSector" in universe.columns
+        else "industry" if "industry" in universe.columns
+        else None
+    )
     sub_sector_lookup = (
-        dict(zip(sp500["symbol"], sp500.get("subSector", [])))
-        if "subSector" in sp500.columns else {}
+        dict(zip(universe["symbol"], universe[sub_sector_col]))
+        if sub_sector_col else {}
     )
     for row in passers:
         sym = row["symbol"]
@@ -99,7 +112,7 @@ def _format_summary(passers: list[dict], universe_size: int) -> str:
     n = len(passers)
     head = (
         f"<b>NIS Fundamentals</b>\n"
-        f"{n} S&P 500 name{'s' if n != 1 else ''} pass Buffett-quality gates "
+        f"{n} name{'s' if n != 1 else ''} pass Buffett-quality gates "
         f"(of {universe_size} screened)\n"
     )
     shown = passers[:_SUMMARY_TOP_N]

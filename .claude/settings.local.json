@@ -10,7 +10,14 @@
       "Bash(python3 *)",
       "WebFetch(domain:site.financialmodelingprep.com)",
       "Skill(taste-skill)",
-      "Bash(curl -sS -o /dev/null -w \"%{http_code}\\\\n\" http://localhost:3000/protected/screenings)"
+      "Bash(curl -sS -o /dev/null -w \"%{http_code}\\\\n\" http://localhost:3000/protected/screenings)",
+      "Bash(python -c \"from services.viral_reels import data_sources as ds, spec as s, cli; import inspect; assert '_fmt_key_or_raise' not in inspect.getsource\\(ds\\); print\\('IMPORTS_OK no-alias'\\)\")",
+      "Bash(exit 1)",
+      "Bash(mkdir -p output/viral_reels/_qa)",
+      "Bash(python -c \"import json; from services.viral_reels import spec as s; sp=s.load\\('services/viral_reels/reel/samples/card_sample_spec.json'\\); print\\('validate:', s.validate\\(sp\\)\\); json.dump\\(sp, open\\('output/viral_reels/_qa/card.json','w'\\)\\)\")",
+      "Bash(timeout 360 python -m services.viral_reels.cli render output/viral_reels/_qa/card.json)",
+      "Bash(sips -s format jpeg /tmp/snow_f.png --resampleHeight 1100 -s formatOptions 80 --out /tmp/snow_f.jpg)",
+      "Read(//tmp/**)"
     ]
   },
   "enableAllProjectMcpServers": true,

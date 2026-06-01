@@ -198,6 +198,28 @@ def cmd_price_news(args):
     _emit(spec, args.out or str(_proj_dir(args.ticker) / "spec.json"))
 
 
+def cmd_card(args):
+    """Scaffold a stock-card poster spec (CEO/hero portrait + logo + stats).
+
+    Pulls the FMP company profile + quote and the internal news pulse, fills
+    sensible defaults, and writes a card spec the director then edits (headline,
+    tag, the fetched CEO ``heroImageUrl``, badge/stat overrides). Render with
+    ``render`` — the CLI renders card specs as a single PNG.
+    """
+    card = ds.build_card(
+        args.ticker,
+        window_days=args.window_days,
+        headline=args.headline,
+        tag=args.tag,
+        hero_image_url=args.hero_image_url,
+    )
+    spec = spec_mod.build_card_spec(card=card, theme=args.theme)
+    problems = spec_mod.validate(spec)
+    if problems:
+        log.warning("card scaffold has issues:\n- %s", "\n- ".join(problems))
+    _emit(spec, args.out or str(_proj_dir(args.ticker) / "card.json"))
+
+
 def cmd_news_candidates(args):
     """Dump the full pool of plottable news events for a ticker.
 
@@ -277,6 +299,10 @@ def cmd_validate(args):
             print(f"  - {p}")
         sys.exit(1)
     print("OK — spec is valid")
+    # Non-fatal coverage check: price-news reels should plot an event every few
+    # chart ticks so the line is never empty for long.
+    for w in spec_mod.event_spacing_warnings(spec):
+        print(f"  ! coverage: {w}")
 
 
 def cmd_render(args):
@@ -291,9 +317,14 @@ def cmd_render(args):
         for p in problems:
             print(f"  - {p}", file=sys.stderr)
         sys.exit(1)
+    for w in spec_mod.event_spacing_warnings(spec):
+        log.warning("event coverage: %s", w)
 
-    # Default the render next to its spec (e.g. output/viral_reels/NVDA/reel.mp4).
-    out_path = pathlib.Path(args.out or (spec_path.parent / "reel.mp4")).resolve()
+    still = spec_mod.is_still(spec)
+    # Default the render next to its spec — a PNG for card (still) specs, else
+    # the reel mp4.
+    default_name = "card.png" if still else "reel.mp4"
+    out_path = pathlib.Path(args.out or (spec_path.parent / default_name)).resolve()
     out_path.parent.mkdir(parents=True, exist_ok=True)
 
     if not (_REEL_DIR / "node_modules").exists():
@@ -312,10 +343,13 @@ def cmd_render(args):
     props_path.write_text(json.dumps({"spec": spec}))
 
     composition = args.composition or spec_mod.composition_for(spec)
+    # Card specs are single posters → `remotion still`; everything else is a
+    # video → `remotion render`.
+    verb = "still" if still else "render"
     cmd = [
         "npx",
         "remotion",
-        "render",
+        verb,
         "src/index.ts",
         composition,
         str(out_path),
@@ -333,16 +367,16 @@ def main():
     sub = parser.add_subparsers(dest="command")
 
     p_stories = sub.add_parser("stories", help="Rank candidate viral stories")
-    p_stories.add_argument("--window-days", type=int, default=14)
+    p_stories.add_argument("--window-days", type=int, default=30)
     p_stories.add_argument("--out", default=None)
 
     p_snap = sub.add_parser("snapshot", help="Cluster/dimension movers snapshot")
-    p_snap.add_argument("--window-days", type=int, default=14)
+    p_snap.add_argument("--window-days", type=int, default=30)
     p_snap.add_argument("--out", default=None)
 
     p_series = sub.add_parser("series", help="Build race keyframes")
     p_series.add_argument("--kind", choices=list(ds.SERIES_BUILDERS), required=True)
-    p_series.add_argument("--window-days", type=int, default=21)
+    p_series.add_argument("--window-days", type=int, default=30)
     p_series.add_argument("--top", type=int, default=8)
     p_series.add_argument("--value-mode", choices=ds.VALUE_MODES, default="cumulative_articles")
     p_series.add_argument("--tickers", default=None, help="comma list (ticker kind only)")
@@ -354,7 +388,7 @@ def main():
     p_prices.add_argument("--out", default=None)
 
     p_hl = sub.add_parser("headlines", help="Top article headlines behind a window (UI-styled cards)")
-    p_hl.add_argument("--window-days", type=int, default=21)
+    p_hl.add_argument("--window-days", type=int, default=30)
     p_hl.add_argument("--limit", type=int, default=8)
     p_hl.add_argument("--dimension-key", default=None, help="rank by load on this dimension")
     p_hl.add_argument("--tickers", default=None, help="comma list to scope by ticker")
@@ -362,7 +396,7 @@ def main():
 
     p_scaf = sub.add_parser("scaffold", help="Build a starter ReelSpec to edit")
     p_scaf.add_argument("--kind", choices=list(ds.SERIES_BUILDERS), default="cluster")
-    p_scaf.add_argument("--window-days", type=int, default=21)
+    p_scaf.add_argument("--window-days", type=int, default=30)
     p_scaf.add_argument("--top", type=int, default=8)
     p_scaf.add_argument("--value-mode", choices=ds.VALUE_MODES, default="cumulative_articles")
     p_scaf.add_argument("--theme", default="midnight")
@@ -382,6 +416,18 @@ def main():
     p_pn.add_argument("--theme", default="midnight")
     p_pn.add_argument("--out", default=None,
                       help="defaults to output/viral_reels/<TICKER>/spec.json")
+
+    p_card = sub.add_parser("card",
+                            help="Scaffold a stock-card poster (CEO/hero portrait + logo + stats)")
+    p_card.add_argument("--ticker", required=True)
+    p_card.add_argument("--window-days", type=int, default=14, help="window for the news pulse")
+    p_card.add_argument("--headline", default=None, help="the big hook headline (else a placeholder)")
+    p_card.add_argument("--tag", default=None, help="pill under the headline, e.g. 'Earnings Beat'")
+    p_card.add_argument("--hero-image-url", default=None,
+                        help="CEO photo URL (director fetches it); falls back to the logo")
+    p_card.add_argument("--theme", default="midnight")
+    p_card.add_argument("--out", default=None,
+                        help="defaults to output/viral_reels/<TICKER>/card.json")
 
     p_nc = sub.add_parser("news-candidates",
                           help="Dump the full pool of plottable news events (director picks from this)")
@@ -433,6 +479,7 @@ def main():
         "article-images": cmd_article_images,
         "scaffold": cmd_scaffold,
         "price-news": cmd_price_news,
+        "card": cmd_card,
         "news-candidates": cmd_news_candidates,
         "catalysts": cmd_catalysts,
         "fmp-news": cmd_fmp_news,

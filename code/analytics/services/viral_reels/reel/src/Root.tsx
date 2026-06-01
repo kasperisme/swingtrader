@@ -2,12 +2,15 @@ import React from 'react';
 import {Composition} from 'remotion';
 import {BarChartRace} from './compositions/BarChartRace';
 import {PriceNewsChart} from './compositions/PriceNewsChart';
-import {ReelSpec, PriceNewsSpec} from './types';
+import {StockCard} from './compositions/StockCard';
+import {ReelSpec, PriceNewsSpec, CardReelSpec} from './types';
 import sampleSpec from '../samples/sample_spec.json';
 import priceNewsSample from '../samples/price_news_sample_spec.json';
+import cardSample from '../samples/card_sample_spec.json';
 
 const spec = sampleSpec as unknown as ReelSpec;
 const priceSpec = priceNewsSample as unknown as PriceNewsSpec;
+const cardSpec = cardSample as unknown as CardReelSpec;
 
 const metaFromFormat = (f: {durationInSeconds: number; fps: number; width: number; height: number}) => ({
   durationInFrames: Math.round(f.durationInSeconds * f.fps),
@@ -37,6 +40,16 @@ export const RemotionRoot: React.FC = () => {
         width={priceSpec.format.width}
         height={priceSpec.format.height}
         durationInFrames={Math.round(priceSpec.format.durationInSeconds * priceSpec.format.fps)}
+        calculateMetadata={({props}) => metaFromFormat(props.spec.format)}
+      />
+      <Composition
+        id="StockCard"
+        component={StockCard}
+        defaultProps={{spec: cardSpec}}
+        fps={cardSpec.format.fps}
+        width={cardSpec.format.width}
+        height={cardSpec.format.height}
+        durationInFrames={Math.round(cardSpec.format.durationInSeconds * cardSpec.format.fps)}
         calculateMetadata={({props}) => metaFromFormat(props.spec.format)}
       />
     </>

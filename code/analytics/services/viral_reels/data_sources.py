@@ -184,7 +184,7 @@ def _window_floor(window_days: int) -> str:
 
 
 def cluster_series(
-    window_days: int = 14,
+    window_days: int = 30,
     value_mode: str = "cumulative_articles",
 ) -> list[dict[str, Any]]:
     """Bar-chart-race keyframes for the 9 impact clusters."""
@@ -211,7 +211,7 @@ def cluster_series(
 
 
 def dimension_series(
-    window_days: int = 14,
+    window_days: int = 30,
     top_k: int = 8,
     value_mode: str = "cumulative_articles",
 ) -> list[dict[str, Any]]:
@@ -239,7 +239,7 @@ def dimension_series(
 
 
 def ticker_series(
-    window_days: int = 14,
+    window_days: int = 30,
     top_k: int = 8,
     value_mode: str = "cumulative_articles",
     tickers: list[str] | None = None,
@@ -865,7 +865,7 @@ def align_first_event_to_second_point(chart: dict[str, Any], lead: int = 1) -> d
 
 
 def headlines(
-    window_days: int = 14,
+    window_days: int = 30,
     limit: int = 5,
     dimension_key: str | None = None,
     tickers: list[str] | None = None,
@@ -963,11 +963,203 @@ def article_images(ids: list[int]) -> list[dict[str, Any]]:
 
 
 # ---------------------------------------------------------------------------
+# Stock card (poster) — CEO/hero portrait + logo + headline + stat cards
+# ---------------------------------------------------------------------------
+
+
+def _fmt_money(n: Any) -> str | None:
+    """Compact currency, e.g. 1.23e12 -> '$1.2T', 950_000 -> '$950.0K'."""
+    if n is None:
+        return None
+    try:
+        v = float(n)
+    except (TypeError, ValueError):
+        return None
+    for unit, div in (("T", 1e12), ("B", 1e9), ("M", 1e6), ("K", 1e3)):
+        if abs(v) >= div:
+            return f"${v / div:.1f}{unit}"
+    return f"${v:,.0f}"
+
+
+def _fmt_pct(n: Any) -> str | None:
+    if n is None:
+        return None
+    try:
+        return f"{float(n):+.2f}%"
+    except (TypeError, ValueError):
+        return None
+
+
+def _fmt_price(n: Any) -> str | None:
+    if n is None:
+        return None
+    try:
+        v = float(n)
+    except (TypeError, ValueError):
+        return None
+    return f"${v:,.0f}" if abs(v) >= 1000 else f"${v:.2f}"
+
+
+def company_profile(ticker: str) -> dict[str, Any]:
+    """FMP company profile: name, logo image, CEO, sector, exchange, …
+
+    Best-effort: returns ``{}`` on any failure so the card still builds from
+    director-supplied copy. Uses the v3 ``profile/{ticker}`` endpoint.
+    """
+    ticker = ticker.upper().strip()
+    try:
+        resp = requests.get(
+            f"https://financialmodelingprep.com/api/v3/profile/{ticker}",
+            params={"apikey": _fmp_key()},
+            timeout=30,
+        )
+        if resp.status_code != 200:
+            log.warning("FMP profile %s returned %s", ticker, resp.status_code)
+            return {}
+        rows = resp.json() or []
+        return rows[0] if rows else {}
+    except Exception as exc:  # noqa: BLE001 — enrichment is best-effort
+        log.warning("FMP profile %s failed: %s", ticker, exc)
+        return {}
+
+
+def fmp_quote(ticker: str) -> dict[str, Any]:
+    """FMP full quote: price, changesPercentage, marketCap, pe, eps, volume, …
+
+    Best-effort: returns ``{}`` on failure. Uses the v3 ``quote/{ticker}`` path.
+    """
+    ticker = ticker.upper().strip()
+    try:
+        resp = requests.get(
+            f"https://financialmodelingprep.com/api/v3/quote/{ticker}",
+            params={"apikey": _fmp_key()},
+            timeout=30,
+        )
+        if resp.status_code != 200:
+            log.warning("FMP quote %s returned %s", ticker, resp.status_code)
+            return {}
+        rows = resp.json() or []
+        return rows[0] if rows else {}
+    except Exception as exc:  # noqa: BLE001
+        log.warning("FMP quote %s failed: %s", ticker, exc)
+        return {}
+
+
+def news_pulse(ticker: str, window_days: int = 14) -> dict[str, Any]:
+    """Internal news-impact pulse for a ticker over the window.
+
+    Aggregates ``ticker_sentiment_heads_v`` into article volume + mean
+    sentiment and derives an advisory 0–10 ``impactScore`` (the on-brand analog
+    to eyeball.football's rating). The score is directional: neutral ≈ 5, strong
+    bullish coverage ≈ 10, strong bearish ≈ 0. Heuristic — the director can
+    override the badge per card.
+    """
+    client, schema = _supabase()
+    since = datetime.now(timezone.utc) - timedelta(days=window_days)
+    rows = (
+        client.schema(schema)
+        .table("ticker_sentiment_heads_v")
+        .select("sentiment_score,published_at")
+        .eq("ticker", ticker.upper().strip())
+        .gte("published_at", since.isoformat())
+        .limit(5000)
+        .execute()
+        .data
+        or []
+    )
+    scores = [float(r.get("sentiment_score") or 0) for r in rows if r.get("sentiment_score") is not None]
+    count = len(scores)
+    avg = sum(scores) / count if count else 0.0
+    pos = sum(1 for s in scores if s > 0.05)
+    vol_factor = min(count / 30.0, 1.0)
+    raw = 5.0 + avg * 4.0 + vol_factor
+    score = round(max(0.0, min(10.0, raw)), 1)
+    return {
+        "ticker": ticker.upper().strip(),
+        "windowDays": window_days,
+        "newsCount": count,
+        "avgSentiment": _round(avg),
+        "posShare": _round(pos / count) if count else 0.0,
+        "impactScore": score,
+    }
+
+
+def build_card(
+    ticker: str,
+    window_days: int = 14,
+    *,
+    headline: str | None = None,
+    tag: str | None = None,
+    hero_image_url: str | None = None,
+    badge: dict[str, Any] | None = None,
+    stats: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    """Assemble the data half of a stock-card spec for a ticker.
+
+    Pulls the FMP company profile (name/logo/CEO/sector) + quote (price stats)
+    and the internal :func:`news_pulse`, then fills sensible defaults the
+    director edits: a 4-up stat grid, an Impact badge, and identity fields.
+
+    The **hero portrait** is left to the director: pass ``hero_image_url`` with a
+    fetched CEO photo (the eyeball.football look). When absent the renderer falls
+    back to the company logo on a branded gradient.
+    """
+    ticker = ticker.upper().strip()
+    profile = company_profile(ticker)
+    quote = fmp_quote(ticker)
+    pulse = news_pulse(ticker, window_days=window_days)
+
+    if stats is None:
+        stats = []
+        price = _fmt_price(quote.get("price"))
+        if price:
+            stats.append({"label": "Price", "value": price})
+        chg = _fmt_pct(quote.get("changesPercentage"))
+        if chg:
+            stats.append({"label": "Change", "value": chg})
+        mc = _fmt_money(quote.get("marketCap") or profile.get("mktCap"))
+        if mc:
+            stats.append({"label": "Market Cap", "value": mc})
+        pe = quote.get("pe")
+        if pe is not None:
+            try:
+                stats.append({"label": "P/E", "value": f"{float(pe):.1f}"})
+            except (TypeError, ValueError):
+                pass
+        stats.append({"label": "News (14d)", "value": str(pulse["newsCount"])})
+        stats = stats[:4]
+
+    if badge is None:
+        avg = pulse["avgSentiment"]
+        tone = "positive" if avg > 0.05 else "negative" if avg < -0.05 else "neutral"
+        badge = {"label": "Impact", "value": f'{pulse["impactScore"]:.1f}', "tone": tone}
+
+    return {
+        "ticker": ticker,
+        "company": (profile.get("companyName") or ticker).strip(),
+        "ceo": (profile.get("ceo") or "").strip() or None,
+        "sector": (profile.get("sector") or "").strip() or None,
+        "exchange": (profile.get("exchangeShortName") or "").strip() or None,
+        "logoUrl": profile.get("image"),
+        # Director fetches a CEO photo and passes it; else the renderer uses the
+        # logo as the centrepiece on a branded gradient.
+        "heroImageUrl": hero_image_url,
+        "headline": (headline or "<EDIT: the hook headline>").strip(),
+        "tag": (tag or "").strip() or None,
+        "badge": badge,
+        "stats": stats,
+        "cta": "Swipe to Watch",
+        "footer": "newsimpactscreener.com",
+        "pulse": pulse,
+    }
+
+
+# ---------------------------------------------------------------------------
 # Inspection helpers (for the director to eyeball what's moving)
 # ---------------------------------------------------------------------------
 
 
-def trend_snapshot(window_days: int = 14) -> dict[str, Any]:
+def trend_snapshot(window_days: int = 30) -> dict[str, Any]:
     """Compact cluster + dimension snapshot for picking a story.
 
     Returns the latest level and the change-over-window for each cluster and

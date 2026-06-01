@@ -24,7 +24,7 @@ def _cumulative_leaders(keyframes: list[dict], n: int = 5) -> list[dict]:
     return last[:n]
 
 
-def find_stories(window_days: int = 14, max_stories: int = 6) -> list[dict[str, Any]]:
+def find_stories(window_days: int = 30, max_stories: int = 6) -> list[dict[str, Any]]:
     """Return ranked candidate stories. Resilient: skips any source that errors."""
     stories: list[dict[str, Any]] = []
 

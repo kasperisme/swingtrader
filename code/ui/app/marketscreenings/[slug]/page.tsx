@@ -28,9 +28,12 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const { slug } = await params;
   const s = await getMarketScreeningBySlug(slug);
   if (!s) return { title: "Screening not found" };
+  const cadence = humanizeCron(s.schedule);
   const description =
     s.description ??
-    `${s.name} — curated swing-trading screening that runs on ${humanizeCron(s.schedule)}.`;
+    `${s.name} — curated swing-trading screening that runs ${
+      cadence.charAt(0).toLowerCase() + cadence.slice(1)
+    }.`;
   const canonical = `/marketscreenings/${s.slug}`;
   return {
     title: `${s.name} | Market Screenings`,

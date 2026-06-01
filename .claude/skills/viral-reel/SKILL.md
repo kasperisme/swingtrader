@@ -55,6 +55,24 @@ Read its `README.md` once before your first run.
   resolution). `news-candidates` (one headline per day + advisory `impact`) is
   the complementary day-by-day view if you want the full pool.
 
+  **Even coverage — an event every ≤3-4 chart ticks.** The whole window is the
+  reel: the price line draws point-by-point at a steady pace, so any stretch
+  with no event is dead air on screen. Whatever window you render, keep *all*
+  the chart's points (don't trim the run-up — a 30-day reel shows the full 30
+  days), and land an event at least every 3-4 trading-day **points** —
+  including from the first point to the first event, and from the last event to
+  the end. "Tick" = one price point = one trading day, so a 20-point chart needs
+  ~5-6 well-spread events as a floor, not a cap. Filler is fine: when nothing
+  big happened, plot the strongest available headline for that stretch (a
+  "Buy/Hold ahead of earnings" take, an analyst note) just to keep the line
+  populated — the catalysts still carry the story. To colour pins, mix the
+  internal `news-candidates` events (they carry AI `sentiment`) in with the FMP
+  catalyst headlines. `validate` and `render` print non-fatal `coverage:`
+  warnings for any gap over 4 ticks — clear them before shipping. And **don't**
+  call `align_first_event_to_second_point` here — it trims the opening run-up,
+  which fights "show the whole window" (it's only for the auto `price-news`
+  quick draft).
+
   **Thin internal coverage? Pull from FMP too.** The internal feed is sparse for
   some tickers (you'll see only a handful of days with news). Two extra sources
   widen it — both emit events in the same shape as `news-candidates`, with the

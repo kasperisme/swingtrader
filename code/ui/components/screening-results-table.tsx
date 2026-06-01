@@ -21,6 +21,7 @@ import {
   isNumericColumn,
   orderedDataColumnKeys,
 } from "@/app/protected/screenings/screenings-row-data";
+import { LlmAnalysisCell, isLlmAnalysis } from "@/components/llm-analysis-cell";
 
 /**
  * Slim, screen-agnostic row shape. Both user_scan_rows and
@@ -51,6 +52,7 @@ type Props = {
 };
 
 function formatHeader(key: string): string {
+  if (key === "llm_analysis") return "AI Analysis";
   return key
     .replace(/_/g, " ")
     .replace(/([a-z])([A-Z])/g, "$1 $2")
@@ -77,6 +79,19 @@ function formatValue(v: unknown, isBoolCol: boolean): React.ReactNode {
   }
   if (typeof v === "number") {
     return Number.isInteger(v) ? v.toLocaleString() : v.toFixed(2);
+  }
+  // Objects/arrays would otherwise stringify to "[object Object]". Rich
+  // llm_analysis objects are routed to LlmAnalysisCell upstream; anything else
+  // gets a compact, readable JSON fallback rather than a broken cell.
+  if (typeof v === "object") {
+    return (
+      <span
+        className="block max-w-[24rem] truncate font-mono text-[11px] text-muted-foreground"
+        title={JSON.stringify(v)}
+      >
+        {JSON.stringify(v)}
+      </span>
+    );
   }
   return String(v);
 }
@@ -222,18 +237,27 @@ export function ScreeningResultsTable({
                 <td className="px-3 py-2 font-medium sticky left-0 bg-background">
                   {r.symbol ?? "—"}
                 </td>
-                {dataColumns.map((key) => (
-                  <td
-                    key={key}
-                    className={cn(
-                      "px-3 py-2 whitespace-nowrap",
-                      numericColumns.has(key) && "text-right tabular-nums",
-                      boolColumns.has(key) && "text-center",
-                    )}
-                  >
-                    {formatValue(r.rowData[key], boolColumns.has(key))}
-                  </td>
-                ))}
+                {dataColumns.map((key) => {
+                  const value = r.rowData[key];
+                  const rich = isLlmAnalysis(value);
+                  return (
+                    <td
+                      key={key}
+                      className={cn(
+                        "px-3 py-2",
+                        rich ? "align-top" : "whitespace-nowrap",
+                        numericColumns.has(key) && "text-right tabular-nums",
+                        boolColumns.has(key) && "text-center",
+                      )}
+                    >
+                      {rich ? (
+                        <LlmAnalysisCell value={value} />
+                      ) : (
+                        formatValue(value, boolColumns.has(key))
+                      )}
+                    </td>
+                  );
+                })}
               </tr>
             ))}
           </tbody>

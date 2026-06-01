@@ -74,10 +74,17 @@ export const PriceChart: React.FC<Props> = ({
   // data revealed so far (incl. the live point), so the viewer can't see the
   // whole range up front — it expands as new highs/lows arrive. A small minimum
   // band keeps the very first points from being wildly amplified.
-  const revLows = lows.slice(0, last + 1).concat(curClose);
-  const revHighs = highs.slice(0, last + 1).concat(curClose);
-  let min = Math.min(...revLows);
-  let max = Math.max(...revHighs);
+  // Running min/max over the candles revealed so far (incl. the live point).
+  // The leading (in-progress) candle's full low/high is folded in *gradually*
+  // via `frac`: at the start of a segment it contributes only `curClose`, and
+  // by the time `last` ticks over to the next integer it has reached the real
+  // low/high — so the range is a continuous function of `reveal`. Adding a new
+  // candle's extent in one step (the old behaviour) is what snapped the y-domain
+  // and made the whole graph jump vertically between frames.
+  const revLows = lows.slice(0, last + 1);
+  const revHighs = highs.slice(0, last + 1);
+  let min = Math.min(...revLows, curClose, lerp(curClose, lows[nextIdx], frac));
+  let max = Math.max(...revHighs, curClose, lerp(curClose, highs[nextIdx], frac));
   const minSpan = curClose * 0.02;
   if (max - min < minSpan) {
     const mid = (max + min) / 2;

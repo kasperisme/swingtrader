@@ -11,8 +11,10 @@ All-or-nothing gating: a ticker either passes every gate or is rejected.
 Defaults are conservative; tune in one place via ``NIS_GATES``.
 
 Per-ticker cost: 3 FMP API calls (key_metrics annual, income_statement
-quarterly, cash_flow_statement quarterly). S&P 500 universe → ~1500 calls
-end-to-end → ~5 minutes wall clock at Starter's 300/min limit.
+quarterly, cash_flow_statement quarterly). The NYSE + NASDAQ universe
+(~6–7k symbols, minus excluded sectors) → ~15–20k calls end-to-end →
+roughly an hour wall clock at Starter's 300/min limit. There is no
+price/RS pre-screen, so every universe ticker is deep-screened.
 """
 
 from __future__ import annotations
@@ -57,7 +59,6 @@ class NISGates:
     net_debt_to_ebitda_max:   float = 1.5
     shares_5y_change_max:     float = 0.0   # flat or down
     eps_10y_cagr_min:         float = 0.07  # 7%
-    top_n:                    int   = 30
 
 
 NIS_GATES = NISGates()
@@ -99,7 +100,7 @@ class NISFundamentals:
     Usage:
         bq = NISFundamentals()
         rows = bq.run_screen(universe=["AAPL", "MSFT", ...])
-        # rows = list of dicts for passers, sorted by ROE desc, capped at top_n
+        # rows = list of dicts for ALL passers, sorted by ROE desc
     """
 
     def __init__(self, gates: NISGates = NIS_GATES) -> None:
@@ -217,7 +218,7 @@ class NISFundamentals:
     def run_screen(self, universe: Iterable[str]) -> list[dict]:
         """Evaluate every ticker in the universe and return the passers.
 
-        Sorted by 10y avg ROE descending, capped at ``gates.top_n``.
+        Returns every passer, sorted by 10y avg ROE descending (no cap).
         Skips silently on data errors; logs progress every 25 tickers.
         """
         tickers = [t for t in universe if t]
@@ -250,4 +251,4 @@ class NISFundamentals:
             "[nis_fundamentals] done: scored=%d passers=%d rejected=%d skipped=%d",
             scored, len(passers), rejected, skipped,
         )
-        return passers[: self.gates.top_n]
+        return passers

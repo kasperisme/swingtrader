@@ -43,6 +43,15 @@ DEFAULT_FORMAT: dict[str, Any] = {
     "durationInSeconds": 20,
 }
 
+# The stock card is a still poster sized for the Instagram feed (4:5 portrait),
+# not the 9:16 reel canvas.
+CARD_DEFAULT_FORMAT: dict[str, Any] = {
+    "width": 1080,
+    "height": 1350,
+    "fps": 30,
+    "durationInSeconds": 6,
+}
+
 VALUE_FORMATS = ("count", "score", "percent", "currency", "signed")
 
 
@@ -141,6 +150,29 @@ def build_price_news_spec(
     }
 
 
+def build_card_spec(
+    *,
+    card: dict[str, Any],
+    theme: str = "midnight",
+    sources: list[str] | None = None,
+    format_overrides: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Assemble a stock-card spec (a still poster, not an animation).
+
+    ``card`` holds the identity/stat/badge data from the data layer; the
+    director supplies the headline, tag, hero portrait URL and any badge/stat
+    overrides. Rendered as a single 1080×1350 (4:5) PNG via Remotion ``still``.
+    """
+    fmt = {**CARD_DEFAULT_FORMAT, **(format_overrides or {})}
+    return {
+        "version": VERSION,
+        "format": fmt,
+        "theme": theme,
+        "card": card,
+        "sources": sources or ["News Impact Screener", "Financial Modeling Prep"],
+    }
+
+
 def _validate_format_and_timing(spec: dict[str, Any], errors: list[str]) -> None:
     fmt = spec.get("format") or {}
     for key in ("width", "height", "fps", "durationInSeconds"):
@@ -162,6 +194,8 @@ def validate(spec: dict[str, Any]) -> list[str]:
     Dispatches on shape: a ``chart`` key means the price+news format, a ``race``
     key means the bar-chart-race format.
     """
+    if "card" in spec and "race" not in spec and "chart" not in spec:
+        return validate_card(spec)
     if "chart" in spec and "race" not in spec:
         return validate_price_news(spec)
 
@@ -249,8 +283,114 @@ def validate_price_news(spec: dict[str, Any]) -> list[str]:
     return errors
 
 
+# Max trading-day gap the price-news chart should ever go without an event —
+# the chart draws at a steady pace, so a larger gap leaves a stretch of empty
+# line on screen. The director should land an event every ≤4 chart ticks.
+MAX_EVENT_GAP_POINTS = 4
+
+
+def event_spacing_warnings(
+    spec: dict[str, Any], max_gap: int = MAX_EVENT_GAP_POINTS
+) -> list[str]:
+    """Non-fatal coverage check for a price-news spec: flag stretches of the
+    chart with no plotted event.
+
+    Gaps are measured in **chart ticks** (price points = trading days), not
+    calendar days, since the line is drawn point-by-point at a steady pace. We
+    warn when the run from the chart's start to the first event, between any two
+    consecutive events, or from the last event to the chart's end exceeds
+    ``max_gap`` points — i.e. the reel would show a span with no headline. Empty
+    list == well covered. Not an error: the renderer still works.
+    """
+    if "chart" not in spec or "race" in spec:
+        return []
+    chart = spec.get("chart") or {}
+    points = chart.get("points") or []
+    events = chart.get("events") or []
+    if len(points) < 2 or not events:
+        return []
+
+    day_index = {p["t"]: i for i, p in enumerate(points)}
+
+    def _idx(t: str) -> int:
+        # snap an event to the nearest chart tick (matches the renderer)
+        if t in day_index:
+            return day_index[t]
+        from datetime import date
+
+        def _d(s: str):
+            return date.fromisoformat(str(s)[:10])
+
+        target = _d(t)
+        return min(range(len(points)), key=lambda i: abs((_d(points[i]["t"]) - target).days))
+
+    idxs = sorted({_idx(str(e["t"])) for e in events if e.get("t")})
+    last = len(points) - 1
+    warnings: list[str] = []
+
+    if idxs[0] > max_gap:
+        warnings.append(
+            f"first event is {idxs[0]} chart ticks in — the reel opens with an "
+            f"empty {idxs[0]}-day run (want an event within {max_gap})"
+        )
+    for a, b in zip(idxs, idxs[1:]):
+        if b - a > max_gap:
+            warnings.append(
+                f"{b - a}-tick gap between events at points {a} and {b} "
+                f"(want one every ≤{max_gap})"
+            )
+    if last - idxs[-1] > max_gap:
+        warnings.append(
+            f"last event is {last - idxs[-1]} chart ticks before the end — the "
+            f"reel ends on an empty run (want an event within {max_gap})"
+        )
+    return warnings
+
+
+def validate_card(spec: dict[str, Any]) -> list[str]:
+    """Validate a stock-card spec. Empty list == valid."""
+    errors: list[str] = []
+    fmt = spec.get("format") or {}
+    for key in ("width", "height", "fps", "durationInSeconds"):
+        if not isinstance(fmt.get(key), (int, float)) or fmt.get(key) <= 0:
+            errors.append(f"format.{key} must be a positive number")
+
+    card = spec.get("card") or {}
+    if not (card.get("ticker") or "").strip():
+        errors.append("card.ticker is required")
+    if not (card.get("company") or "").strip():
+        errors.append("card.company is required")
+    if not (card.get("headline") or "").strip():
+        errors.append("card.headline is required")
+    if not (card.get("heroImageUrl") or card.get("logoUrl")):
+        errors.append("card needs a heroImageUrl (CEO photo) or a logoUrl to render a hero")
+
+    stats = card.get("stats") or []
+    if not (1 <= len(stats) <= 4):
+        errors.append("card.stats must have 1–4 entries")
+    for i, s in enumerate(stats):
+        if not (s.get("label") or "").strip() or not str(s.get("value") or "").strip():
+            errors.append(f"card.stats[{i}] needs a 'label' and 'value'")
+
+    badge = card.get("badge")
+    if badge is not None:
+        if not str(badge.get("value") or "").strip():
+            errors.append("card.badge.value must be non-empty when a badge is present")
+        tone = badge.get("tone")
+        if tone is not None and tone not in ("positive", "negative", "neutral"):
+            errors.append("card.badge.tone must be positive | negative | neutral")
+    return errors
+
+
+def is_still(spec: dict[str, Any]) -> bool:
+    """True for specs rendered as a single PNG (the stock card)."""
+    return "card" in spec and "race" not in spec and "chart" not in spec
+
+
 def composition_for(spec: dict[str, Any]) -> str:
     """Remotion composition id for a spec, by shape."""
+    if is_still(spec):
+        return "StockCard"
     return "PriceNewsChart" if ("chart" in spec and "race" not in spec) else "BarChartRace"
 
 
