@@ -23,9 +23,16 @@ from services.rag import (
 
 
 def test_market_registry_matches_rag_plus_fetch_url():
-    """No user_id → registry holds RAG market tools + fetch_url."""
+    """No user_id → registry holds RAG market tools + fetch_url.
+
+    When FMP is enabled (FMP_API_KEY set) the registry also carries the FMP MCP
+    tools, so assert the RAG floor is present rather than exact equality.
+    """
     reg = engine._build_registry(user_id=None)
-    assert set(reg.names()) == set(get_market_tools()) | {"fetch_url"}
+    expected = set(get_market_tools()) | {"fetch_url"}
+    assert expected <= set(reg.names())
+    if not engine._FMP_ENABLED:
+        assert set(reg.names()) == expected
 
 
 def test_user_registry_layers_user_tools_on_top_of_market():
@@ -49,11 +56,17 @@ def test_no_duplicate_schemas():
 
 
 def test_engine_schemas_are_canonical_rag_objects():
-    """Registry holds RAG's schema dicts by identity — not copies."""
+    """Registry holds RAG's schema dicts by identity — not copies.
+
+    Only RAG tools are canonical objects; FMP MCP schemas (present when FMP is
+    enabled) are built dynamically, so they're skipped here.
+    """
     reg = engine._build_registry(user_id="u1")
     rag_by_name = {s["function"]["name"]: s for s in RAG_TOOL_SCHEMAS}
     for s in reg.schemas():
         name = s["function"]["name"]
+        if name not in rag_by_name:
+            continue  # FMP MCP tool — not a RAG canonical object
         assert s is rag_by_name[name], (
             f"Schema for {name} is a copy — it should be the RAG canonical object"
         )

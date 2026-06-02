@@ -144,6 +144,47 @@ Jobs still marked `running` after `STUCK_TIMEOUT_MINUTES` are flipped to `error`
 | `SCREENING_STUCK_TIMEOUT_MINUTES` | `20` | Mark stuck `running` rows as `error` |
 | `SCREENING_TIMEOUT_MS` | `600000` | OpenClaw wall-clock timeout for the tick cron |
 
+### Skills (the optimized primary path)
+
+Screenings with ≥2 tickers route through `multi_ticker.py`. Before the dynamic
+LLM planner runs, a **cheap classifier** (`skills.classify_skill`) maps the
+prompt to a predefined `ScreeningSkill` (`skills.py`). On a match, the skill's
+**hardcoded** recipe runs as the primary path — the model never chooses tools
+or FMP endpoints. Each per-ticker evaluation walks a deterministic-first ladder:
+
+```
+1. FETCH    skill.tool_plan runs verbatim (internal RAG + FMP, args/enums baked in)
+2. COMPUTE  skill.analytics(ticker, data) → TickerSignal (pure Python)
+              metrics + facts + a verdict where the data is unambiguous
+3. JUDGE    only TickerSignals with needs_llm=True go to the per-ticker LLM
+              evaluator (skill.eval_focus tunes it); decided cases cost no tokens
+4. VERDICT  stage-3 concluder synthesises {triggered, summary}
+```
+
+This collapses the old `plan(≤90s) [+ re-plan(≤90s)] + trial rounds` prefix into
+**one cheap classify call**, makes plans reproducible per intent, and shrinks the
+per-ticker LLM batch to only the ambiguous names (a breakout run may escalate
+zero tickers). Skills stand on an internal `requires` floor; FMP calls are
+best-effort — unknown/access-denied FMP tools are dropped and analytics degrades
+to escalation. When no skill fits (classifier → `NONE`) or a skill's required
+internal tools are missing, the run **diverts** to the unchanged dynamic planner.
+
+Current skills: `news_impact`, `breakout`, `portfolio_rundown`,
+`relationship_contagion`. Inspect/repair them with:
+
+```bash
+python -m services.agent.cli validate-skills [--user-id <uuid>] [--probe] [--ticker AAPL]
+python -m services.agent.cli classify "which names are breaking out?"
+```
+
+`validate-skills` checks each skill's `requires` against a live registry, reports
+which FMP tools resolve, and (with `--probe`) calls them to confirm API-plan
+availability. The breakout skill uses FMP `quote` + `chart`
+(`endpoint=historical-price-eod-light`, with `{FROM_DATE}`/`{TO_DATE}` substituted
+to a ~45-day window ending today) for its deterministic price/volume math, and
+pulls the user's logged entry from `get_user_screening_note_details`. Run
+`validate-skills --probe` after an FMP plan change to confirm these still resolve.
+
 ### Multi-ticker pipeline (screenings with ≥2 tickers)
 
 The fan-out pipeline (`multi_ticker.py`) evaluates tickers in mini-batches so
@@ -179,7 +220,9 @@ DB row status:  running → done | error
 | `scheduler.py` | User queue + dispatch only (`user_screening_results`). |
 | `sync_crons.py` | OpenClaw: `screening-tick` + ensures `market-screening-tick` exists |
 | `engine.py` | LLM agent loop (Ollama), `run_screening`, `persist_and_deliver` |
-| `cli.py` | CLI entrypoint |
+| `multi_ticker.py` | Fan-out pipeline: classify → skill recipe \| dynamic plan → per-ticker ladder → conclude |
+| `skills.py` | Predefined `ScreeningSkill` recipes, deterministic analytics, `classify_skill` |
+| `cli.py` | CLI entrypoint (incl. `validate-skills`, `classify`) |
 | `sync_crons.py` | One-time OpenClaw tick cron setup + old cron cleanup |
 | `data_queries.py` | Supabase query wrappers (market + user data) |
 | `fmp_tools.py` | FMP MCP client (optional, requires `FMP_API_KEY`) |

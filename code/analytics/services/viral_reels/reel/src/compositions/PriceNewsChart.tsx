@@ -34,14 +34,20 @@ const ChartSection: React.FC<PriceNewsProps & {mainFrames: number}> = ({spec, ma
     [events, points],
   );
   const lastF = Math.max(1, mainFrames - 1);
-  const progress = clamp(frame / lastF, 0, 1);
+  // Reserve a tail hold so the final event's card (usually the climax) gets
+  // screen time: an event on the last point would otherwise land on the very
+  // last frame and never be seen. The line finishes drawing at `drawF`, then
+  // the chart holds on the final point for the remaining frames.
+  const holdFrames = events.length ? Math.round(2.2 * fps) : 0;
+  const drawF = Math.max(1, lastF - holdFrames);
+  const progress = clamp(frame / drawF, 0, 1);
 
   // A card appears when the line reaches its date and then STAYS — the next
   // event's card animates in on top of it. Cards are opaque, so the newest
   // fully covers the prior (which peeks out behind it). No fade-outs, so an
   // article is always on screen once the first one has landed.
   const passed = eventsWithIndex
-    .map(({e, i, idx}) => ({e, i, passFrame: (idx / Math.max(1, n - 1)) * lastF}))
+    .map(({e, i, idx}) => ({e, i, passFrame: (idx / Math.max(1, n - 1)) * drawF}))
     .filter((x) => frame >= x.passFrame - 1e-3)
     .sort((a, b) => a.passFrame - b.passFrame);
   const current = passed.length ? passed[passed.length - 1] : null;

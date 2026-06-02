@@ -32,7 +32,7 @@ import json
 import logging
 import os
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 import httpx
@@ -40,6 +40,12 @@ import httpx
 from services.agent_core import ToolRegistry, simple_chat
 
 from .fmp_tools import looks_like_access_denied
+from .skills import (
+    ScreeningSkill,
+    TickerSignal,
+    _INTERNAL_TOOLS,
+    classify_skill,
+)
 
 log = logging.getLogger(__name__)
 
@@ -431,9 +437,30 @@ async def _trial_run_plan(
 # ── Stage 2: per-ticker execution ───────────────────────────────────────────
 
 
+# Date-window lookback for skills that request a price/history range via the
+# {FROM_DATE}/{TO_DATE} placeholders (e.g. breakout's EOD chart). ~45 calendar
+# days comfortably covers a 20-trading-bar lookback through weekends/holidays.
+_DATE_LOOKBACK_DAYS = int(os.environ.get("AGENT_PRICE_LOOKBACK_DAYS", "45"))
+
+
+def _date_window() -> tuple[str, str]:
+    """(from_date, to_date) as ISO dates — to_date is today (US Eastern)."""
+    try:
+        from zoneinfo import ZoneInfo
+        now = datetime.now(ZoneInfo("America/New_York"))
+    except Exception:
+        now = datetime.now(timezone.utc)
+    to_d = now.date()
+    return (to_d - timedelta(days=_DATE_LOOKBACK_DAYS)).isoformat(), to_d.isoformat()
+
+
 def _substitute_ticker(value: Any, ticker: str) -> Any:
     if isinstance(value, str):
-        return value.replace(_TICKER_PLACEHOLDER, ticker)
+        v = value.replace(_TICKER_PLACEHOLDER, ticker)
+        if "{FROM_DATE}" in v or "{TO_DATE}" in v:
+            from_d, to_d = _date_window()
+            v = v.replace("{FROM_DATE}", from_d).replace("{TO_DATE}", to_d)
+        return v
     if isinstance(value, list):
         return [_substitute_ticker(v, ticker) for v in value]
     if isinstance(value, dict):
@@ -537,13 +564,25 @@ async def _evaluate_ticker_batch(
     per_ticker_data_map: dict[str, dict[str, Any]],
     shared_data: dict[str, Any],
     context_addon: str,
+    eval_focus: str = "",
+    computed_map: dict[str, str] | None = None,
 ) -> list[dict]:
     """Evaluate a batch of tickers in a single LLM call.
 
     Each ticker's pre-fetched tool data is laid out in its own labelled block;
     the model is instructed to judge each independently. Returns one verdict
     per ticker (defaults filled for any the model omits).
+
+    ``eval_focus`` (skill path) appends intent-specific judging guidance to the
+    canonical evaluator system prompt — the JSON output contract stays defined
+    in one place. ``computed_map`` carries the deterministic analytics facts
+    (pct_from_high, sentiment aggregates, …) so the model reasons over computed
+    numbers, not just raw tool dumps.
     """
+    system = _BATCH_TICKER_SYSTEM
+    if eval_focus:
+        system = f"{_BATCH_TICKER_SYSTEM}\n\n## Skill focus\n{eval_focus}"
+    computed_map = computed_map or {}
     user_parts = [
         f"TODAY'S DATE: {_today_str()}",
         f"SCREENING PROMPT:\n{prompt}",
@@ -555,8 +594,10 @@ async def _evaluate_ticker_batch(
             per_ticker_data_map.get(ticker) or {},
             max_chars=_BATCH_PER_TOOL_CHARS,
         )
+        computed = computed_map.get(ticker)
+        prefix = f"COMPUTED METRICS: {computed}\n" if computed else ""
         user_parts.append(
-            f"----- TICKER {ticker} DATA -----\n{block or '(no data returned)'}"
+            f"----- TICKER {ticker} DATA -----\n{prefix}{block or '(no data returned)'}"
         )
     shared_block = _format_tool_data(shared_data)
     if shared_block:
@@ -572,7 +613,7 @@ async def _evaluate_ticker_batch(
         client,
         base_url=base_url,
         model=model,
-        system=_BATCH_TICKER_SYSTEM,
+        system=system,
         user="\n\n".join(user_parts),
         request_format="json",
         label=f"Batch eval [{', '.join(tickers)}]",
@@ -688,6 +729,7 @@ async def _conclude(
     trigger_condition: str | None,
     verdicts: list[dict],
     context_addon: str,
+    conclude_hint: str = "",
 ) -> dict:
     verdict_lines = [
         f"- {v['ticker']}: triggered={v['triggered_for_ticker']} "
@@ -701,6 +743,8 @@ async def _conclude(
     ]
     if trigger_condition:
         user_parts.append(f"TRIGGER CONDITION (the only gate):\n{trigger_condition}")
+    if conclude_hint:
+        user_parts.append(f"SYNTHESIS GUIDANCE:\n{conclude_hint}")
     if context_addon:
         user_parts.append(f"CONTEXT:\n{context_addon}")
     user_parts.append("Return the JSON conclusion now.")
@@ -730,6 +774,60 @@ def _parse_conclusion(raw: str) -> dict:
     }
 
 
+# ── Skill resolution (the optimized primary path) ───────────────────────────
+
+
+def _render_metrics(sig: TickerSignal) -> str:
+    """Compact one-line rendering of a TickerSignal's facts + metrics, fed to
+    the per-ticker LLM evaluator so it reasons over computed numbers."""
+    parts: list[str] = []
+    if sig.facts:
+        parts.append(sig.facts)
+    if sig.metrics:
+        parts.append("[" + ", ".join(f"{k}={v}" for k, v in sig.metrics.items()) + "]")
+    return " ".join(parts)
+
+
+async def _resolve_skill_plan(
+    client: httpx.AsyncClient,
+    skill: ScreeningSkill,
+    registry: ToolRegistry,
+    tickers: list[str],
+) -> tuple[list[dict], set[str], dict[str, Any]]:
+    """Turn a matched skill into a ready-to-run tool plan.
+
+    Unlike the dynamic path there is NO planner call and NO re-plan loop: the
+    plan is the skill's literal ``tool_plan``. We only (a) drop any tool the
+    registry doesn't know (handles renamed/absent FMP tools cleanly) and
+    (b) trial-probe just the FMP calls once to drop access-denied ones. The
+    internal ``requires`` floor — checked by the caller — guarantees the plan
+    never empties out, so we never need to fall back to the planner here.
+    """
+    plan = [e for e in skill.tool_plan if registry.has(e["name"])]
+    dropped = [e["name"] for e in skill.tool_plan if not registry.has(e["name"])]
+    if dropped:
+        log.info("Skill %s: dropped %d unknown tool(s): %s", skill.id, len(dropped), dropped)
+
+    unavailable: set[str] = set()
+    trial_results: dict[str, Any] = {}
+    fmp_entries = [e for e in plan if e["name"] not in _INTERNAL_TOOLS]
+    if fmp_entries:
+        t_trial = time.monotonic()
+        unavailable, trial_results = await _trial_run_plan(
+            registry, fmp_entries, tickers[0]
+        )
+        if unavailable:
+            log.warning(
+                "Skill %s: %d FMP tool(s) unavailable — %s (%.1fs); "
+                "running on the internal floor",
+                skill.id, len(unavailable), sorted(unavailable),
+                time.monotonic() - t_trial,
+            )
+            _session_unavailable_tools.update(unavailable)
+            plan = [e for e in plan if e["name"] not in unavailable]
+    return plan, unavailable, trial_results
+
+
 # ── Public entry point ─────────────────────────────────────────────────────
 
 
@@ -741,9 +839,16 @@ async def run_multi_ticker_async(
     trigger_condition: str | None = None,
     context_addon: str = "",
 ) -> dict:
-    """Plan → fan-out per-ticker → conclude.
+    """Classify → (skill recipe | dynamic plan) → fan-out per-ticker → conclude.
 
     Returns {triggered, summary, data_used} compatible with run_agent.
+
+    A cheap classifier first tries to route the prompt to a predefined
+    ``ScreeningSkill`` (services.agent.skills). On a match the skill's literal
+    tool plan + deterministic analytics run as the optimized primary path,
+    skipping the dynamic LLM planner entirely. Only when no skill fits (or its
+    required internal tools are missing) does the run divert to the dynamic
+    planner — the same plan/trial/re-plan path as before.
     """
     base_url = os.environ.get(_OLLAMA_URL_ENV, "http://localhost:11434").rstrip("/")
     model = (
@@ -761,160 +866,216 @@ async def run_multi_ticker_async(
     )
 
     async with httpx.AsyncClient() as client:
-        # Stage 1 — plan
         t0 = time.monotonic()
-        try:
-            plan = await asyncio.wait_for(
-                _plan_tools(
-                    client,
-                    base_url=base_url,
-                    model=model,
-                    prompt=prompt,
-                    tickers=tickers,
-                    registry=registry,
-                    context_addon=context_addon,
-                ),
-                timeout=_PLAN_TIMEOUT,
-            )
-        except asyncio.TimeoutError:
-            log.error("Multi-ticker plan timed out after %.0fs", _PLAN_TIMEOUT)
-            return {
-                "triggered": False,
-                "summary": "Planner timed out before producing a plan.",
-                "data_used": {"error": "plan_timeout", "ticker_count": len(tickers)},
-            }
-        tool_plan = plan["tool_plan"]
-        per_ticker_brief = plan["per_ticker_brief"]
-        if not tool_plan:
+
+        # Stage 0 — route to a predefined skill (one cheap classify call).
+        skill = await classify_skill(
+            client,
+            base_url=base_url,
+            model=model,
+            prompt=prompt,
+            trigger_condition=trigger_condition,
+        )
+        if skill is not None and not all(registry.has(t) for t in skill.requires):
+            missing = [t for t in skill.requires if not registry.has(t)]
             log.warning(
-                "Multi-ticker plan: empty — falling back to default per-ticker tool set"
+                "Skill %s required tools missing %s — diverting to dynamic planner",
+                skill.id, missing,
             )
-            plan = _default_fallback_plan(registry)
-            tool_plan = plan["tool_plan"]
-            per_ticker_brief = plan["per_ticker_brief"]
+            skill = None
+
+        # Per-run knobs that a skill may override (defaults = dynamic path).
+        eval_focus = ""
+        conclude_hint = ""
+        batch_size = _BATCH_SIZE
+        eff_model = model
+        plan_rationale = ""
+
+        if skill is not None:
+            eff_model = skill.model or model
+            batch_size = skill.batch_size or _BATCH_SIZE
+            eval_focus = skill.eval_focus
+            conclude_hint = skill.conclude_hint
+            per_ticker_brief = f"Skill '{skill.id}': {skill.description}"
+            plan_rationale = f"skill:{skill.id}"
+            tool_plan, unavailable, trial_results = await _resolve_skill_plan(
+                client, skill, registry, tickers
+            )
             if not tool_plan:
-                # The registry didn't even have the basics — give up.
                 return {
                     "triggered": False,
-                    "summary": "Planner returned no plan and registry has no fallback tools.",
+                    "summary": (
+                        f"Skill '{skill.id}' had no runnable tools "
+                        "(all unavailable); nothing to evaluate."
+                    ),
                     "data_used": {
-                        "plan": plan,
-                        "verdicts": [],
+                        "skill": skill.id,
+                        "unavailable_tools": sorted(unavailable),
                         "ticker_count": len(tickers),
-                        "triggered_count": 0,
                     },
                 }
-        # Stage 1.5 — trial run: probe every unique planned tool against the
-        # first ticker to verify it's actually available under the current API
-        # plan. Drop any that fail and, if the plan empties out, re-plan once
-        # with the excluded list before falling back to "nothing to evaluate".
-        probe_ticker = tickers[0]
-        t_trial = time.monotonic()
-        unavailable, trial_results = await _trial_run_plan(
-            registry, tool_plan, probe_ticker
-        )
-        if unavailable:
-            log.warning(
-                "Trial run: %d tool(s) unavailable on probe ticker %s — %s (%.1fs)",
-                len(unavailable),
-                probe_ticker,
-                sorted(unavailable),
-                time.monotonic() - t_trial,
-            )
-            _session_unavailable_tools.update(unavailable)
-            survived = [e for e in tool_plan if e["name"] not in unavailable]
-            if survived:
-                tool_plan = survived
-            else:
-                log.info(
-                    "Trial run dropped every planned tool — re-planning with "
-                    "EXCLUDED hint"
+        else:
+            # ── Dynamic planner path (fallback) ──
+            # Stage 1 — plan
+            try:
+                plan = await asyncio.wait_for(
+                    _plan_tools(
+                        client,
+                        base_url=base_url,
+                        model=model,
+                        prompt=prompt,
+                        tickers=tickers,
+                        registry=registry,
+                        context_addon=context_addon,
+                    ),
+                    timeout=_PLAN_TIMEOUT,
                 )
-                try:
-                    plan = await asyncio.wait_for(
-                        _plan_tools(
-                            client,
-                            base_url=base_url,
-                            model=model,
-                            prompt=prompt,
-                            tickers=tickers,
-                            registry=registry,
-                            context_addon=context_addon,
-                            excluded_tools=unavailable,
-                        ),
-                        timeout=_PLAN_TIMEOUT,
-                    )
-                    tool_plan = [
-                        e for e in plan["tool_plan"]
-                        if e["name"] not in unavailable
-                    ]
-                    per_ticker_brief = plan["per_ticker_brief"]
-                except asyncio.TimeoutError:
-                    log.error(
-                        "Re-plan timed out — falling back to default plan"
-                    )
-                    plan = _default_fallback_plan(registry)
-                    tool_plan = [
-                        e for e in plan["tool_plan"]
-                        if e["name"] not in unavailable
-                    ]
-                    per_ticker_brief = plan["per_ticker_brief"]
-
-                if tool_plan:
-                    extra_unavail, extra_results = await _trial_run_plan(
-                        registry, tool_plan, probe_ticker
-                    )
-                    if extra_unavail:
-                        log.warning(
-                            "Re-plan trial flagged %d more unavailable: %s",
-                            len(extra_unavail),
-                            sorted(extra_unavail),
-                        )
-                        _session_unavailable_tools.update(extra_unavail)
-                        tool_plan = [
-                            e for e in tool_plan
-                            if e["name"] not in extra_unavail
-                        ]
-                        unavailable |= extra_unavail
-                    trial_results.update(extra_results)
-
+            except asyncio.TimeoutError:
+                log.error("Multi-ticker plan timed out after %.0fs", _PLAN_TIMEOUT)
+                return {
+                    "triggered": False,
+                    "summary": "Planner timed out before producing a plan.",
+                    "data_used": {"error": "plan_timeout", "ticker_count": len(tickers)},
+                }
+            tool_plan = plan["tool_plan"]
+            per_ticker_brief = plan["per_ticker_brief"]
+            plan_rationale = plan["rationale"]
+            if not tool_plan:
+                log.warning(
+                    "Multi-ticker plan: empty — falling back to default per-ticker tool set"
+                )
+                plan = _default_fallback_plan(registry)
+                tool_plan = plan["tool_plan"]
+                per_ticker_brief = plan["per_ticker_brief"]
+                plan_rationale = plan["rationale"]
                 if not tool_plan:
+                    # The registry didn't even have the basics — give up.
                     return {
                         "triggered": False,
-                        "summary": (
-                            "Trial run: every planned tool is unavailable "
-                            "under the current data plan; nothing to evaluate."
-                        ),
+                        "summary": "Planner returned no plan and registry has no fallback tools.",
                         "data_used": {
-                            "unavailable_tools": sorted(unavailable),
+                            "plan": plan,
+                            "verdicts": [],
                             "ticker_count": len(tickers),
-                            "rationale": plan["rationale"],
+                            "triggered_count": 0,
                         },
                     }
-        else:
-            log.info(
-                "Trial run: all %d tool(s) available on probe ticker %s (%.1fs)",
-                len(trial_results),
-                probe_ticker,
-                time.monotonic() - t_trial,
+            # Stage 1.5 — trial run: probe every unique planned tool against the
+            # first ticker to verify it's actually available under the current API
+            # plan. Drop any that fail and, if the plan empties out, re-plan once
+            # with the excluded list before falling back to "nothing to evaluate".
+            probe_ticker = tickers[0]
+            t_trial = time.monotonic()
+            unavailable, trial_results = await _trial_run_plan(
+                registry, tool_plan, probe_ticker
             )
+            if unavailable:
+                log.warning(
+                    "Trial run: %d tool(s) unavailable on probe ticker %s — %s (%.1fs)",
+                    len(unavailable),
+                    probe_ticker,
+                    sorted(unavailable),
+                    time.monotonic() - t_trial,
+                )
+                _session_unavailable_tools.update(unavailable)
+                survived = [e for e in tool_plan if e["name"] not in unavailable]
+                if survived:
+                    tool_plan = survived
+                else:
+                    log.info(
+                        "Trial run dropped every planned tool — re-planning with "
+                        "EXCLUDED hint"
+                    )
+                    try:
+                        plan = await asyncio.wait_for(
+                            _plan_tools(
+                                client,
+                                base_url=base_url,
+                                model=model,
+                                prompt=prompt,
+                                tickers=tickers,
+                                registry=registry,
+                                context_addon=context_addon,
+                                excluded_tools=unavailable,
+                            ),
+                            timeout=_PLAN_TIMEOUT,
+                        )
+                        tool_plan = [
+                            e for e in plan["tool_plan"]
+                            if e["name"] not in unavailable
+                        ]
+                        per_ticker_brief = plan["per_ticker_brief"]
+                        plan_rationale = plan["rationale"]
+                    except asyncio.TimeoutError:
+                        log.error(
+                            "Re-plan timed out — falling back to default plan"
+                        )
+                        plan = _default_fallback_plan(registry)
+                        tool_plan = [
+                            e for e in plan["tool_plan"]
+                            if e["name"] not in unavailable
+                        ]
+                        per_ticker_brief = plan["per_ticker_brief"]
+                        plan_rationale = plan["rationale"]
 
-        # Always include the latest ticker articles in the per-ticker context,
-        # even if the planner didn't pick get_ticker_news. News impact is the
-        # core thesis of the screener — the per-ticker evaluator should never
-        # have to guess from sentiment scores alone when the headlines are
-        # one tool call away.
-        tool_plan = _ensure_latest_news_in_plan(tool_plan, registry)
+                    if tool_plan:
+                        extra_unavail, extra_results = await _trial_run_plan(
+                            registry, tool_plan, probe_ticker
+                        )
+                        if extra_unavail:
+                            log.warning(
+                                "Re-plan trial flagged %d more unavailable: %s",
+                                len(extra_unavail),
+                                sorted(extra_unavail),
+                            )
+                            _session_unavailable_tools.update(extra_unavail)
+                            tool_plan = [
+                                e for e in tool_plan
+                                if e["name"] not in extra_unavail
+                            ]
+                            unavailable |= extra_unavail
+                        trial_results.update(extra_results)
+
+                    if not tool_plan:
+                        return {
+                            "triggered": False,
+                            "summary": (
+                                "Trial run: every planned tool is unavailable "
+                                "under the current data plan; nothing to evaluate."
+                            ),
+                            "data_used": {
+                                "unavailable_tools": sorted(unavailable),
+                                "ticker_count": len(tickers),
+                                "rationale": plan_rationale,
+                            },
+                        }
+            else:
+                log.info(
+                    "Trial run: all %d tool(s) available on probe ticker %s (%.1fs)",
+                    len(trial_results),
+                    probe_ticker,
+                    time.monotonic() - t_trial,
+                )
+
+            # Always include the latest ticker articles in the per-ticker context,
+            # even if the planner didn't pick get_ticker_news. News impact is the
+            # core thesis of the screener — the per-ticker evaluator should never
+            # have to guess from sentiment scores alone when the headlines are
+            # one tool call away.
+            tool_plan = _ensure_latest_news_in_plan(tool_plan, registry)
 
         per_ticker_plan, shared_plan = _split_plan(tool_plan)
         log.info(
-            "Multi-ticker plan: %d tool(s) (%d per-ticker, %d shared) — names=%s brief=%r rationale=%r (%.1fs total to plan+trial)",
+            "Multi-ticker plan: skill=%s %d tool(s) (%d per-ticker, %d shared) — "
+            "names=%s brief=%r rationale=%r batch_size=%d (%.1fs to resolve)",
+            skill.id if skill else None,
             len(tool_plan),
             len(per_ticker_plan),
             len(shared_plan),
             [t["name"] for t in tool_plan],
             per_ticker_brief[:120],
-            plan["rationale"][:120],
+            plan_rationale[:120],
+            batch_size,
             time.monotonic() - t0,
         )
 
@@ -957,17 +1118,20 @@ async def run_multi_ticker_async(
         # tickers — the key lever for large screenings (N calls → ceil(N/B)).
         # Tool fetches still run per ticker; only the evaluation is batched.
         batches = [
-            tickers[i : i + _BATCH_SIZE]
-            for i in range(0, len(tickers), _BATCH_SIZE)
+            tickers[i : i + batch_size]
+            for i in range(0, len(tickers), batch_size)
         ]
         sem = asyncio.Semaphore(_TICKER_CONCURRENCY)
+        # Track how the deterministic layer split the work, for observability.
+        decided_total = 0
+        escalated_total = 0
 
         async def _process_batch(batch: list[str]) -> list[dict]:
+            nonlocal decided_total, escalated_total
             async with sem:
                 started = time.monotonic()
                 try:
-                    # Fetch every ticker's per-ticker tools concurrently, then
-                    # evaluate the whole batch in one LLM call.
+                    # FETCH — every ticker's per-ticker tools, concurrently.
                     if per_ticker_plan:
                         datas = await asyncio.gather(
                             *(_execute_plan(registry, per_ticker_plan, t) for t in batch)
@@ -975,24 +1139,63 @@ async def run_multi_ticker_async(
                         per_ticker_data_map = dict(zip(batch, datas))
                     else:
                         per_ticker_data_map = {t: {} for t in batch}
-                    verdicts = await asyncio.wait_for(
-                        _evaluate_ticker_batch(
-                            client,
-                            base_url=base_url,
-                            model=model,
-                            prompt=prompt,
-                            tickers=batch,
-                            per_ticker_brief=per_ticker_brief,
-                            per_ticker_data_map=per_ticker_data_map,
-                            shared_data=shared_data,
-                            context_addon=context_addon,
-                        ),
-                        timeout=_BATCH_EVAL_TIMEOUT,
-                    )
+
+                    # COMPUTE — deterministic analytics (skill path only).
+                    # Conclusive signals become verdicts with no LLM cost; only
+                    # the ambiguous/qualitative ones are escalated to the model.
+                    decided: list[dict] = []
+                    escalate: list[str] = []
+                    computed_map: dict[str, str] = {}
+                    if skill is not None:
+                        for t in batch:
+                            try:
+                                sig = skill.analytics(t, per_ticker_data_map.get(t) or {})
+                            except Exception as exc:  # noqa: BLE001
+                                log.warning("Skill %s analytics(%s) failed: %s", skill.id, t, exc)
+                                sig = TickerSignal.escalate(t, facts=f"analytics error: {exc}")
+                            computed_map[t] = _render_metrics(sig)
+                            if sig.needs_llm:
+                                escalate.append(t)
+                            else:
+                                decided.append(sig.to_verdict())
+                    else:
+                        escalate = list(batch)
+                    decided_total += len(decided)
+                    escalated_total += len(escalate)
+
+                    # JUDGE — one LLM eval call for the escalated subset only.
+                    llm_verdicts: list[dict] = []
+                    if escalate:
+                        llm_verdicts = await asyncio.wait_for(
+                            _evaluate_ticker_batch(
+                                client,
+                                base_url=base_url,
+                                model=eff_model,
+                                prompt=prompt,
+                                tickers=escalate,
+                                per_ticker_brief=per_ticker_brief,
+                                per_ticker_data_map=per_ticker_data_map,
+                                shared_data=shared_data,
+                                context_addon=context_addon,
+                                eval_focus=eval_focus,
+                                computed_map=computed_map,
+                            ),
+                            timeout=_BATCH_EVAL_TIMEOUT,
+                        )
+
+                    # Merge decided + LLM verdicts, preserving batch order.
+                    by_sym = {v["ticker"]: v for v in (decided + llm_verdicts)}
+                    verdicts = [
+                        by_sym.get(t.upper())
+                        or _failed_verdict(t, "No verdict produced for this ticker.")
+                        for t in batch
+                    ]
                     trig = sum(1 for v in verdicts if v["triggered_for_ticker"])
                     log.info(
-                        "Multi-ticker batch [%s]: %d/%d triggered in %.1fs",
+                        "Multi-ticker batch [%s]: %d/%d triggered "
+                        "(%d decided deterministically, %d via LLM) in %.1fs",
                         ", ".join(batch), trig, len(batch),
+                        len(decided), len(escalate),
                         time.monotonic() - started,
                     )
                     return verdicts
@@ -1014,11 +1217,14 @@ async def run_multi_ticker_async(
         triggered_count = sum(1 for v in verdicts if v["triggered_for_ticker"])
         log.info(
             "Multi-ticker stage 2 done: %d/%d triggered across %d batch(es) "
-            "of <=%d (concurrency=%d, %.1fs)",
+            "of <=%d (%d decided deterministically, %d escalated to LLM, "
+            "concurrency=%d, %.1fs)",
             triggered_count,
             len(verdicts),
             len(batches),
-            _BATCH_SIZE,
+            batch_size,
+            decided_total,
+            escalated_total,
             _TICKER_CONCURRENCY,
             time.monotonic() - t1,
         )
@@ -1030,11 +1236,12 @@ async def run_multi_ticker_async(
                 _conclude(
                     client,
                     base_url=base_url,
-                    model=model,
+                    model=eff_model,
                     prompt=prompt,
                     trigger_condition=trigger_condition,
                     verdicts=verdicts,
                     context_addon=context_addon,
+                    conclude_hint=conclude_hint,
                 ),
                 timeout=_CONCLUDE_TIMEOUT,
             )
@@ -1054,19 +1261,22 @@ async def run_multi_ticker_async(
         "triggered": conclusion["triggered"],
         "summary": conclusion["summary"],
         "data_used": {
+            "skill": skill.id if skill else None,
             "plan": {
                 "tools": [t["name"] for t in tool_plan],
                 "args_templates": [t["args"] for t in tool_plan],
                 "per_ticker_tools": [t["name"] for t in per_ticker_plan],
                 "shared_tools": [t["name"] for t in shared_plan],
                 "per_ticker_brief": per_ticker_brief,
-                "rationale": plan["rationale"],
+                "rationale": plan_rationale,
                 "unavailable_tools": sorted(unavailable),
             },
             "verdicts": verdicts,
             "ticker_count": len(tickers),
             "triggered_count": triggered_count,
-            "batch_size": _BATCH_SIZE,
+            "decided_count": decided_total,
+            "escalated_count": escalated_total,
+            "batch_size": batch_size,
             "batch_count": len(batches),
         },
     }

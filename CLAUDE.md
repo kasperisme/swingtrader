@@ -77,13 +77,26 @@ See `.openclaw/skills/screen-agent/SKILL.md` for full setup docs.
 
 Architecture: OpenClaw handles scheduling (one sync cron + per-screening jobs), Python handles execution (LLM agent loop + data tools + Telegram delivery).
 
-Key files:
-- `code/analytics/screen_agent/engine.py` — LLM agent loop, 11 data tools, Telegram delivery
-- `code/analytics/screen_agent/data_queries.py` — Supabase query wrappers (market-wide + user-specific)
-- `code/analytics/screen_agent/sync_crons.py` — Reconciles Supabase screenings with OpenClaw cron jobs
-- `code/analytics/screen_agent/cli.py` — CLI: `run <id>`, `sync`
+Key files (under `code/analytics/services/agent/`):
+- `engine.py` — single-ticker LLM agent loop, `run_screening`, Telegram delivery
+- `multi_ticker.py` — fan-out pipeline for screenings with ≥2 tickers: classify → skill recipe | dynamic plan → per-ticker ladder → conclude
+- `skills.py` — predefined `ScreeningSkill` recipes (`news_impact`, `breakout`, `portfolio_rundown`, `relationship_contagion`) + deterministic analytics + `classify_skill`
+- `data_queries.py` — Supabase query wrappers (market-wide + user-specific)
+- `sync_crons.py` — Reconciles Supabase screenings with OpenClaw cron jobs
+- `cli.py` — CLI: `tick`, `run <id>`, `setup-cron`, `validate-skills`, `classify`
 - `code/ui/app/actions/screenings-agent.ts` — Server actions + plan gates
 - `code/ui/app/protected/agents/` — UI for managing agents
+
+### Multi-ticker = skills-first
+
+When a screening has ≥2 tickers, `multi_ticker.py` runs. A cheap classifier maps
+the prompt to a predefined skill whose **hardcoded** tool plan (internal RAG +
+FMP, no model tool-choice) runs a deterministic-first ladder: **FETCH** (literal
+tool calls) → **COMPUTE** (`skill.analytics`, pure Python, decides clear cases) →
+**JUDGE** (LLM only for ambiguous tickers, tuned by `skill.eval_focus`) →
+**VERDICT** (concluder). Only when no skill fits does it divert to the legacy
+dynamic LLM planner. Run `python -m services.agent.cli validate-skills` after FMP
+plan changes to confirm/repair the breakout skill's FMP tool names.
 
 ## Viral Reels (Data-Reel Generator)
 
