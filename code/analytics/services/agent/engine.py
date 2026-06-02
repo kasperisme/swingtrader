@@ -278,6 +278,10 @@ def _run_agent_multi_ticker(
         )
         result = {
             "triggered": False,
+            # Mark as a real run failure so delivery renders the ⚠️ "Run failed"
+            # alert instead of the misleading ✅ "no trigger" checkmark. A
+            # wall-clock timeout is a failure, not "conditions not met".
+            "error": True,
             "summary": (
                 f"Multi-ticker pipeline exceeded the {_RUN_TIMEOUT_SECONDS:.0f}s "
                 "wall-clock deadline before producing a result."
@@ -291,8 +295,9 @@ def _run_agent_multi_ticker(
 
     # Apply the same always-send override the single-agent path uses. Without
     # a user-set condition, screenings always fire — the pipeline's verdict
-    # only shapes the summary copy.
-    if not has_condition:
+    # only shapes the summary copy. A run failure (e.g. wall-clock timeout) is
+    # exempt: it must surface as an error alert, not a forced "always send".
+    if not has_condition and not result.get("error"):
         result["triggered"] = True
         if not (result.get("summary") or "").strip():
             result["summary"] = (
@@ -447,6 +452,9 @@ def run_agent(
         )
         result = {
             "triggered": False,
+            # Surface as a real failure (⚠️ alert) rather than a ✅ "no trigger"
+            # checkmark — a wall-clock timeout means the run never completed.
+            "error": True,
             "summary": (
                 f"Agent run exceeded the {_RUN_TIMEOUT_SECONDS:.0f}s wall-clock "
                 "deadline before producing a result."
@@ -458,7 +466,7 @@ def run_agent(
             },
         }
 
-    if not has_condition:
+    if not has_condition and not result.get("error"):
         result["triggered"] = True
         if not (result.get("summary") or "").strip():
             result["summary"] = (

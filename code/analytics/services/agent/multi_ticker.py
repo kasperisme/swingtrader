@@ -7,12 +7,16 @@ agentic loop. Three isolated LLM contexts:
   Stage 1 (plan):       one call sees the full tool catalog and decides which
                         tools to invoke per ticker, with the literal "{TICKER}"
                         as a placeholder.
-  Stage 2 (per-ticker): for each ticker, execute the planned tools (parallel
-                        within a ticker), then a focused single-shot LLM call
-                        reads {prompt, ticker, tool data} and emits a verdict.
-                        Bounded concurrency at the ticker level. Each ticker
-                        gets a fresh context — tool output from ticker A never
-                        enters ticker B's prompt.
+  Stage 2 (per-ticker): execute the planned tools per ticker (parallel within
+                        a ticker), then evaluate tickers in mini-batches — one
+                        LLM call reads {prompt, B tickers' tool data} and emits
+                        one verdict per ticker. Batching cuts the call count
+                        from N to ceil(N/B), the main lever for large
+                        screenings (set AGENT_MULTI_TICKER_BATCH_SIZE=1 to
+                        restore one-ticker-per-call). Each batch gets a fresh
+                        context — tool output from one batch never enters
+                        another's prompt — and the evaluator judges each ticker
+                        independently. Bounded concurrency at the batch level.
   Stage 3 (conclude):   one call sees only the per-ticker verdicts (not raw
                         tool dumps) and synthesises the overall
                         {triggered, summary}.
@@ -43,9 +47,23 @@ _OLLAMA_URL_ENV = "OLLAMA_BASE_URL"
 _OLLAMA_MODEL_ENV = "OLLAMA_TIKTOK_MODEL"
 
 _TICKER_CONCURRENCY = int(os.environ.get("AGENT_MULTI_TICKER_CONCURRENCY", "3"))
-_PER_TICKER_TIMEOUT = float(os.environ.get("AGENT_PER_TICKER_TIMEOUT", "60"))
 _PLAN_TIMEOUT = float(os.environ.get("AGENT_PLAN_TIMEOUT", "90"))
 _CONCLUDE_TIMEOUT = float(os.environ.get("AGENT_CONCLUDE_TIMEOUT", "60"))
+
+# Mini-batching: evaluate several tickers per LLM call instead of one-each. The
+# dominant wall-clock cost of a large screening is the N sequential per-ticker
+# eval calls against a local (serially-served) Ollama. Grouping B tickers into
+# a single eval call turns N calls into ceil(N/B), the biggest lever for runs
+# with many tickers. Each batch still gets its own fresh context — tool data
+# for a batch never enters another batch's prompt — and the evaluator is told
+# to judge each ticker independently. Set to 1 to restore strict one-ticker-
+# per-call isolation.
+_BATCH_SIZE = max(1, int(os.environ.get("AGENT_MULTI_TICKER_BATCH_SIZE", "5")))
+# A batch emits ~B verdicts, so it needs a larger ceiling than a single eval.
+_BATCH_EVAL_TIMEOUT = float(os.environ.get("AGENT_BATCH_EVAL_TIMEOUT", "120"))
+# Per-tool char cap inside a batched prompt. Tighter than the single-ticker cap
+# because B tickers' worth of tool data share one prompt — keeps prefill bounded.
+_BATCH_PER_TOOL_CHARS = int(os.environ.get("AGENT_BATCH_PER_TOOL_CHARS", "2500"))
 
 _TICKER_PLACEHOLDER = "{TICKER}"
 _MAX_TOOL_RESULT_CHARS = 4000
@@ -450,35 +468,48 @@ async def _execute_plan(
     return results
 
 
-_PER_TICKER_SYSTEM = """You are evaluating ONE ticker against a screening prompt.
+_BATCH_TICKER_SYSTEM = """You are evaluating SEVERAL tickers against ONE \
+screening prompt.
 
 You receive:
   - The screening prompt
-  - The ticker
   - A planner brief on what to check
-  - Pre-fetched tool data for this ticker (and optional market-wide data)
+  - For EACH ticker: its symbol and pre-fetched tool data
+  - Optional market-wide data shared across all tickers
 
-Your job: decide whether THIS TICKER satisfies the screening prompt and write \
-a short evidence-based verdict.
+Evaluate EACH ticker INDEPENDENTLY. Judge each ticker ONLY on its own \
+pre-fetched data and the shared market-wide data — never let one ticker's \
+findings leak into another's verdict.
 
 Respond with ONLY this JSON (no markdown, no commentary):
 {
-  "ticker": "<symbol>",
-  "triggered_for_ticker": true | false,
-  "key_findings": "<1-3 sentences citing concrete data points (scores, headlines, prices)>",
-  "confidence": "high" | "medium" | "low"
+  "verdicts": [
+    {
+      "ticker": "<symbol>",
+      "triggered_for_ticker": true | false,
+      "key_findings": "<1-3 sentences citing concrete data points (scores, headlines, prices)>",
+      "confidence": "high" | "medium" | "low"
+    }
+  ]
 }
 
 Rules:
-- Be CONSERVATIVE: triggered_for_ticker=true only when the data clearly supports it.
+- Output EXACTLY ONE verdict object per ticker provided. Do not skip any ticker.
+- Be CONSERVATIVE: triggered_for_ticker=true only when that ticker's data \
+clearly supports it.
 - Cite concrete evidence (numbers, headlines, scores). Never speculate.
-- If the pre-fetched data is empty or inconclusive, triggered_for_ticker=false \
-and say so in key_findings.
-- Cap key_findings at ~400 characters.
+- If a ticker's data is empty or inconclusive, triggered_for_ticker=false and \
+say so in its key_findings.
+- Cap each key_findings at ~400 characters.
 """
 
 
-def _format_tool_data(data: dict[str, Any], *, header: str | None = None) -> str:
+def _format_tool_data(
+    data: dict[str, Any],
+    *,
+    header: str | None = None,
+    max_chars: int = _MAX_TOOL_RESULT_CHARS,
+) -> str:
     if not data:
         return ""
     lines: list[str] = []
@@ -489,68 +520,134 @@ def _format_tool_data(data: dict[str, Any], *, header: str | None = None) -> str
             payload = json.dumps(result, default=str)
         except Exception:
             payload = repr(result)
-        if len(payload) > _MAX_TOOL_RESULT_CHARS:
-            payload = payload[: _MAX_TOOL_RESULT_CHARS - 1] + "..."
+        if len(payload) > max_chars:
+            payload = payload[: max_chars - 1] + "..."
         lines.append(f"=== {name} ===\n{payload}")
     return "\n\n".join(lines)
 
 
-async def _evaluate_ticker(
+async def _evaluate_ticker_batch(
     client: httpx.AsyncClient,
     *,
     base_url: str,
     model: str,
     prompt: str,
-    ticker: str,
+    tickers: list[str],
     per_ticker_brief: str,
-    per_ticker_data: dict[str, Any],
+    per_ticker_data_map: dict[str, dict[str, Any]],
     shared_data: dict[str, Any],
     context_addon: str,
-) -> dict:
+) -> list[dict]:
+    """Evaluate a batch of tickers in a single LLM call.
+
+    Each ticker's pre-fetched tool data is laid out in its own labelled block;
+    the model is instructed to judge each independently. Returns one verdict
+    per ticker (defaults filled for any the model omits).
+    """
     user_parts = [
         f"TODAY'S DATE: {_today_str()}",
         f"SCREENING PROMPT:\n{prompt}",
-        f"TICKER: {ticker}",
         f"PLANNER BRIEF:\n{per_ticker_brief or '(none)'}",
+        f"TICKERS TO EVALUATE ({len(tickers)}): {', '.join(tickers)}",
     ]
-    per_ticker_block = _format_tool_data(per_ticker_data)
-    if per_ticker_block:
-        user_parts.append(f"PER-TICKER DATA:\n{per_ticker_block}")
+    for ticker in tickers:
+        block = _format_tool_data(
+            per_ticker_data_map.get(ticker) or {},
+            max_chars=_BATCH_PER_TOOL_CHARS,
+        )
+        user_parts.append(
+            f"----- TICKER {ticker} DATA -----\n{block or '(no data returned)'}"
+        )
     shared_block = _format_tool_data(shared_data)
     if shared_block:
-        user_parts.append(f"MARKET-WIDE DATA (shared across all tickers):\n{shared_block}")
+        user_parts.append(
+            f"MARKET-WIDE DATA (shared across all tickers):\n{shared_block}"
+        )
     if context_addon:
         user_parts.append(f"CONTEXT:\n{context_addon}")
-    user_parts.append("Return the JSON verdict for this ticker now.")
+    user_parts.append(
+        "Return the JSON object with one verdict per ticker now."
+    )
     raw = await simple_chat(
         client,
         base_url=base_url,
         model=model,
-        system=_PER_TICKER_SYSTEM,
+        system=_BATCH_TICKER_SYSTEM,
         user="\n\n".join(user_parts),
         request_format="json",
-        label=f"Per-ticker {ticker}",
+        label=f"Batch eval [{', '.join(tickers)}]",
     )
-    return _parse_verdict(raw, ticker)
+    return _parse_batch_verdicts(raw, tickers)
 
 
-def _parse_verdict(raw: str, ticker: str) -> dict:
+def _parse_batch_verdicts(raw: str, tickers: list[str]) -> list[dict]:
+    """Parse a batched eval response into one verdict per requested ticker.
+
+    Matches returned verdicts to requested tickers by symbol so order/omissions
+    don't misalign results. Any ticker the model skipped gets a low-confidence
+    not-triggered placeholder, so a partial response never drops a ticker.
+    """
     raw = raw.removeprefix("```json").removeprefix("```").removesuffix("```").strip()
     try:
         data = json.loads(raw)
     except json.JSONDecodeError:
-        log.warning("Per-ticker %s: non-JSON verdict, head=%r", ticker, raw[:200])
-        return {
-            "ticker": ticker,
-            "triggered_for_ticker": False,
-            "key_findings": "Evaluation failed to parse a verdict.",
-            "confidence": "low",
-        }
+        log.warning(
+            "Batch eval [%s]: non-JSON response, head=%r",
+            ", ".join(tickers), raw[:200],
+        )
+        return [_failed_verdict(t, "Batch evaluation failed to parse.") for t in tickers]
+
+    raw_verdicts = data.get("verdicts") if isinstance(data, dict) else None
+    if not isinstance(raw_verdicts, list):
+        # Tolerate a model that returned a bare list, or a single object.
+        if isinstance(data, list):
+            raw_verdicts = data
+        elif isinstance(data, dict) and "ticker" in data:
+            raw_verdicts = [data]
+        else:
+            raw_verdicts = []
+
+    by_symbol: dict[str, dict] = {}
+    for entry in raw_verdicts:
+        if not isinstance(entry, dict):
+            continue
+        sym = str(entry.get("ticker") or "").strip().upper()
+        if sym:
+            by_symbol[sym] = _normalize_verdict(entry, sym)
+
+    out: list[dict] = []
+    missing: list[str] = []
+    for t in tickers:
+        v = by_symbol.get(t.upper())
+        if v is None:
+            missing.append(t)
+            out.append(_failed_verdict(t, "No verdict returned for this ticker."))
+        else:
+            out.append(v)
+    if missing:
+        log.warning(
+            "Batch eval [%s]: model omitted %d ticker(s): %s",
+            ", ".join(tickers), len(missing), missing,
+        )
+    return out
+
+
+def _normalize_verdict(data: dict, ticker: str) -> dict:
+    """Coerce a raw verdict dict into the canonical per-ticker verdict shape."""
     return {
         "ticker": str(data.get("ticker") or ticker).upper(),
         "triggered_for_ticker": bool(data.get("triggered_for_ticker")),
         "key_findings": str(data.get("key_findings") or "").strip()[:600],
         "confidence": str(data.get("confidence") or "low").strip().lower(),
+    }
+
+
+def _failed_verdict(ticker: str, reason: str) -> dict:
+    return {
+        "ticker": ticker.upper(),
+        "triggered_for_ticker": False,
+        "key_findings": reason,
+        "confidence": "low",
     }
 
 
@@ -856,57 +953,73 @@ async def run_multi_ticker_async(
                     len(cached_shared),
                 )
 
+        # Group tickers into mini-batches so each LLM eval call covers several
+        # tickers — the key lever for large screenings (N calls → ceil(N/B)).
+        # Tool fetches still run per ticker; only the evaluation is batched.
+        batches = [
+            tickers[i : i + _BATCH_SIZE]
+            for i in range(0, len(tickers), _BATCH_SIZE)
+        ]
         sem = asyncio.Semaphore(_TICKER_CONCURRENCY)
 
-        async def _process_ticker(ticker: str) -> dict:
+        async def _process_batch(batch: list[str]) -> list[dict]:
             async with sem:
                 started = time.monotonic()
                 try:
-                    per_ticker_data = (
-                        await _execute_plan(registry, per_ticker_plan, ticker)
-                        if per_ticker_plan
-                        else {}
-                    )
-                    verdict = await asyncio.wait_for(
-                        _evaluate_ticker(
+                    # Fetch every ticker's per-ticker tools concurrently, then
+                    # evaluate the whole batch in one LLM call.
+                    if per_ticker_plan:
+                        datas = await asyncio.gather(
+                            *(_execute_plan(registry, per_ticker_plan, t) for t in batch)
+                        )
+                        per_ticker_data_map = dict(zip(batch, datas))
+                    else:
+                        per_ticker_data_map = {t: {} for t in batch}
+                    verdicts = await asyncio.wait_for(
+                        _evaluate_ticker_batch(
                             client,
                             base_url=base_url,
                             model=model,
                             prompt=prompt,
-                            ticker=ticker,
+                            tickers=batch,
                             per_ticker_brief=per_ticker_brief,
-                            per_ticker_data=per_ticker_data,
+                            per_ticker_data_map=per_ticker_data_map,
                             shared_data=shared_data,
                             context_addon=context_addon,
                         ),
-                        timeout=_PER_TICKER_TIMEOUT,
+                        timeout=_BATCH_EVAL_TIMEOUT,
                     )
+                    trig = sum(1 for v in verdicts if v["triggered_for_ticker"])
                     log.info(
-                        "Multi-ticker %s: triggered=%s conf=%s in %.1fs",
-                        ticker,
-                        verdict["triggered_for_ticker"],
-                        verdict["confidence"],
+                        "Multi-ticker batch [%s]: %d/%d triggered in %.1fs",
+                        ", ".join(batch), trig, len(batch),
                         time.monotonic() - started,
                     )
-                    return verdict
+                    return verdicts
                 except Exception as exc:  # noqa: BLE001
                     log.warning(
-                        "Multi-ticker %s: evaluation failed: %s", ticker, exc
+                        "Multi-ticker batch [%s]: evaluation failed: %s",
+                        ", ".join(batch), exc,
                     )
-                    return {
-                        "ticker": ticker,
-                        "triggered_for_ticker": False,
-                        "key_findings": f"Evaluation failed: {exc}",
-                        "confidence": "low",
-                    }
+                    return [
+                        _failed_verdict(t, f"Evaluation failed: {exc}")
+                        for t in batch
+                    ]
 
         t1 = time.monotonic()
-        verdicts = await asyncio.gather(*(_process_ticker(t) for t in tickers))
+        batch_results = await asyncio.gather(
+            *(_process_batch(b) for b in batches)
+        )
+        verdicts = [v for batch in batch_results for v in batch]
         triggered_count = sum(1 for v in verdicts if v["triggered_for_ticker"])
         log.info(
-            "Multi-ticker stage 2 done: %d/%d triggered per-ticker (%.1fs)",
+            "Multi-ticker stage 2 done: %d/%d triggered across %d batch(es) "
+            "of <=%d (concurrency=%d, %.1fs)",
             triggered_count,
             len(verdicts),
+            len(batches),
+            _BATCH_SIZE,
+            _TICKER_CONCURRENCY,
             time.monotonic() - t1,
         )
 
@@ -953,5 +1066,7 @@ async def run_multi_ticker_async(
             "verdicts": verdicts,
             "ticker_count": len(tickers),
             "triggered_count": triggered_count,
+            "batch_size": _BATCH_SIZE,
+            "batch_count": len(batches),
         },
     }

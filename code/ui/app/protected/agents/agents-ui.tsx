@@ -2,7 +2,7 @@
 
 import { useState, useMemo, useCallback, useEffect, useId } from "react";
 import { track } from "@/lib/analytics/events";
-import { Bot, Pause, Play, Trash2, Plus, Clock, AlertCircle, Zap, Loader2, LayoutList, CalendarDays, ChevronLeft, ChevronRight, Pencil, X, Link2, Filter, Send } from "lucide-react";
+import { Bot, Pause, Play, Trash2, Plus, Clock, AlertCircle, Zap, Loader2, LayoutList, CalendarDays, ChevronLeft, ChevronRight, Pencil, X, Link2, Filter, Send, History, CheckCircle2, Bell, AlertTriangle, MinusCircle } from "lucide-react";
 import { TelegramConnect } from "@/components/telegram-connect";
 import {
   type ScheduledScreening,
@@ -18,6 +18,7 @@ import {
   updateScheduledScreening,
   listScanRuns,
   listScanRowsForRuns,
+  getScreeningResults,
 } from "@/app/actions/screenings-agent";
 import { TickerSearchCombobox } from "@/components/ticker-search-combobox";
 import { relationshipsResolveTicker } from "@/app/actions/relationships";
@@ -1668,6 +1669,153 @@ function CreateForm({ onClose, atLimit, suggestionTickers }: { onClose: () => vo
   );
 }
 
+// ── Run history ─────────────────────────────────────────────────────────────
+
+type RunStateMeta = {
+  label: string;
+  Icon: typeof CheckCircle2;
+  iconClass: string;
+  badgeClass: string;
+};
+
+/** Classify a persisted run into a display state. Mirrors the Telegram
+ * delivery logic in services/agent/engine.py (_format_telegram_message). */
+function runStateMeta(r: ScreeningResult): RunStateMeta {
+  if (r.status === "error") {
+    return {
+      label: "Failed",
+      Icon: AlertTriangle,
+      iconClass: "text-destructive",
+      badgeClass: "bg-destructive/10 text-destructive",
+    };
+  }
+  if (r.status === "skipped") {
+    return {
+      label: "Skipped",
+      Icon: MinusCircle,
+      iconClass: "text-muted-foreground",
+      badgeClass: "bg-muted text-muted-foreground",
+    };
+  }
+  if (r.status === "running") {
+    return {
+      label: "Running",
+      Icon: Loader2,
+      iconClass: "text-muted-foreground animate-spin",
+      badgeClass: "bg-muted text-muted-foreground",
+    };
+  }
+  if (r.triggered) {
+    return {
+      label: "Triggered",
+      Icon: Bell,
+      iconClass: "text-amber-600 dark:text-amber-400",
+      badgeClass: "bg-amber-500/10 text-amber-600 dark:text-amber-400",
+    };
+  }
+  return {
+    label: "No trigger",
+    Icon: CheckCircle2,
+    iconClass: "text-emerald-600 dark:text-emerald-400",
+    badgeClass: "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400",
+  };
+}
+
+function formatRunTime(iso: string): string {
+  const d = new Date(iso);
+  return d.toLocaleString(undefined, {
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
+function RunHistory({ screeningId }: { screeningId: string }) {
+  const [loading, setLoading] = useState(true);
+  const [err, setErr] = useState<string | null>(null);
+  const [runs, setRuns] = useState<ScreeningResult[]>([]);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    setErr(null);
+    const res = await getScreeningResults(screeningId, 15);
+    if (res.ok) setRuns(res.data.filter((r) => !r.is_test));
+    else setErr(res.error);
+    setLoading(false);
+  }, [screeningId]);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  if (loading) {
+    return (
+      <div className="mt-3 flex items-center gap-2 border-t border-border pt-3 text-xs text-muted-foreground">
+        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+        Loading run history…
+      </div>
+    );
+  }
+
+  if (err) {
+    return (
+      <div className="mt-3 border-t border-border pt-3 text-xs text-destructive">{err}</div>
+    );
+  }
+
+  if (runs.length === 0) {
+    return (
+      <div className="mt-3 border-t border-border pt-3 text-xs text-muted-foreground/70">
+        No runs yet — this agent hasn&apos;t fired on schedule.
+      </div>
+    );
+  }
+
+  return (
+    <div className="mt-3 flex flex-col gap-1.5 border-t border-border pt-3">
+      <div className="mb-0.5 flex items-center justify-between">
+        <span className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+          Recent runs
+        </span>
+        <button
+          type="button"
+          onClick={() => void load()}
+          className="text-[11px] text-muted-foreground/70 transition-colors hover:text-foreground"
+        >
+          Refresh
+        </button>
+      </div>
+      {runs.map((r) => {
+        const meta = runStateMeta(r);
+        return (
+          <div
+            key={r.id}
+            className="flex min-w-0 items-start gap-2.5 rounded-lg border border-border/60 bg-muted/30 px-3 py-2"
+          >
+            <meta.Icon className={`mt-0.5 h-3.5 w-3.5 shrink-0 ${meta.iconClass}`} />
+            <div className="min-w-0 flex-1">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className={`inline-flex items-center rounded-full px-1.5 py-0.5 text-[10px] font-medium ${meta.badgeClass}`}>
+                  {meta.label}
+                </span>
+                <span className="text-[11px] text-muted-foreground/60">
+                  {formatRunTime(r.run_at)}
+                </span>
+              </div>
+              {r.summary && (
+                <p className="mt-1 text-xs leading-relaxed text-foreground/80 line-clamp-3">
+                  {r.summary}
+                </p>
+              )}
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 function AgentCard({ screening, suggestionTickers }: { screening: ScheduledScreening; suggestionTickers: string[] }) {
   const [editing, setEditing] = useState(false);
   const [toggling, setToggling] = useState(false);
@@ -1770,6 +1918,7 @@ function AgentCard({ screening, suggestionTickers }: { screening: ScheduledScree
     setTesting(false);
   }
 
+  const [showHistory, setShowHistory] = useState(false);
   const scheduleLabel = describeCron(screening.schedule);
   const inputClass = "w-full rounded-md border border-input bg-background px-3 py-2 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring disabled:opacity-50";
 
@@ -1976,10 +2125,25 @@ function AgentCard({ screening, suggestionTickers }: { screening: ScheduledScree
               )}
             </div>
             )}
+
+            {showHistory && <RunHistory screeningId={screening.id} />}
           </div>
         </div>
 
         <div className="flex shrink-0 items-center justify-end gap-2 sm:pt-1">
+          <button
+            type="button"
+            onClick={() => setShowHistory((v) => !v)}
+            title="Run history"
+            aria-pressed={showHistory}
+            className={`flex h-8 w-8 items-center justify-center rounded-md border transition-colors ${
+              showHistory
+                ? "border-amber-500/30 bg-amber-500/10 text-amber-600 dark:text-amber-400"
+                : "border-border text-muted-foreground hover:bg-muted hover:text-foreground"
+            }`}
+          >
+            <History className="w-3.5 h-3.5" />
+          </button>
           <button
             type="button"
             onClick={() => { setEditing(true); setEditName(screening.name); setEditPrompt(screening.prompt); setEditSchedule(screening.schedule); setEditTimezone(screening.timezone); setEditTradingSession(screening.trading_session ?? null); setEditTickers(screening.tickers ?? []); setEditLinkedScanRunIds(screening.linked_scan_run_ids ?? []); setEditConditionEnabled(screening.condition_enabled ?? false); setEditTriggerCondition(screening.trigger_condition ?? ""); setSaveErr(null); }}

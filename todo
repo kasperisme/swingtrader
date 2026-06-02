@@ -56,8 +56,8 @@ MVP Scope:
 [x] Pay gates are implemented
 [x] Google Auth is implemented
 [x] Agent jobs should have access to the screening notes for the ticker as well
+[x] Article search refined
 [ ] X auth is implemented
-[ ] Article search refined
 [ ] News trend graph refined (narrative generation)
 [ ] Gennemgå platformen og sikre at det er så simpelt og intuitivt som muligt
 [ ] News trend UI skal forbedres. Det er svært at finde rundt i, og se hvad konklusionen skal være

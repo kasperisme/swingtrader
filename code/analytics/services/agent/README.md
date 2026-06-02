@@ -144,6 +144,20 @@ Jobs still marked `running` after `STUCK_TIMEOUT_MINUTES` are flipped to `error`
 | `SCREENING_STUCK_TIMEOUT_MINUTES` | `20` | Mark stuck `running` rows as `error` |
 | `SCREENING_TIMEOUT_MS` | `600000` | OpenClaw wall-clock timeout for the tick cron |
 
+### Multi-ticker pipeline (screenings with ≥2 tickers)
+
+The fan-out pipeline (`multi_ticker.py`) evaluates tickers in mini-batches so
+the call count scales as `ceil(N / batch_size)` instead of `N`. These knobs
+tune throughput vs. isolation:
+
+| Env var | Default | Purpose |
+|---------|---------|---------|
+| `AGENT_MULTI_TICKER_BATCH_SIZE` | `5` | Tickers evaluated per LLM call. `1` = strict one-ticker-per-call isolation. |
+| `AGENT_MULTI_TICKER_CONCURRENCY` | `3` | Max concurrent batches in flight. |
+| `AGENT_BATCH_EVAL_TIMEOUT` | `120` | Per-batch eval wall-clock ceiling (seconds). |
+| `AGENT_BATCH_PER_TOOL_CHARS` | `2500` | Per-tool payload cap inside a batched prompt. |
+| `AGENT_RUN_TIMEOUT_SECONDS` | `240` | Hard ceiling on the whole run (set in `engine.py`); a timeout now delivers a ⚠️ failure alert. |
+
 ---
 
 ## Result Lifecycle

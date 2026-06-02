@@ -45,6 +45,8 @@ export type ScheduledScreening = {
   updated_at: string;
 };
 
+export type ScreeningResultStatus = "running" | "done" | "error" | "skipped";
+
 export type ScreeningResult = {
   id: string;
   screening_id: string;
@@ -54,6 +56,7 @@ export type ScreeningResult = {
   data_used: Record<string, unknown> | null;
   is_test: boolean;
   delivered: boolean;
+  status: ScreeningResultStatus | null;
   created_at: string;
 };
 
