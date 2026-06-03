@@ -211,6 +211,37 @@ DB row status:  running → done | error
 
 `delivered=true` is set after successful Telegram send.
 
+### Run trace (debugging a job from the DB)
+
+Every run records an ordered event log to `user_screening_results.trace` (JSONB),
+written by `persist_and_deliver`. It captures the sequence of stages
+(`run.start → classify → plan → fetch → analytics → eval → conclude`) with
+relative timestamps, so a job can be reconstructed straight from the database —
+**including runs that errored or timed out**. The recorder (`run_trace.py`) is
+created in the synchronous engine frame and passed into the async pipeline by
+reference, so a wall-clock timeout that cancels the pipeline still leaves the
+events recorded up to the deadline.
+
+Shape: `{ started_at, elapsed, event_count, events: [ {seq, dt, stage, event, …} ] }`.
+
+```sql
+-- the sequence of events for one run, newest jobs first
+select e->>'stage' as stage, e->>'event' as event, e->>'dt' as t, e
+from swingtrader.user_screening_results r,
+     jsonb_array_elements(r.trace->'events') e
+where r.id = '<result-uuid>'
+order by (e->>'seq')::int;
+
+-- jobs that errored or timed out, with their last recorded event
+select id, status, trace->'events'->-1 as last_event
+from swingtrader.user_screening_results
+where status = 'error'
+order by run_at desc limit 20;
+```
+
+Apply the migration before first use:
+`supabase/migrations/20260603000000_screening_result_trace.sql`.
+
 ---
 
 ## Key Files

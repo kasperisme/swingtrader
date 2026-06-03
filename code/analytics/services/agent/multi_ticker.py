@@ -40,6 +40,7 @@ import httpx
 from services.agent_core import ToolRegistry, simple_chat
 
 from .fmp_tools import looks_like_access_denied
+from .run_trace import RunTrace
 from .skills import (
     ScreeningSkill,
     TickerSignal,
@@ -838,10 +839,15 @@ async def run_multi_ticker_async(
     registry: ToolRegistry,
     trigger_condition: str | None = None,
     context_addon: str = "",
+    trace: RunTrace | None = None,
 ) -> dict:
     """Classify → (skill recipe | dynamic plan) → fan-out per-ticker → conclude.
 
     Returns {triggered, summary, data_used} compatible with run_agent.
+
+    ``trace`` (a RunTrace) records the ordered sequence of events so the run can
+    be reconstructed from the DB even if it errors or times out. A fresh one is
+    created when not supplied.
 
     A cheap classifier first tries to route the prompt to a predefined
     ``ScreeningSkill`` (services.agent.skills). On a match the skill's literal
@@ -850,6 +856,7 @@ async def run_multi_ticker_async(
     required internal tools are missing) does the run divert to the dynamic
     planner — the same plan/trial/re-plan path as before.
     """
+    trace = trace or RunTrace()
     base_url = os.environ.get(_OLLAMA_URL_ENV, "http://localhost:11434").rstrip("/")
     model = (
         os.environ.get(_OLLAMA_MODEL_ENV)
@@ -864,6 +871,10 @@ async def run_multi_ticker_async(
         len(registry.schemas()),
         bool(trigger_condition),
     )
+    trace.event(
+        "run", "start", ticker_count=len(tickers),
+        tickers=tickers[:25], model=model, has_condition=bool(trigger_condition),
+    )
 
     async with httpx.AsyncClient() as client:
         t0 = time.monotonic()
@@ -876,12 +887,14 @@ async def run_multi_ticker_async(
             prompt=prompt,
             trigger_condition=trigger_condition,
         )
+        trace.event("classify", "done", skill=skill.id if skill else None)
         if skill is not None and not all(registry.has(t) for t in skill.requires):
             missing = [t for t in skill.requires if not registry.has(t)]
             log.warning(
                 "Skill %s required tools missing %s — diverting to dynamic planner",
                 skill.id, missing,
             )
+            trace.event("classify", "skill_disqualified", skill=skill.id, missing=missing)
             skill = None
 
         # Per-run knobs that a skill may override (defaults = dynamic path).
@@ -901,7 +914,15 @@ async def run_multi_ticker_async(
             tool_plan, unavailable, trial_results = await _resolve_skill_plan(
                 client, skill, registry, tickers
             )
+            trace.event(
+                "plan", "skill",
+                skill=skill.id,
+                tools=[e["name"] for e in tool_plan],
+                fmp_unavailable=sorted(unavailable),
+                batch_size=batch_size,
+            )
             if not tool_plan:
+                trace.event("plan", "empty_skill", skill=skill.id)
                 return {
                     "triggered": False,
                     "summary": (
@@ -932,6 +953,7 @@ async def run_multi_ticker_async(
                 )
             except asyncio.TimeoutError:
                 log.error("Multi-ticker plan timed out after %.0fs", _PLAN_TIMEOUT)
+                trace.event("plan", "timeout", timeout_s=_PLAN_TIMEOUT)
                 return {
                     "triggered": False,
                     "summary": "Planner timed out before producing a plan.",
@@ -940,10 +962,12 @@ async def run_multi_ticker_async(
             tool_plan = plan["tool_plan"]
             per_ticker_brief = plan["per_ticker_brief"]
             plan_rationale = plan["rationale"]
+            trace.event("plan", "dynamic_done", tools=[e["name"] for e in tool_plan])
             if not tool_plan:
                 log.warning(
                     "Multi-ticker plan: empty — falling back to default per-ticker tool set"
                 )
+                trace.event("plan", "fallback_default")
                 plan = _default_fallback_plan(registry)
                 tool_plan = plan["tool_plan"]
                 per_ticker_brief = plan["per_ticker_brief"]
@@ -977,6 +1001,7 @@ async def run_multi_ticker_async(
                     sorted(unavailable),
                     time.monotonic() - t_trial,
                 )
+                trace.event("trial", "unavailable", tools=sorted(unavailable))
                 _session_unavailable_tools.update(unavailable)
                 survived = [e for e in tool_plan if e["name"] not in unavailable]
                 if survived:
@@ -1037,6 +1062,7 @@ async def run_multi_ticker_async(
                         trial_results.update(extra_results)
 
                     if not tool_plan:
+                        trace.event("plan", "all_unavailable", tools=sorted(unavailable))
                         return {
                             "triggered": False,
                             "summary": (
@@ -1078,6 +1104,12 @@ async def run_multi_ticker_async(
             batch_size,
             time.monotonic() - t0,
         )
+        trace.event(
+            "plan", "resolved",
+            per_ticker_tools=[t["name"] for t in per_ticker_plan],
+            shared_tools=[t["name"] for t in shared_plan],
+            batch_size=batch_size,
+        )
 
         # Stage 2 — execute shared (market-wide) tools ONCE, then fan out per
         # ticker. Reuse any successful trial-run results to avoid re-executing
@@ -1114,6 +1146,12 @@ async def run_multi_ticker_async(
                     len(cached_shared),
                 )
 
+        if shared_plan:
+            shared_errors = [n for n, r in shared_data.items() if _result_unavailable(r)
+                             or (isinstance(r, dict) and "error" in r)]
+            trace.event("shared", "done", tools=list(shared_data.keys()),
+                        errors=shared_errors)
+
         # Group tickers into mini-batches so each LLM eval call covers several
         # tickers — the key lever for large screenings (N calls → ceil(N/B)).
         # Tool fetches still run per ticker; only the evaluation is batched.
@@ -1140,6 +1178,15 @@ async def run_multi_ticker_async(
                     else:
                         per_ticker_data_map = {t: {} for t in batch}
 
+                    # Record any per-ticker tool fetch errors (incl. FMP
+                    # access-denied), so a thin/empty evaluation is explainable.
+                    for t in batch:
+                        for name, res in (per_ticker_data_map.get(t) or {}).items():
+                            if _result_unavailable(res) or (isinstance(res, dict) and "error" in res):
+                                err = res.get("error") if isinstance(res, dict) else "unavailable"
+                                trace.event("fetch", "tool_error", ticker=t, tool=name,
+                                            error=str(err)[:200])
+
                     # COMPUTE — deterministic analytics (skill path only).
                     # Conclusive signals become verdicts with no LLM cost; only
                     # the ambiguous/qualitative ones are escalated to the model.
@@ -1152,20 +1199,26 @@ async def run_multi_ticker_async(
                                 sig = skill.analytics(t, per_ticker_data_map.get(t) or {})
                             except Exception as exc:  # noqa: BLE001
                                 log.warning("Skill %s analytics(%s) failed: %s", skill.id, t, exc)
+                                trace.event("analytics", "error", ticker=t, error=str(exc)[:200])
                                 sig = TickerSignal.escalate(t, facts=f"analytics error: {exc}")
                             computed_map[t] = _render_metrics(sig)
                             if sig.needs_llm:
                                 escalate.append(t)
+                                trace.event("analytics", "escalate", ticker=t, metrics=sig.metrics)
                             else:
                                 decided.append(sig.to_verdict())
+                                trace.event("analytics", "decided", ticker=t,
+                                            verdict=sig.verdict, metrics=sig.metrics)
                     else:
                         escalate = list(batch)
+                        trace.event("analytics", "skipped_no_skill", tickers=batch)
                     decided_total += len(decided)
                     escalated_total += len(escalate)
 
                     # JUDGE — one LLM eval call for the escalated subset only.
                     llm_verdicts: list[dict] = []
                     if escalate:
+                        trace.event("eval", "start", tickers=escalate)
                         llm_verdicts = await asyncio.wait_for(
                             _evaluate_ticker_batch(
                                 client,
@@ -1182,6 +1235,9 @@ async def run_multi_ticker_async(
                             ),
                             timeout=_BATCH_EVAL_TIMEOUT,
                         )
+                        trace.event("eval", "done", tickers=escalate,
+                                    triggered=sum(1 for v in llm_verdicts
+                                                  if v["triggered_for_ticker"]))
 
                     # Merge decided + LLM verdicts, preserving batch order.
                     by_sym = {v["ticker"]: v for v in (decided + llm_verdicts)}
@@ -1204,6 +1260,8 @@ async def run_multi_ticker_async(
                         "Multi-ticker batch [%s]: evaluation failed: %s",
                         ", ".join(batch), exc,
                     )
+                    trace.event("eval", "batch_failed", tickers=batch,
+                                error=f"{type(exc).__name__}: {str(exc)[:200]}")
                     return [
                         _failed_verdict(t, f"Evaluation failed: {exc}")
                         for t in batch
@@ -1228,6 +1286,9 @@ async def run_multi_ticker_async(
             _TICKER_CONCURRENCY,
             time.monotonic() - t1,
         )
+        trace.event("stage2", "done", decided=decided_total,
+                    escalated=escalated_total, triggered=triggered_count,
+                    batches=len(batches))
 
         # Stage 3 — conclude (only sees compact verdicts, not raw tool data)
         t2 = time.monotonic()
@@ -1245,10 +1306,13 @@ async def run_multi_ticker_async(
                 ),
                 timeout=_CONCLUDE_TIMEOUT,
             )
+            trace.event("conclude", "done", triggered=conclusion["triggered"],
+                        summary_len=len(conclusion.get("summary") or ""))
         except asyncio.TimeoutError:
             log.error(
                 "Multi-ticker concluder timed out after %.0fs", _CONCLUDE_TIMEOUT
             )
+            trace.event("conclude", "timeout", timeout_s=_CONCLUDE_TIMEOUT)
             conclusion = {"triggered": False, "summary": None}
         log.info(
             "Multi-ticker pipeline: done — triggered=%s summary_len=%d (%.1fs)",

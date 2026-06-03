@@ -42,6 +42,7 @@ from services.rag.taxonomy import CLUSTERS as _CLUSTERS
 
 from .fmp_tools import _FMP_SYSTEM_ADDON, call_fmp_tool, get_fmp_tool_schemas
 from .multi_ticker import run_multi_ticker_async
+from .run_trace import RunTrace
 
 log = logging.getLogger(__name__)
 
@@ -233,6 +234,7 @@ def _run_agent_multi_ticker(
     linked_scan_run_ids: list[int] | None,
     filtered_tickers: list[str] | None,
     trigger_condition: str | None,
+    trace: RunTrace,
 ) -> dict:
     """Route a multi-ticker screening through the plan → fan-out → conclude
     pipeline. Mirrors ``run_agent``'s return contract and applies the same
@@ -267,6 +269,7 @@ def _run_agent_multi_ticker(
                         trigger_condition.strip() if has_condition else None
                     ),
                     context_addon=context_addon,
+                    trace=trace,
                 ),
                 timeout=_RUN_TIMEOUT_SECONDS,
             )
@@ -276,6 +279,9 @@ def _run_agent_multi_ticker(
             "Multi-ticker pipeline timed out after %.0fs (tickers=%d)",
             _RUN_TIMEOUT_SECONDS, len(tickers),
         )
+        # The trace lives in this (synchronous) frame, not the cancelled
+        # coroutine, so events recorded before the deadline are preserved.
+        trace.event("run", "wall_clock_timeout", timeout_s=_RUN_TIMEOUT_SECONDS)
         result = {
             "triggered": False,
             # Mark as a real run failure so delivery renders the ⚠️ "Run failed"
@@ -315,6 +321,7 @@ def run_agent(
     linked_scan_run_ids: list[int] | None = None,
     filtered_tickers: list[str] | None = None,
     trigger_condition: str | None = None,
+    trace: RunTrace | None = None,
 ) -> dict:
     """Run the screening agent loop. Returns {triggered, summary, data_used}.
 
@@ -329,16 +336,23 @@ def run_agent(
     in an isolated LLM context and the conclusion sees only compact
     per-ticker verdicts. Single-ticker / no-ticker runs use the existing
     single-agent tool-calling loop.
+
+    ``trace`` (a RunTrace) accumulates the ordered run events and is attached to
+    the returned result as ``result["trace"]`` so the caller can persist it.
     """
+    trace = trace or RunTrace()
     if tickers and len(tickers) >= 2:
-        return _run_agent_multi_ticker(
+        result = _run_agent_multi_ticker(
             prompt=prompt,
             user_id=user_id,
             tickers=tickers,
             linked_scan_run_ids=linked_scan_run_ids,
             filtered_tickers=filtered_tickers,
             trigger_condition=trigger_condition,
+            trace=trace,
         )
+        result["trace"] = trace.as_dict()
+        return result
 
     base_system = _AGENT_SYSTEM + (_FMP_SYSTEM_ADDON if _FMP_ENABLED else "")
     system = base_system
@@ -437,10 +451,12 @@ def run_agent(
         )
 
     registry = _build_registry(user_id, writeable_run_ids=writeable_run_ids)
+    trace.event("run", "start", mode="single_agent", ticker_count=len(tickers or []),
+                has_condition=has_condition)
     try:
         result = asyncio.run(
             asyncio.wait_for(
-                _run_agent_async(system, prompt, registry),
+                _run_agent_async(system, prompt, registry, trace=trace),
                 timeout=_RUN_TIMEOUT_SECONDS,
             )
         )
@@ -450,6 +466,7 @@ def run_agent(
             _RUN_TIMEOUT_SECONDS,
             _MAX_TOOL_ROUNDS,
         )
+        trace.event("run", "wall_clock_timeout", timeout_s=_RUN_TIMEOUT_SECONDS)
         result = {
             "triggered": False,
             # Surface as a real failure (⚠️ alert) rather than a ✅ "no trigger"
@@ -474,11 +491,13 @@ def run_agent(
                 "See data_used for the raw tool results."
             )
 
+    result["trace"] = trace.as_dict()
     return result
 
 
 async def _run_agent_async(
-    system: str, user_prompt: str, registry: ToolRegistry
+    system: str, user_prompt: str, registry: ToolRegistry,
+    trace: RunTrace | None = None,
 ) -> dict:
     base_url = os.environ.get(_OLLAMA_URL_ENV, "http://localhost:11434").rstrip("/")
     model = (
@@ -511,6 +530,8 @@ async def _run_agent_async(
         )
 
     data_used = {n: _summarise_tool_result(n, r) for n, r in tool_results.items()}
+    if trace is not None:
+        trace.event("tools", "done", rounds=rounds, tools_used=list(tool_results.keys()))
     raw = (final_message.get("content") or "").strip()
     raw = raw.removeprefix("```json").removeprefix("```").removesuffix("```").strip()
     try:
@@ -520,8 +541,13 @@ async def _run_agent_async(
             "Agent returned non-JSON (len=%d, head=%r, tail=%r): %s",
             len(raw), raw[:120], raw[-120:] if len(raw) > 120 else "", raw,
         )
+        if trace is not None:
+            trace.event("parse", "non_json", raw_len=len(raw))
         parsed = {"triggered": False, "summary": None, "data_used": data_used}
     parsed.setdefault("data_used", data_used)
+    if trace is not None:
+        trace.event("run", "parsed", triggered=parsed.get("triggered"),
+                    summary_len=len((parsed.get("summary") or "")))
     log.info(
         "Screening agent: parsed result — rounds=%d triggered=%s summary_len=%d "
         "tools_used=%s",
@@ -604,6 +630,9 @@ def run_screening(screening: dict, dry_run: bool = False, is_test: bool = False)
                 "data_used": {},
             }
 
+    # Own the trace here so it's attached even if run_agent raises before it can
+    # return one — the error row then still carries the events up to the failure.
+    trace = RunTrace()
     try:
         explicit_tickers: list[str] = screening.get("tickers") or []
         linked_ids: list[int] = screening.get("linked_scan_run_ids") or []
@@ -655,12 +684,16 @@ def run_screening(screening: dict, dry_run: bool = False, is_test: bool = False)
             linked_scan_run_ids=linked_ids or None,
             filtered_tickers=filtered_tickers,
             trigger_condition=trigger_condition or None,
+            trace=trace,
         )
         result.update(base)
+        result.setdefault("trace", trace.as_dict())
         return result
     except Exception as exc:
         log.exception("run_agent failed for screening %s", screening["id"])
-        return {**base, "triggered": False, "summary": str(exc), "data_used": {}, "error": True}
+        trace.event("run", "exception", error=f"{type(exc).__name__}: {str(exc)[:300]}")
+        return {**base, "triggered": False, "summary": str(exc), "data_used": {},
+                "error": True, "trace": trace.as_dict()}
 
 
 def persist_and_deliver(result: dict, result_id: str | None = None) -> None:
@@ -678,6 +711,7 @@ def persist_and_deliver(result: dict, result_id: str | None = None) -> None:
     error = bool(result.get("error"))
     skipped = bool(result.get("skipped"))
     status = "error" if error else "skipped" if skipped else "done"
+    trace = result.get("trace")  # ordered event log; persisted even on error/timeout
 
     if result_id:
         try:
@@ -685,6 +719,7 @@ def persist_and_deliver(result: dict, result_id: str | None = None) -> None:
                 "triggered": triggered,
                 "summary": result.get("summary"),
                 "data_used": result.get("data_used", {}),
+                "trace": trace,
                 "status": status,
             }).eq("id", result_id).execute()
         except Exception as exc:
@@ -699,6 +734,7 @@ def persist_and_deliver(result: dict, result_id: str | None = None) -> None:
             "triggered": triggered,
             "summary": result.get("summary"),
             "data_used": result.get("data_used", {}),
+            "trace": trace,
             "is_test": is_test,
             "delivered": False,
             "status": status,

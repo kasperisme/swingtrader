@@ -11,6 +11,7 @@ import asyncio
 from unittest import mock
 
 from services.agent import engine, multi_ticker, skills
+from services.agent.run_trace import RunTrace
 from services.agent.skills import SKILLS, TickerSignal, get_skill
 
 
@@ -293,3 +294,80 @@ def test_no_skill_diverts_to_dynamic_planner():
     # No skill → all tickers escalate to the LLM evaluator.
     assert result["data_used"]["escalated_count"] == 2
     assert set(captured["tickers"]) == {"AAPL", "MSFT"}
+
+
+# ── 4. Run trace ─────────────────────────────────────────────────────────────
+
+
+def test_runtrace_records_ordered_events():
+    tr = RunTrace()
+    tr.event("plan", "done", tools=["a", "b"])
+    tr.event("eval", "start", tickers=["AAPL"])
+    d = tr.as_dict()
+    assert d["event_count"] == 2
+    assert [e["seq"] for e in d["events"]] == [0, 1]
+    assert d["events"][0]["stage"] == "plan" and d["events"][0]["tools"] == ["a", "b"]
+    assert "started_at" in d and "elapsed" in d
+
+
+def test_trace_captures_skill_run_sequence():
+    """A skill run records classify → plan → analytics → stage2 → conclude."""
+    skill = get_skill("news_impact")
+    reg = _FakeRegistry({e["name"] for e in skill.tool_plan})
+    trace = RunTrace()
+
+    async def _fake_classify(*a, **k):
+        return skill
+
+    async def _fake_conclude(*a, **k):
+        return {"triggered": True, "summary": "ok"}
+
+    with mock.patch.object(multi_ticker, "classify_skill", _fake_classify), \
+         mock.patch.object(multi_ticker, "_conclude", _fake_conclude):
+        _run(multi_ticker.run_multi_ticker_async(
+            prompt="news on my names", tickers=["AAPL", "MSFT"],
+            registry=reg, trace=trace))
+
+    stages = [(e["stage"], e["event"]) for e in trace.events]
+    assert ("run", "start") in stages
+    assert ("classify", "done") in stages
+    assert ("plan", "skill") in stages
+    # both tickers had empty news → decided deterministically
+    assert sum(1 for e in trace.events
+               if e["stage"] == "analytics" and e["event"] == "decided") == 2
+    assert ("stage2", "done") in stages
+    assert ("conclude", "done") in stages
+
+
+def test_trace_survives_simulated_timeout():
+    """Events recorded before a cancellation remain in the shared recorder."""
+    import asyncio as _aio
+
+    skill = get_skill("news_impact")
+    reg = _FakeRegistry({e["name"] for e in skill.tool_plan})
+    trace = RunTrace()
+
+    async def _fake_classify(*a, **k):
+        trace.event("classify", "done", skill=skill.id)  # mirror real call
+        return skill
+
+    async def _hang_conclude(*a, **k):
+        await _aio.sleep(10)  # never completes within the timeout
+
+    async def _go():
+        with mock.patch.object(multi_ticker, "classify_skill", _fake_classify), \
+             mock.patch.object(multi_ticker, "_conclude", _hang_conclude):
+            await _aio.wait_for(
+                multi_ticker.run_multi_ticker_async(
+                    prompt="news", tickers=["AAPL"], registry=reg, trace=trace),
+                timeout=0.2,
+            )
+
+    with __import__("pytest").raises(_aio.TimeoutError):
+        _run(_go())
+
+    # Despite the timeout, the pre-conclude sequence is preserved.
+    stages = [(e["stage"], e["event"]) for e in trace.events]
+    assert ("run", "start") in stages
+    assert ("stage2", "done") in stages
+    assert not any(s == ("conclude", "done") for s in stages)
