@@ -221,6 +221,22 @@ def test_classify_returns_matched_skill():
     assert skill is not None and skill.id == "breakout"
 
 
+def test_classify_uses_greedy_deterministic_sampling():
+    """Routing must be deterministic — temperature 0 + fixed seed, no thinking."""
+    captured = {}
+
+    async def _capture(*args, **kwargs):
+        captured.update(kwargs)
+        return '{"skill": "breakout"}'
+
+    with mock.patch.object(skills, "simple_chat", _capture):
+        _run(skills.classify_skill(object(), base_url="x", model="m",
+                                   prompt="breakouts?"))
+    assert captured["options"]["temperature"] == 0.0
+    assert "seed" in captured["options"]
+    assert captured["think"] is False
+
+
 def test_classify_none_falls_through():
     with mock.patch.object(skills, "simple_chat",
                            _mock_simple_chat('{"skill": "NONE"}')):

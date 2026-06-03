@@ -603,16 +603,20 @@ def skill_catalog() -> str:
 # ── Classifier ───────────────────────────────────────────────────────────────
 
 _CLASSIFY_SYSTEM = """You are a router for a stock-screening agent. Given a \
-screening prompt, choose the SINGLE best-matching skill from the list, or NONE \
-if no skill clearly fits.
+screening prompt, choose the SINGLE best-matching predefined skill.
 
 SKILLS:
 {CATALOG}
 
+The predefined skills are the optimized, preferred processing path. PRIORITISE \
+them: pick the closest-matching skill whenever the prompt plausibly fits one. \
+Only return "NONE" when the prompt clearly fits NONE of the skills — NONE is a \
+fallback to a slower general planner, so do not pick it for a borderline case.
+
 Rules:
-- Pick exactly one skill id, or "NONE" when the prompt is a poor fit for all.
+- Pick exactly one skill id. Reserve "NONE" for prompts that genuinely match no skill.
 - A user-set trigger CONDITION (if given) is part of the intent — route on it too.
-- Prefer NONE over a weak/forced match; NONE routes to the general planner.
+- Be consistent: the same prompt must always map to the same skill.
 
 Respond with ONLY this JSON (no markdown, no commentary):
 {"skill": "<skill_id>" | "NONE", "reason": "<short>"}
@@ -646,7 +650,12 @@ async def classify_skill(
             system=system,
             user="\n\n".join(user_parts),
             request_format="json",
-            options={"num_predict": 200},
+            # Greedy + fixed seed so the SAME prompt always routes to the SAME
+            # skill. Without this the router samples and routing looks random.
+            # think=False keeps reasoning models from burning the token budget
+            # (and varying) before emitting the tiny JSON.
+            options={"num_predict": 200, "temperature": 0.0, "top_p": 1.0, "seed": 0},
+            think=False,
             label="Skill classifier",
         )
     except Exception as exc:  # noqa: BLE001 — never let routing kill a run
