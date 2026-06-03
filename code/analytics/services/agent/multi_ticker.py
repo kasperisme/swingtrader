@@ -438,35 +438,53 @@ async def _trial_run_plan(
 # ── Stage 2: per-ticker execution ───────────────────────────────────────────
 
 
-# Date-window lookback for skills that request a price/history range via the
-# {FROM_DATE}/{TO_DATE} placeholders (e.g. breakout's EOD chart). ~45 calendar
-# days comfortably covers a 20-trading-bar lookback through weekends/holidays.
+# Date-window lookbacks for skills that request a price/history range via the
+# {FROM_DATE}/{TO_DATE} placeholders. The daily window (~45 calendar days)
+# covers a 20-trading-bar lookback through weekends/holidays; the intraday
+# window ({FROM_DATE_INTRADAY}) is short so an hourly series stays small.
 _DATE_LOOKBACK_DAYS = int(os.environ.get("AGENT_PRICE_LOOKBACK_DAYS", "45"))
+_INTRADAY_LOOKBACK_DAYS = int(os.environ.get("AGENT_INTRADAY_LOOKBACK_DAYS", "5"))
+
+
+def _et_today():
+    try:
+        from zoneinfo import ZoneInfo
+        return datetime.now(ZoneInfo("America/New_York")).date()
+    except Exception:
+        return datetime.now(timezone.utc).date()
 
 
 def _date_window() -> tuple[str, str]:
     """(from_date, to_date) as ISO dates — to_date is today (US Eastern)."""
-    try:
-        from zoneinfo import ZoneInfo
-        now = datetime.now(ZoneInfo("America/New_York"))
-    except Exception:
-        now = datetime.now(timezone.utc)
-    to_d = now.date()
+    to_d = _et_today()
     return (to_d - timedelta(days=_DATE_LOOKBACK_DAYS)).isoformat(), to_d.isoformat()
 
 
 def _substitute_ticker(value: Any, ticker: str) -> Any:
     if isinstance(value, str):
         v = value.replace(_TICKER_PLACEHOLDER, ticker)
-        if "{FROM_DATE}" in v or "{TO_DATE}" in v:
+        if "{FROM_DATE}" in v or "{TO_DATE}" in v or "{FROM_DATE_INTRADAY}" in v:
             from_d, to_d = _date_window()
-            v = v.replace("{FROM_DATE}", from_d).replace("{TO_DATE}", to_d)
+            intraday_from = (_et_today() - timedelta(days=_INTRADAY_LOOKBACK_DAYS)).isoformat()
+            v = (v.replace("{FROM_DATE_INTRADAY}", intraday_from)
+                  .replace("{FROM_DATE}", from_d)
+                  .replace("{TO_DATE}", to_d))
         return v
     if isinstance(value, list):
         return [_substitute_ticker(v, ticker) for v in value]
     if isinstance(value, dict):
         return {k: _substitute_ticker(v, ticker) for k, v in value.items()}
     return value
+
+
+def _plan_key(entry: dict) -> str:
+    """Result-slot key for a tool-plan entry.
+
+    Defaults to the tool name, but an entry may set an explicit ``key`` so the
+    SAME tool can appear multiple times under distinct slots — e.g. breakout
+    calls ``chart`` twice (daily + intraday) and reads them back separately.
+    """
+    return str(entry.get("key") or entry["name"])
 
 
 async def _execute_plan(
@@ -480,19 +498,21 @@ async def _execute_plan(
 
     async def _one(idx: int, entry: dict) -> tuple[str, Any]:
         name = entry["name"]
+        key = _plan_key(entry)
         args = _substitute_ticker(entry.get("args") or {}, ticker)
         if not registry.has(name):
-            return name, {"error": f"unknown tool {name!r}"}
+            return key, {"error": f"unknown tool {name!r}"}
         try:
-            return name, await registry.call(name, args)
+            return key, await registry.call(name, args)
         except Exception as exc:  # noqa: BLE001 — keep one bad tool from killing the ticker
-            return name, {"error": str(exc)}
+            return key, {"error": str(exc)}
 
     pairs = await asyncio.gather(*(_one(i, e) for i, e in enumerate(plan)))
     results: dict[str, Any] = {}
-    for name, result in pairs:
-        # If the planner picked the same tool twice (rare), the later wins.
-        results[name] = result
+    for key, result in pairs:
+        # Keyed by slot, so the same tool under two slots (e.g. chart daily +
+        # intraday) both survive; a repeated slot lets the later win.
+        results[key] = result
     return results
 
 

@@ -181,28 +181,39 @@ python -m services.agent.cli classify "which names are breaking out?"
 which FMP tools resolve, and (with `--probe`) calls them to confirm API-plan
 availability. Run `validate-skills --probe` after an FMP plan change.
 
-#### Breakout skill — fully deterministic (daily timeframe)
+#### Breakout skill — fully deterministic, multi-timeframe
 
 The breakout decision is made **entirely in Python** (`_analytics_breakout`) and
 never escalates to the LLM — the per-ticker verdict is reproducible, and the LLM
-only writes the final multi-ticker message from the confirmed set. Inputs: FMP
-`chart` (`historical-price-eod-light` — **daily** EOD bars, `{FROM_DATE}`/`{TO_DATE}`
-→ ~45-day window), FMP `quote` (today's price/volume), and the user's logged
-entry from `get_user_screening_note_details`.
+only writes the final multi-ticker message from the confirmed set.
 
-A ticker is a **confirmed breakout** when price is in an early-biased band around
-its reference **and** volume ≥ `_VOLUME_SURGE`× (1.5×) the 20-day average:
+It scans **multiple timeframes** (`_BREAKOUT_TIMEFRAMES`): **daily** EOD and
+**intraday hourly**. The skill calls FMP `chart` twice under distinct result
+slots — `chart_daily` (`historical-price-eod-light`, ~45-day window) and
+`chart_1h` (`intraday-1-hour`, ~5-day window) — plus `quote` (live price/volume,
+used for the daily check) and the user's logged entry from
+`get_user_screening_note_details`. (The pipeline supports the same tool under
+multiple slots via an optional `key` on a tool-plan entry; see `_plan_key`.) A
+ticker **triggers if ANY timeframe confirms**, so an intraday move is caught as
+it develops — before the daily candle has run up. If the intraday endpoint isn't
+available on the API tier, that timeframe is simply skipped.
+
+A timeframe **confirms** when price is in an early-biased band around its
+reference **and** volume ≥ `_VOLUME_SURGE`× (1.5×) the trailing average:
 
 - **With a logged entry note** → reference is the planned entry price, direction-
   aware. Band = `[entry·(1−pre), entry·(1+post)]` (long) — default ±5%
   (`_ENTRY_PRE_BAND_PCT` / `_ENTRY_POST_BAND_PCT`). The pre band fires *before*
   price reaches the entry (early detection); the post band keeps it fresh just
   past. Short entries mirror this.
-- **No entry note** → reference is the trailing 20-day high (`_BREAKOUT_LOOKBACK`);
+- **No entry note** → reference is the trailing high of that timeframe
+  (`_BREAKOUT_LOOKBACK` daily bars / `_INTRADAY_LOOKBACK_BARS` hourly bars);
   in-band = within `pre`% below the high or any new high.
 
 Detection is intentionally biased toward early/false-positive over missing a
-breakout. Tune the bands/threshold via the constants at the top of `skills.py`.
+breakout. Tune the bands/threshold/timeframes via the constants at the top of
+`skills.py` (`_BREAKOUT_TIMEFRAMES`) and the intraday window via
+`AGENT_INTRADAY_LOOKBACK_DAYS`.
 
 ### Multi-ticker pipeline (screenings with ≥2 tickers)
 

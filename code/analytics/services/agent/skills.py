@@ -50,10 +50,20 @@ _TICKER_PLACEHOLDER = "{TICKER}"
 # we start flagging while price is still approaching the level (pre band) and
 # keep flagging just past it (post band). We'd rather alert slightly early than
 # miss a breakout. Both are percentages of the reference price.
-_BREAKOUT_LOOKBACK = 20       # trailing bars: high reference + volume average
-_VOLUME_SURGE = 1.5           # today's volume ≥ 1.5× trailing average to confirm
+_BREAKOUT_LOOKBACK = 20       # trailing daily bars: high reference + volume average
+_INTRADAY_LOOKBACK_BARS = 14  # trailing intraday (hourly) bars for the same
+_VOLUME_SURGE = 1.5           # volume ≥ 1.5× trailing average to confirm
 _ENTRY_PRE_BAND_PCT = 5.0     # begin flagging this far BEFORE the entry/high
 _ENTRY_POST_BAND_PCT = 5.0    # keep flagging this far PAST the entry
+
+# Breakout scans these timeframes. Each maps a tool-plan result slot (filled by
+# the skill's `chart` calls) to a label; daily uses the realtime quote as the
+# live price, intraday uses the latest bar. Add a slot here + a matching chart
+# call in the skill to scan another timeframe.
+_BREAKOUT_TIMEFRAMES = (
+    {"label": "daily", "slot": "chart_daily", "use_quote": True, "lookback": _BREAKOUT_LOOKBACK},
+    {"label": "1h", "slot": "chart_1h", "use_quote": False, "lookback": _INTRADAY_LOOKBACK_BARS},
+)
 
 # Internal RAG tool names. Anything in a skill's tool_plan NOT in this set is
 # treated as an external (FMP) call — used by the price extractor to know which
@@ -231,30 +241,23 @@ def _num(row: dict, *keys: str) -> float | None:
     return None
 
 
-def _price_bars(data: dict[str, Any]) -> list[dict]:
-    """Dated OHLC bars from FMP, sorted oldest→newest.
+def _spot_quote(data: dict[str, Any]) -> dict | None:
+    """The realtime quote row from the ``quote`` slot (has ``price``/``volume``)."""
+    for r in _as_list(data.get("quote")):
+        if isinstance(r, dict) and r.get("price") is not None:
+            return r
+    return None
 
-    FMP's EOD endpoints return newest-first, so we sort by ``date`` ascending —
-    the last element is then genuinely the most recent bar. Requiring a ``date``
-    field cleanly excludes the realtime ``quote`` row (which has no ``date``),
-    keeping the series and the spot quote from contaminating each other.
-    """
+
+def _series_bars(data: dict[str, Any], slot: str) -> list[dict]:
+    """Dated OHLCV bars from a named chart slot, sorted oldest→newest."""
     bars = [
         r
-        for r in _external_rows(data)
+        for r in _as_list(data.get(slot))
         if isinstance(r, dict) and r.get("date") and _num(r, "close", "price", "c") is not None
     ]
     bars.sort(key=lambda r: str(r.get("date")))
     return bars
-
-
-def _spot_quote(data: dict[str, Any]) -> dict | None:
-    """The realtime quote row (FMP ``quote``) — has ``price``/``volume`` but no
-    ``date`` (that's how it's distinguished from the EOD bar series)."""
-    for r in _external_rows(data):
-        if isinstance(r, dict) and "date" not in r and r.get("price") is not None:
-            return r
-    return None
 
 
 def _entry_from_metadata(meta: Any) -> dict | None:
@@ -306,11 +309,12 @@ class ScreeningSkill:
     always_send: bool | None = None
 
     def fmp_tools(self) -> list[str]:
-        return [
+        names = [
             t["name"]
             for t in self.tool_plan
             if t.get("name") not in _INTERNAL_TOOLS
         ]
+        return list(dict.fromkeys(names))  # dedup (same tool may appear twice)
 
 
 # ── Analytics implementations ────────────────────────────────────────────────
@@ -343,90 +347,113 @@ def _analytics_news_impact(ticker: str, data: dict[str, Any]) -> TickerSignal:
     )
 
 
-def _analytics_breakout(ticker: str, data: dict[str, Any]) -> TickerSignal:
-    """Deterministic breakout verdict for one ticker (never escalates).
+def _breakout_band(current: float, ref_high: float, entry: dict | None) -> tuple[bool, float, str]:
+    """(in_band, pct_vs_ref, ref_label) for one timeframe's current price.
 
-    Price reference: the user's planned entry if a note exists, else the
-    trailing N-bar high. Detection uses an early-biased band around that
-    reference (±pre/post pct). Volume must expand ≥ _VOLUME_SURGE× the trailing
-    average. The ticker-level decision is fully hardcoded here; the pipeline's
-    LLM concluder only writes the final message over the confirmed set.
+    Early-biased band: with an entry note we band around the planned entry
+    (direction-aware); otherwise around the trailing high (within pre% below it,
+    or any new high). pre/post come from the module-level band constants.
     """
-    news = _news_items(data)
-    bars = _price_bars(data)
-    closes = [c for b in bars if (c := _num(b, "close", "price", "c")) is not None]
-    vols = [v for b in bars if (v := _num(b, "volume", "v")) is not None]
-    quote = _spot_quote(data)
-    entry = _planned_entry(data, ticker)
-
-    # "Today": prefer the realtime quote; fall back to the latest EOD bar.
-    current = (_num(quote, "price") if quote else None) or (closes[-1] if closes else None)
-    today_vol = (_num(quote, "volume") if quote else None) or (vols[-1] if vols else None)
-
-    metrics: dict[str, Any] = {"news_count": len(news), "bars": len(closes)}
-    if current is not None:
-        metrics["price"] = round(current, 2)
-    if entry:
-        metrics["planned_entry_price"] = entry.get("price")
-        metrics["planned_direction"] = entry.get("direction")
-
-    # Reference excludes the latest bar (treated as "today") so the high/average
-    # is genuinely prior. Need a price plus a volume baseline to decide.
-    prior_closes = closes[:-1][-_BREAKOUT_LOOKBACK:] if len(closes) > 1 else closes
-    prior_vols = vols[:-1][-_BREAKOUT_LOOKBACK:] if len(vols) > 1 else vols
-    if current is None or len(prior_closes) < 5 or not prior_vols or not today_vol:
-        return TickerSignal.decided(
-            ticker, triggered=False,
-            facts=f"{ticker}: insufficient price/volume data to confirm a breakout.",
-            metrics=metrics, confidence="low",
-        )
-
-    avg_v = sum(prior_vols) / len(prior_vols)
-    vol_ratio = (today_vol / avg_v) if avg_v else None
-    if vol_ratio is not None:
-        metrics["volume_ratio"] = round(vol_ratio, 2)
-    vol_ok = vol_ratio is not None and vol_ratio >= _VOLUME_SURGE
-
-    # ── price side: entry band, else trailing-high band (early-biased) ──
     pre = _ENTRY_PRE_BAND_PCT / 100.0
     post = _ENTRY_POST_BAND_PCT / 100.0
     if entry and entry.get("price") is not None:
         ep = float(entry["price"])
         direction = str(entry.get("direction") or "long").lower()
         if direction == "short":
-            # breakdown: approach from above (pre), confirm just below (post)
             lower, upper = ep * (1 - post), ep * (1 + pre)
         else:
-            # breakout: approach from below (pre), confirm just above (post)
             lower, upper = ep * (1 - pre), ep * (1 + post)
-        in_band = lower <= current <= upper
-        metrics["pct_vs_entry"] = round((current - ep) / ep * 100.0, 2) if ep else 0.0
-        ref = f"{direction} entry {ep:g} [{lower:.2f}–{upper:.2f}]"
-    else:
-        prior_high = max(prior_closes)
-        # within `pre` below the high counts as approaching; anything above is a
-        # fresh high. No upper bound — a new high is always in-band.
-        in_band = current >= prior_high * (1 - pre)
-        metrics["pct_vs_high"] = round((current - prior_high) / prior_high * 100.0, 2) if prior_high else 0.0
-        ref = f"{len(prior_closes)}-day high {prior_high:.2f}"
+        pct = round((current - ep) / ep * 100.0, 2) if ep else 0.0
+        return (lower <= current <= upper), pct, f"{direction} entry {ep:g}"
+    pct = round((current - ref_high) / ref_high * 100.0, 2) if ref_high else 0.0
+    return (ref_high > 0 and current >= ref_high * (1 - pre)), pct, f"high {ref_high:.2f}"
 
-    confirmed = in_band and vol_ok
-    vr = f"{vol_ratio:.2f}x" if vol_ratio is not None else "n/a"
-    if confirmed:
-        facts = f"{ticker}: CONFIRMED breakout — price {current:.2f} vs {ref}, volume {vr} avg."
-    elif in_band:
-        facts = (f"{ticker}: price in breakout band ({current:.2f} vs {ref}) "
-                 f"but volume only {vr} avg — not confirmed.")
-    elif vol_ok:
-        facts = (f"{ticker}: volume {vr} avg but price {current:.2f} outside band "
-                 f"({ref}) — not confirmed.")
-    else:
-        facts = f"{ticker}: no breakout — price {current:.2f} vs {ref}, volume {vr} avg."
+
+def _eval_breakout_timeframe(
+    data: dict[str, Any], tf: dict, entry: dict | None
+) -> dict | None:
+    """Deterministic breakout check for one timeframe. None if no usable data.
+
+    Daily uses the realtime quote as the live price/volume; intraday uses the
+    latest bar. The reference high (and volume average) is taken from the prior
+    bars of that timeframe's own series.
+    """
+    bars = _series_bars(data, tf["slot"])
+    closes = [c for b in bars if (c := _num(b, "close", "price", "c")) is not None]
+    highs = [h for b in bars if (h := _num(b, "high", "close", "price")) is not None]
+    vols = [v for b in bars if (v := _num(b, "volume", "v")) is not None]
+
+    quote = _spot_quote(data) if tf.get("use_quote") else None
+    current = (_num(quote, "price") if quote else None) or (closes[-1] if closes else None)
+    cur_vol = (_num(quote, "volume") if quote else None) or (vols[-1] if vols else None)
+
+    n = tf["lookback"]
+    prior_highs = highs[:-1][-n:] if len(highs) > 1 else highs
+    prior_vols = vols[:-1][-n:] if len(vols) > 1 else vols
+    if current is None or len(prior_highs) < 5 or not prior_vols or not cur_vol:
+        return None
+
+    avg_v = sum(prior_vols) / len(prior_vols)
+    vol_ratio = (cur_vol / avg_v) if avg_v else None
+    vol_ok = vol_ratio is not None and vol_ratio >= _VOLUME_SURGE
+    ref_high = max(prior_highs)
+    in_band, pct, ref = _breakout_band(current, ref_high, entry)
+    return {
+        "label": tf["label"],
+        "confirmed": bool(in_band and vol_ok),
+        "in_band": bool(in_band),
+        "vol_ok": bool(vol_ok),
+        "current": round(current, 2),
+        "pct": pct,
+        "vol_ratio": round(vol_ratio, 2) if vol_ratio is not None else None,
+        "ref": ref,
+    }
+
+
+def _analytics_breakout(ticker: str, data: dict[str, Any]) -> TickerSignal:
+    """Deterministic, multi-timeframe breakout verdict (never escalates).
+
+    Scans each timeframe in _BREAKOUT_TIMEFRAMES (daily EOD + intraday hourly).
+    A timeframe confirms when price is in the early-biased band around its
+    reference (planned entry if noted, else trailing high) AND volume ≥ 1.5×
+    the trailing average. The ticker triggers if ANY timeframe confirms — so an
+    intraday move is caught as it develops, before the daily candle has run up.
+    The decision is fully hardcoded; the LLM concluder only writes the message.
+    """
+    news = _news_items(data)
+    entry = _planned_entry(data, ticker)
+    metrics: dict[str, Any] = {"news_count": len(news)}
+    if entry:
+        metrics["planned_entry_price"] = entry.get("price")
+        metrics["planned_direction"] = entry.get("direction")
+
+    results = [r for tf in _BREAKOUT_TIMEFRAMES if (r := _eval_breakout_timeframe(data, tf, entry))]
+    if not results:
+        return TickerSignal.decided(
+            ticker, triggered=False,
+            facts=f"{ticker}: insufficient price/volume data on any timeframe.",
+            metrics=metrics, confidence="low",
+        )
+
+    metrics["timeframes"] = {r["label"]: r for r in results}
+    confirmed_tfs = [r["label"] for r in results if r["confirmed"]]
+    triggered = bool(confirmed_tfs)
+
+    frags = []
+    for r in results:
+        status = "CONFIRMED" if r["confirmed"] else ("in-band" if r["in_band"] else "no")
+        vr = f"{r['vol_ratio']:.2f}x" if r["vol_ratio"] is not None else "n/a"
+        frags.append(f"{r['label']}={status} ({r['current']:.2f} vs {r['ref']}, vol {vr})")
+    head = (
+        f"{ticker}: CONFIRMED breakout on {'+'.join(confirmed_tfs)}"
+        if triggered else f"{ticker}: no confirmed breakout"
+    )
+    facts = f"{head} — " + "; ".join(frags) + "."
     if news:
-        facts += f" Latest: {str(news[0].get('title') or '')[:70]}"
+        facts += f" Latest: {str(news[0].get('title') or '')[:60]}"
 
     return TickerSignal.decided(
-        ticker, triggered=confirmed, facts=facts, metrics=metrics, confidence="high",
+        ticker, triggered=triggered, facts=facts, metrics=metrics, confidence="high",
     )
 
 
@@ -503,40 +530,43 @@ SKILLS: list[ScreeningSkill] = [
     ScreeningSkill(
         id="breakout",
         description=(
-            "Daily-timeframe technical breakouts: price breaking above a planned "
-            "entry or the recent daily high WITH volume confirmation. 'Confirmed "
-            "breakout on price and volume', momentum, breaking resistance."
+            "Multi-timeframe technical breakouts (daily + intraday): price "
+            "breaking above a planned entry or the recent high WITH volume "
+            "confirmation. 'Confirmed breakout on price and volume', momentum, "
+            "breaking resistance, intraday moves."
         ),
-        # Daily EOD series (`chart` historical-price-eod-light) + realtime `quote`
-        # feed the deterministic price/volume math; the user's planned entry is
-        # pulled from their latest screening notes. {FROM_DATE}/{TO_DATE} are
-        # substituted at runtime to a ~45-day window ending today (≈30 daily
-        # bars, enough for the 20-day reference). If an FMP tool is unknown or
-        # access-denied the pipeline drops it; analytics then reports
-        # insufficient data rather than guessing. Confirm with `validate-skills`.
+        # Two `chart` calls under distinct slots feed the deterministic
+        # multi-timeframe math: chart_daily (EOD-light, ~45d window) and chart_1h
+        # (hourly, ~5d window) catch intraday moves before the daily candle runs
+        # up. Realtime `quote` is the live price for the daily check; the user's
+        # planned entry comes from their latest screening notes. Unknown/
+        # access-denied FMP tools (e.g. intraday on a lower tier) are dropped and
+        # that timeframe is simply skipped. Confirm with `validate-skills`.
         tool_plan=[
             {"name": "get_ticker_news", "args": {"tickers": [_TICKER_PLACEHOLDER], "hours": 72, "per_ticker_limit": 5}},
             {"name": "get_user_screening_note_details", "args": {"tickers": [_TICKER_PLACEHOLDER]}},
             {"name": "quote", "args": {"endpoint": "quote", "symbol": _TICKER_PLACEHOLDER}},
-            {"name": "chart", "args": {"endpoint": "historical-price-eod-light", "symbol": _TICKER_PLACEHOLDER, "from_date": "{FROM_DATE}", "to_date": "{TO_DATE}"}},
+            {"name": "chart", "key": "chart_daily", "args": {"endpoint": "historical-price-eod-light", "symbol": _TICKER_PLACEHOLDER, "from_date": "{FROM_DATE}", "to_date": "{TO_DATE}"}},
+            {"name": "chart", "key": "chart_1h", "args": {"endpoint": "intraday-1-hour", "symbol": _TICKER_PLACEHOLDER, "from_date": "{FROM_DATE_INTRADAY}", "to_date": "{TO_DATE}"}},
         ],
         analytics=_analytics_breakout,
         # Breakout is decided deterministically per ticker and never escalates,
         # so this focus is unused unless the pipeline path changes; kept for
         # parity with the eval contract.
         eval_focus=(
-            "Daily-timeframe breakout. The metrics already give the verdict "
-            "(price vs entry/high band + volume_ratio). Do not re-judge — report it."
+            "Multi-timeframe breakout. The metrics already give the verdict per "
+            "timeframe (price vs entry/high band + volume_ratio). Do not re-judge."
         ),
         requires=("get_ticker_news",),
         conclude_hint=(
-            "Each per-ticker verdict was decided deterministically on the DAILY "
-            "timeframe (price entered the breakout band around the planned entry "
-            "or the 20-day high, AND volume ≥1.5× the 20-day average). Write the "
-            "message from these verdicts: list EVERY ticker whose verdict is "
-            "triggered=true, add or re-judge NONE, and note the planned-entry "
-            "context where present. Detection is biased early, so some names may "
-            "be just approaching the level."
+            "Each per-ticker verdict was decided deterministically across "
+            "timeframes (daily + intraday hourly): price entered the breakout "
+            "band around the planned entry or the trailing high AND volume ≥1.5× "
+            "the trailing average. The facts/metrics name WHICH timeframe(s) "
+            "confirmed. Write the message from these verdicts: list EVERY ticker "
+            "whose verdict is triggered=true, add or re-judge NONE, call out the "
+            "timeframe (e.g. intraday-only moves are early), and note the planned-"
+            "entry context where present. Detection is biased early."
         ),
     ),
     ScreeningSkill(
