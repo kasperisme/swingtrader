@@ -34,8 +34,19 @@ _TESTING_TICKER_CAP = 0  # 0 = no cap; set to a small number while iterating
 
 
 def _passed_full_gates(tt: dict) -> bool:
-    """Match ibd_screener: technical ``Passed`` and ``PASSED_FUNDAMENTALS`` (numpy-safe)."""
-    return bool(tt.get("Passed")) and bool(tt.get("PASSED_FUNDAMENTALS"))
+    """NIS Momentum gate: technical ``Passed`` + ``PASSED_FUNDAMENTALS`` plus the
+    current price above its 50-day SMA (numpy-safe).
+
+    Adds ``PriceOverSMA50`` on top of the shared trend-template ``Passed`` so a
+    name that has pulled back below its 50-day MA is dropped — even if it still
+    clears the 150/200-day gates. This is scoped to NIS Momentum; the shared
+    ``Passed`` (used by ibd_screener, stage_2, etc.) is unchanged.
+    """
+    return (
+        bool(tt.get("Passed"))
+        and bool(tt.get("PriceOverSMA50"))
+        and bool(tt.get("PASSED_FUNDAMENTALS"))
+    )
 
 
 def run(
@@ -178,6 +189,7 @@ def _serialize_row(r: dict) -> dict:
         "RS_Rank": _n("RS_Rank"),
         "Passed": _b("Passed"),
         "PriceOverSMA150And200": _b("PriceOverSMA150And200"),
+        "PriceOverSMA50": _b("PriceOverSMA50"),
         "SMA150AboveSMA200": _b("SMA150AboveSMA200"),
         "SMA50AboveSMA150And200": _b("SMA50AboveSMA150And200"),
         "SMA200Slope": _b("SMA200Slope"),

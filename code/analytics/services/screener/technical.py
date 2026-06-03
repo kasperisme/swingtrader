@@ -115,6 +115,12 @@ class technical:
             "SMA50AboveSMA150And200": self.data["SMA50"].iloc[-1]
             > self.data["SMA200"].iloc[-1]
             and self.data["SMA50"].iloc[-1] > self.data["SMA150"].iloc[-1],
+            # Exposed for callers that want to require price above the 50-day MA
+            # (e.g. NIS Momentum drops pullbacks below SMA50). Not part of the
+            # shared ``Passed`` gate, so other trend-template consumers are
+            # unaffected.
+            "PriceOverSMA50": self.data["close"].iloc[-1]
+            > self.data["SMA50"].iloc[-1],
             "SMA200Slope": (
                 len(self.data) >= 22
                 and self.data["SMA200_slope_direction"].tail(20).sum() >= 18
