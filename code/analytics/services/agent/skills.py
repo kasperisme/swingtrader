@@ -41,13 +41,19 @@ log = logging.getLogger(__name__)
 
 _TICKER_PLACEHOLDER = "{TICKER}"
 
-# Breakout: how many trailing bars define the "recent high" the price is
-# measured against, and the trigger thresholds. Kept here so the deterministic
-# layer and the docs agree.
-_BREAKOUT_LOOKBACK = 20
-_NEAR_HIGH_PCT = -2.0   # within 2% of the lookback high
-_FAR_BELOW_PCT = -8.0   # clearly off the highs → not a breakout
-_VOLUME_SURGE = 1.5     # latest volume ≥ 1.5× trailing average
+# Breakout thresholds. The price reference depends on the ticker: if the user
+# has a logged entry note we measure against their planned entry price;
+# otherwise against the trailing N-bar high. Volume must expand by at least
+# _VOLUME_SURGE× the trailing average to confirm.
+#
+# Detection uses a BAND around the reference, biased toward EARLY detection —
+# we start flagging while price is still approaching the level (pre band) and
+# keep flagging just past it (post band). We'd rather alert slightly early than
+# miss a breakout. Both are percentages of the reference price.
+_BREAKOUT_LOOKBACK = 20       # trailing bars: high reference + volume average
+_VOLUME_SURGE = 1.5           # today's volume ≥ 1.5× trailing average to confirm
+_ENTRY_PRE_BAND_PCT = 5.0     # begin flagging this far BEFORE the entry/high
+_ENTRY_POST_BAND_PCT = 5.0    # keep flagging this far PAST the entry
 
 # Internal RAG tool names. Anything in a skill's tool_plan NOT in this set is
 # treated as an external (FMP) call — used by the price extractor to know which
@@ -242,31 +248,43 @@ def _price_bars(data: dict[str, Any]) -> list[dict]:
     return bars
 
 
+def _spot_quote(data: dict[str, Any]) -> dict | None:
+    """The realtime quote row (FMP ``quote``) — has ``price``/``volume`` but no
+    ``date`` (that's how it's distinguished from the EOD bar series)."""
+    for r in _external_rows(data):
+        if isinstance(r, dict) and "date" not in r and r.get("price") is not None:
+            return r
+    return None
+
+
+def _entry_from_metadata(meta: Any) -> dict | None:
+    """Parse a planned entry out of a raw ``metadata_json`` value (string or
+    dict) — a fallback for paths that don't pre-parse ``entry``."""
+    meta = _coerce(meta)
+    if isinstance(meta, dict):
+        entry = meta.get("entry")
+        return entry if isinstance(entry, dict) else None
+    return None
+
+
 def _planned_entry(data: dict[str, Any], ticker: str) -> dict | None:
     """The user's logged entry for this ticker from their latest screening notes.
 
     Shape (per get_user_screening_note_details): {price, direction, date,
-    take_profit?, stop_loss?, bar_idx?}. None when the user hasn't planned an
-    entry (or the user tool isn't available).
+    take_profit?, stop_loss?, bar_idx?}. The tool already parses ``entry`` out
+    of ``metadata_json``; we fall back to parsing it ourselves for robustness.
+    None when the user hasn't planned an entry (or the user tool is absent).
     """
     t = ticker.upper()
     for r in _as_list(data.get("get_user_screening_note_details")):
-        if isinstance(r, dict) and str(r.get("ticker") or "").upper() == t:
-            entry = r.get("entry")
-            if isinstance(entry, dict) and entry.get("price") is not None:
-                return entry
+        if not isinstance(r, dict) or str(r.get("ticker") or "").upper() != t:
+            continue
+        entry = r.get("entry")
+        if not (isinstance(entry, dict) and entry.get("price") is not None):
+            entry = _entry_from_metadata(r.get("metadata_json"))
+        if isinstance(entry, dict) and entry.get("price") is not None:
+            return entry
     return None
-
-
-def _format_entry(entry: dict) -> str:
-    """One-line rendering of a planned entry for facts/metrics."""
-    direction = str(entry.get("direction") or "?")
-    parts = [f"planned {direction} @ {entry.get('price')}"]
-    if entry.get("stop_loss") is not None:
-        parts.append(f"SL {entry['stop_loss']}")
-    if entry.get("take_profit") is not None:
-        parts.append(f"TP {entry['take_profit']}")
-    return ", ".join(parts)
 
 
 # ── Skill definition ─────────────────────────────────────────────────────────
@@ -326,90 +344,90 @@ def _analytics_news_impact(ticker: str, data: dict[str, Any]) -> TickerSignal:
 
 
 def _analytics_breakout(ticker: str, data: dict[str, Any]) -> TickerSignal:
+    """Deterministic breakout verdict for one ticker (never escalates).
+
+    Price reference: the user's planned entry if a note exists, else the
+    trailing N-bar high. Detection uses an early-biased band around that
+    reference (±pre/post pct). Volume must expand ≥ _VOLUME_SURGE× the trailing
+    average. The ticker-level decision is fully hardcoded here; the pipeline's
+    LLM concluder only writes the final message over the confirmed set.
+    """
     news = _news_items(data)
     bars = _price_bars(data)
     closes = [c for b in bars if (c := _num(b, "close", "price", "c")) is not None]
     vols = [v for b in bars if (v := _num(b, "volume", "v")) is not None]
+    quote = _spot_quote(data)
     entry = _planned_entry(data, ticker)
-    metrics: dict[str, Any] = {
-        "news_count": len(news),
-        "mean_sentiment": round(_mean_sentiment(news), 3),
-        "bars": len(closes),
-    }
+
+    # "Today": prefer the realtime quote; fall back to the latest EOD bar.
+    current = (_num(quote, "price") if quote else None) or (closes[-1] if closes else None)
+    today_vol = (_num(quote, "volume") if quote else None) or (vols[-1] if vols else None)
+
+    metrics: dict[str, Any] = {"news_count": len(news), "bars": len(closes)}
+    if current is not None:
+        metrics["price"] = round(current, 2)
     if entry:
         metrics["planned_entry_price"] = entry.get("price")
         metrics["planned_direction"] = entry.get("direction")
-    entry_note = f" | {_format_entry(entry)}" if entry else ""
 
-    if len(closes) < 5:
-        # No usable price series (FMP unavailable / unexpected shape). Without
-        # prices there's no deterministic breakout call: escalate if there's at
-        # least news or a planned entry to reason about, else conclude no-breakout.
-        if news or entry:
-            return TickerSignal.escalate(
-                ticker,
-                facts=(
-                    f"{ticker}: no price series available; "
-                    f"{len(news)} recent headlines to assess{entry_note}."
-                ),
-                metrics=metrics,
-            )
+    # Reference excludes the latest bar (treated as "today") so the high/average
+    # is genuinely prior. Need a price plus a volume baseline to decide.
+    prior_closes = closes[:-1][-_BREAKOUT_LOOKBACK:] if len(closes) > 1 else closes
+    prior_vols = vols[:-1][-_BREAKOUT_LOOKBACK:] if len(vols) > 1 else vols
+    if current is None or len(prior_closes) < 5 or not prior_vols or not today_vol:
         return TickerSignal.decided(
-            ticker,
-            triggered=False,
-            facts=f"{ticker}: no price data and no news — cannot confirm a breakout.",
-            metrics=metrics,
-            confidence="low",
+            ticker, triggered=False,
+            facts=f"{ticker}: insufficient price/volume data to confirm a breakout.",
+            metrics=metrics, confidence="low",
         )
 
-    window = closes[-_BREAKOUT_LOOKBACK:] if len(closes) >= _BREAKOUT_LOOKBACK else closes
-    current = closes[-1]
-    hi = max(window)
-    pct_from_high = ((current - hi) / hi * 100.0) if hi else 0.0
-    metrics["pct_from_high"] = round(pct_from_high, 2)
-
-    vol_ratio: float | None = None
-    if len(vols) >= 5:
-        prior = vols[:-1]
-        avg_v = sum(prior) / len(prior) if prior else 0.0
-        if avg_v:
-            vol_ratio = vols[-1] / avg_v
-            metrics["volume_ratio"] = round(vol_ratio, 2)
-
-    facts = f"{ticker}: {pct_from_high:+.1f}% from {len(window)}-bar high"
+    avg_v = sum(prior_vols) / len(prior_vols)
+    vol_ratio = (today_vol / avg_v) if avg_v else None
     if vol_ratio is not None:
-        facts += f", volume {vol_ratio:.1f}x avg"
+        metrics["volume_ratio"] = round(vol_ratio, 2)
+    vol_ok = vol_ratio is not None and vol_ratio >= _VOLUME_SURGE
+
+    # ── price side: entry band, else trailing-high band (early-biased) ──
+    pre = _ENTRY_PRE_BAND_PCT / 100.0
+    post = _ENTRY_POST_BAND_PCT / 100.0
+    if entry and entry.get("price") is not None:
+        ep = float(entry["price"])
+        direction = str(entry.get("direction") or "long").lower()
+        if direction == "short":
+            # breakdown: approach from above (pre), confirm just below (post)
+            lower, upper = ep * (1 - post), ep * (1 + pre)
+        else:
+            # breakout: approach from below (pre), confirm just above (post)
+            lower, upper = ep * (1 - pre), ep * (1 + post)
+        in_band = lower <= current <= upper
+        metrics["pct_vs_entry"] = round((current - ep) / ep * 100.0, 2) if ep else 0.0
+        ref = f"{direction} entry {ep:g} [{lower:.2f}–{upper:.2f}]"
+    else:
+        prior_high = max(prior_closes)
+        # within `pre` below the high counts as approaching; anything above is a
+        # fresh high. No upper bound — a new high is always in-band.
+        in_band = current >= prior_high * (1 - pre)
+        metrics["pct_vs_high"] = round((current - prior_high) / prior_high * 100.0, 2) if prior_high else 0.0
+        ref = f"{len(prior_closes)}-day high {prior_high:.2f}"
+
+    confirmed = in_band and vol_ok
+    vr = f"{vol_ratio:.2f}x" if vol_ratio is not None else "n/a"
+    if confirmed:
+        facts = f"{ticker}: CONFIRMED breakout — price {current:.2f} vs {ref}, volume {vr} avg."
+    elif in_band:
+        facts = (f"{ticker}: price in breakout band ({current:.2f} vs {ref}) "
+                 f"but volume only {vr} avg — not confirmed.")
+    elif vol_ok:
+        facts = (f"{ticker}: volume {vr} avg but price {current:.2f} outside band "
+                 f"({ref}) — not confirmed.")
+    else:
+        facts = f"{ticker}: no breakout — price {current:.2f} vs {ref}, volume {vr} avg."
     if news:
-        facts += f"; latest: {str(news[0].get('title') or '')[:80]}"
-    facts += entry_note
+        facts += f" Latest: {str(news[0].get('title') or '')[:70]}"
 
-    near_high = pct_from_high >= _NEAR_HIGH_PCT
-    far_below = pct_from_high <= _FAR_BELOW_PCT
-    strong_vol = (vol_ratio or 0.0) >= _VOLUME_SURGE
-
-    # A confirmed price+volume breakout is deterministic — UNLESS the user has a
-    # planned entry, in which case we escalate so the LLM can judge the breakout
-    # against their plan (price vs entry, stop, target) rather than rubber-stamp.
-    if near_high and strong_vol and not entry:
-        return TickerSignal.decided(
-            ticker,
-            triggered=True,
-            facts=facts + " — breakout confirmed (at highs on volume).",
-            metrics=metrics,
-            confidence="high",
-        )
-    if far_below and not entry:
-        return TickerSignal.decided(
-            ticker,
-            triggered=False,
-            facts=facts + " — well off the highs, no breakout.",
-            metrics=metrics,
-            confidence="high",
-        )
-    # Near the high but volume soft, mid-range, or a planned entry exists — a
-    # judgment call. Escalate with the computed numbers so the LLM reasons over
-    # facts (and the user's plan), not raw bars.
-    return TickerSignal.escalate(ticker, facts=facts, metrics=metrics)
+    return TickerSignal.decided(
+        ticker, triggered=confirmed, facts=facts, metrics=metrics, confidence="high",
+    )
 
 
 def _analytics_portfolio_rundown(ticker: str, data: dict[str, Any]) -> TickerSignal:
@@ -485,15 +503,17 @@ SKILLS: list[ScreeningSkill] = [
     ScreeningSkill(
         id="breakout",
         description=(
-            "Technical breakouts / momentum: price pushing to recent highs, "
-            "volume surges, breaking resistance, 'which names are breaking out'."
+            "Daily-timeframe technical breakouts: price breaking above a planned "
+            "entry or the recent daily high WITH volume confirmation. 'Confirmed "
+            "breakout on price and volume', momentum, breaking resistance."
         ),
-        # FMP `chart` (EOD-light series) + `quote` feed the deterministic
-        # price/volume math; the user's planned entry is pulled from their latest
-        # screening notes. {FROM_DATE}/{TO_DATE} are substituted at runtime
-        # (lookback window ending today). If an FMP tool is unknown or
-        # access-denied the pipeline drops it and analytics escalates on the
-        # news floor instead. Confirm names with `validate-skills --probe`.
+        # Daily EOD series (`chart` historical-price-eod-light) + realtime `quote`
+        # feed the deterministic price/volume math; the user's planned entry is
+        # pulled from their latest screening notes. {FROM_DATE}/{TO_DATE} are
+        # substituted at runtime to a ~45-day window ending today (≈30 daily
+        # bars, enough for the 20-day reference). If an FMP tool is unknown or
+        # access-denied the pipeline drops it; analytics then reports
+        # insufficient data rather than guessing. Confirm with `validate-skills`.
         tool_plan=[
             {"name": "get_ticker_news", "args": {"tickers": [_TICKER_PLACEHOLDER], "hours": 72, "per_ticker_limit": 5}},
             {"name": "get_user_screening_note_details", "args": {"tickers": [_TICKER_PLACEHOLDER]}},
@@ -501,17 +521,22 @@ SKILLS: list[ScreeningSkill] = [
             {"name": "chart", "args": {"endpoint": "historical-price-eod-light", "symbol": _TICKER_PLACEHOLDER, "from_date": "{FROM_DATE}", "to_date": "{TO_DATE}"}},
         ],
         analytics=_analytics_breakout,
+        # Breakout is decided deterministically per ticker and never escalates,
+        # so this focus is unused unless the pipeline path changes; kept for
+        # parity with the eval contract.
         eval_focus=(
-            "Focus: is this a real breakout? The metrics already give pct_from_high "
-            "and volume_ratio. triggered_for_ticker=true only when price is at/near "
-            "the recent high AND volume confirms — never on news alone. If the user "
-            "logged a planned entry (planned_entry_price / planned_direction), state "
-            "whether the current price/breakout confirms or contradicts that plan."
+            "Daily-timeframe breakout. The metrics already give the verdict "
+            "(price vs entry/high band + volume_ratio). Do not re-judge — report it."
         ),
         requires=("get_ticker_news",),
         conclude_hint=(
-            "Name only tickers with a confirmed price+volume breakout. Where the "
-            "user has a planned entry, note if the breakout supports it."
+            "Each per-ticker verdict was decided deterministically on the DAILY "
+            "timeframe (price entered the breakout band around the planned entry "
+            "or the 20-day high, AND volume ≥1.5× the 20-day average). Write the "
+            "message from these verdicts: list EVERY ticker whose verdict is "
+            "triggered=true, add or re-judge NONE, and note the planned-entry "
+            "context where present. Detection is biased early, so some names may "
+            "be just approaching the level."
         ),
     ),
     ScreeningSkill(

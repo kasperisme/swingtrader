@@ -74,14 +74,37 @@ def _dated_bars(prices, volumes):
     return list(reversed(rows))  # emulate FMP newest-first ordering
 
 
-def test_breakout_at_high_on_volume_triggers_deterministically():
-    # ascending prices → newest (latest date) is the high; volume surge on it
+def _quote(price, volume):
+    """FMP-shaped realtime quote row (no `date`)."""
+    return [{"symbol": "AAPL", "price": price, "volume": volume, "timestamp": 1}]
+
+
+def test_breakout_never_escalates():
+    """Breakout is fully deterministic — every path decides, none escalate."""
+    cases = [
+        {"chart": _dated_bars(list(range(90, 111)), [100] * 21), "get_ticker_news": []},
+        {"get_ticker_news": []},  # no price data
+        {"chart": _dated_bars(list(range(90, 111)), [100] * 21),
+         "quote": _quote(110, 300), "get_ticker_news": []},
+    ]
+    for data in cases:
+        assert skills._analytics_breakout("AAPL", data).needs_llm is False
+
+
+def test_breakout_new_daily_high_on_volume_confirms():
+    # last bar is a fresh high (110 > prior-20 high 109) on 3x volume
     bars = _dated_bars(list(range(90, 111)), [100] * 20 + [300])
     sig = skills._analytics_breakout("AAPL", {"chart": bars, "get_ticker_news": []})
-    assert sig.needs_llm is False
     assert sig.verdict == "triggered"
-    assert sig.metrics["pct_from_high"] == 0.0
     assert sig.metrics["volume_ratio"] == 3.0
+    assert "CONFIRMED" in sig.facts
+
+
+def test_breakout_in_band_but_soft_volume_not_confirmed():
+    bars = _dated_bars(list(range(90, 111)), [100] * 21)  # no volume surge
+    sig = skills._analytics_breakout("AAPL", {"chart": bars, "get_ticker_news": []})
+    assert sig.verdict == "not"
+    assert "volume only" in sig.facts
 
 
 def test_breakout_handles_json_string_results():
@@ -94,35 +117,59 @@ def test_breakout_handles_json_string_results():
     assert sig.metrics["bars"] == 21
 
 
-def test_breakout_sorts_newest_first_series_correctly():
-    # high is on an OLD date; current (latest date) is far below → not a breakout
-    bars = _dated_bars(list(range(100, 120)) + [105], [100] * 21)
+def test_breakout_below_daily_high_band_not_confirmed():
+    # current far below the prior high → outside the early band, no breakout
+    bars = _dated_bars(list(range(100, 120)) + [105], [100] * 20 + [300])
     sig = skills._analytics_breakout("AAPL", {"chart": bars, "get_ticker_news": []})
-    assert sig.needs_llm is False
-    assert sig.verdict == "not"
+    assert sig.verdict == "not"  # 105 vs 119 high (band floor ~113) → out of band
 
 
-def test_breakout_no_price_data_escalates_when_news_present():
+def test_breakout_insufficient_data_decides_not():
     sig = skills._analytics_breakout("AAPL", {
         "get_ticker_news": [{"ticker": "AAPL", "title": "x", "sentiment_score": 0.1}],
     })
-    assert sig.needs_llm is True
+    assert sig.needs_llm is False
+    assert sig.verdict == "not"
+    assert sig.confidence == "low"
 
 
-def test_breakout_with_planned_entry_escalates_for_plan_check():
-    """A confirmed breakout still escalates when the user logged an entry, so
-    the LLM can judge it against their plan."""
-    bars = _dated_bars(list(range(90, 111)), [100] * 20 + [300])
-    note = [{"ticker": "AAPL", "entry": {"price": 108, "direction": "long",
-                                         "stop_loss": 100, "take_profit": 130}}]
+def _entry_note(price, direction="long"):
+    return [{"ticker": "AAPL", "entry": {"price": price, "direction": direction,
+                                         "stop_loss": price * 0.9,
+                                         "take_profit": price * 1.2}}]
+
+
+def test_breakout_entry_band_confirms_within_post_band():
+    # price 102 is +2% over a long entry of 100 → inside [95,105] band, on volume
+    bars = _dated_bars([100] * 21, [100] * 21)
     sig = skills._analytics_breakout("AAPL", {
-        "chart": bars,
-        "get_ticker_news": [],
-        "get_user_screening_note_details": note,
+        "chart": bars, "quote": _quote(102, 300), "get_ticker_news": [],
+        "get_user_screening_note_details": _entry_note(100),
     })
-    assert sig.needs_llm is True
-    assert sig.metrics["planned_entry_price"] == 108
-    assert "planned long @ 108" in sig.facts
+    assert sig.verdict == "triggered"
+    assert sig.metrics["planned_entry_price"] == 100
+    assert sig.metrics["pct_vs_entry"] == 2.0
+
+
+def test_breakout_entry_band_fires_early_below_entry():
+    # price 96 is -4% (within the 5% PRE band) → early detection still confirms
+    bars = _dated_bars([100] * 21, [100] * 21)
+    sig = skills._analytics_breakout("AAPL", {
+        "chart": bars, "quote": _quote(96, 300), "get_ticker_news": [],
+        "get_user_screening_note_details": _entry_note(100),
+    })
+    assert sig.verdict == "triggered"
+    assert sig.metrics["pct_vs_entry"] == -4.0
+
+
+def test_breakout_entry_too_far_below_not_confirmed():
+    # price 90 is -10%, outside the 5% pre band → not yet a breakout
+    bars = _dated_bars([100] * 21, [100] * 21)
+    sig = skills._analytics_breakout("AAPL", {
+        "chart": bars, "quote": _quote(90, 300), "get_ticker_news": [],
+        "get_user_screening_note_details": _entry_note(100),
+    })
+    assert sig.verdict == "not"
 
 
 def test_quote_row_excluded_from_price_series():

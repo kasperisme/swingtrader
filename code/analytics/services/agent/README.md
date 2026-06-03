@@ -179,11 +179,30 @@ python -m services.agent.cli classify "which names are breaking out?"
 
 `validate-skills` checks each skill's `requires` against a live registry, reports
 which FMP tools resolve, and (with `--probe`) calls them to confirm API-plan
-availability. The breakout skill uses FMP `quote` + `chart`
-(`endpoint=historical-price-eod-light`, with `{FROM_DATE}`/`{TO_DATE}` substituted
-to a ~45-day window ending today) for its deterministic price/volume math, and
-pulls the user's logged entry from `get_user_screening_note_details`. Run
-`validate-skills --probe` after an FMP plan change to confirm these still resolve.
+availability. Run `validate-skills --probe` after an FMP plan change.
+
+#### Breakout skill — fully deterministic (daily timeframe)
+
+The breakout decision is made **entirely in Python** (`_analytics_breakout`) and
+never escalates to the LLM — the per-ticker verdict is reproducible, and the LLM
+only writes the final multi-ticker message from the confirmed set. Inputs: FMP
+`chart` (`historical-price-eod-light` — **daily** EOD bars, `{FROM_DATE}`/`{TO_DATE}`
+→ ~45-day window), FMP `quote` (today's price/volume), and the user's logged
+entry from `get_user_screening_note_details`.
+
+A ticker is a **confirmed breakout** when price is in an early-biased band around
+its reference **and** volume ≥ `_VOLUME_SURGE`× (1.5×) the 20-day average:
+
+- **With a logged entry note** → reference is the planned entry price, direction-
+  aware. Band = `[entry·(1−pre), entry·(1+post)]` (long) — default ±5%
+  (`_ENTRY_PRE_BAND_PCT` / `_ENTRY_POST_BAND_PCT`). The pre band fires *before*
+  price reaches the entry (early detection); the post band keeps it fresh just
+  past. Short entries mirror this.
+- **No entry note** → reference is the trailing 20-day high (`_BREAKOUT_LOOKBACK`);
+  in-band = within `pre`% below the high or any new high.
+
+Detection is intentionally biased toward early/false-positive over missing a
+breakout. Tune the bands/threshold via the constants at the top of `skills.py`.
 
 ### Multi-ticker pipeline (screenings with ≥2 tickers)
 
