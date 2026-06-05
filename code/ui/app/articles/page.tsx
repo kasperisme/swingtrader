@@ -8,6 +8,10 @@ import {
 } from "./articles-search-panel";
 import { getOnboardingTours } from "@/app/actions/onboarding";
 import { PageTour } from "@/app/protected/_components/page-tour";
+import {
+  TrendingScoreboard,
+  TrendingScoreboardSkeleton,
+} from "@/components/trending-scoreboard";
 
 async function ArticlesData({ initialTag }: { initialTag?: string }) {
   // Use service-role client so logged-out visitors can read the public
@@ -80,6 +84,10 @@ export default async function ArticlesPage({
           <span>to search</span>
         </div>
       </header>
+
+      <Suspense fallback={<TrendingScoreboardSkeleton />}>
+        <TrendingScoreboard windowDays={7} limit={20} collapsed={6} />
+      </Suspense>
 
       <Suspense fallback={<EditorialSkeleton mode="feed" />}>
         <ArticlesData initialTag={initialTag} />

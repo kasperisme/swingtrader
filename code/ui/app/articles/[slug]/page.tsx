@@ -2,10 +2,11 @@ import Link from "next/link";
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { Suspense } from "react";
-import { ArrowLeft, ArrowUpRight } from "lucide-react";
+import { ArrowLeft, ArrowUpRight, TrendingUp } from "lucide-react";
 import { createClient as createSupabaseClient } from "@supabase/supabase-js";
 
 import { createClient } from "@/lib/supabase/server";
+import { getTrendingLookup, type TrendingLookupEntry } from "@/lib/trends";
 import { CLUSTERS, DIMENSION_MAP } from "@/app/protected/vectors/dimensions";
 import { ShareButtons } from "@/app/blog/[slug]/share-buttons";
 import { ArticleEarlyAccessCTA } from "./_components/article-early-access-cta";
@@ -469,24 +470,104 @@ function articleTagSearchHref(tag: string): string {
   return `/articles?tag=${encodeURIComponent(tag)}`;
 }
 
-function ArticleTagsRow({ tags }: { tags: string[] }) {
+function ArticleTagsRow({
+  tags,
+  trending = {},
+}: {
+  tags: string[];
+  trending?: Record<string, TrendingLookupEntry>;
+}) {
   if (tags.length === 0) return null;
+
+  // Highlight only the top 3 of THIS article's tags by most positive growth
+  // (rising only — brand-new counts as top growth). Everything else stays a
+  // plain chip, so the eye lands on the genuine movers.
+  const growthScore = (e: TrendingLookupEntry) =>
+    e.isNew ? Number.POSITIVE_INFINITY : e.deltaPct ?? 0;
+  const topGrowth = tags
+    .map((tag) => ({ tag, info: trending[tag] }))
+    .filter(
+      (x): x is { tag: string; info: TrendingLookupEntry } =>
+        Boolean(x.info) && (x.info!.isNew || (x.info!.deltaPct ?? 0) > 0),
+    )
+    .sort((a, b) => growthScore(b.info) - growthScore(a.info))
+    .slice(0, 3)
+    .map((x) => x.tag);
+  const highlight = new Set(topGrowth);
+
+  // Growth value for any tag: brand-new ranks highest, then by %, and tags with
+  // no trending data sink to the bottom.
+  const growthOf = (tag: string): number => {
+    const e = trending[tag];
+    if (!e) return Number.NEGATIVE_INFINITY;
+    return growthScore(e);
+  };
+
+  // Top movers first (in growth order); every remaining tag sorted by growth too.
+  const sorted = [...tags].sort((a, b) => {
+    const ha = highlight.has(a);
+    const hb = highlight.has(b);
+    if (ha !== hb) return ha ? -1 : 1;
+    if (ha && hb) return topGrowth.indexOf(a) - topGrowth.indexOf(b);
+    const ga = growthOf(a);
+    const gb = growthOf(b);
+    if (ga === gb) return 0;
+    if (ga === Number.POSITIVE_INFINITY) return -1;
+    if (gb === Number.POSITIVE_INFINITY) return 1;
+    if (ga === Number.NEGATIVE_INFINITY) return 1;
+    if (gb === Number.NEGATIVE_INFINITY) return -1;
+    return gb - ga;
+  });
+
   return (
     <section className="mt-4">
       <ul className="flex flex-wrap gap-2" aria-label="Article search tags">
-        {tags.map((tag) => (
-          <li key={tag}>
-            <Link
-              href={articleTagSearchHref(tag)}
-              className="inline-flex items-center rounded-md border border-border/70 bg-muted/25 px-2.5 py-1 font-mono text-xs text-foreground/90 transition-colors hover:border-amber-500/40 hover:bg-amber-500/10 hover:text-amber-400"
-            >
-              {formatTagLabel(tag)}
-            </Link>
-          </li>
-        ))}
+        {sorted.map((tag) => {
+          const t = highlight.has(tag) ? trending[tag] : undefined;
+          if (t) {
+            // Highlighted chips are always rising (filter guarantees Δ% > 0 or
+            // New), so always render the green badge — fall back to "<1%" for
+            // sub-rounding growth so big stable themes still read as up.
+            const raw = t.deltaPct != null ? t.deltaPct * 100 : 0;
+            const badge = t.isNew ? "New" : raw >= 1 ? `▲${Math.round(raw)}%` : "▲<1%";
+            return (
+              <li key={tag}>
+                <Link
+                  href={articleTagSearchHref(tag)}
+                  title={`${formatTagLabel(tag)} — top mover, surging now`}
+                  className="inline-flex items-center gap-1.5 rounded-md border border-emerald-500 bg-emerald-500 px-2.5 py-1 font-mono text-xs text-white transition-colors hover:border-emerald-600 hover:bg-emerald-600"
+                >
+                  <TrendingUp size={11} className="text-white" />
+                  {formatTagLabel(tag)}
+                  {badge ? (
+                    <span className="ml-0.5 rounded bg-emerald-700 px-1.5 py-0.5 text-[11px] font-bold tabular-nums text-white shadow-sm">
+                      {badge}
+                    </span>
+                  ) : null}
+                </Link>
+              </li>
+            );
+          }
+          return (
+            <li key={tag}>
+              <Link
+                href={articleTagSearchHref(tag)}
+                className="inline-flex items-center rounded-md border border-border/70 bg-muted/25 px-2.5 py-1 font-mono text-xs text-foreground/90 transition-colors hover:border-emerald-400/40 hover:bg-emerald-500/10 hover:text-emerald-300"
+              >
+                {formatTagLabel(tag)}
+              </Link>
+            </li>
+          );
+        })}
       </ul>
       <p className="mt-3 font-mono text-[10px] uppercase tracking-[0.2em] text-muted-foreground">
-        Search tags
+        {highlight.size > 0 ? (
+          <span className="text-emerald-400/80">
+            Top {highlight.size} mover{highlight.size > 1 ? "s" : ""} · tap to explore
+          </span>
+        ) : (
+          "Search tags"
+        )}
       </p>
     </section>
   );
@@ -875,12 +956,17 @@ async function ArticleData({ params }: { params: Promise<{ slug?: string }> }) {
   // Related articles: shares ≥1 search_tag, within last 30 days, ranked by
   // overlap count + recency. Returns [] when no tags exist or no matches found
   // — the component renders nothing in that case, so no layout shift.
-  const relatedArticles = await fetchRelatedArticles({
-    articleId: article.id,
-    tags: searchTags,
-    limit: 6,
-    windowDays: 30,
-  });
+  const [relatedArticles, trendingLookup] = await Promise.all([
+    fetchRelatedArticles({
+      articleId: article.id,
+      tags: searchTags,
+      limit: 6,
+      windowDays: 30,
+    }),
+    // Which of this story's own tags are hot right now → flame chips that pull
+    // SEO arrivals deeper into the platform.
+    getTrendingLookup({ windowDays: 7, topN: 40 }),
+  ]);
   const siteBaseUrl = SITE_BASE_URL;
   const canonicalUrl = `${siteBaseUrl.replace(/\/$/, "")}/articles/${article.slug ?? slug}`;
   // Tickers carried by this story — drive the conversion CTA's "track these".
@@ -968,7 +1054,7 @@ async function ArticleData({ params }: { params: Promise<{ slug?: string }> }) {
           </div>
         ) : null}
 
-        <ArticleTagsRow tags={searchTags} />
+        <ArticleTagsRow tags={searchTags} trending={trendingLookup} />
       </article>
 
       <div className="mt-12">

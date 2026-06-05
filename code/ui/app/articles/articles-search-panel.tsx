@@ -67,7 +67,6 @@ export function ArticlesSearchPanel({
   const [results, setResults] = useState<SemanticSearchItem[]>([]);
   const [hasSearched, setHasSearched] = useState(Boolean(seedTag));
   const inputRef = useRef<HTMLInputElement>(null);
-  const initialTagRan = useRef(false);
 
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
@@ -83,10 +82,15 @@ export function ArticlesSearchPanel({
     return () => window.removeEventListener("keydown", onKey);
   }, []);
 
+  // Sync to the `?tag=` param. Clicking a ticker/tag (in the scoreboard, on an
+  // article, or in related stories) navigates to /articles?tag=X; this runs on
+  // mount and whenever that tag changes — overwriting whatever is already in the
+  // search box and re-running, even mid-search.
   useEffect(() => {
-    if (!seedTag || initialTagRan.current) return;
-    initialTagRan.current = true;
+    if (!seedTag) return;
+    setQuery(seedTag);
     void runSearch({ queryOverride: seedTag, tags: [normalizeSearchTag(seedTag)] });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [seedTag]);
 
   // Ranked full-text search across title, tags, and body. A free-text query
