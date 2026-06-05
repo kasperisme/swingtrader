@@ -122,7 +122,23 @@ function TrendRow({ item, idx }: { item: TrendItem; idx: number }) {
   );
 }
 
-function Column({ title, items }: { title: string; items: TrendItem[] }) {
+function Column({
+  title,
+  items,
+  visible,
+  canExpand,
+  expanded,
+  total,
+  onToggle,
+}: {
+  title: string;
+  items: TrendItem[];
+  visible: number;
+  canExpand: boolean;
+  expanded: boolean;
+  total: number;
+  onToggle: () => void;
+}) {
   return (
     <div className="min-w-0">
       <h3 className="mb-3 text-sm font-semibold tracking-tight text-foreground/90">{title}</h3>
@@ -130,12 +146,44 @@ function Column({ title, items }: { title: string; items: TrendItem[] }) {
         <p className="px-2 py-6 text-xs text-muted-foreground/70">Nothing here for this filter yet.</p>
       ) : (
         <ul className="-mx-2">
-          {items.map((it, idx) => (
+          {items.slice(0, visible).map((it, idx) => (
             <TrendRow key={it.key} item={it} idx={idx} />
           ))}
         </ul>
       )}
+      {/* Per-column expander — mobile only. On desktop a single shared button
+          (below the grid) controls both columns together. */}
+      {canExpand ? (
+        <div className="mt-3 flex justify-center border-t border-border/50 pt-3 md:hidden">
+          <ExpandButton expanded={expanded} total={total} onToggle={onToggle} />
+        </div>
+      ) : null}
     </div>
+  );
+}
+
+function ExpandButton({
+  expanded,
+  total,
+  onToggle,
+}: {
+  expanded: boolean;
+  total: number;
+  onToggle: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onToggle}
+      aria-expanded={expanded}
+      className="group inline-flex items-center gap-1.5 font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground transition-colors hover:text-amber-400"
+    >
+      {expanded ? "Show less" : `Show top ${total}`}
+      <ChevronDown
+        size={12}
+        className={`transition-transform duration-200 ${expanded ? "rotate-180" : ""}`}
+      />
+    </button>
   );
 }
 
@@ -191,13 +239,29 @@ export function TrendingScoreboardView({
   collapsed?: number;
 }) {
   const [mode, setMode] = useState<SortMode>("mentions");
-  const [expanded, setExpanded] = useState(false);
+  // Independent state per column so they expand separately on mobile. On
+  // desktop a single shared button drives both together.
+  const [tickersExpanded, setTickersExpanded] = useState(false);
+  const [tagsExpanded, setTagsExpanded] = useState(false);
 
   const tickers = board.tickers[mode];
   const tags = board.tags[mode];
   const maxLen = Math.max(tickers.length, tags.length);
-  const canExpand = maxLen > collapsed;
-  const visible = expanded ? maxLen : collapsed;
+
+  const tickersCanExpand = tickers.length > collapsed;
+  const tagsCanExpand = tags.length > collapsed;
+  const tickersVisible = tickersExpanded ? tickers.length : collapsed;
+  const tagsVisible = tagsExpanded ? tags.length : collapsed;
+
+  // Desktop shared button: collapsed unless both columns are expanded; one
+  // click expands (or collapses) both at once.
+  const canExpand = tickersCanExpand || tagsCanExpand;
+  const bothExpanded = tickersExpanded && tagsExpanded;
+  const toggleBoth = () => {
+    const next = !bothExpanded;
+    setTickersExpanded(next);
+    setTagsExpanded(next);
+  };
 
   return (
     <section
@@ -219,24 +283,30 @@ export function TrendingScoreboardView({
       </p>
 
       <div className="grid gap-8 md:grid-cols-2">
-        <Column title="Tickers" items={tickers.slice(0, visible)} />
-        <Column title="Themes" items={tags.slice(0, visible)} />
+        <Column
+          title="Tickers"
+          items={tickers}
+          visible={tickersVisible}
+          canExpand={tickersCanExpand}
+          expanded={tickersExpanded}
+          total={tickers.length}
+          onToggle={() => setTickersExpanded((v) => !v)}
+        />
+        <Column
+          title="Themes"
+          items={tags}
+          visible={tagsVisible}
+          canExpand={tagsCanExpand}
+          expanded={tagsExpanded}
+          total={tags.length}
+          onToggle={() => setTagsExpanded((v) => !v)}
+        />
       </div>
 
+      {/* Shared expander — desktop only. Mobile uses the per-column buttons. */}
       {canExpand ? (
-        <div className="mt-5 flex justify-center border-t border-border/50 pt-4">
-          <button
-            type="button"
-            onClick={() => setExpanded((v) => !v)}
-            aria-expanded={expanded}
-            className="group inline-flex items-center gap-1.5 font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground transition-colors hover:text-amber-400"
-          >
-            {expanded ? "Show less" : `Show top ${maxLen}`}
-            <ChevronDown
-              size={12}
-              className={`transition-transform duration-200 ${expanded ? "rotate-180" : ""}`}
-            />
-          </button>
+        <div className="mt-5 hidden justify-center border-t border-border/50 pt-4 md:flex">
+          <ExpandButton expanded={bothExpanded} total={maxLen} onToggle={toggleBoth} />
         </div>
       ) : null}
     </section>
