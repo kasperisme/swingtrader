@@ -60,9 +60,6 @@ export function SiteHeaderDesktopAuthedNav() {
         <div className={navDropdownPanelClass}>
           <NavDropLink href="/protected/screenings">Screenings</NavDropLink>
           <NavDropLink href="/protected/agents">Agents</NavDropLink>
-          <NavDropLink href="/protected/daily-narrative">
-            Daily Narrative
-          </NavDropLink>
           <NavDropLink href="/protected/trades">Trades</NavDropLink>
         </div>
       </details>

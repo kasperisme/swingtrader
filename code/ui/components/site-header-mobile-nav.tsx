@@ -23,7 +23,6 @@ const researchLinks = [
 const operationsLinks = [
   { href: "/protected/screenings", label: "Screenings" },
   { href: "/protected/agents", label: "Agents" },
-  { href: "/protected/daily-narrative", label: "Daily Narrative" },
   { href: "/protected/trades", label: "Trades" },
 ] as const;
 

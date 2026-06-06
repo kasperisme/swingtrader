@@ -2,10 +2,7 @@ import { Suspense } from "react";
 import { redirect } from "next/navigation";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
-import { getOnboardingProgress } from "@/app/actions/onboarding";
-import { getOrCreateUserProfile } from "@/lib/user-profile";
 import { OpsCenterUI, type UserTradeRow } from "./ops-center-ui";
-import { OnboardingChecklist } from "./_components/onboarding-checklist";
 import { AskAiReminder } from "./_components/ask-ai-reminder";
 
 async function OpsCenterData() {
@@ -35,23 +32,10 @@ async function OpsCenterData() {
   return <OpsCenterUI initialTrades={(rows ?? []) as UserTradeRow[]} />;
 }
 
-async function OnboardingChecklistSlot() {
-  const profile = await getOrCreateUserProfile();
-  if (!profile) return null;
-  // Dismissed users still get the persistent Ask AI reminder so they
-  // know the chat is the long-term answer to "where do I find X?".
-  if (profile.onboarding_dismissed_at) return <AskAiReminder />;
-
-  const progress = await getOnboardingProgress();
-  return <OnboardingChecklist initialProgress={progress} />;
-}
-
 export default function ProtectedPage() {
   return (
     <div className="flex-1 w-full flex flex-col gap-4">
-      <Suspense fallback={null}>
-        <OnboardingChecklistSlot />
-      </Suspense>
+      <AskAiReminder />
 
       <div className="flex items-center justify-between">
         <h1 className="text-sm font-semibold uppercase tracking-widest text-muted-foreground/50">Portfolio</h1>

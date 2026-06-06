@@ -1,6 +1,6 @@
-import { createClient } from "@/lib/supabase/server";
 import type Anthropic from "@anthropic-ai/sdk";
-import { getAnthropicClient, DEFAULT_MODEL } from "@/lib/anthropic";
+import { createClient } from "@/lib/supabase/server";
+import { runAssistantLoop, type ExtraToolHandler } from "@/lib/ai/assistant-loop";
 import {
   TOURS,
   howToBriefMarkdown,
@@ -13,7 +13,7 @@ const TOUR_KEYS = Object.keys(TOURS) as TourKey[];
 const SHOW_HOW_TO_TOOL: Anthropic.Tool = {
   name: "show_how_to",
   description:
-    "Drive a guided tour highlighting the exact UI elements that answer a 'how do I…' question. Use whenever the answer to the user's question is a UI walkthrough — creating a screening, adding a ticker, scheduling an agent, connecting Telegram, etc. Pick the tour_key whose route matches the feature; pass from_step / to_step (0-based, inclusive) when the question only needs a slice of the tour. The user is auto-navigated to the right page; the tour drives itself.",
+    "Drive a guided tour highlighting the exact UI elements that answer a 'how do I…' / 'where is…' question. Use when the user wants to LEARN where something is or do it themselves. (If they instead want you to just DO or CHANGE a setting — save their strategy, subscribe, connect Telegram, create/edit/pause an agent — use the setup tools to perform it directly rather than showing a tour.) Pick the tour_key whose route matches the feature; pass from_step / to_step (0-based, inclusive) for a slice. The user is auto-navigated and the tour drives itself.",
   input_schema: {
     type: "object",
     required: ["tour_key"],
@@ -27,8 +27,7 @@ const SHOW_HOW_TO_TOOL: Anthropic.Tool = {
       from_step: {
         type: "integer",
         minimum: 0,
-        description:
-          "0-based first step to play. Defaults to 0 (start of tour).",
+        description: "0-based first step to play. Defaults to 0 (start of tour).",
       },
       to_step: {
         type: "integer",
@@ -45,21 +44,20 @@ const SHOW_HOW_TO_TOOL: Anthropic.Tool = {
   },
 };
 
-const SYSTEM_PROMPT = `You are the in-app help assistant for newsimpactscreener — a swing-trading research platform that scores news for impact, lets users build screenings, and runs AI agents on a schedule.
+const SYSTEM_PROMPT = `You are the in-app Ask AI assistant for newsimpactscreener — a swing-trading research platform that scores news for impact, lets users build screenings, and runs AI agents on a schedule.
 
-Your job is to answer "how do I…" / "where is…" / "what does X do" questions about the platform, and to walk users to the right place.
+You do two jobs:
 
-# Two ways to answer
+1. **Answer & guide.** For "how do I…" / "where is…" / "what does X do" questions, either reply briefly in markdown (conceptual questions) or call \`show_how_to\` to walk the user through the UI (preferred for actionable how-tos).
 
-1. **Walk them through it (preferred).** If the answer is a UI workflow, call \`show_how_to\` with the tour_key + a tight step range. The user is auto-navigated and a guided tour highlights the exact controls. Use this for almost every actionable question.
-
-2. **Reply in chat.** When the question is conceptual (what does the impact score mean? what's the difference between a screening and an agent?), answer briefly in markdown — 2–4 sentences — and offer a tour as a follow-up if it would help.
+2. **Do it for them.** When the user asks you to actually change their setup — "set my trading strategy to…", "subscribe me to…", "connect Telegram", "create an agent that…", "pause my X agent", "what's left to set up" — use the setup tools to perform it directly. Always confirm the specifics in chat before any write, and especially before creating an agent (echo the schedule, prompt, and tickers). After Telegram pairing, a connect button appears in chat — tell the user to tap it, then call check_telegram_status.
 
 # Style
 
 - Be terse. Bullet points and short sentences over paragraphs.
-- Never invent a feature, page, or button that isn't documented below. If you don't know, say so and suggest the closest tour.
-- When the user asks something off-topic (chart analysis, trade ideas, company fundamentals), redirect: that's what the chart AI on /protected/charts is for.
+- Never invent a feature, page, or button that isn't documented below. If unsure, say so and suggest the closest tour.
+- For market analysis or trade ideas, redirect to the chart AI on /protected/charts.
+- Respect plan limits and the minimum agent schedule from get_agent_limits; relay any tool errors plainly.
 
 # Available tours and their steps
 
@@ -67,25 +65,41 @@ Use these tour_key values verbatim when calling show_how_to.
 
 ${howToBriefMarkdown()}`;
 
+const handleShowHowTo: ExtraToolHandler = (name, input, emit) => {
+  if (name !== "show_how_to") return null;
+  const args = input as {
+    tour_key?: string;
+    from_step?: number;
+    to_step?: number;
+    reply?: string;
+  };
+  if (
+    typeof args.tour_key === "string" &&
+    (TOUR_KEYS as string[]).includes(args.tour_key)
+  ) {
+    const url = howToUrl(args.tour_key as TourKey, args.from_step, args.to_step);
+    const reply = args.reply ?? "Walking you through it.";
+    emit({ type: "navigate", url, reply });
+    return { result: { navigated: true, url }, terminal: true };
+  }
+  return { result: { ok: false, error: "Unknown tour_key" } };
+};
+
 export async function POST(req: Request) {
   const supabase = await createClient();
   const { data: claims } = await supabase.auth.getClaims();
-  if (!claims?.claims?.sub) return new Response("Unauthorized", { status: 401 });
+  const userId = claims?.claims?.sub;
+  if (!userId) return new Response("Unauthorized", { status: 401 });
 
-  let body: {
-    messages: { role: string; content: string }[];
-    currentRoute?: string;
-  };
+  let body: { messages: { role: string; content: string }[]; currentRoute?: string };
   try {
     body = (await req.json()) as typeof body;
   } catch {
     return new Response("Invalid JSON", { status: 400 });
   }
 
-  const history = (body.messages ?? []).map((m) => ({
-    role: (m.role === "assistant" ? "assistant" : "user") as
-      | "user"
-      | "assistant",
+  const history: Anthropic.MessageParam[] = (body.messages ?? []).map((m) => ({
+    role: m.role === "assistant" ? "assistant" : "user",
     content: m.content,
   }));
   if (history.length === 0) {
@@ -97,65 +111,23 @@ export async function POST(req: Request) {
     : "";
 
   const encoder = new TextEncoder();
-  const emit = (
-    controller: ReadableStreamDefaultController,
-    obj: unknown,
-  ) => controller.enqueue(encoder.encode(JSON.stringify(obj) + "\n"));
-
   const stream = new ReadableStream({
     async start(controller) {
+      const emit = (obj: unknown) =>
+        controller.enqueue(encoder.encode(JSON.stringify(obj) + "\n"));
       try {
-        const client = getAnthropicClient();
-        const response = await client.messages.create({
-          model: DEFAULT_MODEL,
-          max_tokens: 1024,
+        await runAssistantLoop({
           system: SYSTEM_PROMPT + routeContext,
-          messages: history,
-          tools: [SHOW_HOW_TO_TOOL],
-          tool_choice: { type: "auto" },
+          history,
+          ctx: { supabase, userId },
+          emit,
+          extraTools: [SHOW_HOW_TO_TOOL],
+          handleExtraTool: handleShowHowTo,
+          fallbackText:
+            "I'm not sure how to help with that yet — could you rephrase, or ask about a specific page (Charts, Screenings, Agents, Profile, Trades, Articles, News Trends, Relations)?",
         });
-
-        let textOut = "";
-        let navigated = false;
-
-        for (const block of response.content) {
-          if (block.type === "text") {
-            textOut += block.text;
-          } else if (block.type === "tool_use" && block.name === "show_how_to") {
-            const args = block.input as {
-              tour_key?: string;
-              from_step?: number;
-              to_step?: number;
-              reply?: string;
-            };
-            if (
-              typeof args.tour_key === "string" &&
-              (TOUR_KEYS as string[]).includes(args.tour_key)
-            ) {
-              const url = howToUrl(
-                args.tour_key as TourKey,
-                args.from_step,
-                args.to_step,
-              );
-              const reply = args.reply ?? "Walking you through it.";
-              emit(controller, { type: "navigate", url, reply });
-              navigated = true;
-            }
-          }
-        }
-
-        if (!navigated && textOut.trim()) {
-          emit(controller, { type: "text", content: textOut });
-        } else if (!navigated && !textOut.trim()) {
-          emit(controller, {
-            type: "text",
-            content:
-              "I'm not sure how to help with that yet — could you rephrase, or ask about a specific page (Charts, Screenings, Agents, Profile, Trades, Articles, News Trends, Relations)?",
-          });
-        }
-        emit(controller, { type: "done" });
       } catch (err) {
-        emit(controller, { type: "error", message: String(err) });
+        emit({ type: "error", message: String(err) });
       } finally {
         controller.close();
       }

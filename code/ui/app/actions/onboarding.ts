@@ -90,6 +90,47 @@ export async function markWelcomed(): Promise<OnboardingActionResult> {
 }
 
 /**
+ * Mark that the user has opened the AI Setup Assistant at least once, so the
+ * post-video auto-launch doesn't keep re-triggering. Stored in
+ * metadata.ai_onboarding_seen (JSONB) — no migration needed.
+ */
+export async function markAiOnboardingSeen(): Promise<OnboardingActionResult> {
+  const supabase = await createClient();
+  const { data: claims } = await supabase.auth.getClaims();
+  const userId = claims?.claims?.sub;
+  if (!userId) return { ok: false, error: "Not authenticated" };
+
+  const { data: existing, error: fetchError } = await supabase
+    .schema("swingtrader")
+    .from("user_profiles")
+    .select("metadata")
+    .eq("user_id", userId)
+    .maybeSingle();
+
+  if (fetchError) {
+    console.error("[onboarding] markAiOnboardingSeen fetch failed", fetchError.message);
+    return { ok: false, error: fetchError.message };
+  }
+
+  const metadata = (existing?.metadata as Record<string, unknown> | undefined) ?? {};
+  if (metadata.ai_onboarding_seen === true) return { ok: true };
+
+  const { error } = await supabase
+    .schema("swingtrader")
+    .from("user_profiles")
+    .upsert(
+      { user_id: userId, metadata: { ...metadata, ai_onboarding_seen: true } },
+      { onConflict: "user_id" },
+    );
+
+  if (error) {
+    console.error("[onboarding] markAiOnboardingSeen update failed", error.message);
+    return { ok: false, error: error.message };
+  }
+  return { ok: true };
+}
+
+/**
  * Dismiss the on-dashboard onboarding checklist. Independent of welcomed_at
  * so the welcome dialog and the checklist can be controlled separately.
  */

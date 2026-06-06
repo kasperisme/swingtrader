@@ -20,6 +20,11 @@ import { createPortal } from "react-dom";
 import { useRouter } from "next/navigation";
 import { Bot, Loader2, Send, Sparkles, X } from "lucide-react";
 import { ChatMarkdown } from "@/components/chat-markdown";
+import {
+  StatusChips,
+  TelegramConnectInline,
+  type AssistantChatMessage,
+} from "@/components/ai-chat-bits";
 
 import {
   RUN_TOUR_EVENT,
@@ -29,7 +34,7 @@ import { TOURS } from "@/app/protected/_components/tour-configs";
 import { clearPostWelcomeHighlight } from "@/app/protected/_components/onboarding-highlight";
 import type { TourKey } from "@/app/actions/onboarding";
 
-type ChatMessage = { role: "user" | "assistant"; content: string };
+type ChatMessage = AssistantChatMessage;
 
 const PROMPT_CHIPS = [
   "How do I create a screening?",
@@ -215,11 +220,38 @@ function HelpChatPanel({ onClose }: { onClose: () => void }) {
               setMessages((prev) => {
                 const copy = [...prev];
                 copy[copy.length - 1] = {
+                  ...copy[copy.length - 1],
                   role: "assistant",
                   content: assistantContent,
                 };
                 return copy;
               });
+            } else if (msg.type === "status") {
+              const label = typeof msg.label === "string" ? msg.label : "";
+              if (label) {
+                setMessages((prev) => {
+                  const copy = [...prev];
+                  const last = copy[copy.length - 1];
+                  copy[copy.length - 1] = {
+                    ...last,
+                    statuses: [...(last.statuses ?? []), label],
+                  };
+                  return copy;
+                });
+              }
+            } else if (msg.type === "telegram_link") {
+              const deepLink =
+                typeof msg.deep_link === "string" ? msg.deep_link : "";
+              if (deepLink) {
+                setMessages((prev) => {
+                  const copy = [...prev];
+                  copy[copy.length - 1] = {
+                    ...copy[copy.length - 1],
+                    telegram: { deep_link: deepLink },
+                  };
+                  return copy;
+                });
+              }
             } else if (msg.type === "navigate") {
               const url = typeof msg.url === "string" ? msg.url : "";
               const reply =
@@ -353,7 +385,7 @@ function HelpChatPanel({ onClose }: { onClose: () => void }) {
             {messages.length === 0 && (
               <div className="flex flex-col gap-3">
                 <p className="text-sm text-muted-foreground">
-                  Ask how to do anything in the platform — I'll walk you through it.
+                  Ask how to do anything in the platform — I&apos;ll walk you through it.
                 </p>
                 <div className="flex flex-col gap-1.5">
                   {PROMPT_CHIPS.map((chip) => (
@@ -386,7 +418,18 @@ function HelpChatPanel({ onClose }: { onClose: () => void }) {
                       Thinking…
                     </span>
                   ) : m.role === "assistant" ? (
-                    <ChatMarkdown content={m.content} variant="help" />
+                    <>
+                      {m.content && (
+                        <ChatMarkdown content={m.content} variant="help" />
+                      )}
+                      <StatusChips statuses={m.statuses} />
+                      {m.telegram?.deep_link && (
+                        <TelegramConnectInline
+                          deepLink={m.telegram.deep_link}
+                          onConnected={() => void send("I've connected Telegram.")}
+                        />
+                      )}
+                    </>
                   ) : (
                     <p className="whitespace-pre-wrap">{m.content}</p>
                   )}

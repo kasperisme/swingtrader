@@ -8,6 +8,43 @@ const stripe = new Stripe(Deno.env.get("STRIPE_SECRET_KEY")!, {
 
 const webhookSecret = Deno.env.get("STRIPE_WEBHOOK_SECRET")!;
 
+const TELEGRAM_BOT_TOKEN = Deno.env.get("TELEGRAM_BOT_TOKEN") ?? "";
+const APP_BASE_URL = (
+  Deno.env.get("APP_BASE_URL") ?? "https://www.newsimpactscreener.com"
+).replace(/\/$/, "");
+
+// Best-effort Telegram send from the webhook (e.g. the trial-ending heads-up).
+async function sendTelegram(chatId: string, html: string): Promise<void> {
+  if (!TELEGRAM_BOT_TOKEN) {
+    console.warn("TELEGRAM_BOT_TOKEN not set — skipping Telegram send");
+    return;
+  }
+  try {
+    await fetch(
+      `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ chat_id: chatId, text: html, parse_mode: "HTML" }),
+      },
+    );
+  } catch (err) {
+    console.error("Telegram send failed:", err);
+  }
+}
+
+// deno-lint-ignore no-explicit-any
+async function getChatId(supabase: any, userId: string): Promise<string | null> {
+  const { data } = await supabase
+    .schema("swingtrader")
+    .from("user_telegram_connections")
+    .select("chat_id")
+    .eq("user_id", userId)
+    .limit(1)
+    .maybeSingle();
+  return data?.chat_id ?? null;
+}
+
 serve(async (req: Request) => {
   const signature = req.headers.get("stripe-signature");
   if (!signature) {
@@ -159,6 +196,46 @@ serve(async (req: Request) => {
         } else {
           await query.update(row).eq("stripe_subscription_id", sub.id);
         }
+
+        break;
+      }
+
+      case "customer.subscription.trial_will_end": {
+        // Fires ~3 days before the trial converts to a paid charge. Send a
+        // proactive heads-up so a missing/failing card doesn't silently lapse.
+        const sub = event.data.object as Stripe.Subscription;
+        const userId = sub.metadata?.user_id;
+        if (!userId) break;
+
+        const chatId = await getChatId(supabase, userId);
+        if (chatId) {
+          await sendTelegram(
+            chatId,
+            "<b>⏳ Your trial is ending soon</b>\n\n" +
+              "Add a payment method to keep your News Impact Screener agents " +
+              "running without interruption:\n" +
+              `<a href="${APP_BASE_URL}/protected/profile">Set up billing</a>`,
+          );
+        }
+        break;
+      }
+
+      case "invoice.payment_failed": {
+        // Defensive: ensure the subscription is flagged past_due promptly even
+        // if customer.subscription.updated is delayed. Enforcement (reminder-
+        // only agent runs + dashboard banner) keys off this status.
+        const invoice = event.data.object as Stripe.Invoice;
+        const customerId =
+          typeof invoice.customer === "string"
+            ? invoice.customer
+            : (invoice.customer as Stripe.Customer)?.id;
+        if (!customerId) break;
+
+        await supabase
+          .schema("swingtrader")
+          .from("user_subscriptions")
+          .update({ status: "past_due" })
+          .eq("stripe_customer_id", customerId);
 
         break;
       }

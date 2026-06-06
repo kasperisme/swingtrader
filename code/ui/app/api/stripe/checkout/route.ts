@@ -21,6 +21,8 @@ export async function POST(req: NextRequest) {
     const body = await req.json();
     const plan = (body.plan ?? "investor") as Plan;
     const interval = (body.interval ?? "monthly") as BillingInterval;
+    const trial = body.trial === true;
+    const TRIAL_DAYS = 14;
 
     if (!VALID_PLANS.includes(plan)) {
       return NextResponse.json({ error: "Invalid plan" }, { status: 400 });
@@ -51,17 +53,19 @@ export async function POST(req: NextRequest) {
         phase: "phase1",
       },
       subscription_data: {
+        ...(trial ? { trial_period_days: TRIAL_DAYS } : {}),
         metadata: {
           user_id: user.id,
           email: user.email ?? "",
           plan,
           billing_interval: interval,
           phase: "phase1",
+          trial: trial ? "true" : "false",
         },
       },
     });
 
-    captureServer(user.id, "checkout_initiated", { plan, interval, session_id: session.id });
+    captureServer(user.id, "checkout_initiated", { plan, interval, trial, session_id: session.id });
 
     return NextResponse.json({ url: session.url });
   } catch (err) {

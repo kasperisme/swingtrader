@@ -36,6 +36,7 @@ type EventMap = {
   onboarding_collapsed_toggled: { collapsed: boolean };
   onboarding_restarted: { completed_steps: number; total_steps: number };
   ask_ai_reminder_clicked: Record<string, never>;
+  setup_assistant_opened: { surface: string };
 
   paywall_viewed: {
     surface: string;

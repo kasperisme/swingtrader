@@ -7,10 +7,10 @@ import { track } from "@/lib/analytics/events";
 import { clearPostWelcomeHighlight } from "./onboarding-highlight";
 
 /**
- * Persistent reminder rendered in place of the onboarding checklist when
- * the user has dismissed it or completed every step. Surfaces the Ask AI
- * button as the long-term answer to "where do I find X?" — the checklist
- * is for first-time orientation, the chat is for everything after.
+ * Persistent Ask AI prompt rendered at the top of the dashboard. It replaces
+ * the old step-by-step onboarding checklist: the chat is the single entry
+ * point for both orientation ("where do I find X?") and getting set up — it can
+ * configure the user's strategy, screenings, Telegram, and agents directly.
  */
 export function AskAiReminder() {
   return (
@@ -21,7 +21,7 @@ export function AskAiReminder() {
       <div className="flex items-center gap-2">
         <Sparkles className="h-3.5 w-3.5 shrink-0 text-amber-400" aria-hidden />
         <span>
-          Looking for something on the platform?{" "}
+          Need to find something or set up your account?{" "}
           <button
             type="button"
             onClick={() => {
@@ -33,8 +33,8 @@ export function AskAiReminder() {
           >
             Ask AI
           </button>{" "}
-          in the top bar — it knows the codebase, the data, and where every
-          page lives.
+          in the top bar — it knows where every page lives and can set up your
+          strategy, screenings, Telegram, and agents for you.
         </span>
       </div>
     </div>

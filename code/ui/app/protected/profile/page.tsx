@@ -12,6 +12,7 @@ import { getTradingStrategy } from "@/app/actions/trading-strategy";
 import { getOnboardingProgress, getOnboardingTours } from "@/app/actions/onboarding";
 import { PageTour } from "@/app/protected/_components/page-tour";
 import { RestartOnboardingButton } from "@/app/protected/_components/restart-onboarding-button";
+import { SetupAssistantTrigger } from "@/components/setup-assistant";
 
 export const metadata = { title: "Profile" };
 
@@ -77,10 +78,13 @@ async function ProfileContent() {
 
   return (
     <div className="flex flex-col gap-8 w-full">
-      <div>
-        <p className="text-xs font-semibold uppercase tracking-widest text-amber-500">Account</p>
-        <h1 className="mt-1 text-2xl font-bold tracking-tight">Profile</h1>
-        <p className="mt-1 text-sm text-muted-foreground">Your account details and settings.</p>
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-widest text-amber-500">Account</p>
+          <h1 className="mt-1 text-2xl font-bold tracking-tight">Profile</h1>
+          <p className="mt-1 text-sm text-muted-foreground">Your account details and settings.</p>
+        </div>
+        <SetupAssistantTrigger className="inline-flex shrink-0 items-center gap-1.5 rounded-md border border-amber-500/40 bg-amber-500/5 px-3 py-1.5 text-sm font-medium text-foreground transition-colors hover:bg-amber-500/10" />
       </div>
 
       {/* Account info */}

@@ -22,14 +22,16 @@ Prio 1:
 [x] (AI Chat) Screening agent is slow (find way to make the agent repond faster e.g. limit personas in UI and let it be a background agent, show in UI like in claude code subagent flow)
 [x] (AI Chat) Screening several stocks is slow (implement a batch process for the agent to run)
 [ ] (Caching) Caching isnt isnt updating correctly (news trends didnt show the last 24 hours, it is also flakey on the 30 day horizon)
-[ ] (AI Chat) Add granularity to chart, and make sure the AI applies the granularity to the prompt
-[ ] (Agent) In the agent, allow the user to select tickers and screenings for the agent to monitor
-[ ] (Agent) Have agent activation windows (e.g. it should scan every 15 minutes when intramarket, but otherwise not)
-[ ] (Agent) Setup market wide screenings (start with predefined screenings and let the agent run them, and in the future let the user create their own screenings using the screening)
-[ ] (Design) Optimize for mobile
-[ ] (UI) Searching is too slow
-[ ] (UI) Screenings should be generic and not linked to my setup
-[ ] (Podcast) Make sure the speakers are setting the scene and not just talking about the data
+[x] (AI Chat) Add granularity to chart, and make sure the AI applies the granularity to the prompt
+[x] (Agent) In the agent, allow the user to select tickers and screenings for the agent to monitor
+[x] (Agent) Have agent activation windows (e.g. it should scan every 15 minutes when intramarket, but otherwise not)
+[x] (Agent) Setup market wide screenings (start with predefined screenings and let the agent run them, and in the future let the user create their own screenings using the screening)
+[x] (Design) Optimize for mobile
+[x] (UI) Searching is too slow
+[x] (UI) Screenings should be generic and not linked to my setup
+[ ] Opsæt onboarding flow til at opsætte det hele for dem ved første adgang til platformen
+[ ] Skab onboardingen med nok personaer til at når brugerne kommer på, at de føler den er personlig til dem, og samtidig bliver promptet til at vælge betaling eller uden betaling for at unlocke deres personlige setup til fulde
+[ ] Optag onboaring video og lig den op på hjemmesiden til første gangs besøgere
 
 Prio 2:
 [x] Get embedding searching to work with the ollama model

@@ -2,7 +2,7 @@
 
 import { createClient } from "@/lib/supabase/server";
 import { getUserPlanTier } from "./plan-gate";
-import { hasPlan, type PlanTier } from "@/lib/plans";
+import { type PlanTier } from "@/lib/plans";
 import type { ScreeningsFilters } from "@/app/protected/screenings/screenings-filters-model";
 import { captureServer } from "@/lib/analytics/server";
 import { PRELAUNCH_OPEN_ACCESS } from "@/lib/launch";
@@ -12,7 +12,7 @@ type ActionResult<T> = Promise<{ ok: true; data: T } | { ok: false; error: strin
 const SCHEMA = "swingtrader";
 
 const SCREENING_LIMITS: Record<PlanTier, number> = {
-  observer: 1,
+  observer: 0,
   investor: 5,
   trader: 25,
 };

@@ -12,11 +12,12 @@ import asyncio
 import json
 import logging
 import os
-from datetime import datetime, timezone, time
+from datetime import datetime, timezone, time, timedelta
 from typing import Any
 
 import httpx
 
+from shared.billing import agents_blocked
 from shared.db import get_supabase_client
 from shared.telegram import (
     get_user_chat_id,
@@ -575,6 +576,22 @@ def _format_telegram_message(name: str, triggered: bool, summary: str | None, er
     return f"<b>✅ {name}</b>\n\n<i>No trigger — conditions not met.</i>"
 
 
+def _billing_url() -> str:
+    base = os.environ.get("APP_BASE_URL", "https://www.newsimpactscreener.com").rstrip("/")
+    return f"{base}/protected/profile"
+
+
+def _format_billing_reminder() -> str:
+    """Reminder-only message sent when the owner isn't on an active paid plan.
+    No agent output — just the nudge to set up billing."""
+    return (
+        "<b>⚠️ Agent paused</b>\n\n"
+        "Running scheduled agents requires an active paid plan. "
+        "Set up billing to resume your alerts:\n"
+        f'<a href="{_billing_url()}">Set up billing</a>'
+    )
+
+
 # ── Trading session helpers ─────────────────────────────────────────────────
 
 _SESSION_LABELS: dict[str, str] = {
@@ -611,6 +628,27 @@ def run_screening(screening: dict, dry_run: bool = False, is_test: bool = False)
         "dry_run": dry_run,
         "is_test": is_test,
     }
+
+    # ── Plan gate ──
+    # Scheduled agents only run for an active/trialing paid plan. The free
+    # Observer tier and lapsed/failing subscriptions do NOT spend any LLM
+    # resources — short-circuit before the prompt runs; delivery sends a
+    # reminder-only Telegram message instead. Test runs always run so the user
+    # can preview their agent. The agent stays scheduled and resumes
+    # automatically once the user is on a paid plan in good standing.
+    if not is_test and agents_blocked(screening.get("user_id")):
+        log.info(
+            "Plan-blocked screening %s (user=%s) — observer/lapsed tier, skipping LLM, sending reminder",
+            screening["id"], screening.get("user_id"),
+        )
+        return {
+            **base,
+            "triggered": False,
+            "billing_blocked": True,
+            "summary": None,
+            "data_used": {},
+            "trace": None,
+        }
 
     # ── Trading session gate ──
     # If the agent is configured to only run during a specific trading session,
@@ -710,7 +748,8 @@ def persist_and_deliver(result: dict, result_id: str | None = None) -> None:
     triggered = bool(result.get("triggered"))
     error = bool(result.get("error"))
     skipped = bool(result.get("skipped"))
-    status = "error" if error else "skipped" if skipped else "done"
+    billing_blocked = bool(result.get("billing_blocked"))
+    status = "error" if error else "skipped" if (skipped or billing_blocked) else "done"
     trace = result.get("trace")  # ordered event log; persisted even on error/timeout
 
     if result_id:
@@ -757,6 +796,10 @@ def persist_and_deliver(result: dict, result_id: str | None = None) -> None:
         update_fields,
     ).eq("id", result["screening_id"]).execute()
 
+    if billing_blocked:
+        _deliver_billing_reminder(client, schema, result, result_id, now)
+        return
+
     if skipped:
         log.info(
             "Skipping Telegram delivery: screening=%s reason=%s",
@@ -792,6 +835,68 @@ def persist_and_deliver(result: dict, result_id: str | None = None) -> None:
         user_id=result["user_id"],
         chat_id=chat_id,
         message_type=message_type,
+        message_text=html,
+        success=success,
+        telegram_message_id=msg_id,
+        error_text=err,
+    )
+
+    if success and result_id:
+        client.schema(schema).table("user_screening_results").update(
+            {"delivered": True},
+        ).eq("id", result_id).execute()
+
+
+_BILLING_REMINDER_THROTTLE_HOURS = 24
+
+
+def _billing_reminder_recently_sent(client, schema: str, user_id: str) -> bool:
+    """True if a billing reminder was sent to this user within the throttle
+    window — so frequent agents don't spam the same nudge every run."""
+    since = (
+        datetime.now(timezone.utc) - timedelta(hours=_BILLING_REMINDER_THROTTLE_HOURS)
+    ).isoformat()
+    try:
+        res = (
+            client.schema(schema)
+            .table("telegram_message_log")
+            .select("id")
+            .eq("user_id", user_id)
+            .eq("message_type", "billing_reminder")
+            .gte("sent_at", since)
+            .limit(1)
+            .execute()
+        )
+        return bool(res.data)
+    except Exception as exc:
+        log.warning("[billing] throttle lookup failed for %s: %s", user_id, exc)
+        return False  # on error, prefer to send rather than go silent
+
+
+def _deliver_billing_reminder(client, schema: str, result: dict, result_id: str | None, now: str) -> None:
+    """Send a reminder-only Telegram message for a billing-blocked run, at most
+    once per throttle window per user."""
+    user_id = result["user_id"]
+    chat_id = get_user_chat_id(user_id)
+    if not chat_id:
+        log.info("No Telegram chat_id for user %s — billing reminder in-app only", user_id)
+        return
+
+    if _billing_reminder_recently_sent(client, schema, user_id):
+        log.info("Billing reminder throttled for user %s (sent within 24h)", user_id)
+        return
+
+    html = _format_billing_reminder()
+    success, msg_id, err = send_telegram_chunks(chat_id, html)
+    if success:
+        log.info("Billing reminder delivered: user=%s chat_id=%s msg_id=%s", user_id, chat_id, msg_id)
+    else:
+        log.warning("Billing reminder FAILED: user=%s chat_id=%s err=%s", user_id, chat_id, err)
+
+    log_telegram_message(
+        user_id=user_id,
+        chat_id=chat_id,
+        message_type="billing_reminder",
         message_text=html,
         success=success,
         telegram_message_id=msg_id,
