@@ -37,6 +37,7 @@ type EventMap = {
   onboarding_restarted: { completed_steps: number; total_steps: number };
   ask_ai_reminder_clicked: Record<string, never>;
   setup_assistant_opened: { surface: string };
+  onboarding_exit_without_billing: Record<string, never>;
 
   paywall_viewed: {
     surface: string;

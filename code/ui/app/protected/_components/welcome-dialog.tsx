@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { ArrowRight, PlayCircle, Sparkles } from "lucide-react";
+import { AlertTriangle, ArrowRight, PlayCircle, Sparkles } from "lucide-react";
 
 import { markWelcomed } from "@/app/actions/onboarding";
 import { track } from "@/lib/analytics/events";
@@ -38,6 +38,7 @@ type Props = {
 export function WelcomeDialog({ displayName }: Props) {
   const [open, setOpen] = useState(true);
   const [step, setStep] = useState<"video" | "setup" | "plan">("video");
+  const [confirmingExit, setConfirmingExit] = useState(false);
   const [isPending, startTransition] = useTransition();
 
   const greetingName = displayName?.trim() || "trader";
@@ -64,18 +65,34 @@ export function WelcomeDialog({ displayName }: Props) {
     setStep("setup");
   }
 
-  // Closing while on the setup step (X / overlay / Finish) — already welcomed.
-  function finishSetup() {
+  // Confirmed they want to leave without setting up billing — close for good.
+  function leaveAnyway() {
+    track("onboarding_exit_without_billing", {});
+    setConfirmingExit(false);
     setOpen(false);
+  }
+
+  // From the confirm box: go (back) to the plan/billing step instead of leaving.
+  function goToBilling() {
+    setConfirmingExit(false);
+    setStep("plan");
   }
 
   function handleOpenChange(next: boolean) {
     if (next) return;
-    if (step === "video") skip();
-    else finishSetup();
+    // Skipping the tutorial up front is fine — nothing has been configured yet.
+    if (step === "video") {
+      skip();
+      return;
+    }
+    // They've built a setup but haven't set up billing. Warn before leaving:
+    // without a paid plan their agents won't run and they're limited to the
+    // free Observer tier.
+    setConfirmingExit(true);
   }
 
   return (
+    <>
     <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogContent
         className={
@@ -165,11 +182,42 @@ export function WelcomeDialog({ displayName }: Props) {
 
             <OnboardingPlanStep
               onBack={() => setStep("setup")}
-              onClose={finishSetup}
+              onClose={() => setConfirmingExit(true)}
             />
           </>
         )}
       </DialogContent>
     </Dialog>
+
+      {/* Exit-without-billing confirmation */}
+      <Dialog
+        open={confirmingExit}
+        onOpenChange={(o) => {
+          if (!o) setConfirmingExit(false);
+        }}
+      >
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <AlertTriangle className="h-5 w-5 text-amber-500" />
+              Leave without setting up billing?
+            </DialogTitle>
+            <DialogDescription className="pt-2">
+              Without an active plan your scheduled agents won&apos;t run — they&apos;ll
+              only send a reminder to set up billing — and you&apos;ll be limited to
+              the free <span className="font-medium text-foreground">Observer</span>{" "}
+              tier. Set up billing now to keep everything you just configured. You
+              can always do it later from your profile.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter className="gap-2 sm:gap-2">
+            <Button variant="ghost" onClick={leaveAnyway}>
+              Leave anyway
+            </Button>
+            <Button onClick={goToBilling}>Set up billing</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </>
   );
 }

@@ -32,7 +32,7 @@ Prio 1:
 [ ] Opsæt onboarding flow til at opsætte det hele for dem ved første adgang til platformen
 [ ] Skab onboardingen med nok personaer til at når brugerne kommer på, at de føler den er personlig til dem, og samtidig bliver promptet til at vælge betaling eller uden betaling for at unlocke deres personlige setup til fulde
 [ ] Optag onboaring video og lig den op på hjemmesiden til første gangs besøgere
-
+[ ] During onboarding make sure the users accept the terms and conditions and privacy policy and understand that they are using the platform at their own risk and that they are responsible for their own actions and that they are not liable for any losses or damages that they may incur by using the platform. This should be logged in the database with what the text they accepted was and when they accepted it.
 Prio 2:
 [x] Get embedding searching to work with the ollama model
 [x] Make sure IBD screener script runs through API
