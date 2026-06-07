@@ -40,6 +40,7 @@
     "ollama": "^0.6.3",
     "posthog-js": "^1.372.9",
     "posthog-node": "^5.33.3",
+    "qrcode.react": "^4.2.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "react-markdown": "^10.1.0",

@@ -8,6 +8,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { Check, Loader2, Send } from "lucide-react";
+import { QRCodeSVG } from "qrcode.react";
 
 export type AssistantChatMessage = {
   role: "user" | "assistant";
@@ -50,7 +51,9 @@ export function TelegramConnectInline({
   onConnected?: () => void;
 }) {
   const [connected, setConnected] = useState(false);
-  const [polling, setPolling] = useState(false);
+  // Poll as soon as the connect UI is shown so the desktop → scan-on-phone flow
+  // is detected without the user having to click the button first.
+  const [polling, setPolling] = useState(true);
   const firedRef = useRef(false);
 
   useEffect(() => {
@@ -59,7 +62,8 @@ export function TelegramConnectInline({
     const started = Date.now();
     const id = setInterval(async () => {
       if (cancelled) return;
-      if (Date.now() - started > 150_000) {
+      // Match the 15-min token TTL with headroom for grabbing a phone to scan.
+      if (Date.now() - started > 600_000) {
         setPolling(false);
         clearInterval(id);
         return;
@@ -96,7 +100,7 @@ export function TelegramConnectInline({
   }
 
   return (
-    <div className="mt-2 flex flex-col gap-1.5">
+    <div className="mt-2 flex flex-col gap-3">
       <a
         href={deepLink}
         target="_blank"
@@ -107,10 +111,26 @@ export function TelegramConnectInline({
         <Send className="h-4 w-4" />
         Open Telegram to connect
       </a>
+
+      {/* Desktop → phone: scan to open the bot in Telegram on mobile. */}
+      <div className="flex items-center gap-3 rounded-md border border-border bg-card p-3">
+        <div className="shrink-0 rounded-md bg-white p-2">
+          <QRCodeSVG value={deepLink} size={104} marginSize={0} level="M" />
+        </div>
+        <div className="min-w-0 text-xs text-muted-foreground">
+          <p className="font-medium text-foreground">On desktop?</p>
+          <p className="mt-0.5">
+            Scan this with your phone&apos;s camera to open Telegram and press
+            <span className="font-medium text-foreground"> Start</span> — it
+            connects automatically.
+          </p>
+        </div>
+      </div>
+
       {polling && (
         <span className="inline-flex items-center gap-1.5 text-xs text-muted-foreground">
           <Loader2 className="h-3 w-3 animate-spin" />
-          Waiting for you to press Start in Telegram…
+          Waiting for you to connect in Telegram…
         </span>
       )}
     </div>
