@@ -1,4 +1,5 @@
 import type { MetadataRoute } from "next";
+import { connection } from "next/server";
 import { isSanityConfigured, sanityFetch } from "@/lib/sanity/client";
 import { docPageSlugListQuery, blogPostSlugListQuery } from "@/lib/sanity/queries";
 import { listMarketScreenings } from "@/app/actions/market-screenings";
@@ -11,6 +12,10 @@ const baseUrl = process.env.NEXT_PUBLIC_SITE_URL ?? "https://newsimpactscreener.
 const ARTICLE_SITEMAP_LIMIT = 5000;
 
 export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
+  // Built from live DB + Sanity data, so generate at request time rather than
+  // during the static prerender (which tears down the in-flight fetches).
+  await connection();
+
   const now = new Date();
   const staticRoutes: MetadataRoute.Sitemap = [
     { url: baseUrl, lastModified: now, changeFrequency: "weekly", priority: 1 },

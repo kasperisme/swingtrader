@@ -10,7 +10,7 @@ Two formats (each a Remotion composition):
 | Format | Composition | Answers |
 |--------|-------------|---------|
 | **Bar chart race** | `BarChartRace` | "Which viral area is winning over time?" — clusters / dimensions / tickers race by article volume, with optional price overlay + article cards. |
-| **Price + News** | `PriceNewsChart` | "Did the news actually move the stock?" — an animated price line with scored news events plotted on it, each headline popping a sentiment-coloured pin + an article card showing the price reaction. |
+| **Price + News** | `PriceNewsChart` | "Did the news actually move the stock?" — an animated OHLC candlestick chart with scored news events plotted on it, each headline popping a sentiment-coloured pin + an article card showing the price reaction. |
 
 Both formats share one **`ArticleCard`** design (thumbnail + uppercase source +
 title + meta) and show the real article images. **No hook/takeaway text is
@@ -135,14 +135,15 @@ Ticker commands default their `--out` into `<TICKER>/data/`, `price-news` writes
 `<TICKER>/spec.json`, and `render` writes the mp4 next to the spec — so `--out`
 is optional and outputs stay organised.
 
-The price line draws left-to-right at a steady pace; **both axes grow with the
-reveal** — the x-axis expands (earlier points compress left) and the y-range is
-the running min/max of the data shown so far, so the viewer can't see the whole
-range up front and it expands as new highs/lows arrive. Dates run along the
-chart's x-axis; price gridline values sit on the left, and the **live price tag
-on the right edge (ticker + price + %Δ) follows the leading point up/down**
-(green/red by direction) — there is no top header, so the article card gets the
-extra space. Each news event pops a pin on the line (green = positive sentiment,
+The OHLC candles draw left-to-right one per trading day at a steady pace (the
+leading candle scales in mid-segment); **both axes grow with the reveal** — the
+x-axis expands (earlier candles compress left) and the y-range is the running
+min/max of the highs/lows shown so far, so the viewer can't see the whole range
+up front and it expands as new highs/lows arrive. Dates run along the chart's
+x-axis; price gridline values sit on the left, and the **live price tag on the
+right edge (ticker + price + %Δ) follows the leading close up/down** (green/red
+by direction) — there is no top header, so the article card gets the extra
+space. Each news event pops a pin on the close (green = positive sentiment,
 red = negative) and an article card that floats **over the graph** with the
 headline, source, and the next-day price move — so it's obvious which headlines
 moved the stock. `price-news` trims the empty pre-news run-up so the first

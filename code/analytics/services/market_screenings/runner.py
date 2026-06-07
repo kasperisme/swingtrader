@@ -8,6 +8,7 @@ from datetime import date, datetime, timezone
 from typing import Any
 
 from shared.db import get_supabase_client
+from shared.i18n import get_message, get_user_language
 from shared.telegram import (
     get_user_chat_id,
     log_telegram_message,
@@ -31,16 +32,16 @@ def _format_telegram_message(
     ticker_count: int | None = None,
     error: bool = False,
     error_summary: str | None = None,
+    language: str = "en",
 ) -> str:
     """Subscriber-facing notification: name + ticker count, no per-symbol detail."""
     if error:
-        return f"<b>⚠️ {name}</b>\n\n<i>Run failed: {error_summary}</i>"
-    count_part = (
-        f"\n{ticker_count} ticker{'s' if ticker_count != 1 else ''}"
-        if ticker_count is not None
-        else ""
-    )
-    return f"<b>📊 New screening: {name}</b>{count_part}"
+        return f"<b>⚠️ {name}</b>\n\n<i>{get_message(language, 'run_failed')}: {error_summary}</i>"
+    count_part = ""
+    if ticker_count is not None:
+        word = get_message(language, "ticker_one" if ticker_count == 1 else "ticker_many")
+        count_part = f"\n{ticker_count} {word}"
+    return f"<b>📊 {get_message(language, 'new_screening')}: {name}</b>{count_part}"
 
 
 # ── Execution ───────────────────────────────────────────────────────────────
@@ -659,12 +660,8 @@ def fan_out_to_subscribers(result: dict[str, Any]) -> None:
             if sym and isinstance(md, str) and md.strip():
                 symbols_for_chat.append((sym, md))
 
-    html = _format_telegram_message(
-        name,
-        ticker_count=result.get("ticker_count"),
-        error=error,
-        error_summary=summary if error else None,
-    )
+    # The message text is formatted per-subscriber inside the loop, since each
+    # subscriber may have a different preferred language.
     message_type = (
         "market_screening_error"
         if error
@@ -757,6 +754,13 @@ def fan_out_to_subscribers(result: dict[str, Any]) -> None:
                 skipped += 1
                 continue
 
+            html = _format_telegram_message(
+                name,
+                ticker_count=result.get("ticker_count"),
+                error=error,
+                error_summary=summary if error else None,
+                language=get_user_language(user_id),
+            )
             log.info("[fan-out] user=%s: sending Telegram to chat=%s", user_id, chat_id)
             success, msg_id, err = send_telegram_chunks(chat_id, html)
             if success:

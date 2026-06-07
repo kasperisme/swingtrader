@@ -1,4 +1,6 @@
 import type { Metadata } from "next";
+import { Suspense } from "react";
+import { connection } from "next/server";
 import {
   getMySubscriptionIds,
   listMarketScreenings,
@@ -38,7 +40,35 @@ function formatRelative(iso: string | null): string {
   return new Date(iso).toLocaleDateString();
 }
 
-export default async function ScreeningsGalleryPage() {
+// The page shell prerenders statically; the screening data + per-user
+// subscription state (auth cookies) stream inside the Suspense boundary at
+// request time. Under Next's Cache Components, request-time data must live in a
+// Suspense boundary — reading it at the top level would reject the in-flight
+// fetch when the static prerender completes.
+export default function ScreeningsGalleryPage() {
+  return (
+    <div className="relative isolate">
+      {/* Decorative grid backdrop — pointer-events safe, sits behind everything. */}
+      <div
+        aria-hidden
+        className="pointer-events-none absolute inset-x-0 top-0 -z-10 h-[420px] bg-terminal-grid opacity-[0.35] [mask-image:linear-gradient(to_bottom,black,transparent)]"
+      />
+
+      <div className="mx-auto max-w-6xl px-4 pt-12 pb-20 sm:px-6 md:pt-20">
+        <Suspense fallback={<GallerySkeleton />}>
+          <GalleryContent />
+        </Suspense>
+      </div>
+    </div>
+  );
+}
+
+async function GalleryContent() {
+  // Defer to request time: the data is per-user (subscriptions) and live, so it
+  // must not run during the static prerender. connection() suspends this branch
+  // until a request exists, so the service-client fetch never starts mid-prerender.
+  await connection();
+
   const [screenings, subscribedIds] = await Promise.all([
     listMarketScreenings(),
     getMySubscriptionIds(),
@@ -53,16 +83,9 @@ export default async function ScreeningsGalleryPage() {
   const triggeredCount = screenings.filter((s) => s.last_triggered).length;
 
   return (
-    <div className="relative isolate">
-      {/* Decorative grid backdrop — pointer-events safe, sits behind everything. */}
-      <div
-        aria-hidden
-        className="pointer-events-none absolute inset-x-0 top-0 -z-10 h-[420px] bg-terminal-grid opacity-[0.35] [mask-image:linear-gradient(to_bottom,black,transparent)]"
-      />
-
-      <div className="mx-auto max-w-6xl px-4 pt-12 pb-20 sm:px-6 md:pt-20">
-        {/* Editorial header — 12 column asymmetric split. */}
-        <header className="grid grid-cols-12 gap-x-6 gap-y-8 border-b border-border/70 pb-10">
+    <>
+      {/* Editorial header — 12 column asymmetric split. */}
+      <header className="grid grid-cols-12 gap-x-6 gap-y-8 border-b border-border/70 pb-10">
           <div className="col-span-12 md:col-span-8">
             <div className="flex items-center gap-2 font-mono text-[11px] uppercase tracking-[0.22em] text-muted-foreground">
               <span className="inline-block h-[1px] w-6 bg-primary" />
@@ -107,12 +130,33 @@ export default async function ScreeningsGalleryPage() {
               />
             </dl>
           </aside>
-        </header>
+      </header>
 
-        <ScreeningsGalleryList
-          screenings={screenings}
-          subscribedIds={subscribedIds}
-        />
+      <ScreeningsGalleryList
+        screenings={screenings}
+        subscribedIds={subscribedIds}
+      />
+    </>
+  );
+}
+
+function GallerySkeleton() {
+  return (
+    <div className="animate-pulse">
+      <div className="grid grid-cols-12 gap-x-6 gap-y-8 border-b border-border/70 pb-10">
+        <div className="col-span-12 space-y-5 md:col-span-8">
+          <div className="h-3 w-40 rounded bg-muted" />
+          <div className="h-16 w-64 rounded bg-muted" />
+          <div className="h-12 w-full max-w-[58ch] rounded bg-muted" />
+        </div>
+        <aside className="col-span-12 md:col-span-4">
+          <div className="h-40 rounded-lg border border-border/70 bg-muted/40" />
+        </aside>
+      </div>
+      <div className="mt-10 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        {Array.from({ length: 6 }).map((_, i) => (
+          <div key={i} className="h-44 rounded-xl border border-border/70 bg-muted/40" />
+        ))}
       </div>
     </div>
   );

@@ -70,8 +70,11 @@ async function handleStart(chat_id: number, first_name: string, token: string): 
     await sendTelegramMessage(
       chat_id,
       `👋 Hi <b>${first_name}</b>!\n\n` +
-      "To connect your NewsImpactScreener account, open the app and click " +
-      "<b>Connect Telegram</b> — you'll get a personal link to tap here.",
+      "I'm the News Impact Screener bot. I deliver alerts from the custom agents " +
+      "you build — each one watches the market on your schedule and pings you the " +
+      "moment your conditions are met.\n\n" +
+      "To get started, open the app and tap <b>Connect Telegram</b> — " +
+      "you'll get a personal link to tap here.",
     );
     return;
   }
@@ -130,8 +133,11 @@ async function handleStart(chat_id: number, first_name: string, token: string): 
   await sendTelegramMessage(
     chat_id,
     "✅ <b>Telegram connected!</b>\n\n" +
-    "You'll receive your personalised Daily Narrative each weekday at <b>08:30 ET</b> — " +
-    "covering your portfolio positions, active screening candidates, and alert watch.\n\n" +
+    "This is where your News Impact Screener agents reach you.\n\n" +
+    "🔔 <b>Agent alerts</b> — your custom agents watch the market on your schedule and message you the moment their conditions hit\n" +
+    "📊 <b>Screening updates</b> — fresh candidates from the market screenings you follow\n\n" +
+    "<b>Build an agent for whatever you care about</b> — a macro theme, an earnings gap, a single ticker, or a whole watchlist. Open <b>Agents</b> in the app and describe what to watch for in plain English; it runs on your schedule and only pings you when your conditions are met.\n\n" +
+    "You can also <code>/search &lt;terms&gt;</code> the latest headlines anytime.\n\n" +
     "<i>Not financial advice.</i>",
   );
 }

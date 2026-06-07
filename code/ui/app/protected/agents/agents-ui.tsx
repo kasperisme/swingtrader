@@ -83,16 +83,32 @@ export function AgentsUI({ screenings, limits, error, suggestionTickers, telegra
       )}
 
       {/* Usage + controls */}
-      <div className="flex min-w-0 flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+      <div className="flex min-w-0 flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
         <div className="min-w-0 flex-1">
-          {limits && (
-            <p className="text-sm text-muted-foreground break-words">
-              <span className="font-semibold text-foreground">{limits.used}</span>
-              <span className="text-muted-foreground/60"> / {limits.limit}</span>
-              {" "}active agents
-              <span className="ml-2 text-xs text-muted-foreground/60">({limits.plan} plan)</span>
-            </p>
-          )}
+          {limits && (() => {
+            const pct = Math.min(100, (limits.used / Math.max(1, limits.limit)) * 100);
+            const nearLimit = limits.used >= limits.limit;
+            return (
+              <div className="min-w-0">
+                <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
+                  <span className="text-2xl font-bold tabular-nums leading-none tracking-tight text-foreground">
+                    {limits.used}
+                  </span>
+                  <span className="text-sm tabular-nums text-muted-foreground/50">/ {limits.limit}</span>
+                  <span className="text-xs text-muted-foreground">active agents</span>
+                  <span className="rounded-full border border-border px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-muted-foreground/70">
+                    {limits.plan}
+                  </span>
+                </div>
+                <div className="mt-2 h-1 w-full max-w-[15rem] overflow-hidden rounded-full bg-muted">
+                  <div
+                    className={`h-full w-full origin-left rounded-full transition-transform duration-500 ease-out ${nearLimit ? "bg-rose-500" : "bg-amber-500"}`}
+                    style={{ transform: `scaleX(${pct / 100})` }}
+                  />
+                </div>
+              </div>
+            );
+          })()}
         </div>
         <div className="flex shrink-0 flex-wrap items-center gap-2">
           {/* View toggle */}
@@ -133,7 +149,7 @@ export function AgentsUI({ screenings, limits, error, suggestionTickers, telegra
                     ? "You've reached your active-agent limit"
                     : undefined
               }
-              className="inline-flex items-center gap-1.5 rounded-md bg-foreground px-3 py-2.5 text-sm font-medium text-background transition-opacity hover:opacity-90 disabled:opacity-40 disabled:pointer-events-none"
+              className="inline-flex items-center gap-1.5 rounded-md bg-foreground px-3.5 py-2.5 text-sm font-medium text-background shadow-sm transition-all hover:opacity-90 active:scale-[0.98] disabled:opacity-40 disabled:pointer-events-none disabled:active:scale-100"
             >
               <Plus className="w-3.5 h-3.5" />
               New agent
@@ -157,12 +173,42 @@ export function AgentsUI({ screenings, limits, error, suggestionTickers, telegra
       {view === "list" && (
         <div data-tour="agent-list" className="flex flex-col gap-3">
           {screenings.length === 0 && !showForm && (
-            <div className="rounded-2xl border border-dashed border-border px-6 py-14 text-center">
-              <Bot className="mx-auto w-8 h-8 text-muted-foreground/30 mb-3" />
-              <p className="text-sm font-medium text-foreground/70">No agents yet</p>
-              <p className="mt-1 text-xs text-muted-foreground">
-                Create one to get started — the agent runs on schedule and alerts you when conditions are met.
+            <div className="rounded-2xl border border-dashed border-border/70 px-6 py-16 text-center">
+              <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-2xl border border-border bg-muted/40">
+                <Bot className="h-6 w-6 text-muted-foreground/50" />
+              </div>
+              <p className="text-base font-semibold tracking-tight text-foreground">No agents yet</p>
+              <p className="mx-auto mt-1.5 max-w-[44ch] text-sm leading-relaxed text-muted-foreground">
+                Spin up your first agent — it watches the market on your schedule
+                and pings you the moment your conditions hit.
               </p>
+              <button
+                type="button"
+                onClick={() => setShowForm(true)}
+                disabled={createBlocked}
+                title={
+                  !telegramConnected
+                    ? "Connect Telegram first to create agents"
+                    : atLimit
+                      ? "You've reached your active-agent limit"
+                      : undefined
+                }
+                className="mt-5 inline-flex items-center gap-1.5 rounded-md bg-foreground px-4 py-2.5 text-sm font-medium text-background shadow-sm transition-all hover:opacity-90 active:scale-[0.98] disabled:opacity-40 disabled:pointer-events-none disabled:active:scale-100"
+              >
+                <Plus className="h-3.5 w-3.5" />
+                Create your first agent
+              </button>
+              <div className="mt-7 flex flex-wrap items-center justify-center gap-1.5">
+                <span className="text-[11px] uppercase tracking-wide text-muted-foreground/40">Try</span>
+                {["Airline macro selloff", "NVDA earnings gap", "Biotech FDA catalysts"].map((idea) => (
+                  <span
+                    key={idea}
+                    className="rounded-full border border-border bg-muted/30 px-2.5 py-0.5 text-[11px] text-muted-foreground"
+                  >
+                    {idea}
+                  </span>
+                ))}
+              </div>
             </div>
           )}
             {screenings.map((s) => (
@@ -746,53 +792,190 @@ function TickerPicker({
   );
 }
 
-// ── Scan run picker (multi-select checkboxes) ──────────────────────────────────
+// ── Linked-screening helpers ────────────────────────────────────────────────
+
+/** Pretty label for a scan-run `source`. `market_screening:foo-bar` → "Foo Bar". */
+function formatSourceLabel(source: string): string {
+  const slug = source.startsWith("market_screening:")
+    ? source.slice("market_screening:".length)
+    : source;
+  if (source.startsWith("market_screening:")) {
+    return slug
+      .replace(/[-_]+/g, " ")
+      .replace(/\b\w/g, (c) => c.toUpperCase())
+      .trim();
+  }
+  return source;
+}
+
+/** Newest run id for a source. `scanRuns` is ordered scan_date desc, so the
+ * first match is the latest. Returns null if the source has no runs. */
+function latestRunIdForSource(source: string, scanRuns: ScanRunSummary[]): number | null {
+  for (const r of scanRuns) if (r.source === source) return r.id;
+  return null;
+}
+
+/** Effective linked run ids = pinned ids ∪ {latest run per followed source}.
+ * Mirrors the engine's resolution so the filter preview matches what runs. */
+function effectiveLinkedRunIds(
+  pinnedIds: number[],
+  followedSources: string[],
+  scanRuns: ScanRunSummary[],
+): number[] {
+  const seen = new Set<number>();
+  const out: number[] = [];
+  for (const id of pinnedIds) {
+    if (!seen.has(id)) { seen.add(id); out.push(id); }
+  }
+  for (const s of followedSources) {
+    const id = latestRunIdForSource(s, scanRuns);
+    if (id != null && !seen.has(id)) { seen.add(id); out.push(id); }
+  }
+  return out;
+}
+
+// ── Scan run picker (source-grouped, latest-vs-pin per source) ─────────────────
+
+type SourceGroup = { source: string; runs: ScanRunSummary[] };
 
 function ScanRunPicker({
-  linkedIds,
-  onChange,
+  pinnedIds,
+  followedSources,
+  onChangePinned,
+  onChangeFollowed,
   scanRuns,
 }: {
-  linkedIds: number[];
-  onChange: (ids: number[]) => void;
+  pinnedIds: number[];
+  followedSources: string[];
+  onChangePinned: (ids: number[]) => void;
+  onChangeFollowed: (sources: string[]) => void;
   scanRuns: ScanRunSummary[];
 }) {
   if (scanRuns.length === 0) {
     return <p className="text-xs text-muted-foreground">No scan runs yet. Create one on the Screenings page.</p>;
   }
 
-  function toggle(id: number) {
-    if (linkedIds.includes(id)) {
-      onChange(linkedIds.filter((x) => x !== id));
-    } else {
-      onChange([...linkedIds, id]);
-    }
+  // Group runs by source (preserving scan_date-desc order); null-source runs are pin-only.
+  const groups: SourceGroup[] = [];
+  const groupBySource = new Map<string, SourceGroup>();
+  const ungrouped: ScanRunSummary[] = [];
+  for (const r of scanRuns) {
+    if (!r.source) { ungrouped.push(r); continue; }
+    let g = groupBySource.get(r.source);
+    if (!g) { g = { source: r.source, runs: [] }; groupBySource.set(r.source, g); groups.push(g); }
+    g.runs.push(r);
   }
 
-  function runLabel(r: ScanRunSummary): string {
-    const date = r.scan_date.slice(0, 10);
-    return r.source ? `${date} · ${r.source}` : date;
+  function pinnedIdInGroup(g: SourceGroup): number | null {
+    for (const r of g.runs) if (pinnedIds.includes(r.id)) return r.id;
+    return null;
   }
+
+  function followLatest(g: SourceGroup) {
+    // remove any pinned id from this group, add source to followed
+    const groupIds = new Set(g.runs.map((r) => r.id));
+    onChangePinned(pinnedIds.filter((id) => !groupIds.has(id)));
+    if (!followedSources.includes(g.source)) onChangeFollowed([...followedSources, g.source]);
+  }
+
+  function pinRun(g: SourceGroup, id: number) {
+    // exactly one pinned id per group; clear followed for this source
+    const groupIds = new Set(g.runs.map((r) => r.id));
+    onChangePinned([...pinnedIds.filter((x) => !groupIds.has(x)), id]);
+    if (followedSources.includes(g.source)) onChangeFollowed(followedSources.filter((s) => s !== g.source));
+  }
+
+  function clearGroup(g: SourceGroup) {
+    const groupIds = new Set(g.runs.map((r) => r.id));
+    onChangePinned(pinnedIds.filter((id) => !groupIds.has(id)));
+    if (followedSources.includes(g.source)) onChangeFollowed(followedSources.filter((s) => s !== g.source));
+  }
+
+  function toggleUngrouped(id: number) {
+    if (pinnedIds.includes(id)) onChangePinned(pinnedIds.filter((x) => x !== id));
+    else onChangePinned([...pinnedIds, id]);
+  }
+
+  const segBtn = "px-2 py-0.5 text-[11px] font-medium rounded transition-colors";
 
   return (
-    <div className="flex flex-col gap-1.5 max-h-40 overflow-y-auto">
-      {scanRuns.map((r) => {
-        const checked = linkedIds.includes(r.id);
+    <div className="flex flex-col gap-1.5 max-h-56 overflow-y-auto">
+      {groups.map((g) => {
+        const followed = followedSources.includes(g.source);
+        const pinnedId = pinnedIdInGroup(g);
+        const included = followed || pinnedId != null;
+        const latestDate = g.runs[0]?.scan_date.slice(0, 10) ?? "";
         return (
-          <label
-            key={r.id}
-            className="flex items-center gap-2 text-xs cursor-pointer hover:bg-muted/50 rounded px-1.5 py-1 transition-colors"
-          >
-            <input
-              type="checkbox"
-              checked={checked}
-              onChange={() => toggle(r.id)}
-              className="rounded border-border"
-            />
-            <span className="truncate text-foreground">{runLabel(r)}</span>
-          </label>
+          <div key={g.source} className="rounded-md border border-border/60 px-2 py-1.5">
+            <label className="flex items-center gap-2 text-xs cursor-pointer">
+              <input
+                type="checkbox"
+                checked={included}
+                onChange={() => (included ? clearGroup(g) : followLatest(g))}
+                className="rounded border-border"
+              />
+              <span className="truncate text-foreground font-medium">{formatSourceLabel(g.source)}</span>
+              <span className="ml-auto shrink-0 text-[10px] text-muted-foreground/60 tabular-nums">
+                {g.runs.length} run{g.runs.length !== 1 ? "s" : ""}
+              </span>
+            </label>
+            {included && (
+              <div className="mt-1.5 flex flex-wrap items-center gap-1.5 pl-6">
+                <div className="inline-flex rounded-md border border-border bg-background p-0.5">
+                  <button
+                    type="button"
+                    onClick={() => followLatest(g)}
+                    className={`${segBtn} ${followed ? "bg-foreground text-background" : "text-muted-foreground hover:text-foreground"}`}
+                  >
+                    Latest run
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => pinRun(g, pinnedId ?? g.runs[0].id)}
+                    className={`${segBtn} ${!followed ? "bg-foreground text-background" : "text-muted-foreground hover:text-foreground"}`}
+                  >
+                    Pin a run
+                  </button>
+                </div>
+                {followed ? (
+                  <span className="text-[11px] text-muted-foreground/70">follows newest · now {latestDate}</span>
+                ) : (
+                  <select
+                    value={pinnedId ?? g.runs[0].id}
+                    onChange={(e) => pinRun(g, Number(e.target.value))}
+                    className="rounded-md border border-input bg-background px-1.5 py-0.5 text-[11px] text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+                  >
+                    {g.runs.map((r) => (
+                      <option key={r.id} value={r.id}>{r.scan_date.slice(0, 10)}</option>
+                    ))}
+                  </select>
+                )}
+              </div>
+            )}
+          </div>
         );
       })}
+      {ungrouped.length > 0 && (
+        <div className="flex flex-col gap-1 pt-0.5">
+          {groups.length > 0 && (
+            <span className="text-[10px] uppercase tracking-wide text-muted-foreground/50 px-1.5">Unlabeled runs</span>
+          )}
+          {ungrouped.map((r) => (
+            <label
+              key={r.id}
+              className="flex items-center gap-2 text-xs cursor-pointer hover:bg-muted/50 rounded px-1.5 py-1 transition-colors"
+            >
+              <input
+                type="checkbox"
+                checked={pinnedIds.includes(r.id)}
+                onChange={() => toggleUngrouped(r.id)}
+                className="rounded border-border"
+              />
+              <span className="truncate text-foreground">{r.scan_date.slice(0, 10)}</span>
+            </label>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -1092,12 +1275,18 @@ function PillPopover({
   const [editTradingSession, setEditTradingSession] = useState<string | null>(screening.trading_session ?? null);
   const [editTickers, setEditTickers] = useState<string[]>(screening.tickers ?? []);
   const [editLinkedScanRunIds, setEditLinkedScanRunIds] = useState<number[]>(screening.linked_scan_run_ids ?? []);
+  const [editLinkedScanSources, setEditLinkedScanSources] = useState<string[]>(screening.linked_scan_sources ?? []);
   const [editScanFilters, setEditScanFilters] = useState<ScreeningsFilters>((screening.scan_filters as ScreeningsFilters | null) ?? DEFAULT_SCREENINGS_FILTERS);
   const [editConditionEnabled, setEditConditionEnabled] = useState<boolean>(screening.condition_enabled ?? false);
   const [editTriggerCondition, setEditTriggerCondition] = useState<string>(screening.trigger_condition ?? "");
   const [scanRuns, setScanRuns] = useState<ScanRunSummary[]>([]);
   const [saving, setSaving] = useState(false);
   const [saveErr, setSaveErr] = useState<string | null>(null);
+
+  const editEffectiveLinkedIds = useMemo(
+    () => effectiveLinkedRunIds(editLinkedScanRunIds, editLinkedScanSources, scanRuns),
+    [editLinkedScanRunIds, editLinkedScanSources, scanRuns],
+  );
 
   useEffect(() => {
     void listScanRuns().then((res) => {
@@ -1164,6 +1353,7 @@ function PillPopover({
       timezone: editTimezone,
       tickers: editTickers,
       linked_scan_run_ids: editLinkedScanRunIds,
+      linked_scan_sources: editLinkedScanSources,
       scan_filters: countScreeningsFilterRules(editScanFilters) > 0 ? editScanFilters : null,
       trading_session: (editTradingSession as TradingSession) ?? "none",
       condition_enabled: editConditionEnabled,
@@ -1221,19 +1411,21 @@ function PillPopover({
             <div className="flex flex-col gap-1">
               <label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Linked screenings</label>
               <ScanRunPicker
-                linkedIds={editLinkedScanRunIds}
-                onChange={setEditLinkedScanRunIds}
+                pinnedIds={editLinkedScanRunIds}
+                followedSources={editLinkedScanSources}
+                onChangePinned={setEditLinkedScanRunIds}
+                onChangeFollowed={setEditLinkedScanSources}
                 scanRuns={scanRuns}
               />
             </div>
           )}
-          {editLinkedScanRunIds.length > 0 && (
+          {editEffectiveLinkedIds.length > 0 && (
             <div className="flex flex-col gap-1">
               <label className="text-xs font-medium text-muted-foreground uppercase tracking-wide flex items-center gap-1">
                 <Filter className="w-3 h-3" /> Filter tickers
               </label>
               <AgentFilterSection
-                linkedScanRunIds={editLinkedScanRunIds}
+                linkedScanRunIds={editEffectiveLinkedIds}
                 filters={editScanFilters}
                 setFilters={setEditScanFilters}
               />
@@ -1481,12 +1673,18 @@ function CreateForm({ onClose, atLimit, suggestionTickers }: { onClose: () => vo
   const [tradingSession, setTradingSession] = useState<string | null>(null);
   const [tickers, setTickers] = useState<string[]>([]);
   const [linkedScanRunIds, setLinkedScanRunIds] = useState<number[]>([]);
+  const [linkedScanSources, setLinkedScanSources] = useState<string[]>([]);
   const [scanFilters, setScanFilters] = useState<ScreeningsFilters>(DEFAULT_SCREENINGS_FILTERS);
   const [conditionEnabled, setConditionEnabled] = useState(false);
   const [triggerCondition, setTriggerCondition] = useState("");
   const [scanRuns, setScanRuns] = useState<ScanRunSummary[]>([]);
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+
+  const effectiveLinkedIds = useMemo(
+    () => effectiveLinkedRunIds(linkedScanRunIds, linkedScanSources, scanRuns),
+    [linkedScanRunIds, linkedScanSources, scanRuns],
+  );
 
   useEffect(() => {
     void listScanRuns().then((res) => {
@@ -1510,6 +1708,7 @@ function CreateForm({ onClose, atLimit, suggestionTickers }: { onClose: () => vo
       timezone,
       tickers,
       linked_scan_run_ids: linkedScanRunIds,
+      linked_scan_sources: linkedScanSources,
       scan_filters: countScreeningsFilterRules(scanFilters) > 0 ? scanFilters : null,
       trading_session: (tradingSession as TradingSession) ?? "none",
       condition_enabled: conditionEnabled,
@@ -1600,12 +1799,14 @@ function CreateForm({ onClose, atLimit, suggestionTickers }: { onClose: () => vo
             </span>
           </label>
           <ScanRunPicker
-            linkedIds={linkedScanRunIds}
-            onChange={setLinkedScanRunIds}
+            pinnedIds={linkedScanRunIds}
+            followedSources={linkedScanSources}
+            onChangePinned={setLinkedScanRunIds}
+            onChangeFollowed={setLinkedScanSources}
             scanRuns={scanRuns}
           />
         </div>
-        {linkedScanRunIds.length > 0 && (
+        {effectiveLinkedIds.length > 0 && (
           <div className="flex flex-col gap-1.5">
             <label className="text-xs font-medium text-muted-foreground uppercase tracking-wide flex items-center gap-1.5">
               <Filter className="w-3 h-3" />
@@ -1613,7 +1814,7 @@ function CreateForm({ onClose, atLimit, suggestionTickers }: { onClose: () => vo
               <span className="normal-case font-normal text-muted-foreground/60">narrow which tickers the agent focuses on</span>
             </label>
             <AgentFilterSection
-              linkedScanRunIds={linkedScanRunIds}
+              linkedScanRunIds={effectiveLinkedIds}
               filters={scanFilters}
               setFilters={setScanFilters}
             />
@@ -1831,12 +2032,18 @@ function AgentCard({ screening, suggestionTickers }: { screening: ScheduledScree
   const [editTradingSession, setEditTradingSession] = useState<string | null>(screening.trading_session ?? null);
   const [editTickers, setEditTickers] = useState<string[]>(screening.tickers ?? []);
   const [editLinkedScanRunIds, setEditLinkedScanRunIds] = useState<number[]>(screening.linked_scan_run_ids ?? []);
+  const [editLinkedScanSources, setEditLinkedScanSources] = useState<string[]>(screening.linked_scan_sources ?? []);
   const [editScanFilters, setEditScanFilters] = useState<ScreeningsFilters>((screening.scan_filters as ScreeningsFilters | null) ?? DEFAULT_SCREENINGS_FILTERS);
   const [editConditionEnabled, setEditConditionEnabled] = useState<boolean>(screening.condition_enabled ?? false);
   const [editTriggerCondition, setEditTriggerCondition] = useState<string>(screening.trigger_condition ?? "");
   const [scanRuns, setScanRuns] = useState<ScanRunSummary[]>([]);
   const [saving, setSaving] = useState(false);
   const [saveErr, setSaveErr] = useState<string | null>(null);
+
+  const editEffectiveLinkedIds = useMemo(
+    () => effectiveLinkedRunIds(editLinkedScanRunIds, editLinkedScanSources, scanRuns),
+    [editLinkedScanRunIds, editLinkedScanSources, scanRuns],
+  );
 
   useEffect(() => {
     void listScanRuns().then((res) => {
@@ -1872,6 +2079,7 @@ function AgentCard({ screening, suggestionTickers }: { screening: ScheduledScree
       timezone: editTimezone,
       tickers: editTickers,
       linked_scan_run_ids: editLinkedScanRunIds,
+      linked_scan_sources: editLinkedScanSources,
       scan_filters: countScreeningsFilterRules(editScanFilters) > 0 ? editScanFilters : null,
       trading_session: (editTradingSession as TradingSession) ?? "none",
       condition_enabled: editConditionEnabled,
@@ -1963,10 +2171,16 @@ function AgentCard({ screening, suggestionTickers }: { screening: ScheduledScree
                 Linked screenings
                 <span className="ml-2 normal-case font-normal text-muted-foreground/60">pull context from a scan run</span>
               </label>
-              <ScanRunPicker linkedIds={editLinkedScanRunIds} onChange={setEditLinkedScanRunIds} scanRuns={scanRuns} />
+              <ScanRunPicker
+                pinnedIds={editLinkedScanRunIds}
+                followedSources={editLinkedScanSources}
+                onChangePinned={setEditLinkedScanRunIds}
+                onChangeFollowed={setEditLinkedScanSources}
+                scanRuns={scanRuns}
+              />
             </div>
           )}
-          {editLinkedScanRunIds.length > 0 && (
+          {editEffectiveLinkedIds.length > 0 && (
             <div className="flex flex-col gap-1.5">
               <label className="text-xs font-medium text-muted-foreground uppercase tracking-wide flex items-center gap-1.5">
                 <Filter className="w-3 h-3" />
@@ -1974,7 +2188,7 @@ function AgentCard({ screening, suggestionTickers }: { screening: ScheduledScree
                 <span className="normal-case font-normal text-muted-foreground/60">narrow which tickers the agent focuses on</span>
               </label>
               <AgentFilterSection
-                linkedScanRunIds={editLinkedScanRunIds}
+                linkedScanRunIds={editEffectiveLinkedIds}
                 filters={editScanFilters}
                 setFilters={setEditScanFilters}
               />
@@ -2022,10 +2236,15 @@ function AgentCard({ screening, suggestionTickers }: { screening: ScheduledScree
   }
 
   return (
-    <div className={`rounded-2xl border bg-card transition-opacity ${deleting ? "opacity-50 pointer-events-none" : "border-border"}`}>
+    <div className={`group rounded-2xl border bg-card transition-all duration-200 ${deleting ? "pointer-events-none border-border opacity-50" : "border-border hover:border-foreground/15 hover:shadow-[0_4px_28px_-12px_rgba(0,0,0,0.3)]"}`}>
       <div className="flex min-w-0 flex-col gap-3 px-4 py-4 sm:flex-row sm:items-start sm:gap-3 sm:px-5">
         <div className="flex min-w-0 flex-1 items-start gap-3">
-          <div className={`mt-1 h-2 w-2 shrink-0 rounded-full ${screening.is_active ? "bg-emerald-500" : "bg-muted-foreground/30"}`} />
+          <span className="relative mt-1.5 flex h-2 w-2 shrink-0">
+            {screening.is_active && (
+              <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-500/60" />
+            )}
+            <span className={`relative inline-flex h-2 w-2 rounded-full ${screening.is_active ? "bg-emerald-500" : "bg-muted-foreground/30"}`} />
+          </span>
 
           <div className="min-w-0 flex-1">
             <div className="flex flex-wrap items-center gap-2">
@@ -2046,17 +2265,26 @@ function AgentCard({ screening, suggestionTickers }: { screening: ScheduledScree
 
             <p className="mt-1 text-sm text-muted-foreground line-clamp-2">{screening.prompt}</p>
 
-            {((screening.tickers?.length ?? 0) > 0 || (screening.linked_scan_run_ids?.length ?? 0) > 0) && (
+            {((screening.tickers?.length ?? 0) > 0 || (screening.linked_scan_run_ids?.length ?? 0) > 0 || (screening.linked_scan_sources?.length ?? 0) > 0) && (
             <div className="mt-2 flex flex-wrap items-center gap-1.5">
               {(screening.tickers ?? []).map((t) => (
                 <span key={t} className="inline-flex items-center rounded bg-muted px-1.5 py-0.5 text-[11px] font-mono font-medium text-foreground/80">
                   {t}
                 </span>
               ))}
+              {(screening.linked_scan_sources ?? []).length > 0 && (
+                <span
+                  className="inline-flex items-center gap-1 rounded bg-emerald-500/10 px-1.5 py-0.5 text-[11px] text-emerald-600 dark:text-emerald-400"
+                  title={(screening.linked_scan_sources ?? []).map(formatSourceLabel).join(", ")}
+                >
+                  <Link2 className="w-3 h-3" />
+                  {screening.linked_scan_sources.length} following latest
+                </span>
+              )}
               {(screening.linked_scan_run_ids ?? []).length > 0 && (
                 <span className="inline-flex items-center gap-1 rounded bg-muted px-1.5 py-0.5 text-[11px] text-muted-foreground">
                   <Link2 className="w-3 h-3" />
-                  {screening.linked_scan_run_ids.length} linked
+                  {screening.linked_scan_run_ids.length} pinned
                 </span>
               )}
               {screening.scan_filters &&
@@ -2146,7 +2374,7 @@ function AgentCard({ screening, suggestionTickers }: { screening: ScheduledScree
           </button>
           <button
             type="button"
-            onClick={() => { setEditing(true); setEditName(screening.name); setEditPrompt(screening.prompt); setEditSchedule(screening.schedule); setEditTimezone(screening.timezone); setEditTradingSession(screening.trading_session ?? null); setEditTickers(screening.tickers ?? []); setEditLinkedScanRunIds(screening.linked_scan_run_ids ?? []); setEditConditionEnabled(screening.condition_enabled ?? false); setEditTriggerCondition(screening.trigger_condition ?? ""); setSaveErr(null); }}
+            onClick={() => { setEditing(true); setEditName(screening.name); setEditPrompt(screening.prompt); setEditSchedule(screening.schedule); setEditTimezone(screening.timezone); setEditTradingSession(screening.trading_session ?? null); setEditTickers(screening.tickers ?? []); setEditLinkedScanRunIds(screening.linked_scan_run_ids ?? []); setEditLinkedScanSources(screening.linked_scan_sources ?? []); setEditConditionEnabled(screening.condition_enabled ?? false); setEditTriggerCondition(screening.trigger_condition ?? ""); setSaveErr(null); }}
             title="Edit agent"
             className="flex h-8 w-8 items-center justify-center rounded-md border border-border text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
           >

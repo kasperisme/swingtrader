@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+import { NextResponse, connection } from "next/server";
 import { createServiceClient } from "@/lib/supabase/service";
 
 /**
@@ -121,6 +121,8 @@ function renderFeed(episodes: EpisodeRow[]): string {
 }
 
 export async function GET() {
+  // Generated from live DB data on request — defer past the static prerender.
+  await connection();
   try {
     const supabase = createServiceClient();
     const { data, error } = await supabase

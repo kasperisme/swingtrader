@@ -2,13 +2,15 @@ import { Suspense } from "react";
 import { createClient } from "@/lib/supabase/server";
 import { redirect } from "next/navigation";
 import Link from "next/link";
-import { KeyRound, Lock, LogOut, CreditCard, Sparkles } from "lucide-react";
+import { KeyRound, Lock, LogOut, CreditCard, Sparkles, Mail } from "lucide-react";
 import { LogoutButton } from "@/components/logout-button";
 import { TelegramConnect } from "@/components/telegram-connect";
 import { ManageBillingButton } from "@/components/manage-billing-button";
 import { Badge } from "@/components/ui/badge";
 import { TradingStrategyForm } from "@/components/trading-strategy-form";
 import { getTradingStrategy } from "@/app/actions/trading-strategy";
+import { LanguageSelector } from "@/components/language-selector";
+import { getPreferredLanguage } from "@/app/actions/preferences";
 import { getOnboardingProgress, getOnboardingTours } from "@/app/actions/onboarding";
 import { PageTour } from "@/app/protected/_components/page-tour";
 import { RestartOnboardingButton } from "@/app/protected/_components/restart-onboarding-button";
@@ -46,7 +48,7 @@ async function ProfileContent() {
 
   if (error || !user) redirect("/auth/login");
 
-  const [{ data: subscription }, tradingStrategy, onboardingProgress] = await Promise.all([
+  const [{ data: subscription }, tradingStrategy, onboardingProgress, preferredLanguage] = await Promise.all([
     supabase
       .schema("swingtrader")
       .from("user_subscriptions")
@@ -55,6 +57,7 @@ async function ProfileContent() {
       .maybeSingle(),
     getTradingStrategy(),
     getOnboardingProgress(),
+    getPreferredLanguage(),
   ]);
 
   const onboardingTotal = 8;
@@ -199,6 +202,24 @@ async function ProfileContent() {
         </div>
       </section>
 
+      {/* Preferences */}
+      <section className="rounded-2xl border border-border bg-card overflow-hidden">
+        <div className="border-b border-border px-5 py-3">
+          <p className="text-xs font-semibold uppercase tracking-widest text-amber-500">
+            Preferences
+          </p>
+        </div>
+        <div className="flex flex-col gap-2 px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
+          <div className="min-w-0">
+            <p className="text-sm font-medium">Language</p>
+            <p className="text-xs text-muted-foreground">
+              Language for AI agent alerts and Telegram messages.
+            </p>
+          </div>
+          <LanguageSelector initialValue={preferredLanguage} className="w-full sm:w-56" />
+        </div>
+      </section>
+
       {/* Settings links */}
       <section className="rounded-2xl border border-border bg-card overflow-hidden">
         <div className="border-b border-border px-5 py-3">
@@ -207,6 +228,20 @@ async function ProfileContent() {
           </p>
         </div>
         <div className="divide-y divide-border">
+          <a
+            href={`mailto:k@newsimpactscreener.com?subject=${encodeURIComponent("News Impact Screener — feedback")}`}
+            className="flex cursor-pointer items-center gap-3 px-5 py-4 transition-colors hover:bg-muted/50"
+          >
+            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-border bg-background">
+              <Mail className="h-4 w-4 text-amber-400" />
+            </div>
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-medium">Feedback &amp; support</p>
+              <p className="truncate text-xs text-muted-foreground">
+                Questions, ideas, or issues? Email k@newsimpactscreener.com
+              </p>
+            </div>
+          </a>
           <div className="flex items-center gap-3 px-5 py-4">
             <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-border bg-background">
               <Sparkles className="h-4 w-4 text-amber-400" />

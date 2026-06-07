@@ -8,6 +8,7 @@ import { track } from "@/lib/analytics/events";
 import { setPostWelcomeHighlight } from "./onboarding-highlight";
 import { SetupAssistantChat } from "@/components/setup-assistant";
 import { OnboardingPlanStep } from "@/components/onboarding-plan-step";
+import { LanguageSelector } from "@/components/language-selector";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -135,6 +136,16 @@ export function WelcomeDialog({ displayName }: Props) {
                 </Button>
               </div>
             )}
+
+            <div className="flex flex-col gap-1.5 rounded-lg border border-border bg-muted/30 px-4 py-3">
+              <div className="flex items-center justify-between gap-3">
+                <span className="text-sm font-medium text-foreground">Language</span>
+                <LanguageSelector className="w-44 shrink-0" />
+              </div>
+              <p className="text-xs text-muted-foreground">
+                Your agent alerts and Telegram messages will be delivered in this language.
+              </p>
+            </div>
 
             <DialogFooter className="gap-2 sm:gap-2">
               <Button variant="ghost" onClick={skip} disabled={isPending}>

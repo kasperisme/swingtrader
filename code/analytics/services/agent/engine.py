@@ -19,6 +19,7 @@ import httpx
 
 from shared.billing import agents_blocked
 from shared.db import get_supabase_client
+from shared.i18n import get_message, get_user_language, language_instruction
 from shared.telegram import (
     get_user_chat_id,
     log_telegram_message,
@@ -35,6 +36,7 @@ from services.rag import get_user_trading_strategy
 from services.rag.screening import (
     apply_scan_filters as _apply_scan_filters,
     get_filtered_tickers_from_scan as _get_filtered_tickers_from_scan,
+    resolve_latest_run_ids_for_sources as _resolve_latest_run_ids_for_sources,
 )
 from services.rag.context import (
     get_linked_scan_run_context as _get_linked_scan_run_context,
@@ -236,6 +238,7 @@ def _run_agent_multi_ticker(
     filtered_tickers: list[str] | None,
     trigger_condition: str | None,
     trace: RunTrace,
+    language: str = "en",
 ) -> dict:
     """Route a multi-ticker screening through the plan → fan-out → conclude
     pipeline. Mirrors ``run_agent``'s return contract and applies the same
@@ -271,6 +274,7 @@ def _run_agent_multi_ticker(
                     ),
                     context_addon=context_addon,
                     trace=trace,
+                    language=language,
                 ),
                 timeout=_RUN_TIMEOUT_SECONDS,
             )
@@ -323,6 +327,7 @@ def run_agent(
     filtered_tickers: list[str] | None = None,
     trigger_condition: str | None = None,
     trace: RunTrace | None = None,
+    language: str = "en",
 ) -> dict:
     """Run the screening agent loop. Returns {triggered, summary, data_used}.
 
@@ -351,6 +356,7 @@ def run_agent(
             filtered_tickers=filtered_tickers,
             trigger_condition=trigger_condition,
             trace=trace,
+            language=language,
         )
         result["trace"] = trace.as_dict()
         return result
@@ -450,6 +456,8 @@ def run_agent(
             "(e.g. 'No positions found in your portfolio' or 'No news in the last 24 hours "
             "for your holdings')."
         )
+
+    system += language_instruction(language)
 
     registry = _build_registry(user_id, writeable_run_ids=writeable_run_ids)
     trace.event("run", "start", mode="single_agent", ticker_count=len(tickers or []),
@@ -568,12 +576,14 @@ def _summarise_tool_result(name: str, result: Any) -> Any:
 
 # ── Telegram formatting ────────────────────────────────────────────────────
 
-def _format_telegram_message(name: str, triggered: bool, summary: str | None, error: bool = False) -> str:
+def _format_telegram_message(
+    name: str, triggered: bool, summary: str | None, error: bool = False, language: str = "en"
+) -> str:
     if error:
-        return f"<b>⚠️ {name}</b>\n\n<i>Run failed: {summary}</i>"
+        return f"<b>⚠️ {name}</b>\n\n<i>{get_message(language, 'run_failed')}: {summary}</i>"
     if triggered:
         return f"<b>🔔 {name}</b>\n\n{summary}"
-    return f"<b>✅ {name}</b>\n\n<i>No trigger — conditions not met.</i>"
+    return f"<b>✅ {name}</b>\n\n<i>{get_message(language, 'no_trigger')}</i>"
 
 
 def _billing_url() -> str:
@@ -581,14 +591,16 @@ def _billing_url() -> str:
     return f"{base}/protected/profile"
 
 
-def _format_billing_reminder() -> str:
+def _format_billing_reminder(language: str = "en") -> str:
     """Reminder-only message sent when the owner isn't on an active paid plan.
     No agent output — just the nudge to set up billing."""
+    paused = get_message(language, "billing_paused")
+    body = get_message(language, "billing_body")
+    cta = get_message(language, "billing_cta")
     return (
-        "<b>⚠️ Agent paused</b>\n\n"
-        "Running scheduled agents requires an active paid plan. "
-        "Set up billing to resume your alerts:\n"
-        f'<a href="{_billing_url()}">Set up billing</a>'
+        f"<b>⚠️ {paused}</b>\n\n"
+        f"{body}\n"
+        f'<a href="{_billing_url()}">{cta}</a>'
     )
 
 
@@ -628,6 +640,10 @@ def run_screening(screening: dict, dry_run: bool = False, is_test: bool = False)
         "dry_run": dry_run,
         "is_test": is_test,
     }
+    # Resolve once and carry on every return path (incl. billing-blocked /
+    # skipped) so delivery localizes without a second lookup.
+    language = get_user_language(screening.get("user_id"))
+    base["language"] = language
 
     # ── Plan gate ──
     # Scheduled agents only run for an active/trialing paid plan. The free
@@ -673,8 +689,22 @@ def run_screening(screening: dict, dry_run: bool = False, is_test: bool = False)
     trace = RunTrace()
     try:
         explicit_tickers: list[str] = screening.get("tickers") or []
-        linked_ids: list[int] = screening.get("linked_scan_run_ids") or []
         scan_filters: dict | None = screening.get("scan_filters")
+
+        # Effective linked runs = pinned run IDs ∪ latest run per followed source.
+        # Followed sources resolve to the NEWEST active run at run time, so the
+        # agent auto-switches as fresh runs land. Pinned IDs stay frozen.
+        pinned_ids: list[int] = screening.get("linked_scan_run_ids") or []
+        followed_sources: list[str] = screening.get("linked_scan_sources") or []
+        resolved_source_ids = _resolve_latest_run_ids_for_sources(
+            screening.get("user_id"), followed_sources
+        )
+        seen_run_ids: set[int] = set()
+        linked_ids: list[int] = []
+        for rid in (*pinned_ids, *resolved_source_ids):
+            if rid not in seen_run_ids:
+                seen_run_ids.add(rid)
+                linked_ids.append(rid)
 
         # If scan_filters are set, resolve the filtered ticker list from linked runs
         # and merge with any explicitly pinned tickers.
@@ -704,13 +734,16 @@ def run_screening(screening: dict, dry_run: bool = False, is_test: bool = False)
 
         log.info(
             "Screening %s (%s) → run_agent: user=%s tickers_explicit=%d "
-            "tickers_filtered=%d linked_runs=%d has_condition=%s prompt_len=%d",
+            "tickers_filtered=%d linked_runs=%d (pinned=%d followed_sources=%d) "
+            "has_condition=%s prompt_len=%d",
             screening["id"],
             screening.get("name") or "(unnamed)",
             screening.get("user_id"),
             len(explicit_tickers),
             len(filtered_tickers or []),
             len(linked_ids),
+            len(pinned_ids),
+            len(followed_sources),
             bool(trigger_condition),
             len(screening.get("prompt") or ""),
         )
@@ -723,6 +756,7 @@ def run_screening(screening: dict, dry_run: bool = False, is_test: bool = False)
             filtered_tickers=filtered_tickers,
             trigger_condition=trigger_condition or None,
             trace=trace,
+            language=language,
         )
         result.update(base)
         result.setdefault("trace", trace.as_dict())
@@ -812,7 +846,10 @@ def persist_and_deliver(result: dict, result_id: str | None = None) -> None:
         log.info("No Telegram chat_id for user %s — in-app only", result["user_id"])
         return
 
-    html = _format_telegram_message(result["name"], triggered, result.get("summary"), error=error)
+    language = result.get("language") or get_user_language(result["user_id"])
+    html = _format_telegram_message(
+        result["name"], triggered, result.get("summary"), error=error, language=language
+    )
     message_type = (
         "screening_error" if error
         else "screening_alert" if triggered
@@ -886,7 +923,7 @@ def _deliver_billing_reminder(client, schema: str, result: dict, result_id: str 
         log.info("Billing reminder throttled for user %s (sent within 24h)", user_id)
         return
 
-    html = _format_billing_reminder()
+    html = _format_billing_reminder(result.get("language") or get_user_language(user_id))
     success, msg_id, err = send_telegram_chunks(chat_id, html)
     if success:
         log.info("Billing reminder delivered: user=%s chat_id=%s msg_id=%s", user_id, chat_id, msg_id)

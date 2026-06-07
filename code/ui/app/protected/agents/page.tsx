@@ -71,15 +71,20 @@ async function AgentsData() {
 
 export default function AgentsPage() {
   return (
-    <div className="mx-auto w-full min-w-0 max-w-4xl px-4 py-8">
-      <div className="mb-8">
-        <p className="text-xs font-semibold uppercase tracking-widest text-amber-500 mb-1">Agents</p>
-        <h1 className="text-2xl font-bold text-foreground">Scheduled Agents</h1>
-        <p className="mt-1 text-sm text-muted-foreground">
-          Write a prompt describing what to watch for. The AI agent runs it on
-          schedule and alerts you when conditions are met.
+    <div className="mx-auto w-full min-w-0 max-w-4xl px-4 py-8 sm:py-10">
+      <header className="mb-8 border-b border-border/60 pb-6">
+        <div className="mb-2 flex items-center gap-2">
+          <span className="inline-block h-1.5 w-1.5 rounded-full bg-amber-500" />
+          <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-amber-500">Agents</p>
+        </div>
+        <h1 className="text-3xl font-bold leading-none tracking-tighter text-foreground sm:text-4xl">
+          Scheduled Agents
+        </h1>
+        <p className="mt-3 max-w-[58ch] text-sm leading-relaxed text-muted-foreground">
+          Write a prompt describing what to watch for. The agent runs it on
+          schedule and pings you the moment your conditions are met.
         </p>
-      </div>
+      </header>
       <Suspense fallback={<div className="text-muted-foreground/40 text-sm">Loading…</div>}>
         <AgentsData />
       </Suspense>

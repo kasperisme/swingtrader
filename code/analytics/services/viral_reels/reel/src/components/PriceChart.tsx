@@ -56,8 +56,9 @@ export const PriceChart: React.FC<Props> = ({
   if (points.length < 2) return null;
 
   const closes = points.map((p) => p.close);
-  const lows = points.map((p) => (p.low ?? p.close));
-  const highs = points.map((p) => (p.high ?? p.close));
+  const opens = points.map((p) => (p.open ?? p.close));
+  const lows = points.map((p) => (p.low ?? Math.min(p.open ?? p.close, p.close)));
+  const highs = points.map((p) => (p.high ?? Math.max(p.open ?? p.close, p.close)));
 
   const padT = PAD_T + topInset; // headroom so the line's peak stays below the card
   const innerW = width - PAD_L - PAD_R - rightInset; // right strip for the price tag
@@ -105,10 +106,11 @@ export const PriceChart: React.FC<Props> = ({
   const curX = lerp(x(last), x(nextIdx), frac);
   const curY = y(curClose);
 
-  let line = `M ${x(0)} ${y(closes[0])}`;
-  for (let i = 1; i <= last; i++) line += ` L ${x(i)} ${y(closes[i])}`;
-  line += ` L ${curX} ${curY}`;
-  const area = `${line} L ${curX} ${baseline} L ${x(0)} ${baseline} Z`;
+  // Candle width tracks the point spacing (one candle per trading day). As the
+  // domain expands the spacing shrinks and candles thin, matching the line
+  // chart's "compress left" feel. Clamp so they stay visible but never collide.
+  const spacing = innerW / dom;
+  const candleW = clamp(spacing * 0.64, 3, 38);
 
   const up = curClose >= closes[0];
   const lineColor = up ? theme.positive : theme.negative;
@@ -117,13 +119,6 @@ export const PriceChart: React.FC<Props> = ({
 
   return (
     <svg width={width} height={height} style={{position: 'absolute', inset: 0}}>
-      <defs>
-        <linearGradient id="priceArea" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stopColor={lineColor} stopOpacity={0.35} />
-          <stop offset="100%" stopColor={lineColor} stopOpacity={0} />
-        </linearGradient>
-      </defs>
-
       {/* horizontal gridlines + price labels (left side; the live price rides
           the right strip as a moving tag) */}
       {gridVals.map((v, i) => (
@@ -169,9 +164,36 @@ export const PriceChart: React.FC<Props> = ({
           });
       })()}
 
-      {/* area + line */}
-      <path d={area} fill="url(#priceArea)" />
-      <path d={line} fill="none" stroke={lineColor} strokeWidth={6} strokeLinejoin="round" strokeLinecap="round" />
+      {/* candlesticks — one per revealed trading day. The in-progress (leading)
+          candle scales in via `frac` so the reveal stays continuous; fully
+          formed candles render at full opacity. */}
+      {(() => {
+        const candles: React.ReactNode[] = [];
+        const draw = (i: number, op: number) => {
+          const o = opens[i];
+          const c = closes[i];
+          const cup = c >= o;
+          const col = cup ? theme.positive : theme.negative;
+          const cx = x(i);
+          const yO = y(o);
+          const yC = y(c);
+          const bodyTop = Math.min(yO, yC);
+          const bodyH = Math.max(2, Math.abs(yC - yO));
+          const w = candleW;
+          return (
+            <g key={i} opacity={op}>
+              {/* wick: high → low */}
+              <line x1={cx} y1={y(highs[i])} x2={cx} y2={y(lows[i])} stroke={col} strokeWidth={Math.max(1.5, w * 0.16)} />
+              {/* body: open → close */}
+              <rect x={cx - w / 2} y={bodyTop} width={w} height={bodyH} fill={col} rx={Math.min(3, w * 0.22)} />
+            </g>
+          );
+        };
+        for (let i = 0; i <= last; i++) candles.push(draw(i, 1));
+        // Leading candle forming on the open segment (only while mid-segment).
+        if (frac > 1e-3 && nextIdx > last) candles.push(draw(nextIdx, clamp(frac * 1.4, 0, 1)));
+        return candles;
+      })()}
 
       {/* event pins (only once the line has drawn past them) */}
       {events.map((e, i) => {

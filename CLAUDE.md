@@ -105,8 +105,8 @@ See `.claude/skills/viral-reel/SKILL.md` and `code/analytics/services/viral_reel
 Turns the news-impact data foundation (+ FMP price/OHLC) into ~20s vertical
 video reels (r/dataisbeautiful style). Two formats: **bar chart race**
 (`BarChartRace` — viral areas racing by volume) and **price + news**
-(`PriceNewsChart` — a price line with scored news events plotted on it to show
-which headlines moved the stock). Split:
+(`PriceNewsChart` — an OHLC candlestick chart with scored news events plotted on
+it to show which headlines moved the stock). Split:
 - **Python** (`services/viral_reels/`) — deterministic data: builds race
   keyframes from `news_trends_*_daily_v` views + ticker sentiment, fetches the
   FMP price overlay, ranks candidate "viral" stories. No creative choices.
@@ -121,7 +121,7 @@ Key files:
 - `code/analytics/services/viral_reels/cli.py` — `stories|snapshot|series|prices|headlines|article-images|scaffold|price-news|news-candidates|catalysts|fmp-news|fmp-press|validate|render`
 - `code/analytics/services/viral_reels/data_sources.py` — also wraps FMP **stock-news** (`fmp_stock_news`) + **press-releases** (`fmp_press_releases`) to widen thin internal coverage and anchor moves to the company's own catalysts
 - `code/analytics/services/viral_reels/reel/src/compositions/BarChartRace.tsx` — bar-chart-race animation
-- `code/analytics/services/viral_reels/reel/src/compositions/PriceNewsChart.tsx` — price line + news events animation
+- `code/analytics/services/viral_reels/reel/src/compositions/PriceNewsChart.tsx` — OHLC candlestick + news events animation
 
 ## Sanity Studio
 

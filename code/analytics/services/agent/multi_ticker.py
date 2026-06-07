@@ -38,6 +38,7 @@ from typing import Any
 import httpx
 
 from services.agent_core import ToolRegistry, simple_chat
+from shared.i18n import language_instruction
 
 from .fmp_tools import looks_like_access_denied
 from .run_trace import RunTrace
@@ -587,6 +588,7 @@ async def _evaluate_ticker_batch(
     context_addon: str,
     eval_focus: str = "",
     computed_map: dict[str, str] | None = None,
+    language: str = "en",
 ) -> list[dict]:
     """Evaluate a batch of tickers in a single LLM call.
 
@@ -603,6 +605,7 @@ async def _evaluate_ticker_batch(
     system = _BATCH_TICKER_SYSTEM
     if eval_focus:
         system = f"{_BATCH_TICKER_SYSTEM}\n\n## Skill focus\n{eval_focus}"
+    system += language_instruction(language)
     computed_map = computed_map or {}
     user_parts = [
         f"TODAY'S DATE: {_today_str()}",
@@ -751,6 +754,7 @@ async def _conclude(
     verdicts: list[dict],
     context_addon: str,
     conclude_hint: str = "",
+    language: str = "en",
 ) -> dict:
     verdict_lines = [
         f"- {v['ticker']}: triggered={v['triggered_for_ticker']} "
@@ -773,7 +777,7 @@ async def _conclude(
         client,
         base_url=base_url,
         model=model,
-        system=_CONCLUDE_SYSTEM,
+        system=_CONCLUDE_SYSTEM + language_instruction(language),
         user="\n\n".join(user_parts),
         request_format="json",
         label="Multi-ticker concluder",
@@ -860,6 +864,7 @@ async def run_multi_ticker_async(
     trigger_condition: str | None = None,
     context_addon: str = "",
     trace: RunTrace | None = None,
+    language: str = "en",
 ) -> dict:
     """Classify → (skill recipe | dynamic plan) → fan-out per-ticker → conclude.
 
@@ -1252,6 +1257,7 @@ async def run_multi_ticker_async(
                                 context_addon=context_addon,
                                 eval_focus=eval_focus,
                                 computed_map=computed_map,
+                                language=language,
                             ),
                             timeout=_BATCH_EVAL_TIMEOUT,
                         )
@@ -1323,6 +1329,7 @@ async def run_multi_ticker_async(
                     verdicts=verdicts,
                     context_addon=context_addon,
                     conclude_hint=conclude_hint,
+                    language=language,
                 ),
                 timeout=_CONCLUDE_TIMEOUT,
             )

@@ -33,6 +33,7 @@ export type ScheduledScreening = {
   timezone: string;
   tickers: string[];
   linked_scan_run_ids: number[];
+  linked_scan_sources: string[];
   scan_filters: ScreeningsFilters | null;
   trading_session: TradingSession | null;
   condition_enabled: boolean;
@@ -86,6 +87,7 @@ export async function createScheduledScreening(input: {
   timezone: string;
   tickers?: string[];
   linked_scan_run_ids?: number[];
+  linked_scan_sources?: string[];
   scan_filters?: ScreeningsFilters | null;
   trading_session?: TradingSession | null;
   condition_enabled?: boolean;
@@ -150,6 +152,7 @@ export async function createScheduledScreening(input: {
       timezone: input.timezone,
       tickers: input.tickers ?? [],
       linked_scan_run_ids: input.linked_scan_run_ids ?? [],
+      linked_scan_sources: input.linked_scan_sources ?? [],
       scan_filters: input.scan_filters ?? null,
       trading_session: input.trading_session ?? "none",
       condition_enabled: input.condition_enabled ?? false,
@@ -173,6 +176,7 @@ export async function updateScheduledScreening(
     timezone?: string;
     tickers?: string[];
     linked_scan_run_ids?: number[];
+    linked_scan_sources?: string[];
     scan_filters?: ScreeningsFilters | null;
     trading_session?: TradingSession | null;
     condition_enabled?: boolean;

@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+import { NextResponse, connection } from "next/server";
 import { createServiceClient } from "@/lib/supabase/service";
 
 export interface WatchdogMeta {
@@ -44,6 +44,8 @@ export interface HealthResponse {
 }
 
 export async function GET() {
+  // Live ops status from the DB — generate at request time, not at prerender.
+  await connection();
   const supabase = createServiceClient();
   const now = new Date();
   const alerts: string[] = [];

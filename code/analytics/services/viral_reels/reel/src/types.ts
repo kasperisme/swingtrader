@@ -93,8 +93,8 @@ export type BarChartRaceProps = {
 };
 
 // ---------------------------------------------------------------------------
-// Format 2: Price + News — an animated price line with news events plotted on
-// it, to show whether headlines moved the stock.
+// Format 2: Price + News — an animated OHLC candlestick chart with news events
+// plotted on it, to show whether headlines moved the stock.
 // ---------------------------------------------------------------------------
 
 export interface OHLCPoint {

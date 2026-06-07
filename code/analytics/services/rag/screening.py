@@ -344,3 +344,41 @@ def get_filtered_tickers_from_scan(
         row["row_data"] = rd
 
     return apply_scan_filters(rows, scan_filters)
+
+
+def resolve_latest_run_ids_for_sources(
+    user_id: str | None,
+    sources: list[str],
+) -> list[int]:
+    """Resolve each followed `source` to the newest active user_scan_runs.id.
+
+    Returns one run ID per source (the most recent active run for that user +
+    source), in the order sources first appear newest. Empty user_id/sources
+    yields []. Used by the agent engine so a "followed source" auto-switches to
+    the latest run as fresh runs land periodically.
+    """
+    if not user_id or not sources:
+        return []
+
+    client = get_supabase_client()
+    schema = "swingtrader"
+
+    rows = (
+        client.schema(schema)
+        .table("user_scan_runs")
+        .select("id, scan_date, source")
+        .eq("user_id", user_id)
+        .eq("status", "active")
+        .in_("source", sources)
+        .order("scan_date", desc=True)
+        .execute()
+    ).data or []
+
+    # rows are scan_date desc; first row seen per source is the newest.
+    latest_by_source: dict[str, int] = {}
+    for r in rows:
+        src = r.get("source")
+        if src and src not in latest_by_source and r.get("id") is not None:
+            latest_by_source[src] = int(r["id"])
+
+    return list(latest_by_source.values())

@@ -31,9 +31,9 @@ Read its `README.md` once before your first run.
   Clusters / dimensions / tickers race by article volume. Default; the rest of
   this doc covers it.
 - **Price + News** (`PriceNewsChart`) — "did the news actually move the stock?"
-  An animated price line with scored news events plotted on it (green/red pins +
-  callouts showing the next-day move). Use when the user names a ticker and
-  wants to show news → price reaction.
+  An animated **OHLC candlestick** chart (green/red bodies + high-low wicks) with
+  scored news events plotted on it (pins + callouts showing the next-day move).
+  Use when the user names a ticker and wants to show news → price reaction.
 
   **You pick the events — don't ship the auto-selection.** The whole point is
   news → price *causation*: pick the headline that plausibly caused each notable
@@ -58,7 +58,7 @@ Read its `README.md` once before your first run.
   the complementary day-by-day view if you want the full pool.
 
   **Even coverage — an event every ≤3-4 chart ticks.** The whole window is the
-  reel: the price line draws point-by-point at a steady pace, so any stretch
+  reel: the candles draw one-by-one at a steady pace, so any stretch
   with no event is dead air on screen. Whatever window you render, keep *all*
   the chart's points (don't trim the run-up — a 30-day reel shows the full 30
   days), and land an event at least every 3-4 trading-day **points** —
