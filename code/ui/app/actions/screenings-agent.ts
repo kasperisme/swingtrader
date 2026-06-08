@@ -6,6 +6,9 @@ import { type PlanTier } from "@/lib/plans";
 import type { ScreeningsFilters } from "@/app/protected/screenings/screenings-filters-model";
 import { captureServer } from "@/lib/analytics/server";
 import { PRELAUNCH_OPEN_ACCESS } from "@/lib/launch";
+import { getTelegramStatus } from "@/lib/telegram/link";
+import { sendTelegramMessage, escapeTelegramHtml } from "@/lib/telegram/send";
+import { humanizeCron } from "@/lib/cron-format";
 
 type ActionResult<T> = Promise<{ ok: true; data: T } | { ok: false; error: string }>;
 
@@ -78,6 +81,64 @@ export async function listScheduledScreenings(): ActionResult<
 
   if (error) return { ok: false, error: error.message };
   return { ok: true, data: (data ?? []) as ScheduledScreening[] };
+}
+
+/** "market_screening:foo-bar" → "Foo Bar"; raw string for user-named sources. */
+function formatSourceLabel(source: string): string {
+  if (source.startsWith("market_screening:")) {
+    return source
+      .slice("market_screening:".length)
+      .replace(/[-_]+/g, " ")
+      .replace(/\b\w/g, (c) => c.toUpperCase())
+      .trim();
+  }
+  return source;
+}
+
+/** HTML Telegram message describing a freshly-created agent. */
+function buildAgentCreatedMessage(s: ScheduledScreening): string {
+  const lines: string[] = [
+    `🤖 <b>Agent created: ${escapeTelegramHtml(s.name)}</b>`,
+    "",
+    `🗓 ${escapeTelegramHtml(humanizeCron(s.schedule, s.timezone))}`,
+  ];
+  if (s.trading_session === "nyse") lines.push("🕘 Runs during NYSE hours only");
+  if (s.tickers?.length) {
+    lines.push(`📈 Tickers: ${s.tickers.map(escapeTelegramHtml).join(", ")}`);
+  }
+  if (s.linked_scan_sources?.length) {
+    const labels = s.linked_scan_sources.map((src) => escapeTelegramHtml(formatSourceLabel(src)));
+    lines.push(`🔗 Follows latest: ${labels.join(", ")}`);
+  }
+  if (s.linked_scan_run_ids?.length) {
+    const n = s.linked_scan_run_ids.length;
+    lines.push(`📌 ${n} pinned screening run${n === 1 ? "" : "s"}`);
+  }
+  if (s.condition_enabled && s.trigger_condition) {
+    lines.push(`🎯 Only alerts when: <i>${escapeTelegramHtml(s.trigger_condition)}</i>`);
+  } else {
+    lines.push("🔔 Sends you an update on every run.");
+  }
+  lines.push("");
+  lines.push("I'll watch this for you and message you here. Manage it anytime under Agents in the app.");
+  return lines.join("\n");
+}
+
+/** Best-effort Telegram confirmation. Never throws — agent creation must not
+ * depend on it. No-op when the user hasn't connected Telegram. */
+async function sendAgentCreatedConfirmation(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  userId: string,
+  screening: ScheduledScreening,
+): Promise<void> {
+  try {
+    const tg = await getTelegramStatus(supabase, userId);
+    if (tg.connected && tg.chat_id) {
+      await sendTelegramMessage(tg.chat_id, buildAgentCreatedMessage(screening));
+    }
+  } catch (e) {
+    console.error("[screenings-agent] agent-created Telegram confirmation failed", e);
+  }
 }
 
 export async function createScheduledScreening(input: {
@@ -164,7 +225,10 @@ export async function createScheduledScreening(input: {
     .single();
 
   if (error) return { ok: false, error: error.message };
-  return { ok: true, data: data as ScheduledScreening };
+
+  const created = data as ScheduledScreening;
+  await sendAgentCreatedConfirmation(supabase, userId, created);
+  return { ok: true, data: created };
 }
 
 export async function updateScheduledScreening(

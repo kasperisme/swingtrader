@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from typing import Callable
 
-from .scripts import nis_fundamentals, nis_momentum, stage_2, test_aapl
+from .scripts import ai_supercycle, nis_fundamentals, nis_momentum, stage_2, test_aapl
 from .types import ScreeningResult
 
 
@@ -18,6 +18,7 @@ ScriptFn = Callable[[object, dict], ScreeningResult]
 
 
 SCRIPTS: dict[str, ScriptFn] = {
+    "ai_supercycle":    ai_supercycle.run,
     "nis_fundamentals": nis_fundamentals.run,
     "nis_momentum":     nis_momentum.run,
     "stage_2":          stage_2.run,

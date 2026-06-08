@@ -19,7 +19,7 @@ import {
   useState,
   type FormEvent,
 } from "react";
-import { Loader2, Send, Sparkles, Wand2 } from "lucide-react";
+import { Loader2, Pencil, Send, Sparkles, Wand2 } from "lucide-react";
 
 import { ChatMarkdown } from "@/components/chat-markdown";
 import {
@@ -44,6 +44,31 @@ export function openSetupAssistant() {
 }
 export function closeSetupAssistant() {
   listeners.forEach((l) => l(false));
+}
+
+// The assistant ends each question with a final line of tap-able quick replies:
+//   ::options:: Option A | Option B | Option C
+// Split that off the visible text so we can render it as buttons. While the
+// line is still streaming in, hide the forming "::…" fragment so it never
+// flickers in the bubble.
+const OPTIONS_RE = /\n*::options::[ \t]*([^\n]*?)[ \t]*$/i;
+
+function parseAssistant(content: string): { text: string; options: string[] } {
+  const m = content.match(OPTIONS_RE);
+  if (m && m.index !== undefined) {
+    const options = m[1]
+      .split("|")
+      .map((s) => s.trim())
+      .filter(Boolean)
+      .slice(0, 4);
+    return { text: content.slice(0, m.index).trimEnd(), options };
+  }
+  // A marker still streaming in (e.g. "::opt"). Hide the trailing fragment.
+  const forming = content.match(/\n*::o[^\n]*$/i);
+  if (forming && forming.index !== undefined) {
+    return { text: content.slice(0, forming.index).trimEnd(), options: [] };
+  }
+  return { text: content, options: [] };
 }
 
 const SETUP_STEPS = [
@@ -130,8 +155,12 @@ export function SetupAssistantChat({ className = "" }: { className?: string }) {
   const [messages, setMessages] = useState<AssistantChatMessage[]>([]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
+  // When the latest question offers tap-able options, the free-text box stays
+  // hidden until the user taps "Add note / comment".
+  const [showComposer, setShowComposer] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
   const kickedOff = useRef(false);
 
   useEffect(() => {
@@ -164,6 +193,7 @@ export function SetupAssistantChat({ className = "" }: { className?: string }) {
       ];
       setMessages(next);
       setInput("");
+      setShowComposer(false);
       setLoading(true);
 
       const controller = new AbortController();
@@ -264,6 +294,22 @@ export function SetupAssistantChat({ className = "" }: { className?: string }) {
 
   const done = deriveDone(messages);
 
+  // Tap-able quick replies from the latest answered question (only once the
+  // turn has fully streamed in). When present, the free-text box is collapsed
+  // behind an "Add note / comment" chip so the user mostly clicks.
+  const lastMsg = messages[messages.length - 1];
+  const latestOptions =
+    !loading && lastMsg?.role === "assistant"
+      ? parseAssistant(lastMsg.content).options
+      : [];
+  const optionsActive = latestOptions.length > 0;
+  const composerVisible = !optionsActive || showComposer;
+
+  function revealComposer() {
+    setShowComposer(true);
+    setTimeout(() => textareaRef.current?.focus(), 0);
+  }
+
   return (
     <div className={`flex min-h-0 flex-col ${className}`}>
       {/* Progress strip */}
@@ -311,7 +357,10 @@ export function SetupAssistantChat({ className = "" }: { className?: string }) {
                 </span>
               ) : m.role === "assistant" ? (
                 <>
-                  {m.content && <ChatMarkdown content={m.content} variant="help" />}
+                  {(() => {
+                    const { text } = parseAssistant(m.content);
+                    return text ? <ChatMarkdown content={text} variant="help" /> : null;
+                  })()}
                   <StatusChips statuses={m.statuses} />
                   {m.telegram?.deep_link && (
                     <TelegramConnectInline
@@ -329,36 +378,69 @@ export function SetupAssistantChat({ className = "" }: { className?: string }) {
         <div ref={bottomRef} />
       </div>
 
-      <form onSubmit={onSubmit} className="shrink-0 border-t border-border pt-3">
-        <div className="flex items-end gap-2">
-          <textarea
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" && !e.shiftKey) {
-                e.preventDefault();
-                void runTurn(input);
-              }
-            }}
-            placeholder="Type your answer…"
-            rows={1}
-            disabled={loading}
-            className="min-h-[40px] max-h-32 flex-1 resize-none rounded-md border border-input bg-background px-3 py-2 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-60"
-          />
-          <button
-            type="submit"
-            disabled={loading || !input.trim()}
-            className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-md bg-foreground text-background transition-opacity hover:opacity-90 disabled:opacity-40"
-            aria-label="Send"
-          >
-            {loading ? (
-              <Loader2 className="h-4 w-4 animate-spin" />
-            ) : (
-              <Send className="h-4 w-4" />
+      {optionsActive && (
+        <div className="shrink-0 border-t border-border pt-3">
+          <div className="flex flex-wrap gap-2">
+            {latestOptions.map((opt) => (
+              <button
+                key={opt}
+                type="button"
+                onClick={() => void runTurn(opt)}
+                className="rounded-full border border-border bg-background px-3.5 py-1.5 text-sm font-medium text-foreground transition-colors hover:border-foreground/30 hover:bg-muted active:scale-[0.98]"
+              >
+                {opt}
+              </button>
+            ))}
+            {!showComposer && (
+              <button
+                type="button"
+                onClick={revealComposer}
+                className="inline-flex items-center gap-1.5 rounded-full border border-dashed border-border px-3.5 py-1.5 text-sm font-medium text-muted-foreground transition-colors hover:border-foreground/30 hover:text-foreground"
+              >
+                <Pencil className="h-3.5 w-3.5" />
+                Add note / comment
+              </button>
             )}
-          </button>
+          </div>
         </div>
-      </form>
+      )}
+
+      {composerVisible && (
+        <form
+          onSubmit={onSubmit}
+          className={optionsActive ? "shrink-0 pt-2" : "shrink-0 border-t border-border pt-3"}
+        >
+          <div className="flex items-end gap-2">
+            <textarea
+              ref={textareaRef}
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && !e.shiftKey) {
+                  e.preventDefault();
+                  void runTurn(input);
+                }
+              }}
+              placeholder={optionsActive ? "Add a note or your own answer…" : "Type your answer…"}
+              rows={1}
+              disabled={loading}
+              className="min-h-[40px] max-h-32 flex-1 resize-none rounded-md border border-input bg-background px-3 py-2 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-60"
+            />
+            <button
+              type="submit"
+              disabled={loading || !input.trim()}
+              className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-md bg-foreground text-background transition-opacity hover:opacity-90 disabled:opacity-40"
+              aria-label="Send"
+            >
+              {loading ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <Send className="h-4 w-4" />
+              )}
+            </button>
+          </div>
+        </form>
+      )}
     </div>
   );
 }

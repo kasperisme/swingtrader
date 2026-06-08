@@ -2562,6 +2562,77 @@ export function ScreeningsUI({
     }
   }, [isCaveman, selectedTicker, cavemanRangeId, deepDiveListSymbols]);
 
+  // Neighbour prefetch (desktop + caveman): when the user lands on a ticker,
+  // warm the data the NEXT few tickers will need so arrow / ▶ navigation feels
+  // instant. We fetch into the SAME per-symbol caches the on-select effects
+  // read from, so navigating finds a cache hit and renders with no spinner:
+  //   • OHLC chart — at the chart's current granularity + range (desktop only;
+  //     caveman OHLC is warmed by the effect above with its own range presets)
+  //   • company profile + per-ticker sentiment (the info cards)
+  // Forward-biased, since arrows usually advance. In-flight guards keep each
+  // symbol's profile/sentiment to a single fetch; prefetchOhlc dedupes itself.
+  const prefetchProfileInflight = useRef<Set<string>>(new Set());
+  const prefetchSentimentInflight = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    if (!selectedTicker) return;
+    const list = deepDiveListSymbols;
+    const i = list.indexOf(selectedTicker);
+    if (i < 0) return;
+
+    const PREFETCH_AHEAD = 3;
+    const PREFETCH_BEHIND = 1;
+    const neighbours: string[] = [];
+    for (let d = 1; d <= PREFETCH_AHEAD; d++) {
+      const s = list[i + d];
+      if (s) neighbours.push(s);
+    }
+    for (let d = 1; d <= PREFETCH_BEHIND; d++) {
+      const s = list[i - d];
+      if (s) neighbours.push(s);
+    }
+
+    for (const raw of neighbours) {
+      const sym = raw.trim().toUpperCase();
+
+      // Chart OHLC — match the key the chart will request (parent-owned range).
+      if (!isCaveman && chartDateRange) {
+        void prefetchOhlc(raw, chartGranularity, chartDateRange);
+      }
+
+      // Company profile → companyProfileCacheRef (read cache-first on select).
+      if (
+        !companyProfileCacheRef.current.has(sym) &&
+        !prefetchProfileInflight.current.has(sym)
+      ) {
+        prefetchProfileInflight.current.add(sym);
+        void fmpGetCompanyProfile(sym)
+          .then((res) => {
+            if (res.ok) companyProfileCacheRef.current.set(sym, res.data);
+          })
+          .finally(() => prefetchProfileInflight.current.delete(sym));
+      }
+
+      // Per-ticker sentiment → sentimentCacheRef.
+      if (
+        !sentimentCacheRef.current.has(sym) &&
+        !prefetchSentimentInflight.current.has(sym)
+      ) {
+        prefetchSentimentInflight.current.add(sym);
+        void screeningsGetTickerSentimentHeadRows([sym])
+          .then((res) => {
+            if (res.ok) sentimentCacheRef.current.set(sym, res.data);
+          })
+          .finally(() => prefetchSentimentInflight.current.delete(sym));
+      }
+    }
+  }, [
+    selectedTicker,
+    deepDiveListSymbols,
+    isCaveman,
+    chartGranularity,
+    chartDateRange,
+  ]);
+
   const hiddenDismissedInListCount = useMemo(() => {
     let count = 0;
     for (const s of filteredSymbols) {

@@ -142,6 +142,30 @@ Read its `README.md` once before your first run.
   fills `chart.points` and each event's sentiment/move/`imageUrl`. No on-reel
   hook/takeaway text; add it in IG.
 
+## Cover / poster image (the standard way — don't hand-roll one)
+
+When you need a still **cover/thumbnail** for the reel (IG feed poster, CEO/hero
+shot), use the built-in `card` command — it scaffolds a `StockCard` poster
+(1080×1350) and **auto-fetches** the company profile, FMP stats (price/Δ/mktcap/PE),
+the internal Impact badge, any NIS screening the ticker is in, and a
+Wikipedia/Commons **CEO portrait**:
+
+```bash
+python -m services.viral_reels.cli card --ticker SNDK --window-days 65 \
+    --headline "Every green candle had a headline." --tag "+115% in 9 weeks"
+# → output/viral_reels/SNDK/card.json   (edit headline/tag/badge/heroImageUrl)
+python -m services.viral_reels.cli render output/viral_reels/SNDK/card.json \
+    --out output/viral_reels/SNDK/card.png   # card specs render as a single PNG
+```
+
+Flags: `--headline`, `--tag`, `--hero-image-url <url>`, `--no-ceo-photo`,
+`--no-nis`, `--theme`. The CEO photo auto-fetch misses for some execs (sets
+`heroImageUrl: null`) — then pass `--hero-image-url <URL>`, or set
+`card.heroImageUrl` in the JSON. `StockCard` renders it via `<Img>`, so it needs
+a **real URL** (remote, or a `data:image/...;base64,` URL for a local file — a
+bare `public/` path 404s). Do **not** build a new Remotion composition for
+covers; `StockCard` already is the cover generator.
+
 ### Output layout
 Everything for one reel lives in a **per-project folder** — never a flat dump:
 
