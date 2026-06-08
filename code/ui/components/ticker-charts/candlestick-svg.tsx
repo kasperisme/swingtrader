@@ -1380,8 +1380,19 @@ export function CandlestickSvg({
 
           const startBar = data[minIdx];
           const endBar   = data[maxIdx];
-          const priceChange = endBar.close - startBar.open;
-          const pctChange   = (priceChange / startBar.open) * 100;
+          // Measure the BOX against the chart's price axis — the vertical span
+          // the user actually dragged — not the ticker's open/close on the start
+          // and end bars. Map the raw start/end Y (clamped to the price pane) to
+          // prices so the magnitude is the box height and the sign follows drag
+          // direction (drag up = price up).
+          const startPrice = toPrice(
+            Math.max(PAD_T, Math.min(H_PRICE - PAD_B, selBox.startY)),
+          );
+          const endPrice = toPrice(
+            Math.max(PAD_T, Math.min(H_PRICE - PAD_B, selBox.endY)),
+          );
+          const priceChange = endPrice - startPrice;
+          const pctChange   = startPrice !== 0 ? (priceChange / startPrice) * 100 : 0;
           const barCount    = maxIdx - minIdx + 1;
           const totalVol    = barsInRange.reduce((s, b) => s + b.volume, 0);
           const calDays     = Math.round(

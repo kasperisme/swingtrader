@@ -23,6 +23,27 @@ import {
 import { CandlestickSvg } from "./candlestick-svg";
 import type { AnnotationRole, ChartAnnotation, ChartPoint, OhlcBar, EntryMarker } from "./types";
 
+/**
+ * Normalize a free-typed decimal string so it always parses with parseFloat.
+ * `<input type="number">` is locale-bound on mobile — it only accepts the OS
+ * locale's decimal separator, so a keyboard whose decimal key emits the other
+ * separator (`,` vs `.`) gets silently rejected and the value never updates.
+ * The trade inputs therefore use type="text" + inputMode="decimal" and route
+ * through this: accept both `,` and `.` as the decimal point, keep an optional
+ * leading minus, drop everything else. Output is dot-decimal (parseFloat-safe).
+ */
+function sanitizeDecimalInput(raw: string): string {
+  let s = raw.replace(/,/g, ".").replace(/[^0-9.-]/g, "");
+  const neg = s.startsWith("-");
+  s = s.replace(/-/g, "");
+  // Collapse any extra decimal points down to the first one.
+  const firstDot = s.indexOf(".");
+  if (firstDot !== -1) {
+    s = s.slice(0, firstDot + 1) + s.slice(firstDot + 1).replace(/\./g, "");
+  }
+  return (neg ? "-" : "") + s;
+}
+
 export type TickerChartNoteStatus =
   | "active"
   | "dismissed"
@@ -576,12 +597,12 @@ export function TickerChartsPanel({
           className="fixed z-[100] min-w-[200px] rounded-md border border-border bg-popover py-1 text-popover-foreground shadow-md"
           style={{
             left: Math.min(entryMenu.x, window.innerWidth - 210),
-            top: Math.min(entryMenu.y, window.innerHeight - 140),
+            top: Math.min(entryMenu.y, window.innerHeight - 260),
           }}
           onPointerDown={(e) => e.stopPropagation()}
         >
           <div className="px-2 py-1.5 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
-            Entry
+            Entry / Target / Stop
           </div>
           {entryMarker && (
             <div
@@ -609,6 +630,76 @@ export function TickerChartsPanel({
             }}
           >
             Set entry at crosshair
+          </button>
+          {/* Target / stop live under the entry, so these re-save the existing
+              entry (price/direction + the other level preserved) with the
+              crosshair price as the new level. Need both an entry and a
+              captured crosshair point. */}
+          <button
+            type="button"
+            role="menuitem"
+            className="flex w-full items-center justify-between gap-2 px-3 py-2 text-left text-sm hover:bg-muted disabled:opacity-40 disabled:pointer-events-none"
+            disabled={!entryMarker || !entryMenu.pointSnapshot}
+            onClick={() => {
+              if (entryMarker && entryMenu.pointSnapshot) {
+                onSetEntryMarker(
+                  symbol,
+                  {
+                    barIdx: entryMarker.barIdx,
+                    date: entryMarker.date,
+                    price: entryMarker.price,
+                    open: entryMarker.price,
+                    high: entryMarker.price,
+                    low: entryMarker.price,
+                    close: entryMarker.price,
+                  },
+                  entryMarker.direction,
+                  entryMenu.pointSnapshot.price,
+                  entryMarker.stop_loss ?? null,
+                );
+              }
+              setEntryMenu(null);
+            }}
+          >
+            <span>Set take profit at crosshair</span>
+            {entryMarker && entryMenu.pointSnapshot && (
+              <span className="text-[11px] text-muted-foreground">
+                ${entryMenu.pointSnapshot.price.toFixed(2)}
+              </span>
+            )}
+          </button>
+          <button
+            type="button"
+            role="menuitem"
+            className="flex w-full items-center justify-between gap-2 px-3 py-2 text-left text-sm hover:bg-muted disabled:opacity-40 disabled:pointer-events-none"
+            disabled={!entryMarker || !entryMenu.pointSnapshot}
+            onClick={() => {
+              if (entryMarker && entryMenu.pointSnapshot) {
+                onSetEntryMarker(
+                  symbol,
+                  {
+                    barIdx: entryMarker.barIdx,
+                    date: entryMarker.date,
+                    price: entryMarker.price,
+                    open: entryMarker.price,
+                    high: entryMarker.price,
+                    low: entryMarker.price,
+                    close: entryMarker.price,
+                  },
+                  entryMarker.direction,
+                  entryMarker.take_profit ?? null,
+                  entryMenu.pointSnapshot.price,
+                );
+              }
+              setEntryMenu(null);
+            }}
+          >
+            <span>Set stop loss at crosshair</span>
+            {entryMarker && entryMenu.pointSnapshot && (
+              <span className="text-[11px] text-muted-foreground">
+                ${entryMenu.pointSnapshot.price.toFixed(2)}
+              </span>
+            )}
           </button>
           <button
             type="button"
@@ -657,41 +748,48 @@ export function TickerChartsPanel({
             <label className="flex items-center justify-between gap-2 text-xs">
               <span className="text-muted-foreground">Entry</span>
               <input
-                type="number"
-                step="any"
+                type="text"
                 inputMode="decimal"
                 className="h-7 w-[120px] rounded border border-border bg-background px-1.5 text-xs"
                 value={entryEditor.entry}
                 onChange={(e) =>
-                  setEntryEditor((p) => (p ? { ...p, entry: e.target.value } : p))
+                  setEntryEditor((p) =>
+                    p
+                      ? { ...p, entry: sanitizeDecimalInput(e.target.value) }
+                      : p,
+                  )
                 }
               />
             </label>
             <label className="flex items-center justify-between gap-2 text-xs">
               <span className="text-muted-foreground">Target</span>
               <input
-                type="number"
-                step="any"
+                type="text"
                 inputMode="decimal"
                 placeholder="—"
                 className="h-7 w-[120px] rounded border border-border bg-background px-1.5 text-xs"
                 value={entryEditor.target}
                 onChange={(e) =>
-                  setEntryEditor((p) => (p ? { ...p, target: e.target.value } : p))
+                  setEntryEditor((p) =>
+                    p
+                      ? { ...p, target: sanitizeDecimalInput(e.target.value) }
+                      : p,
+                  )
                 }
               />
             </label>
             <label className="flex items-center justify-between gap-2 text-xs">
               <span className="text-muted-foreground">Stop</span>
               <input
-                type="number"
-                step="any"
+                type="text"
                 inputMode="decimal"
                 placeholder="—"
                 className="h-7 w-[120px] rounded border border-border bg-background px-1.5 text-xs"
                 value={entryEditor.stop}
                 onChange={(e) =>
-                  setEntryEditor((p) => (p ? { ...p, stop: e.target.value } : p))
+                  setEntryEditor((p) =>
+                    p ? { ...p, stop: sanitizeDecimalInput(e.target.value) } : p,
+                  )
                 }
               />
             </label>

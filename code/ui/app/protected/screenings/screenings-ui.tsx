@@ -1652,6 +1652,24 @@ export function ScreeningsUI({
   // Mirror of the sidebar's currently-visible sort order, so dismiss/advance
   // logic can jump to the closest ticker the user actually sees.
   const sortedSidebarOrderRef = useRef<string[]>([]);
+  // Reactive mirror of the sidebar's visible sort order. The ref above stays
+  // fresh for imperative callbacks (dismiss/advance), but effects can't depend
+  // on a ref — so prefetch / auto-select read this state and re-run the moment
+  // the sidebar reports (or re-sorts) its order. Updated together via
+  // handleSidebarOrderChange.
+  const [sidebarOrder, setSidebarOrder] = useState<string[]>([]);
+  const handleSidebarOrderChange = useCallback((order: string[]) => {
+    sortedSidebarOrderRef.current = order;
+    // The sidebar recomputes `sortedSymbols` (and so calls this) on every
+    // render because some of its memo inputs aren't referentially stable. Only
+    // commit to state when the order's *contents* actually change, otherwise a
+    // fresh-but-identical array would trigger an endless re-render loop.
+    setSidebarOrder((prev) =>
+      prev.length === order.length && prev.every((s, idx) => s === order[idx])
+        ? prev
+        : order,
+    );
+  }, []);
   const [chartDateRange, setChartDateRange] = useState<
     { from: string; to: string } | undefined
   >();
@@ -2522,10 +2540,9 @@ export function ScreeningsUI({
   // sort yet (briefly true on the very first mount).
   useEffect(() => {
     if (selectedTicker) return;
-    const first =
-      sortedSidebarOrderRef.current[0] ?? deepDiveListSymbols[0];
+    const first = sidebarOrder[0] ?? deepDiveListSymbols[0];
     if (first) setSelectedTicker(first);
-  }, [selectedTicker, deepDiveListSymbols]);
+  }, [selectedTicker, sidebarOrder, deepDiveListSymbols]);
 
   // Caveman prefetch: warm the OHLC client cache so range and ticker switches
   // render instantly. For the selected ticker we prefetch all three date-filter
@@ -2571,16 +2588,45 @@ export function ScreeningsUI({
   //   • company profile + per-ticker sentiment (the info cards)
   // Forward-biased, since arrows usually advance. In-flight guards keep each
   // symbol's profile/sentiment to a single fetch; prefetchOhlc dedupes itself.
+  //
+  // Crucially, prefetch must NOT steal bandwidth from the ticker the user is
+  // actually looking at. Browsers cap ~6 concurrent connections per origin and
+  // every fetch here is a same-origin server action, so an eager neighbour
+  // burst (up to ~4 symbols × 3 fetches) would queue ahead of the selected
+  // ticker's own profile/sentiment/OHLC requests and visibly slow them. We
+  // guard against that two ways:
+  //   1. Gate: don't start until the SELECTED ticker's own profile + sentiment
+  //      have landed in cache (a proxy for "the urgent burst has settled").
+  //      Gating on these state values re-runs the effect once they resolve.
+  //   2. Defer: kick off during browser idle time (requestIdleCallback) so it
+  //      yields to the selected ticker's render + in-flight fetches.
   const prefetchProfileInflight = useRef<Set<string>>(new Set());
   const prefetchSentimentInflight = useRef<Set<string>>(new Set());
   useEffect(() => {
     if (!selectedTicker) return;
-    const list = deepDiveListSymbols;
+    // Walk the sidebar's *visible* sorted order so the symbols we warm are the
+    // ones physically adjacent to the selection on screen (the order the user
+    // navigates with arrows / ▶). deepDiveListSymbols is the impact-score order,
+    // which rarely matches what the sidebar shows; fall back to it only before
+    // the sidebar has reported its order.
+    const list = sidebarOrder.length ? sidebarOrder : deepDiveListSymbols;
     const i = list.indexOf(selectedTicker);
     if (i < 0) return;
 
+    // Gate on the selected ticker's own data being ready. Until its profile and
+    // sentiment are cached, the on-select fetches are still in flight — hold off
+    // so prefetch never contends with them. The effect re-runs (via the
+    // companyProfile / tickerSentimentRows deps) once those resolve.
+    const selectedSym = selectedTicker.trim().toUpperCase();
+    if (
+      !companyProfileCacheRef.current.has(selectedSym) ||
+      !sentimentCacheRef.current.has(selectedSym)
+    ) {
+      return;
+    }
+
     const PREFETCH_AHEAD = 3;
-    const PREFETCH_BEHIND = 1;
+    const PREFETCH_BEHIND = 3;
     const neighbours: string[] = [];
     for (let d = 1; d <= PREFETCH_AHEAD; d++) {
       const s = list[i + d];
@@ -2591,46 +2637,82 @@ export function ScreeningsUI({
       if (s) neighbours.push(s);
     }
 
-    for (const raw of neighbours) {
-      const sym = raw.trim().toUpperCase();
+    const runPrefetch = () => {
+      for (const raw of neighbours) {
+        const sym = raw.trim().toUpperCase();
 
-      // Chart OHLC — match the key the chart will request (parent-owned range).
-      if (!isCaveman && chartDateRange) {
-        void prefetchOhlc(raw, chartGranularity, chartDateRange);
-      }
+        // Chart OHLC — match the key the chart will request (parent-owned range).
+        if (!isCaveman && chartDateRange) {
+          void prefetchOhlc(raw, chartGranularity, chartDateRange);
+        }
 
-      // Company profile → companyProfileCacheRef (read cache-first on select).
-      if (
-        !companyProfileCacheRef.current.has(sym) &&
-        !prefetchProfileInflight.current.has(sym)
-      ) {
-        prefetchProfileInflight.current.add(sym);
-        void fmpGetCompanyProfile(sym)
-          .then((res) => {
-            if (res.ok) companyProfileCacheRef.current.set(sym, res.data);
-          })
-          .finally(() => prefetchProfileInflight.current.delete(sym));
-      }
+        // Company profile → companyProfileCacheRef (read cache-first on select).
+        if (
+          !companyProfileCacheRef.current.has(sym) &&
+          !prefetchProfileInflight.current.has(sym)
+        ) {
+          prefetchProfileInflight.current.add(sym);
+          void fmpGetCompanyProfile(sym)
+            .then((res) => {
+              if (res.ok) companyProfileCacheRef.current.set(sym, res.data);
+            })
+            .finally(() => prefetchProfileInflight.current.delete(sym));
+        }
 
-      // Per-ticker sentiment → sentimentCacheRef.
-      if (
-        !sentimentCacheRef.current.has(sym) &&
-        !prefetchSentimentInflight.current.has(sym)
-      ) {
-        prefetchSentimentInflight.current.add(sym);
-        void screeningsGetTickerSentimentHeadRows([sym])
-          .then((res) => {
-            if (res.ok) sentimentCacheRef.current.set(sym, res.data);
-          })
-          .finally(() => prefetchSentimentInflight.current.delete(sym));
+        // Per-ticker sentiment → sentimentCacheRef.
+        if (
+          !sentimentCacheRef.current.has(sym) &&
+          !prefetchSentimentInflight.current.has(sym)
+        ) {
+          prefetchSentimentInflight.current.add(sym);
+          void screeningsGetTickerSentimentHeadRows([sym])
+            .then((res) => {
+              if (res.ok) sentimentCacheRef.current.set(sym, res.data);
+            })
+            .finally(() => prefetchSentimentInflight.current.delete(sym));
+        }
       }
+    };
+
+    // Defer to idle so the selected ticker's render/fetches go first. Fall back
+    // to a short timeout where requestIdleCallback is unavailable (e.g. Safari).
+    const ric = (
+      window as typeof window & {
+        requestIdleCallback?: (
+          cb: () => void,
+          opts?: { timeout: number },
+        ) => number;
+        cancelIdleCallback?: (handle: number) => void;
+      }
+    ).requestIdleCallback;
+    const cic = (
+      window as typeof window & { cancelIdleCallback?: (h: number) => void }
+    ).cancelIdleCallback;
+
+    let idleHandle: number | undefined;
+    let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
+    if (ric) {
+      idleHandle = ric(runPrefetch, { timeout: 2000 });
+    } else {
+      timeoutHandle = setTimeout(runPrefetch, 300);
     }
+
+    return () => {
+      if (idleHandle !== undefined && cic) cic(idleHandle);
+      if (timeoutHandle !== undefined) clearTimeout(timeoutHandle);
+    };
   }, [
     selectedTicker,
     deepDiveListSymbols,
+    // Re-run when the sidebar reports / re-sorts its visible order so the
+    // neighbours we warm always track what the user sees.
+    sidebarOrder,
     isCaveman,
     chartGranularity,
     chartDateRange,
+    // Re-run once the selected ticker's own data resolves so the gate opens.
+    companyProfile,
+    tickerSentimentRows,
   ]);
 
   const hiddenDismissedInListCount = useMemo(() => {
@@ -3240,9 +3322,7 @@ export function ScreeningsUI({
                   hiddenDismissedCount={hiddenDismissedInListCount}
                   showDismissed={showDismissedInList}
                   onToggleShowDismissed={toggleShowDismissedInList}
-                  onSortedOrderChange={(order) => {
-                    sortedSidebarOrderRef.current = order;
-                  }}
+                  onSortedOrderChange={handleSidebarOrderChange}
                   isCaveman={isCaveman}
                 />
               </div>
