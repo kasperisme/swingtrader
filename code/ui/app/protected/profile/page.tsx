@@ -83,8 +83,11 @@ async function ProfileContent() {
     <div className="flex flex-col gap-8 w-full">
       <div className="flex items-start justify-between gap-4">
         <div>
-          <p className="text-xs font-semibold uppercase tracking-widest text-amber-500">Account</p>
-          <h1 className="mt-1 text-2xl font-bold tracking-tight">Profile</h1>
+          <div className="flex items-center gap-2">
+            <span className="inline-block h-1.5 w-1.5 rounded-full bg-amber-500" />
+            <p className="font-mono text-[11px] font-semibold uppercase tracking-[0.16em] text-amber-500">Account</p>
+          </div>
+          <h1 className="mt-1.5 text-2xl font-bold tracking-tight">Profile</h1>
           <p className="mt-1 text-sm text-muted-foreground">Your account details and settings.</p>
         </div>
         <SetupAssistantTrigger className="inline-flex shrink-0 items-center gap-1.5 rounded-md border border-amber-500/40 bg-amber-500/5 px-3 py-1.5 text-sm font-medium text-foreground transition-colors hover:bg-amber-500/10" />
@@ -93,24 +96,24 @@ async function ProfileContent() {
       {/* Account info */}
       <section className="rounded-2xl border border-border bg-card overflow-hidden">
         <div className="border-b border-border px-5 py-3">
-          <p className="text-xs font-semibold uppercase tracking-widest text-amber-500">
+          <p className="font-mono text-[11px] font-semibold uppercase tracking-[0.16em] text-amber-500">
             Account details
           </p>
         </div>
         <dl className="divide-y divide-border">
           <div className="flex items-center justify-between gap-4 px-5 py-3">
             <dt className="text-sm text-muted-foreground">Email</dt>
-            <dd className="text-sm font-medium truncate">{user.email}</dd>
+            <dd className="truncate font-mono text-[13px] font-medium">{user.email}</dd>
           </div>
 
           <div className="flex items-center justify-between gap-4 px-5 py-3">
             <dt className="text-sm text-muted-foreground">Member since</dt>
-            <dd className="text-sm">{joined}</dd>
+            <dd className="font-mono text-[13px] tabular-nums text-foreground/80">{joined}</dd>
           </div>
           {lastSignIn && (
             <div className="flex items-center justify-between gap-4 px-5 py-3">
               <dt className="text-sm text-muted-foreground">Last sign-in</dt>
-              <dd className="text-sm">{lastSignIn}</dd>
+              <dd className="font-mono text-[13px] tabular-nums text-foreground/80">{lastSignIn}</dd>
             </div>
           )}
         </dl>
@@ -119,7 +122,7 @@ async function ProfileContent() {
       {/* Subscription */}
       <section data-tour="subscription" className="rounded-2xl border border-border bg-card overflow-hidden">
         <div className="border-b border-border px-5 py-3 flex items-center justify-between">
-          <p className="text-xs font-semibold uppercase tracking-widest text-amber-500">
+          <p className="font-mono text-[11px] font-semibold uppercase tracking-[0.16em] text-amber-500">
             Subscription
           </p>
           {subscription?.stripe_customer_id && <ManageBillingButton />}
@@ -129,9 +132,9 @@ async function ProfileContent() {
             <dt className="text-sm text-muted-foreground">Plan</dt>
             <dd>
               {subscription ? (
-                <span className="text-sm font-medium capitalize">{subscription.plan}</span>
+                <span className="rounded border border-amber-500/30 bg-amber-500/5 px-1.5 py-0.5 font-mono text-[11px] font-semibold uppercase tracking-[0.1em] text-amber-600 dark:text-amber-400">{subscription.plan}</span>
               ) : (
-                <span className="text-sm text-muted-foreground">Free</span>
+                <span className="rounded border border-border px-1.5 py-0.5 font-mono text-[11px] font-semibold uppercase tracking-[0.1em] text-muted-foreground">Free</span>
               )}
             </dd>
           </div>
@@ -139,7 +142,7 @@ async function ProfileContent() {
             <>
               <div className="flex items-center justify-between gap-4 px-5 py-3">
                 <dt className="text-sm text-muted-foreground">Billing</dt>
-                <dd className="text-sm capitalize">{subscription.billing_interval}</dd>
+                <dd className="font-mono text-[13px] capitalize text-foreground/80">{subscription.billing_interval}</dd>
               </div>
               <div className="flex items-center justify-between gap-4 px-5 py-3">
                 <dt className="text-sm text-muted-foreground">Status</dt>
@@ -152,7 +155,7 @@ async function ProfileContent() {
                   <dt className="text-sm text-muted-foreground">
                     {subscription.status === "canceled" ? "Access until" : "Renews"}
                   </dt>
-                  <dd className="text-sm">
+                  <dd className="font-mono text-[13px] tabular-nums text-foreground/80">
                     {new Date(subscription.current_period_end).toLocaleDateString("en-US", {
                       year: "numeric",
                       month: "long",
@@ -180,7 +183,7 @@ async function ProfileContent() {
       {/* Telegram — pair account for Daily Narrative delivery */}
       <section data-tour="telegram-connect">
         <div className="mb-3">
-          <p className="text-xs font-semibold uppercase tracking-widest text-amber-500">
+          <p className="font-mono text-[11px] font-semibold uppercase tracking-[0.16em] text-amber-500">
             Notifications
           </p>
         </div>
@@ -190,7 +193,7 @@ async function ProfileContent() {
       {/* Trading strategy */}
       <section data-tour="trading-strategy" className="rounded-2xl border border-border bg-card overflow-hidden">
         <div className="border-b border-border px-5 py-3">
-          <p className="text-xs font-semibold uppercase tracking-widest text-amber-500">
+          <p className="font-mono text-[11px] font-semibold uppercase tracking-[0.16em] text-amber-500">
             Trading strategy
           </p>
         </div>
@@ -205,7 +208,7 @@ async function ProfileContent() {
       {/* Preferences */}
       <section className="rounded-2xl border border-border bg-card overflow-hidden">
         <div className="border-b border-border px-5 py-3">
-          <p className="text-xs font-semibold uppercase tracking-widest text-amber-500">
+          <p className="font-mono text-[11px] font-semibold uppercase tracking-[0.16em] text-amber-500">
             Preferences
           </p>
         </div>
@@ -223,7 +226,7 @@ async function ProfileContent() {
       {/* Settings links */}
       <section className="rounded-2xl border border-border bg-card overflow-hidden">
         <div className="border-b border-border px-5 py-3">
-          <p className="text-xs font-semibold uppercase tracking-widest text-amber-500">
+          <p className="font-mono text-[11px] font-semibold uppercase tracking-[0.16em] text-amber-500">
             Settings
           </p>
         </div>

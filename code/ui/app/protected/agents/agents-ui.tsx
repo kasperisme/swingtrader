@@ -1,8 +1,20 @@
 "use client";
 
-import { useState, useMemo, useCallback, useEffect, useId } from "react";
+import { useState, useMemo, useCallback, useEffect, useId, type ReactNode } from "react";
+import {
+  Dialog,
+  DialogContent,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { track } from "@/lib/analytics/events";
-import { Bot, Pause, Play, Trash2, Plus, Clock, AlertCircle, Zap, Loader2, LayoutList, CalendarDays, ChevronLeft, ChevronRight, Pencil, X, Link2, Filter, Send, History, CheckCircle2, Bell, AlertTriangle, MinusCircle } from "lucide-react";
+import { Bot, Pause, Play, Trash2, Plus, Clock, AlertCircle, Zap, Loader2, LayoutList, CalendarDays, ChevronLeft, ChevronRight, Pencil, X, Link2, Filter, Send, History, CheckCircle2, Bell, AlertTriangle, MinusCircle, MoreHorizontal, ChevronDown } from "lucide-react";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { TelegramConnect } from "@/components/telegram-connect";
 import {
   type ScheduledScreening,
@@ -57,8 +69,32 @@ export function AgentsUI({ screenings, limits, error, suggestionTickers, telegra
   const atLimit = limits ? limits.used >= limits.limit : true;
   const createBlocked = !telegramConnected || atLimit;
 
+  async function handleCreate(v: AgentFormValues): Promise<AgentSubmitResult> {
+    const res = await createScheduledScreening(toScreeningPayload(v));
+    if (res.ok) {
+      track("agent_created", { agent_id: res.data?.id ?? "", kind: "scheduled_screening" });
+      window.location.reload();
+      return { ok: true };
+    }
+    if (/active screenings/i.test(res.error)) {
+      track("paywall_hit", { surface: "screenings_create", user_plan: "unknown", reason: "screenings_active_limit" });
+    }
+    return { ok: false, error: res.error };
+  }
+
+  function openCreate() {
+    if (createBlocked) return;
+    setShowForm(true);
+  }
+
+  const newAgentTitle = !telegramConnected
+    ? "Connect Telegram first to create agents"
+    : atLimit
+      ? "You've reached your active-agent limit"
+      : undefined;
+
   return (
-    <div className="flex min-w-0 w-full flex-col gap-6">
+    <div className="flex min-w-0 w-full flex-col gap-5">
       {error && (
         <div className="flex min-w-0 items-start gap-3 rounded-xl border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm text-destructive">
           <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
@@ -82,44 +118,21 @@ export function AgentsUI({ screenings, limits, error, suggestionTickers, telegra
         </div>
       )}
 
-      {/* Usage + controls */}
-      <div className="flex min-w-0 flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
-        <div className="min-w-0 flex-1">
-          {limits && (() => {
-            const pct = Math.min(100, (limits.used / Math.max(1, limits.limit)) * 100);
-            const nearLimit = limits.used >= limits.limit;
-            return (
-              <div className="min-w-0">
-                <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
-                  <span className="text-2xl font-bold tabular-nums leading-none tracking-tight text-foreground">
-                    {limits.used}
-                  </span>
-                  <span className="text-sm tabular-nums text-muted-foreground/50">/ {limits.limit}</span>
-                  <span className="text-xs text-muted-foreground">active agents</span>
-                  <span className="rounded-full border border-border px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-muted-foreground/70">
-                    {limits.plan}
-                  </span>
-                </div>
-                <div className="mt-2 h-1 w-full max-w-[15rem] overflow-hidden rounded-full bg-muted">
-                  <div
-                    className={`h-full w-full origin-left rounded-full transition-transform duration-500 ease-out ${nearLimit ? "bg-rose-500" : "bg-amber-500"}`}
-                    style={{ transform: `scaleX(${pct / 100})` }}
-                  />
-                </div>
-              </div>
-            );
-          })()}
-        </div>
-        <div className="flex shrink-0 flex-wrap items-center gap-2">
-          {/* View toggle */}
+      {/* Command bar — capacity readout · view toggle · new agent */}
+      <div className="flex min-w-0 flex-col gap-3 rounded-xl border border-border bg-card/40 px-3.5 py-3 sm:flex-row sm:items-center sm:justify-between">
+        {limits ? (
+          <CapacityReadout used={limits.used} limit={limits.limit} plan={limits.plan} />
+        ) : (
+          <span className="font-mono text-[11px] text-muted-foreground/50">loading…</span>
+        )}
+        <div className="flex shrink-0 items-center gap-2">
           {screenings.length > 0 && (
             <div className="flex gap-0.5 rounded-lg border border-border p-0.5">
               <button
                 type="button"
                 onClick={() => setView("list")}
-                className={`min-h-[40px] min-w-[40px] p-2 rounded-md transition-colors ${
-                  view === "list" ? "bg-foreground text-background" : "text-muted-foreground hover:bg-muted"
-                }`}
+                aria-pressed={view === "list"}
+                className={`flex h-9 w-9 items-center justify-center rounded-md transition-colors ${view === "list" ? "bg-foreground text-background" : "text-muted-foreground hover:bg-muted"}`}
                 title="List view"
               >
                 <LayoutList className="w-3.5 h-3.5" />
@@ -127,42 +140,36 @@ export function AgentsUI({ screenings, limits, error, suggestionTickers, telegra
               <button
                 type="button"
                 onClick={() => setView("calendar")}
-                className={`min-h-[40px] min-w-[40px] p-2 rounded-md transition-colors ${
-                  view === "calendar" ? "bg-foreground text-background" : "text-muted-foreground hover:bg-muted"
-                }`}
+                aria-pressed={view === "calendar"}
+                className={`flex h-9 w-9 items-center justify-center rounded-md transition-colors ${view === "calendar" ? "bg-foreground text-background" : "text-muted-foreground hover:bg-muted"}`}
                 title="Calendar view"
               >
                 <CalendarDays className="w-3.5 h-3.5" />
               </button>
             </div>
           )}
-          {!showForm && (
-            <button
-              type="button"
-              onClick={() => setShowForm(true)}
-              disabled={createBlocked}
-              data-tour="agent-create"
-              title={
-                !telegramConnected
-                  ? "Connect Telegram first to create agents"
-                  : atLimit
-                    ? "You've reached your active-agent limit"
-                    : undefined
-              }
-              className="inline-flex items-center gap-1.5 rounded-md bg-foreground px-3.5 py-2.5 text-sm font-medium text-background shadow-sm transition-all hover:opacity-90 active:scale-[0.98] disabled:opacity-40 disabled:pointer-events-none disabled:active:scale-100"
-            >
-              <Plus className="w-3.5 h-3.5" />
-              New agent
-            </button>
-          )}
+          <button
+            type="button"
+            onClick={openCreate}
+            disabled={createBlocked}
+            data-tour="agent-create"
+            title={newAgentTitle}
+            className="inline-flex h-9 items-center gap-1.5 rounded-md bg-foreground px-3.5 text-sm font-medium text-background shadow-sm transition-all hover:opacity-90 active:scale-[0.98] disabled:pointer-events-none disabled:opacity-40 disabled:active:scale-100"
+          >
+            <Plus className="w-3.5 h-3.5" />
+            New agent
+          </button>
         </div>
       </div>
 
-      {showForm && telegramConnected && (
-        <CreateForm
-          onClose={() => setShowForm(false)}
-          atLimit={atLimit}
+      {telegramConnected && (
+        <AgentFormDialog
+          open={showForm}
+          onOpenChange={setShowForm}
+          mode="create"
           suggestionTickers={suggestionTickers}
+          onSubmit={handleCreate}
+          disabled={atLimit}
         />
       )}
 
@@ -171,8 +178,8 @@ export function AgentsUI({ screenings, limits, error, suggestionTickers, telegra
 
       {/* Agent list */}
       {view === "list" && (
-        <div data-tour="agent-list" className="flex flex-col gap-3">
-          {screenings.length === 0 && !showForm && (
+        <div data-tour="agent-list" className="flex flex-col gap-2.5">
+          {screenings.length === 0 ? (
             <div className="rounded-2xl border border-dashed border-border/70 px-6 py-16 text-center">
               <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-2xl border border-border bg-muted/40">
                 <Bot className="h-6 w-6 text-muted-foreground/50" />
@@ -184,38 +191,51 @@ export function AgentsUI({ screenings, limits, error, suggestionTickers, telegra
               </p>
               <button
                 type="button"
-                onClick={() => setShowForm(true)}
+                onClick={openCreate}
                 disabled={createBlocked}
-                title={
-                  !telegramConnected
-                    ? "Connect Telegram first to create agents"
-                    : atLimit
-                      ? "You've reached your active-agent limit"
-                      : undefined
-                }
+                title={newAgentTitle}
                 className="mt-5 inline-flex items-center gap-1.5 rounded-md bg-foreground px-4 py-2.5 text-sm font-medium text-background shadow-sm transition-all hover:opacity-90 active:scale-[0.98] disabled:opacity-40 disabled:pointer-events-none disabled:active:scale-100"
               >
                 <Plus className="h-3.5 w-3.5" />
                 Create your first agent
               </button>
-              <div className="mt-7 flex flex-wrap items-center justify-center gap-1.5">
-                <span className="text-[11px] uppercase tracking-wide text-muted-foreground/40">Try</span>
-                {["Airline macro selloff", "NVDA earnings gap", "Biotech FDA catalysts"].map((idea) => (
-                  <span
-                    key={idea}
-                    className="rounded-full border border-border bg-muted/30 px-2.5 py-0.5 text-[11px] text-muted-foreground"
-                  >
-                    {idea}
-                  </span>
-                ))}
-              </div>
             </div>
+          ) : (
+            screenings.map((s) => (
+              <AgentCard key={s.id} screening={s} suggestionTickers={suggestionTickers} />
+            ))
           )}
-            {screenings.map((s) => (
-            <AgentCard key={s.id} screening={s} suggestionTickers={suggestionTickers} />
-          ))}
         </div>
       )}
+    </div>
+  );
+}
+
+/** Mono capacity readout — `●●●○○ 3 / 5 · PRO`. Dots for small plans, bar for large. */
+function CapacityReadout({ used, limit, plan }: { used: number; limit: number; plan: string }) {
+  const nearLimit = used >= limit;
+  const fillClass = nearLimit ? "bg-rose-500" : "bg-emerald-500";
+  return (
+    <div className="flex min-w-0 flex-wrap items-center gap-x-2.5 gap-y-1">
+      {limit <= 10 ? (
+        <div className="flex items-center gap-1" aria-hidden>
+          {Array.from({ length: limit }, (_, i) => (
+            <span key={i} className={`h-2 w-2 rounded-full ${i < used ? fillClass : "bg-muted-foreground/20"}`} />
+          ))}
+        </div>
+      ) : (
+        <div className="h-1.5 w-24 overflow-hidden rounded-full bg-muted">
+          <div className={`h-full rounded-full ${fillClass}`} style={{ width: `${Math.min(100, (used / Math.max(1, limit)) * 100)}%` }} />
+        </div>
+      )}
+      <span className="font-mono text-sm tabular-nums text-foreground">
+        {used}
+        <span className="text-muted-foreground/50"> / {limit}</span>
+      </span>
+      <span className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground/60">active agents</span>
+      <span className="rounded border border-border px-1.5 py-0.5 font-mono text-[9px] font-semibold uppercase tracking-[0.1em] text-muted-foreground/70">
+        {plan}
+      </span>
     </div>
   );
 }
@@ -356,23 +376,32 @@ function RecurrenceScheduler({
   return (
     <div className="w-full min-w-0 divide-y divide-border rounded-xl border border-border text-sm">
 
-      {/* Repeats */}
+      {/* Repeats — segmented chips */}
       <div className={row}>
         <span className={lbl}>Repeats:</span>
-        <div className="min-w-0 w-full sm:w-auto">
-        <select
-          value={parsed.pattern}
-          onChange={(e) => {
-            const p = e.target.value as RecurrencePattern;
-            const patch2: Partial<typeof parsed> = { pattern: p };
-            if (p === "minutely" && parsed.interval < 1) patch2.interval = 15;
-            if (p === "hourly" && parsed.interval > 24) patch2.interval = 1;
-            patch(patch2);
-          }}
-          className={sel}
-        >
-          {patterns.map((p) => <option key={p.value} value={p.value}>{p.label}</option>)}
-        </select>
+        <div className="flex min-w-0 flex-wrap gap-1">
+          {patterns.map((p) => {
+            const activeP = parsed.pattern === p.value;
+            return (
+              <button
+                key={p.value}
+                type="button"
+                onClick={() => {
+                  const patch2: Partial<typeof parsed> = { pattern: p.value };
+                  if (p.value === "minutely" && parsed.interval < 1) patch2.interval = 15;
+                  if (p.value === "hourly" && parsed.interval > 24) patch2.interval = 1;
+                  patch(patch2);
+                }}
+                className={`rounded-md border px-2.5 py-1 font-mono text-[11px] tracking-[0.04em] transition-colors ${
+                  activeP
+                    ? "border-foreground bg-foreground text-background"
+                    : "border-border text-muted-foreground hover:bg-muted"
+                }`}
+              >
+                {p.label}
+              </button>
+            );
+          })}
         </div>
       </div>
 
@@ -504,7 +533,7 @@ function RecurrenceScheduler({
       {/* Summary */}
       <div className={`${row} bg-muted/30 rounded-b-xl`}>
         <span className={lbl}>Summary:</span>
-        <span className="min-w-0 break-words font-semibold text-foreground">
+        <span className="min-w-0 break-words font-mono text-[13px] font-semibold tracking-[0.02em] text-amber-600 dark:text-amber-400">
           {describeCron(value)}
           {tradingSession && tradingSession !== "none" && (
             <span className="ml-2 font-normal text-muted-foreground">· market hours only</span>
@@ -618,6 +647,22 @@ function nextRuns(cron: string, count: number, from?: Date): Date[] {
     cursor.setMinutes(cursor.getMinutes() + 1);
   }
   return results;
+}
+
+/** Compact "in 2h 14m" / "in 45m" / "now" relative label for the next run. */
+function fmtCountdown(when: Date | undefined): string {
+  if (!when) return "—";
+  const ms = when.getTime() - Date.now();
+  if (ms <= 0) return "now";
+  const mins = Math.round(ms / 60000);
+  if (mins < 1) return "now";
+  if (mins < 60) return `in ${mins}m`;
+  const hrs = Math.floor(mins / 60);
+  const rem = mins % 60;
+  if (hrs < 24) return rem ? `in ${hrs}h ${rem}m` : `in ${hrs}h`;
+  const days = Math.floor(hrs / 24);
+  const remH = hrs % 24;
+  return remH ? `in ${days}d ${remH}h` : `in ${days}d`;
 }
 
 // ── Agent color palette ─────────────────────────────────────────────────────
@@ -1261,38 +1306,12 @@ function PillPopover({
   onClose: () => void;
   suggestionTickers: string[];
 }) {
-  const [mode, setMode] = useState<"menu" | "edit">("menu");
+  const [editing, setEditing] = useState(false);
   const [toggling, setToggling] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [testing, setTesting] = useState(false);
   const [testResult, setTestResult] = useState<ScreeningResult | null>(null);
   const [testError, setTestError] = useState<string | null>(null);
-
-  const [editName, setEditName] = useState(screening.name);
-  const [editPrompt, setEditPrompt] = useState(screening.prompt);
-  const [editSchedule, setEditSchedule] = useState(screening.schedule);
-  const [editTimezone, setEditTimezone] = useState(screening.timezone);
-  const [editTradingSession, setEditTradingSession] = useState<string | null>(screening.trading_session ?? null);
-  const [editTickers, setEditTickers] = useState<string[]>(screening.tickers ?? []);
-  const [editLinkedScanRunIds, setEditLinkedScanRunIds] = useState<number[]>(screening.linked_scan_run_ids ?? []);
-  const [editLinkedScanSources, setEditLinkedScanSources] = useState<string[]>(screening.linked_scan_sources ?? []);
-  const [editScanFilters, setEditScanFilters] = useState<ScreeningsFilters>((screening.scan_filters as ScreeningsFilters | null) ?? DEFAULT_SCREENINGS_FILTERS);
-  const [editConditionEnabled, setEditConditionEnabled] = useState<boolean>(screening.condition_enabled ?? false);
-  const [editTriggerCondition, setEditTriggerCondition] = useState<string>(screening.trigger_condition ?? "");
-  const [scanRuns, setScanRuns] = useState<ScanRunSummary[]>([]);
-  const [saving, setSaving] = useState(false);
-  const [saveErr, setSaveErr] = useState<string | null>(null);
-
-  const editEffectiveLinkedIds = useMemo(
-    () => effectiveLinkedRunIds(editLinkedScanRunIds, editLinkedScanSources, scanRuns),
-    [editLinkedScanRunIds, editLinkedScanSources, scanRuns],
-  );
-
-  useEffect(() => {
-    void listScanRuns().then((res) => {
-      if (res.ok) setScanRuns(res.data);
-    });
-  }, []);
 
   async function handleToggle() {
     setToggling(true);
@@ -1338,225 +1357,112 @@ function PillPopover({
     setTesting(false);
   }
 
-  async function handleSave() {
-    if (!editPrompt.trim()) return;
-    if (editConditionEnabled && !editTriggerCondition.trim()) {
-      setSaveErr("Trigger condition is required when 'Only send when condition is met' is enabled.");
-      return;
-    }
-    setSaving(true);
-    setSaveErr(null);
-    const res = await updateScheduledScreening(screening.id, {
-      name: editName.trim() || "Untitled Agent",
-      prompt: editPrompt.trim(),
-      schedule: editSchedule,
-      timezone: editTimezone,
-      tickers: editTickers,
-      linked_scan_run_ids: editLinkedScanRunIds,
-      linked_scan_sources: editLinkedScanSources,
-      scan_filters: countScreeningsFilterRules(editScanFilters) > 0 ? editScanFilters : null,
-      trading_session: (editTradingSession as TradingSession) ?? "none",
-      condition_enabled: editConditionEnabled,
-      trigger_condition: editConditionEnabled ? editTriggerCondition.trim() : null,
-    });
+  async function handleEditSubmit(v: AgentFormValues): Promise<AgentSubmitResult> {
+    const res = await updateScheduledScreening(screening.id, toScreeningPayload(v));
     if (res.ok) {
       onClose();
       window.location.reload();
-    } else {
-      setSaveErr(res.error);
-      setSaving(false);
+      return { ok: true };
     }
+    return { ok: false, error: res.error };
   }
 
   const actionBtn = "flex items-center gap-1.5 w-full px-2.5 py-1.5 text-xs rounded-md transition-colors";
-  const inputClass = "w-full rounded-md border border-input bg-background px-2.5 py-1.5 text-xs placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring disabled:opacity-50";
-
-  if (mode === "edit") {
-    return (
-      <div className="absolute left-0 top-[22px] z-50 w-[min(18rem,calc(100vw-2rem))] max-w-[calc(100vw-2rem)] rounded-xl border border-border bg-card shadow-lg shadow-black/10 overflow-hidden">
-        <div className="px-3 pt-3 pb-2 border-b border-border flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <div className={`w-2 h-2 rounded-full ${AGENT_COLORS[colorIdx % AGENT_COLORS.length]}`} />
-            <span className="text-xs font-semibold text-foreground">Edit agent</span>
-          </div>
-          <button type="button" onClick={() => setMode("menu")} className="text-xs text-muted-foreground/50 hover:text-muted-foreground transition-colors">Back</button>
-        </div>
-        <div className="px-3 py-3 flex flex-col gap-3">
-          {saveErr && <p className="text-[11px] text-destructive">{saveErr}</p>}
-          <div className="flex flex-col gap-1">
-            <label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Name</label>
-            <input type="text" value={editName} onChange={(e) => setEditName(e.target.value)} className={inputClass} />
-          </div>
-          <div className="flex flex-col gap-1">
-            <label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Prompt</label>
-            <textarea value={editPrompt} onChange={(e) => setEditPrompt(e.target.value)} rows={4} className={inputClass} />
-          </div>
-          <div className="flex flex-col gap-1">
-            <label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Recurrence</label>
-            <RecurrenceScheduler value={editSchedule} onChange={setEditSchedule} tradingSession={editTradingSession} onTradingSessionChange={setEditTradingSession} />
-          </div>
-          <div className="flex flex-col gap-1">
-            <label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Timezone</label>
-            <TimezoneSelect value={editTimezone} onChange={setEditTimezone} className={inputClass} />
-          </div>
-          <div className="flex flex-col gap-1">
-            <label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Tickers</label>
-            <TickerPicker
-              tickers={editTickers}
-              onChange={setEditTickers}
-              suggestionTickers={suggestionTickers}
-            />
-          </div>
-          {scanRuns.length > 0 && (
-            <div className="flex flex-col gap-1">
-              <label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Linked screenings</label>
-              <ScanRunPicker
-                pinnedIds={editLinkedScanRunIds}
-                followedSources={editLinkedScanSources}
-                onChangePinned={setEditLinkedScanRunIds}
-                onChangeFollowed={setEditLinkedScanSources}
-                scanRuns={scanRuns}
-              />
-            </div>
-          )}
-          {editEffectiveLinkedIds.length > 0 && (
-            <div className="flex flex-col gap-1">
-              <label className="text-xs font-medium text-muted-foreground uppercase tracking-wide flex items-center gap-1">
-                <Filter className="w-3 h-3" /> Filter tickers
-              </label>
-              <AgentFilterSection
-                linkedScanRunIds={editEffectiveLinkedIds}
-                filters={editScanFilters}
-                setFilters={setEditScanFilters}
-              />
-            </div>
-          )}
-          <div className="flex flex-col gap-1.5">
-            <label className="inline-flex items-start gap-2 text-[11px] font-medium text-foreground">
-              <input
-                type="checkbox"
-                checked={editConditionEnabled}
-                onChange={(e) => setEditConditionEnabled(e.target.checked)}
-                className="mt-0.5 h-3 w-3 rounded border-input"
-              />
-              <span>
-                Only send when condition is met
-                <span className="ml-1 normal-case font-normal text-muted-foreground/60">
-                  agent only triggers if your condition is satisfied
-                </span>
-              </span>
-            </label>
-            {editConditionEnabled && (
-              <textarea
-                value={editTriggerCondition}
-                onChange={(e) => setEditTriggerCondition(e.target.value)}
-                rows={3}
-                placeholder="e.g. At least one holding has news with sentiment_score below -0.4 today."
-                className={inputClass}
-              />
-            )}
-          </div>
-          <div className="flex items-center gap-2 pt-1 border-t border-border">
-            <button
-              type="button"
-              onClick={() => void handleSave()}
-              disabled={saving || !editPrompt.trim() || (editConditionEnabled && !editTriggerCondition.trim())}
-              className="inline-flex items-center gap-1.5 rounded-md bg-foreground px-3 py-1.5 text-xs font-medium text-background transition-opacity hover:opacity-90 disabled:opacity-40 disabled:pointer-events-none"
-            >
-              {saving ? "Saving…" : "Save"}
-            </button>
-            <button type="button" onClick={onClose} className="rounded-md border border-border px-3 py-1.5 text-xs text-muted-foreground transition-colors hover:bg-muted">
-              Cancel
-            </button>
-          </div>
-        </div>
-      </div>
-    );
-  }
 
   return (
-    <div className="absolute left-0 top-[22px] z-50 w-[min(14rem,calc(100vw-2rem))] max-w-[calc(100vw-2rem)] rounded-xl border border-border bg-card shadow-lg shadow-black/10 overflow-hidden">
-      {/* Agent header */}
-      <div className="px-3 pt-3 pb-2 border-b border-border">
-        <div className="flex items-center gap-2">
-          <div className={`w-2 h-2 rounded-full ${AGENT_COLORS[colorIdx % AGENT_COLORS.length]}`} />
-          <span className="text-xs font-semibold text-foreground truncate">{screening.name}</span>
+    <>
+      <div className="absolute left-0 top-[22px] z-50 w-[min(14rem,calc(100vw-2rem))] max-w-[calc(100vw-2rem)] rounded-xl border border-border bg-card shadow-lg shadow-black/10 overflow-hidden">
+        {/* Agent header */}
+        <div className="px-3 pt-3 pb-2 border-b border-border">
+          <div className="flex items-center gap-2">
+            <div className={`w-2 h-2 rounded-full ${AGENT_COLORS[colorIdx % AGENT_COLORS.length]}`} />
+            <span className="text-xs font-semibold text-foreground truncate">{screening.name}</span>
+          </div>
+          <p className="mt-1 break-words font-mono text-[10px] text-muted-foreground">
+            {describeCron(screening.schedule)} &middot; {screening.timezone}
+            {screening.trading_session && screening.trading_session !== "none" && screening.trading_session !== null && (
+              <span className="ml-1.5 inline-flex items-center rounded bg-foreground/10 px-1 py-px font-medium text-foreground/70">mkt hrs</span>
+            )}
+          </p>
         </div>
-        <p className="mt-1 break-words text-[11px] text-muted-foreground">
-          {describeCron(screening.schedule)} &middot; {screening.timezone}
-          {screening.trading_session && screening.trading_session !== "none" && screening.trading_session !== null && (
-            <span className="ml-1.5 inline-flex items-center rounded bg-foreground/10 px-1 py-px font-medium text-foreground/70">market hours</span>
-          )}
-        </p>
-      </div>
 
-      {/* Actions */}
-      <div className="p-1.5 flex flex-col gap-0.5">
-        <button
-          type="button"
-          onClick={() => void handleTestRun()}
-          disabled={testing}
-          className={`${actionBtn} ${testing ? "text-muted-foreground" : "text-amber-600 dark:text-amber-400 hover:bg-amber-500/10"}`}
-        >
-          {testing ? <Loader2 className="w-3 h-3 animate-spin" /> : <Zap className="w-3 h-3" />}
-          {testing ? "Running..." : "Test run now"}
-        </button>
-        <button
-          type="button"
-          onClick={() => setMode("edit")}
-          className={`${actionBtn} text-muted-foreground hover:bg-muted hover:text-foreground`}
-        >
-          <Pencil className="w-3 h-3" />
-          Edit agent
-        </button>
-        <button
-          type="button"
-          onClick={() => void handleToggle()}
-          disabled={toggling}
-          className={`${actionBtn} text-muted-foreground hover:bg-muted hover:text-foreground`}
-        >
-          {toggling ? <Loader2 className="w-3 h-3 animate-spin" /> : screening.is_active ? <Pause className="w-3 h-3" /> : <Play className="w-3 h-3" />}
-          {screening.is_active ? "Pause agent" : "Resume agent"}
-        </button>
-        <button
-          type="button"
-          onClick={() => void handleDelete()}
-          disabled={deleting}
-          className={`${actionBtn} text-destructive/80 hover:bg-destructive/10 hover:text-destructive`}
-        >
-          {deleting ? <Loader2 className="w-3 h-3 animate-spin" /> : <Trash2 className="w-3 h-3" />}
-          Delete agent
-        </button>
-      </div>
+        {/* Actions */}
+        <div className="p-1.5 flex flex-col gap-0.5">
+          <button
+            type="button"
+            onClick={() => void handleTestRun()}
+            disabled={testing}
+            className={`${actionBtn} ${testing ? "text-muted-foreground" : "text-amber-600 dark:text-amber-400 hover:bg-amber-500/10"}`}
+          >
+            {testing ? <Loader2 className="w-3 h-3 animate-spin" /> : <Zap className="w-3 h-3" />}
+            {testing ? "Running..." : "Test run now"}
+          </button>
+          <button
+            type="button"
+            onClick={() => setEditing(true)}
+            className={`${actionBtn} text-muted-foreground hover:bg-muted hover:text-foreground`}
+          >
+            <Pencil className="w-3 h-3" />
+            Edit agent
+          </button>
+          <button
+            type="button"
+            onClick={() => void handleToggle()}
+            disabled={toggling}
+            className={`${actionBtn} text-muted-foreground hover:bg-muted hover:text-foreground`}
+          >
+            {toggling ? <Loader2 className="w-3 h-3 animate-spin" /> : screening.is_active ? <Pause className="w-3 h-3" /> : <Play className="w-3 h-3" />}
+            {screening.is_active ? "Pause agent" : "Resume agent"}
+          </button>
+          <button
+            type="button"
+            onClick={() => void handleDelete()}
+            disabled={deleting}
+            className={`${actionBtn} text-destructive/80 hover:bg-destructive/10 hover:text-destructive`}
+          >
+            {deleting ? <Loader2 className="w-3 h-3 animate-spin" /> : <Trash2 className="w-3 h-3" />}
+            Delete agent
+          </button>
+        </div>
 
-      {/* Test result */}
-      {(testResult || testError) && (
+        {/* Test result */}
+        {(testResult || testError) && (
+          <div className="border-t border-border px-3 py-2">
+            {testError && <p className="text-[11px] text-destructive">{testError}</p>}
+            {testResult && (
+              <div>
+                <span className={`font-mono text-[10px] uppercase tracking-[0.1em] ${testResult.triggered ? "text-amber-600 dark:text-amber-400" : "text-muted-foreground"}`}>
+                  {testResult.triggered ? "triggered" : "not triggered"}
+                </span>
+                {testResult.summary && (
+                  <p className="mt-0.5 text-[11px] text-foreground/70 leading-relaxed line-clamp-3">{testResult.summary}</p>
+                )}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Dismiss */}
         <div className="border-t border-border px-3 py-2">
-          {testError && <p className="text-[11px] text-destructive">{testError}</p>}
-          {testResult && (
-            <div>
-              <span className={`text-[11px] font-medium ${testResult.triggered ? "text-amber-600 dark:text-amber-400" : "text-muted-foreground"}`}>
-                {testResult.triggered ? "Triggered" : "Not triggered"}
-              </span>
-              {testResult.summary && (
-                <p className="mt-0.5 text-[11px] text-foreground/70 leading-relaxed line-clamp-3">{testResult.summary}</p>
-              )}
-            </div>
-          )}
+          <button
+            type="button"
+            onClick={onClose}
+            className="text-xs text-muted-foreground/50 hover:text-muted-foreground transition-colors"
+          >
+            Close
+          </button>
         </div>
-      )}
-
-      {/* Dismiss */}
-      <div className="border-t border-border px-3 py-2">
-        <button
-          type="button"
-          onClick={onClose}
-          className="text-xs text-muted-foreground/50 hover:text-muted-foreground transition-colors"
-        >
-          Close
-        </button>
       </div>
-    </div>
+
+      <AgentFormDialog
+        open={editing}
+        onOpenChange={setEditing}
+        mode="edit"
+        initial={screeningToFormInitial(screening)}
+        suggestionTickers={suggestionTickers}
+        onSubmit={handleEditSubmit}
+      />
+    </>
   );
 }
 
@@ -1663,23 +1569,73 @@ function AgentFilterSection({
   );
 }
 
-// ── Create form ─────────────────────────────────────────────────────────────
+// ── Shared agent form (create + edit) ────────────────────────────────────────
 
-function CreateForm({ onClose, atLimit, suggestionTickers }: { onClose: () => void; atLimit: boolean; suggestionTickers: string[] }) {
-  const [name, setName] = useState("");
-  const [prompt, setPrompt] = useState("");
-  const [schedule, setSchedule] = useState("0 7 * * 1-5");
-  const [timezone, setTimezone] = useState("America/New_York");
-  const [tradingSession, setTradingSession] = useState<string | null>(null);
-  const [tickers, setTickers] = useState<string[]>([]);
-  const [linkedScanRunIds, setLinkedScanRunIds] = useState<number[]>([]);
-  const [linkedScanSources, setLinkedScanSources] = useState<string[]>([]);
-  const [scanFilters, setScanFilters] = useState<ScreeningsFilters>(DEFAULT_SCREENINGS_FILTERS);
-  const [conditionEnabled, setConditionEnabled] = useState(false);
-  const [triggerCondition, setTriggerCondition] = useState("");
+export type AgentFormValues = {
+  name: string;
+  prompt: string;
+  schedule: string;
+  timezone: string;
+  tradingSession: string | null;
+  tickers: string[];
+  linkedScanRunIds: number[];
+  linkedScanSources: string[];
+  scanFilters: ScreeningsFilters;
+  conditionEnabled: boolean;
+  triggerCondition: string;
+};
+
+type AgentSubmitResult = { ok: true } | { ok: false; error: string };
+
+const PROMPT_IDEAS = ["Airline macro selloff", "NVDA earnings gap", "Biotech FDA catalysts"];
+
+function SectionLabel({ children }: { children: ReactNode }) {
+  return (
+    <p className="font-mono text-[10px] uppercase tracking-[0.16em] text-muted-foreground/50">
+      {children}
+    </p>
+  );
+}
+
+/** One form, three call-sites (create + card edit + calendar edit). Owns its
+ * own field state + save/error; the caller supplies `onSubmit` (which performs
+ * the server action) and reloads on success. */
+function AgentForm({
+  initial,
+  suggestionTickers,
+  submitLabel,
+  onSubmit,
+  onCancel,
+  disabled,
+}: {
+  initial?: Partial<AgentFormValues>;
+  suggestionTickers: string[];
+  submitLabel: string;
+  onSubmit: (v: AgentFormValues) => Promise<AgentSubmitResult>;
+  onCancel: () => void;
+  disabled?: boolean;
+}) {
+  const [name, setName] = useState(initial?.name ?? "");
+  const [prompt, setPrompt] = useState(initial?.prompt ?? "");
+  const [schedule, setSchedule] = useState(initial?.schedule ?? "0 7 * * 1-5");
+  const [timezone, setTimezone] = useState(initial?.timezone ?? "America/New_York");
+  const [tradingSession, setTradingSession] = useState<string | null>(initial?.tradingSession ?? null);
+  const [tickers, setTickers] = useState<string[]>(initial?.tickers ?? []);
+  const [linkedScanRunIds, setLinkedScanRunIds] = useState<number[]>(initial?.linkedScanRunIds ?? []);
+  const [linkedScanSources, setLinkedScanSources] = useState<string[]>(initial?.linkedScanSources ?? []);
+  const [scanFilters, setScanFilters] = useState<ScreeningsFilters>(initial?.scanFilters ?? DEFAULT_SCREENINGS_FILTERS);
+  const [conditionEnabled, setConditionEnabled] = useState(initial?.conditionEnabled ?? false);
+  const [triggerCondition, setTriggerCondition] = useState(initial?.triggerCondition ?? "");
   const [scanRuns, setScanRuns] = useState<ScanRunSummary[]>([]);
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+
+  const hasAdvanced =
+    (initial?.linkedScanRunIds?.length ?? 0) > 0 ||
+    (initial?.linkedScanSources?.length ?? 0) > 0 ||
+    (initial?.conditionEnabled ?? false) ||
+    countScreeningsFilterRules(initial?.scanFilters ?? DEFAULT_SCREENINGS_FILTERS) > 0;
+  const [refineOpen, setRefineOpen] = useState(hasAdvanced);
 
   const effectiveLinkedIds = useMemo(
     () => effectiveLinkedRunIds(linkedScanRunIds, linkedScanSources, scanRuns),
@@ -1692,40 +1648,27 @@ function CreateForm({ onClose, atLimit, suggestionTickers }: { onClose: () => vo
     });
   }, []);
 
-  async function handleSave() {
-    if (!prompt.trim()) return;
+  const canSubmit = prompt.trim().length > 0 && (!conditionEnabled || triggerCondition.trim().length > 0);
+
+  async function handleSubmit() {
+    if (!canSubmit) return;
     setSaving(true);
     setErr(null);
-    if (conditionEnabled && !triggerCondition.trim()) {
-      setErr("Trigger condition is required when 'Only send when condition is met' is enabled.");
-      setSaving(false);
-      return;
-    }
-    const res = await createScheduledScreening({
+    const res = await onSubmit({
       name: name.trim() || "Untitled Agent",
       prompt: prompt.trim(),
       schedule,
       timezone,
+      tradingSession,
       tickers,
-      linked_scan_run_ids: linkedScanRunIds,
-      linked_scan_sources: linkedScanSources,
-      scan_filters: countScreeningsFilterRules(scanFilters) > 0 ? scanFilters : null,
-      trading_session: (tradingSession as TradingSession) ?? "none",
-      condition_enabled: conditionEnabled,
-      trigger_condition: conditionEnabled ? triggerCondition.trim() : null,
+      linkedScanRunIds,
+      linkedScanSources,
+      scanFilters,
+      conditionEnabled,
+      triggerCondition: conditionEnabled ? triggerCondition.trim() : "",
     });
-    if (res.ok) {
-      track("agent_created", { agent_id: res.data?.id ?? "", kind: "scheduled_screening" });
-      onClose();
-      window.location.reload();
-    } else {
-      if (/active screenings/i.test(res.error)) {
-        track("paywall_hit", {
-          surface: "screenings_create",
-          user_plan: "unknown",
-          reason: "screenings_active_limit",
-        });
-      }
+    // On success the caller reloads the page; keep the spinner until then.
+    if (!res.ok) {
       setErr(res.error);
       setSaving(false);
     }
@@ -1733,141 +1676,222 @@ function CreateForm({ onClose, atLimit, suggestionTickers }: { onClose: () => vo
 
   const inputClass =
     "w-full rounded-md border border-input bg-background px-3 py-2 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring disabled:opacity-50";
+  const busy = saving || disabled;
 
   return (
-    <div className="min-w-0 overflow-hidden rounded-2xl border border-border bg-card">
-      <div className="border-b border-border px-4 py-3 sm:px-5">
-        <p className="text-xs font-semibold uppercase tracking-widest text-amber-500">New agent</p>
-      </div>
-      <div className="flex min-w-0 flex-col gap-4 px-4 py-5 sm:px-5">
+    <form
+      onSubmit={(e) => { e.preventDefault(); void handleSubmit(); }}
+      className="flex min-h-0 flex-1 flex-col"
+    >
+      <div className="flex min-h-0 flex-1 flex-col gap-6 overflow-y-auto px-4 py-5 sm:px-6">
         {err && (
-          <p className="text-sm text-destructive">{err}</p>
-        )}
-        <div className="flex flex-col gap-1.5">
-          <label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Name</label>
-          <input
-            type="text"
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            placeholder="e.g. Airline Macro Watch"
-            className={inputClass}
-          />
-        </div>
-        <div className="flex flex-col gap-1.5">
-          <label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
-            Prompt
-            <span className="ml-2 normal-case font-normal text-muted-foreground/60">
-              describe what to watch for in plain English
-            </span>
-          </label>
-          <textarea
-            value={prompt}
-            onChange={(e) => setPrompt(e.target.value)}
-            rows={5}
-            placeholder={`e.g. Check MACRO_SENSITIVITY cluster trend for airline stocks (AAL, DAL, UAL). Alert me when the cluster score drops below -0.3. Include which dimensions are driving it and any headlines from the last 14 hours.`}
-            className={inputClass}
-          />
-        </div>
-        <div data-tour="agent-schedule" className="flex flex-col gap-1.5">
-          <label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
-            Recurrence
-          </label>
-          <RecurrenceScheduler value={schedule} onChange={setSchedule} tradingSession={tradingSession} onTradingSessionChange={setTradingSession} />
-        </div>
-        <div className="flex flex-col gap-1.5">
-          <label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Timezone</label>
-          <TimezoneSelect value={timezone} onChange={setTimezone} className={inputClass} />
-        </div>
-        <div className="flex flex-col gap-1.5">
-          <label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
-            Tickers
-            <span className="ml-2 normal-case font-normal text-muted-foreground/60">
-              focus the agent on specific symbols
-            </span>
-          </label>
-          <TickerPicker
-            tickers={tickers}
-            onChange={setTickers}
-            suggestionTickers={suggestionTickers}
-          />
-        </div>
-        <div className="flex flex-col gap-1.5">
-          <label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
-            Linked screenings
-            <span className="ml-2 normal-case font-normal text-muted-foreground/60">
-              include context from your scan runs
-            </span>
-          </label>
-          <ScanRunPicker
-            pinnedIds={linkedScanRunIds}
-            followedSources={linkedScanSources}
-            onChangePinned={setLinkedScanRunIds}
-            onChangeFollowed={setLinkedScanSources}
-            scanRuns={scanRuns}
-          />
-        </div>
-        {effectiveLinkedIds.length > 0 && (
-          <div className="flex flex-col gap-1.5">
-            <label className="text-xs font-medium text-muted-foreground uppercase tracking-wide flex items-center gap-1.5">
-              <Filter className="w-3 h-3" />
-              Filter tickers
-              <span className="normal-case font-normal text-muted-foreground/60">narrow which tickers the agent focuses on</span>
-            </label>
-            <AgentFilterSection
-              linkedScanRunIds={effectiveLinkedIds}
-              filters={scanFilters}
-              setFilters={setScanFilters}
-            />
+          <div className="flex items-start gap-2 rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive">
+            <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+            <span className="min-w-0 break-words">{err}</span>
           </div>
         )}
-        <div className="flex flex-col gap-1.5">
-          <label className="inline-flex items-center gap-2 text-xs font-medium text-foreground">
-            <input
-              type="checkbox"
-              checked={conditionEnabled}
-              onChange={(e) => setConditionEnabled(e.target.checked)}
-              className="h-3.5 w-3.5 rounded border-input"
-            />
-            Only send when a condition is met
-            <span className="normal-case font-normal text-muted-foreground/60">
-              the agent only triggers a Telegram alert if the condition you write is satisfied
-            </span>
-          </label>
-          {conditionEnabled && (
+
+        {/* 01 — What to watch */}
+        <div className="flex flex-col gap-3">
+          <SectionLabel>01 · What to watch</SectionLabel>
+          <div className="flex flex-col gap-1.5">
+            <label className="text-xs font-medium text-muted-foreground">Name</label>
+            <input type="text" value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Airline Macro Watch" className={inputClass} />
+          </div>
+          <div className="flex flex-col gap-1.5">
+            <label className="text-xs font-medium text-muted-foreground">
+              Prompt <span className="font-normal text-muted-foreground/50">— plain English, what to watch for</span>
+            </label>
             <textarea
-              value={triggerCondition}
-              onChange={(e) => setTriggerCondition(e.target.value)}
-              rows={3}
-              placeholder="e.g. At least one of my holdings has a same-day news article with sentiment_score below -0.4. OR: Relative volume on AAPL or NVDA is above 2x their 20-day average."
+              value={prompt}
+              onChange={(e) => setPrompt(e.target.value)}
+              rows={5}
+              placeholder={`e.g. Check MACRO_SENSITIVITY cluster trend for airline stocks (AAL, DAL, UAL). Alert me when the cluster score drops below -0.3. Include which dimensions are driving it and any headlines from the last 14 hours.`}
               className={inputClass}
             />
+            {!prompt.trim() && (
+              <div className="flex flex-wrap items-center gap-1.5">
+                <span className="font-mono text-[10px] uppercase tracking-[0.1em] text-muted-foreground/40">try</span>
+                {PROMPT_IDEAS.map((idea) => (
+                  <button
+                    key={idea}
+                    type="button"
+                    onClick={() => setPrompt(idea)}
+                    className="rounded-full border border-border bg-muted/30 px-2.5 py-0.5 text-[11px] text-muted-foreground transition-colors hover:border-amber-500/40 hover:text-amber-500"
+                  >
+                    {idea}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+          <div className="flex flex-col gap-1.5">
+            <label className="text-xs font-medium text-muted-foreground">
+              Tickers <span className="font-normal text-muted-foreground/50">— focus on specific symbols</span>
+            </label>
+            <TickerPicker tickers={tickers} onChange={setTickers} suggestionTickers={suggestionTickers} />
+          </div>
+        </div>
+
+        {/* 02 — When it runs */}
+        <div className="flex flex-col gap-3 border-t border-border/60 pt-5">
+          <SectionLabel>02 · When it runs</SectionLabel>
+          <div data-tour="agent-schedule">
+            <RecurrenceScheduler value={schedule} onChange={setSchedule} tradingSession={tradingSession} onTradingSessionChange={setTradingSession} />
+          </div>
+          <div className="flex flex-col gap-1.5">
+            <label className="text-xs font-medium text-muted-foreground">Timezone</label>
+            <TimezoneSelect value={timezone} onChange={setTimezone} className={inputClass} />
+          </div>
+        </div>
+
+        {/* 03 — Refine (collapsible) */}
+        <div className="flex flex-col gap-3 border-t border-border/60 pt-5">
+          <button type="button" onClick={() => setRefineOpen((v) => !v)} className="flex items-center justify-between gap-2 text-left">
+            <SectionLabel>03 · Refine <span className="text-muted-foreground/30">— optional</span></SectionLabel>
+            <ChevronDown className={`h-4 w-4 text-muted-foreground/50 transition-transform ${refineOpen ? "rotate-180" : ""}`} />
+          </button>
+          {refineOpen && (
+            <div className="flex flex-col gap-4">
+              <div className="flex flex-col gap-1.5">
+                <label className="text-xs font-medium text-muted-foreground">
+                  Linked screenings <span className="font-normal text-muted-foreground/50">— include scan-run context</span>
+                </label>
+                <ScanRunPicker
+                  pinnedIds={linkedScanRunIds}
+                  followedSources={linkedScanSources}
+                  onChangePinned={setLinkedScanRunIds}
+                  onChangeFollowed={setLinkedScanSources}
+                  scanRuns={scanRuns}
+                />
+              </div>
+              {effectiveLinkedIds.length > 0 && (
+                <div className="flex flex-col gap-1.5">
+                  <label className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
+                    <Filter className="h-3 w-3" /> Filter tickers
+                    <span className="font-normal text-muted-foreground/50">— narrow which tickers the agent focuses on</span>
+                  </label>
+                  <AgentFilterSection linkedScanRunIds={effectiveLinkedIds} filters={scanFilters} setFilters={setScanFilters} />
+                </div>
+              )}
+              <div className="flex flex-col gap-1.5">
+                <label className="inline-flex items-start gap-2 text-xs font-medium text-foreground">
+                  <input type="checkbox" checked={conditionEnabled} onChange={(e) => setConditionEnabled(e.target.checked)} className="mt-0.5 h-3.5 w-3.5 rounded border-input" />
+                  <span>
+                    Only alert when a condition is met
+                    <span className="ml-1 font-normal text-muted-foreground/50">— skip the Telegram ping unless your condition is satisfied</span>
+                  </span>
+                </label>
+                {conditionEnabled && (
+                  <textarea
+                    value={triggerCondition}
+                    onChange={(e) => setTriggerCondition(e.target.value)}
+                    rows={3}
+                    placeholder="e.g. At least one of my holdings has a same-day news article with sentiment_score below -0.4. OR: Relative volume on AAPL or NVDA is above 2x their 20-day average."
+                    className={inputClass}
+                  />
+                )}
+              </div>
+            </div>
           )}
         </div>
-        <div className="flex min-w-0 flex-col gap-3 border-t border-border pt-3 sm:flex-row sm:flex-wrap sm:items-center sm:gap-3 sm:pt-1">
-          <div className="flex min-w-0 flex-wrap items-center gap-2 sm:gap-3">
-            <button
-              type="button"
-              onClick={() => void handleSave()}
-              disabled={saving || atLimit || !prompt.trim() || (conditionEnabled && !triggerCondition.trim())}
-              className="inline-flex items-center gap-1.5 rounded-md bg-foreground px-4 py-2 text-sm font-medium text-background transition-opacity hover:opacity-90 disabled:opacity-40 disabled:pointer-events-none"
-            >
-              {saving ? "Saving…" : "Save & activate"}
-            </button>
-            <button
-              type="button"
-              onClick={onClose}
-              className="rounded-md border border-border px-4 py-2 text-sm text-muted-foreground transition-colors hover:bg-muted"
-            >
-              Cancel
-            </button>
-          </div>
-          <p className="min-w-0 text-xs text-muted-foreground/60 sm:ml-auto">
-            Alerts delivered to Telegram (if connected) and shown here
-          </p>
-        </div>
       </div>
-    </div>
+
+      {/* sticky footer */}
+      <div className="flex shrink-0 items-center gap-3 border-t border-border bg-card/90 px-4 py-3 backdrop-blur sm:px-6">
+        <button
+          type="submit"
+          disabled={busy || !canSubmit}
+          className="inline-flex items-center gap-1.5 rounded-md bg-foreground px-4 py-2 text-sm font-medium text-background transition-opacity hover:opacity-90 disabled:pointer-events-none disabled:opacity-40"
+        >
+          {saving && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+          {saving ? "Saving…" : submitLabel}
+        </button>
+        <button type="button" onClick={onCancel} className="rounded-md border border-border px-4 py-2 text-sm text-muted-foreground transition-colors hover:bg-muted">
+          Cancel
+        </button>
+        <span className="ml-auto hidden items-center gap-1 font-mono text-[10px] tracking-[0.04em] text-muted-foreground/40 sm:inline-flex">
+          <Send className="h-3 w-3" /> telegram
+        </span>
+      </div>
+    </form>
   );
+}
+
+/** Mobile-first wrapper: full-screen sheet on phones, centered modal on desktop. */
+function AgentFormDialog({
+  open,
+  onOpenChange,
+  mode,
+  initial,
+  suggestionTickers,
+  onSubmit,
+  disabled,
+}: {
+  open: boolean;
+  onOpenChange: (v: boolean) => void;
+  mode: "create" | "edit";
+  initial?: Partial<AgentFormValues>;
+  suggestionTickers: string[];
+  onSubmit: (v: AgentFormValues) => Promise<AgentSubmitResult>;
+  disabled?: boolean;
+}) {
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="left-0 top-0 flex h-[100dvh] max-h-[100dvh] w-full max-w-xl translate-x-0 translate-y-0 flex-col gap-0 overflow-hidden rounded-none border-0 bg-card p-0 sm:left-[50%] sm:top-[50%] sm:h-auto sm:max-h-[88vh] sm:translate-x-[-50%] sm:translate-y-[-50%] sm:rounded-2xl sm:border">
+        <div className="flex shrink-0 items-center gap-2 border-b border-border px-4 py-3.5 sm:px-6">
+          <span className="h-1.5 w-1.5 rounded-full bg-amber-500" />
+          <DialogTitle className="font-mono text-[11px] font-semibold uppercase tracking-[0.16em] text-amber-500">
+            {mode === "create" ? "New agent" : "Edit agent"}
+          </DialogTitle>
+        </div>
+        {open && (
+          <AgentForm
+            initial={initial}
+            suggestionTickers={suggestionTickers}
+            submitLabel={mode === "create" ? "Save & activate" : "Save changes"}
+            onSubmit={onSubmit}
+            onCancel={() => onOpenChange(false)}
+            disabled={disabled}
+          />
+        )}
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+/** Build the server-action payload shared by create + update. */
+function toScreeningPayload(v: AgentFormValues) {
+  return {
+    name: v.name,
+    prompt: v.prompt,
+    schedule: v.schedule,
+    timezone: v.timezone,
+    tickers: v.tickers,
+    linked_scan_run_ids: v.linkedScanRunIds,
+    linked_scan_sources: v.linkedScanSources,
+    scan_filters: countScreeningsFilterRules(v.scanFilters) > 0 ? v.scanFilters : null,
+    trading_session: (v.tradingSession as TradingSession) ?? "none",
+    condition_enabled: v.conditionEnabled,
+    trigger_condition: v.conditionEnabled ? v.triggerCondition : null,
+  };
+}
+
+/** Map a stored screening to the form's initial values. */
+function screeningToFormInitial(s: ScheduledScreening): Partial<AgentFormValues> {
+  return {
+    name: s.name,
+    prompt: s.prompt,
+    schedule: s.schedule,
+    timezone: s.timezone,
+    tradingSession: s.trading_session ?? null,
+    tickers: s.tickers ?? [],
+    linkedScanRunIds: s.linked_scan_run_ids ?? [],
+    linkedScanSources: s.linked_scan_sources ?? [],
+    scanFilters: (s.scan_filters as ScreeningsFilters | null) ?? DEFAULT_SCREENINGS_FILTERS,
+    conditionEnabled: s.condition_enabled ?? false,
+    triggerCondition: s.trigger_condition ?? "",
+  };
 }
 
 // ── Run history ─────────────────────────────────────────────────────────────
@@ -2024,31 +2048,13 @@ function AgentCard({ screening, suggestionTickers }: { screening: ScheduledScree
   const [testing, setTesting] = useState(false);
   const [testResult, setTestResult] = useState<ScreeningResult | null>(null);
   const [testError, setTestError] = useState<string | null>(null);
+  const [showHistory, setShowHistory] = useState(false);
 
-  const [editName, setEditName] = useState(screening.name);
-  const [editPrompt, setEditPrompt] = useState(screening.prompt);
-  const [editSchedule, setEditSchedule] = useState(screening.schedule);
-  const [editTimezone, setEditTimezone] = useState(screening.timezone);
-  const [editTradingSession, setEditTradingSession] = useState<string | null>(screening.trading_session ?? null);
-  const [editTickers, setEditTickers] = useState<string[]>(screening.tickers ?? []);
-  const [editLinkedScanRunIds, setEditLinkedScanRunIds] = useState<number[]>(screening.linked_scan_run_ids ?? []);
-  const [editLinkedScanSources, setEditLinkedScanSources] = useState<string[]>(screening.linked_scan_sources ?? []);
-  const [editScanFilters, setEditScanFilters] = useState<ScreeningsFilters>((screening.scan_filters as ScreeningsFilters | null) ?? DEFAULT_SCREENINGS_FILTERS);
-  const [editConditionEnabled, setEditConditionEnabled] = useState<boolean>(screening.condition_enabled ?? false);
-  const [editTriggerCondition, setEditTriggerCondition] = useState<string>(screening.trigger_condition ?? "");
-  const [scanRuns, setScanRuns] = useState<ScanRunSummary[]>([]);
-  const [saving, setSaving] = useState(false);
-  const [saveErr, setSaveErr] = useState<string | null>(null);
-
-  const editEffectiveLinkedIds = useMemo(
-    () => effectiveLinkedRunIds(editLinkedScanRunIds, editLinkedScanSources, scanRuns),
-    [editLinkedScanRunIds, editLinkedScanSources, scanRuns],
-  );
-
+  // Re-render once a minute so the next-run countdown actually advances.
+  const [, setTick] = useState(0);
   useEffect(() => {
-    void listScanRuns().then((res) => {
-      if (res.ok) setScanRuns(res.data);
-    });
+    const id = setInterval(() => setTick((n) => n + 1), 60_000);
+    return () => clearInterval(id);
   }, []);
 
   async function handleToggle() {
@@ -2064,34 +2070,13 @@ function AgentCard({ screening, suggestionTickers }: { screening: ScheduledScree
     window.location.reload();
   }
 
-  async function handleSave() {
-    if (!editPrompt.trim()) return;
-    if (editConditionEnabled && !editTriggerCondition.trim()) {
-      setSaveErr("Trigger condition is required when 'Only send when condition is met' is enabled.");
-      return;
-    }
-    setSaving(true);
-    setSaveErr(null);
-    const res = await updateScheduledScreening(screening.id, {
-      name: editName.trim() || "Untitled Agent",
-      prompt: editPrompt.trim(),
-      schedule: editSchedule,
-      timezone: editTimezone,
-      tickers: editTickers,
-      linked_scan_run_ids: editLinkedScanRunIds,
-      linked_scan_sources: editLinkedScanSources,
-      scan_filters: countScreeningsFilterRules(editScanFilters) > 0 ? editScanFilters : null,
-      trading_session: (editTradingSession as TradingSession) ?? "none",
-      condition_enabled: editConditionEnabled,
-      trigger_condition: editConditionEnabled ? editTriggerCondition.trim() : null,
-    });
+  async function handleEditSubmit(v: AgentFormValues): Promise<AgentSubmitResult> {
+    const res = await updateScheduledScreening(screening.id, toScreeningPayload(v));
     if (res.ok) {
-      setEditing(false);
       window.location.reload();
-    } else {
-      setSaveErr(res.error);
-      setSaving(false);
+      return { ok: true };
     }
+    return { ok: false, error: res.error };
   }
 
   async function handleTestRun() {
@@ -2126,293 +2111,187 @@ function AgentCard({ screening, suggestionTickers }: { screening: ScheduledScree
     setTesting(false);
   }
 
-  const [showHistory, setShowHistory] = useState(false);
-  const scheduleLabel = describeCron(screening.schedule);
-  const inputClass = "w-full rounded-md border border-input bg-background px-3 py-2 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring disabled:opacity-50";
+  const active = screening.is_active;
+  const marketHours = screening.trading_session && screening.trading_session !== "none";
+  const filterCount = screening.scan_filters ? countScreeningsFilterRules(screening.scan_filters) : 0;
+  const nextRun = active ? nextRuns(screening.schedule, 1)[0] : undefined;
 
-  if (editing) {
-    return (
-      <div className="min-w-0 overflow-hidden rounded-2xl border border-border bg-card">
-        <div className="flex items-center justify-between border-b border-border px-4 py-3 sm:px-5">
-          <div className="flex items-center gap-2">
-            <div className={`w-2 h-2 rounded-full ${screening.is_active ? "bg-emerald-500" : "bg-muted-foreground/30"}`} />
-            <span className="text-xs font-semibold uppercase tracking-widest text-amber-500">Edit agent</span>
-          </div>
-          <button type="button" onClick={() => setEditing(false)} className="text-xs text-muted-foreground hover:text-foreground transition-colors">Cancel</button>
-        </div>
-        <div className="flex min-w-0 flex-col gap-4 px-4 py-5 sm:px-5">
-          {saveErr && <p className="text-sm text-destructive">{saveErr}</p>}
-          <div className="flex flex-col gap-1.5">
-            <label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Name</label>
-            <input type="text" value={editName} onChange={(e) => setEditName(e.target.value)} className={inputClass} />
-          </div>
-          <div className="flex flex-col gap-1.5">
-            <label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Prompt</label>
-            <textarea value={editPrompt} onChange={(e) => setEditPrompt(e.target.value)} rows={4} className={inputClass} />
-          </div>
-          <div className="flex flex-col gap-1.5">
-            <label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Recurrence</label>
-            <RecurrenceScheduler value={editSchedule} onChange={setEditSchedule} tradingSession={editTradingSession} onTradingSessionChange={setEditTradingSession} />
-            </div>
-          <div className="flex flex-col gap-1">
-            <label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Timezone</label>
-            <TimezoneSelect value={editTimezone} onChange={setEditTimezone} className={inputClass} />
-          </div>
-          <div className="flex flex-col gap-1">
-            <label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
-              Tickers
-              <span className="ml-2 normal-case font-normal text-muted-foreground/60">focus the agent on specific symbols</span>
-            </label>
-            <TickerPicker tickers={editTickers} onChange={setEditTickers} suggestionTickers={suggestionTickers} />
-          </div>
-          {scanRuns.length > 0 && (
-            <div className="flex flex-col gap-1.5">
-              <label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
-                Linked screenings
-                <span className="ml-2 normal-case font-normal text-muted-foreground/60">pull context from a scan run</span>
-              </label>
-              <ScanRunPicker
-                pinnedIds={editLinkedScanRunIds}
-                followedSources={editLinkedScanSources}
-                onChangePinned={setEditLinkedScanRunIds}
-                onChangeFollowed={setEditLinkedScanSources}
-                scanRuns={scanRuns}
-              />
-            </div>
-          )}
-          {editEffectiveLinkedIds.length > 0 && (
-            <div className="flex flex-col gap-1.5">
-              <label className="text-xs font-medium text-muted-foreground uppercase tracking-wide flex items-center gap-1.5">
-                <Filter className="w-3 h-3" />
-                Filter tickers
-                <span className="normal-case font-normal text-muted-foreground/60">narrow which tickers the agent focuses on</span>
-              </label>
-              <AgentFilterSection
-                linkedScanRunIds={editEffectiveLinkedIds}
-                filters={editScanFilters}
-                setFilters={setEditScanFilters}
-              />
-            </div>
-          )}
-          <div className="flex flex-col gap-1.5">
-            <label className="inline-flex items-center gap-2 text-xs font-medium text-foreground">
-              <input
-                type="checkbox"
-                checked={editConditionEnabled}
-                onChange={(e) => setEditConditionEnabled(e.target.checked)}
-                className="h-3.5 w-3.5 rounded border-input"
-              />
-              Only send when a condition is met
-              <span className="normal-case font-normal text-muted-foreground/60">
-                the agent only triggers a Telegram alert if the condition you write is satisfied
-              </span>
-            </label>
-            {editConditionEnabled && (
-              <textarea
-                value={editTriggerCondition}
-                onChange={(e) => setEditTriggerCondition(e.target.value)}
-                rows={3}
-                placeholder="e.g. At least one of my holdings has a same-day news article with sentiment_score below -0.4."
-                className={inputClass}
-              />
-            )}
-          </div>
-          <div className="flex min-w-0 flex-wrap items-center gap-2 border-t border-border pt-3 sm:gap-3 sm:pt-1">
-            <button
-              type="button"
-              onClick={() => void handleSave()}
-              disabled={saving || !editPrompt.trim() || (editConditionEnabled && !editTriggerCondition.trim())}
-              className="inline-flex items-center gap-1.5 rounded-md bg-foreground px-4 py-2 text-sm font-medium text-background transition-opacity hover:opacity-90 disabled:opacity-40 disabled:pointer-events-none"
-            >
-              {saving ? "Saving…" : "Save changes"}
-            </button>
-            <button type="button" onClick={() => setEditing(false)} className="rounded-md border border-border px-4 py-2 text-sm text-muted-foreground transition-colors hover:bg-muted">
-              Cancel
-            </button>
-          </div>
-        </div>
-      </div>
-    );
-  }
+  // Left signal strip: paused = muted, recently triggered = amber, healthy = emerald.
+  const stripClass = !active
+    ? "bg-muted-foreground/25"
+    : screening.last_triggered
+      ? "bg-amber-500"
+      : "bg-emerald-500";
 
   return (
-    <div className={`group rounded-2xl border bg-card transition-all duration-200 ${deleting ? "pointer-events-none border-border opacity-50" : "border-border hover:border-foreground/15 hover:shadow-[0_4px_28px_-12px_rgba(0,0,0,0.3)]"}`}>
-      <div className="flex min-w-0 flex-col gap-3 px-4 py-4 sm:flex-row sm:items-start sm:gap-3 sm:px-5">
-        <div className="flex min-w-0 flex-1 items-start gap-3">
-          <span className="relative mt-1.5 flex h-2 w-2 shrink-0">
-            {screening.is_active && (
-              <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-500/60" />
-            )}
-            <span className={`relative inline-flex h-2 w-2 rounded-full ${screening.is_active ? "bg-emerald-500" : "bg-muted-foreground/30"}`} />
-          </span>
+    <>
+      <div
+        className={`group relative overflow-hidden rounded-xl border bg-card transition-all duration-200 ${
+          deleting
+            ? "pointer-events-none border-border opacity-50"
+            : "border-border hover:border-foreground/15 hover:shadow-[0_4px_28px_-12px_rgba(0,0,0,0.3)]"
+        }`}
+      >
+        {/* signal strip */}
+        <span
+          aria-hidden
+          className={`absolute inset-y-0 left-0 w-[3px] ${stripClass} ${active && !screening.last_triggered ? "animate-signal-pulse" : ""}`}
+        />
 
+        <div className="flex min-w-0 items-start gap-3 py-3.5 pl-5 pr-3 sm:pr-4">
           <div className="min-w-0 flex-1">
-            <div className="flex flex-wrap items-center gap-2">
-            <span className="font-semibold text-sm text-foreground truncate">{screening.name}</span>
-            <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium ${
-              screening.is_active
-                ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
-                : "bg-muted text-muted-foreground"
-            }`}>
-              {screening.is_active ? "Active" : "Paused"}
-            </span>
-            {screening.last_triggered && (
-              <span className="inline-flex items-center rounded-full bg-amber-500/10 px-2 py-0.5 text-[11px] font-medium text-amber-600 dark:text-amber-400">
-                Triggered
+            {/* row 1 — name · state · next-run */}
+            <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+              <span className="truncate text-sm font-semibold text-foreground">{screening.name}</span>
+              <span className={`rounded border px-1.5 py-px font-mono text-[9px] uppercase tracking-[0.1em] ${
+                active
+                  ? "border-emerald-500/30 bg-emerald-500/5 text-emerald-600 dark:text-emerald-400"
+                  : "border-border bg-muted/50 text-muted-foreground"
+              }`}>
+                {active ? "live" : "paused"}
               </span>
-            )}
+              {screening.last_triggered && (
+                <span className="inline-flex items-center gap-1 rounded border border-amber-500/30 bg-amber-500/5 px-1.5 py-px font-mono text-[9px] uppercase tracking-[0.1em] text-amber-600 dark:text-amber-400">
+                  <Bell className="h-2.5 w-2.5" /> fired
+                </span>
+              )}
+              <span className="ml-auto shrink-0 font-mono text-[11px] tabular-nums text-muted-foreground/70">
+                {active ? `next ${fmtCountdown(nextRun)}` : "—"}
+              </span>
             </div>
 
-            <p className="mt-1 text-sm text-muted-foreground line-clamp-2">{screening.prompt}</p>
+            {/* row 2 — prompt */}
+            <p className="mt-1.5 line-clamp-2 text-[13px] leading-relaxed text-muted-foreground">{screening.prompt}</p>
 
-            {((screening.tickers?.length ?? 0) > 0 || (screening.linked_scan_run_ids?.length ?? 0) > 0 || (screening.linked_scan_sources?.length ?? 0) > 0) && (
-            <div className="mt-2 flex flex-wrap items-center gap-1.5">
+            {/* row 3 — mono meta strip */}
+            <div className="mt-2.5 flex flex-wrap items-center gap-1.5 font-mono text-[10px] tracking-[0.03em]">
+              <span className="inline-flex items-center gap-1 text-muted-foreground/60">
+                <Clock className="h-3 w-3 shrink-0" />
+                {describeCron(screening.schedule)}
+              </span>
               {(screening.tickers ?? []).map((t) => (
-                <span key={t} className="inline-flex items-center rounded bg-muted px-1.5 py-0.5 text-[11px] font-mono font-medium text-foreground/80">
-                  {t}
-                </span>
+                <span key={t} className="rounded bg-muted px-1.5 py-px font-medium text-foreground/80">{t}</span>
               ))}
+              {marketHours && (
+                <span className="rounded border border-border px-1.5 py-px text-muted-foreground/70">mkt hrs</span>
+              )}
+              {screening.condition_enabled && (
+                <span
+                  className="rounded border border-amber-500/30 bg-amber-500/5 px-1.5 py-px text-amber-600 dark:text-amber-400"
+                  title={screening.trigger_condition ?? undefined}
+                >
+                  cond
+                </span>
+              )}
               {(screening.linked_scan_sources ?? []).length > 0 && (
                 <span
-                  className="inline-flex items-center gap-1 rounded bg-emerald-500/10 px-1.5 py-0.5 text-[11px] text-emerald-600 dark:text-emerald-400"
+                  className="inline-flex items-center gap-1 rounded border border-emerald-500/30 bg-emerald-500/5 px-1.5 py-px text-emerald-600 dark:text-emerald-400"
                   title={(screening.linked_scan_sources ?? []).map(formatSourceLabel).join(", ")}
                 >
-                  <Link2 className="w-3 h-3" />
-                  {screening.linked_scan_sources.length} following latest
+                  <Link2 className="h-2.5 w-2.5" /> {screening.linked_scan_sources.length} live
                 </span>
               )}
               {(screening.linked_scan_run_ids ?? []).length > 0 && (
-                <span className="inline-flex items-center gap-1 rounded bg-muted px-1.5 py-0.5 text-[11px] text-muted-foreground">
-                  <Link2 className="w-3 h-3" />
-                  {screening.linked_scan_run_ids.length} pinned
+                <span className="inline-flex items-center gap-1 rounded border border-border px-1.5 py-px text-muted-foreground/70">
+                  <Link2 className="h-2.5 w-2.5" /> {screening.linked_scan_run_ids.length} pin
                 </span>
               )}
-              {screening.scan_filters &&
-                countScreeningsFilterRules(screening.scan_filters) > 0 && (
-                <span className="inline-flex items-center gap-1 rounded bg-muted px-1.5 py-0.5 text-[11px] text-muted-foreground">
-                  <Filter className="w-3 h-3" />
-                  {countScreeningsFilterRules(screening.scan_filters)} filter
-                  {countScreeningsFilterRules(screening.scan_filters) !== 1
-                    ? "s"
-                    : ""}
+              {filterCount > 0 && (
+                <span className="inline-flex items-center gap-1 rounded border border-border px-1.5 py-px text-muted-foreground/70">
+                  <Filter className="h-2.5 w-2.5" /> {filterCount}
                 </span>
               )}
             </div>
-            )}
 
-            <div className="mt-2 flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground/60">
-            <span className="inline-flex min-w-0 items-center gap-1 break-words">
-              <Clock className="h-3 w-3 shrink-0" />
-              <span className="min-w-0">{scheduleLabel}</span>
-            </span>
-            {screening.trading_session && screening.trading_session !== "none" && screening.trading_session !== null && (
-              <span className="inline-flex items-center gap-1 rounded bg-foreground/10 px-1.5 py-0.5 font-medium text-foreground/70">
-                Market hours
-              </span>
-            )}
-            {screening.condition_enabled && (
-              <span
-                className="inline-flex items-center gap-1 rounded bg-amber-500/10 px-1.5 py-0.5 font-medium text-amber-600 dark:text-amber-400"
-                title={screening.trigger_condition ?? undefined}
-              >
-                Conditional
-              </span>
-            )}
-            <span className="min-w-0 break-all">{screening.timezone}</span>
+            {/* last-run inline status */}
             {screening.last_run_at && (
-              <span className="min-w-0 break-words">
-                Last run {new Date(screening.last_run_at).toISOString().replace("T", " ").slice(0, 16)} UTC
-              </span>
+              <p className="mt-2 font-mono text-[10px] text-muted-foreground/50">
+                {screening.last_triggered ? "⚡ triggered" : "✓ no trigger"} · last {formatRunTime(screening.last_run_at)} · {screening.timezone}
+              </p>
             )}
-            </div>
 
             {testing && (
-            <div className="mt-3 flex items-center gap-2 text-sm text-muted-foreground">
-              <Loader2 className="w-3.5 h-3.5 animate-spin" />
-              Queued — waiting for Mac Mini to pick up…
-            </div>
+              <div className="mt-3 flex items-center gap-2 text-sm text-muted-foreground">
+                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                Queued — waiting for the agent runner to pick up…
+              </div>
             )}
             {testError && (
-            <div className="mt-3 rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs text-destructive">
-              {testError}
-            </div>
+              <div className="mt-3 rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs text-destructive">
+                {testError}
+              </div>
             )}
             {testResult && (
-            <div className={`mt-3 rounded-lg border px-3 py-2.5 text-xs ${
-              testResult.triggered
-                ? "border-amber-500/30 bg-amber-500/5"
-                : "border-border bg-muted/50"
-            }`}>
-              <div className="flex items-center gap-1.5 mb-1">
-                <span className={`font-medium ${testResult.triggered ? "text-amber-600 dark:text-amber-400" : "text-muted-foreground"}`}>
-                  {testResult.triggered ? "Triggered" : "Not triggered"}
-                </span>
+              <div className={`mt-3 rounded-lg border px-3 py-2.5 text-xs ${
+                testResult.triggered ? "border-amber-500/30 bg-amber-500/5" : "border-border bg-muted/50"
+              }`}>
+                <div className="mb-1 flex items-center gap-1.5">
+                  <span className={`font-mono text-[10px] uppercase tracking-[0.1em] ${testResult.triggered ? "text-amber-600 dark:text-amber-400" : "text-muted-foreground"}`}>
+                    {testResult.triggered ? "triggered" : "not triggered"}
+                  </span>
+                </div>
+                {testResult.summary && <p className="leading-relaxed text-foreground/80">{testResult.summary}</p>}
               </div>
-              {testResult.summary && (
-                <p className="text-foreground/80 leading-relaxed">{testResult.summary}</p>
-              )}
-            </div>
             )}
 
             {showHistory && <RunHistory screeningId={screening.id} />}
           </div>
-        </div>
 
-        <div className="flex shrink-0 items-center justify-end gap-2 sm:pt-1">
-          <button
-            type="button"
-            onClick={() => setShowHistory((v) => !v)}
-            title="Run history"
-            aria-pressed={showHistory}
-            className={`flex h-8 w-8 items-center justify-center rounded-md border transition-colors ${
-              showHistory
-                ? "border-amber-500/30 bg-amber-500/10 text-amber-600 dark:text-amber-400"
-                : "border-border text-muted-foreground hover:bg-muted hover:text-foreground"
-            }`}
-          >
-            <History className="w-3.5 h-3.5" />
-          </button>
-          <button
-            type="button"
-            onClick={() => { setEditing(true); setEditName(screening.name); setEditPrompt(screening.prompt); setEditSchedule(screening.schedule); setEditTimezone(screening.timezone); setEditTradingSession(screening.trading_session ?? null); setEditTickers(screening.tickers ?? []); setEditLinkedScanRunIds(screening.linked_scan_run_ids ?? []); setEditLinkedScanSources(screening.linked_scan_sources ?? []); setEditConditionEnabled(screening.condition_enabled ?? false); setEditTriggerCondition(screening.trigger_condition ?? ""); setSaveErr(null); }}
-            title="Edit agent"
-            className="flex h-8 w-8 items-center justify-center rounded-md border border-border text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-          >
-            <Pencil className="w-3.5 h-3.5" />
-          </button>
-          <button
-            type="button"
-            onClick={() => void handleTestRun()}
-            disabled={testing}
-            title="Test run now"
-            className="flex h-8 w-8 items-center justify-center rounded-md border border-border text-muted-foreground transition-colors hover:border-amber-500/30 hover:bg-amber-500/10 hover:text-amber-600 disabled:opacity-40"
-          >
-            {testing
-              ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
-              : <Zap className="w-3.5 h-3.5" />}
-          </button>
-          <button
-            type="button"
-            onClick={() => void handleToggle()}
-            disabled={toggling}
-            title={screening.is_active ? "Pause agent" : "Resume agent"}
-            className="flex h-8 w-8 items-center justify-center rounded-md border border-border text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:opacity-40"
-          >
-            {screening.is_active
-              ? <Pause className="w-3.5 h-3.5" />
-              : <Play className="w-3.5 h-3.5" />}
-          </button>
-          <button
-            type="button"
-            onClick={() => void handleDelete()}
-            disabled={deleting}
-            title="Delete agent"
-            className="flex h-8 w-8 items-center justify-center rounded-md border border-border text-muted-foreground transition-colors hover:border-destructive/30 hover:bg-destructive/10 hover:text-destructive disabled:opacity-40"
-          >
-            <Trash2 className="w-3.5 h-3.5" />
-          </button>
+          {/* actions — one primary "Run" + overflow menu */}
+          <div className="flex shrink-0 items-center gap-1">
+            <button
+              type="button"
+              onClick={() => void handleTestRun()}
+              disabled={testing}
+              title="Test run now"
+              className="inline-flex h-8 items-center gap-1.5 rounded-md border border-border px-2.5 font-mono text-[11px] text-foreground transition-colors hover:border-amber-500/40 hover:bg-amber-500/5 hover:text-amber-600 disabled:opacity-40 dark:hover:text-amber-400"
+            >
+              {testing ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Zap className="h-3.5 w-3.5" />}
+              <span className="hidden sm:inline">Run</span>
+            </button>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <button
+                  type="button"
+                  title="More actions"
+                  className="flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                >
+                  <MoreHorizontal className="h-4 w-4" />
+                </button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-44">
+                <DropdownMenuItem onSelect={() => setEditing(true)}>
+                  <Pencil className="mr-2 h-3.5 w-3.5" /> Edit
+                </DropdownMenuItem>
+                <DropdownMenuItem onSelect={() => setShowHistory((v) => !v)}>
+                  <History className="mr-2 h-3.5 w-3.5" /> {showHistory ? "Hide history" : "Run history"}
+                </DropdownMenuItem>
+                <DropdownMenuItem disabled={toggling} onSelect={() => void handleToggle()}>
+                  {active ? <Pause className="mr-2 h-3.5 w-3.5" /> : <Play className="mr-2 h-3.5 w-3.5" />}
+                  {active ? "Pause" : "Resume"}
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem
+                  disabled={deleting}
+                  onSelect={() => void handleDelete()}
+                  className="text-destructive focus:text-destructive"
+                >
+                  <Trash2 className="mr-2 h-3.5 w-3.5" /> Delete
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </div>
         </div>
       </div>
-    </div>
+
+      <AgentFormDialog
+        open={editing}
+        onOpenChange={setEditing}
+        mode="edit"
+        initial={screeningToFormInitial(screening)}
+        suggestionTickers={suggestionTickers}
+        onSubmit={handleEditSubmit}
+      />
+    </>
   );
 }
