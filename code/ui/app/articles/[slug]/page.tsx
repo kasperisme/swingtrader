@@ -2,7 +2,7 @@ import Link from "next/link";
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { Suspense } from "react";
-import { ArrowLeft, ArrowUpRight, TrendingUp } from "lucide-react";
+import { ArrowLeft, ArrowUpRight, Lock, TrendingUp } from "lucide-react";
 import { createClient as createSupabaseClient } from "@supabase/supabase-js";
 
 import { createClient } from "@/lib/supabase/server";
@@ -13,6 +13,7 @@ import { ArticleEarlyAccessCTA } from "./_components/article-early-access-cta";
 import { ClusterScoreCard } from "./_components/cluster-score-card";
 import { ScreenerBridgeCTA } from "./_components/screener-bridge-cta";
 import { FloatingCTA } from "./_components/floating-cta";
+import { MidPageEmailCapture } from "./_components/mid-page-email-capture";
 import {
   getLatestMarketScreeningResultRows,
   getMarketScreeningBySlug,
@@ -84,6 +85,23 @@ function clampText(s: string, max: number): string {
   const t = s.trim().replace(/\s+/g, " ");
   if (t.length <= max) return t;
   return t.slice(0, max - 1).trimEnd() + "…";
+}
+
+function signedScore(n: number, digits = 2): string {
+  return `${n >= 0 ? "+" : ""}${n.toFixed(digits)}`;
+}
+
+/**
+ * Build the SEO <title> bounded to 60 chars: "[headline] — TICKER ±score |
+ * NewsImpactScreener". The ticker tag + brand suffix are always preserved; only
+ * the headline is trimmed to fit the budget.
+ */
+function buildBoundedTitle(headline: string, tickerTag: string): string {
+  const brand = " | NewsImpactScreener";
+  const suffix = `${tickerTag}${brand}`;
+  const room = 60 - suffix.length;
+  const head = clampText(headline, Math.max(12, room));
+  return `${head}${suffix}`;
 }
 
 type ArticleRow = {
@@ -342,6 +360,25 @@ function ScoreText({ value, digits = 3 }: { value: number; digits?: number }) {
   );
 }
 
+/**
+ * Lock overlay for gated list rows — sits over the blurred preview and routes to
+ * the early-access CTA on the same page. Shared by the claim and stock gates.
+ */
+function GateOverlay({ count, noun }: { count: number; noun: string }) {
+  return (
+    <div className="absolute inset-0 flex items-center justify-center">
+      <Link
+        href="#early-access"
+        className="inline-flex items-center gap-2 rounded-full border border-amber-500/30 bg-background/80 px-4 py-2 font-mono text-[11px] uppercase tracking-[0.18em] text-amber-400 backdrop-blur-sm transition-colors hover:border-amber-500/60 hover:text-amber-300"
+      >
+        <Lock size={12} />
+        Unlock {count} more {noun}
+        {count === 1 ? "" : "s"}
+      </Link>
+    </div>
+  );
+}
+
 function DimensionList({
   rows,
 }: {
@@ -384,12 +421,60 @@ function DimensionList({
   );
 }
 
+function StockRow({
+  s,
+  idx,
+  tone,
+  max,
+}: {
+  s: RankedStock;
+  idx: number;
+  tone: "pos" | "neg";
+  max: number;
+}) {
+  return (
+    <li className="grid grid-cols-[1.25rem_1fr_auto] items-baseline gap-3">
+      <span className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground/70">
+        {String(idx + 1).padStart(2, "0")}
+      </span>
+      <div className="min-w-0">
+        <div className="mb-1 flex items-baseline justify-between gap-3">
+          <span className="truncate text-sm">
+            <span className="font-semibold tracking-tight text-foreground">
+              {s.ticker}
+            </span>
+            {s.sector ? (
+              <span className="ml-2 text-xs text-muted-foreground">
+                {s.sector}
+              </span>
+            ) : null}
+          </span>
+        </div>
+        <MagnitudeBar value={s.score} max={max} tone={tone} />
+      </div>
+      <span
+        className={
+          tone === "pos"
+            ? "font-mono text-xs tabular-nums text-emerald-500"
+            : "font-mono text-xs tabular-nums text-rose-500"
+        }
+      >
+        {tone === "pos" ? "+" : ""}
+        {s.score.toFixed(3)}
+      </span>
+    </li>
+  );
+}
+
 function StockLedger({
   rows,
   tone,
+  lockAfter,
 }: {
   rows: RankedStock[];
   tone: "pos" | "neg";
+  /** Show this many rows free, then blur + gate the rest behind early access. */
+  lockAfter?: number;
 }) {
   if (rows.length === 0) {
     return (
@@ -399,41 +484,36 @@ function StockLedger({
     );
   }
   const max = rows.reduce((m, r) => Math.max(m, Math.abs(r.score)), 0);
+  const limit = lockAfter ?? rows.length;
+  const free = rows.slice(0, limit);
+  const locked = rows.slice(limit);
   return (
-    <ol className="space-y-3">
-      {rows.map((s, idx) => (
-        <li key={s.ticker} className="grid grid-cols-[1.25rem_1fr_auto] items-baseline gap-3">
-          <span className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground/70">
-            {String(idx + 1).padStart(2, "0")}
-          </span>
-          <div className="min-w-0">
-            <div className="mb-1 flex items-baseline justify-between gap-3">
-              <span className="truncate text-sm">
-                <span className="font-semibold tracking-tight text-foreground">
-                  {s.ticker}
-                </span>
-                {s.sector ? (
-                  <span className="ml-2 text-xs text-muted-foreground">
-                    {s.sector}
-                  </span>
-                ) : null}
-              </span>
-            </div>
-            <MagnitudeBar value={s.score} max={max} tone={tone} />
-          </div>
-          <span
-            className={
-              tone === "pos"
-                ? "font-mono text-xs tabular-nums text-emerald-500"
-                : "font-mono text-xs tabular-nums text-rose-500"
-            }
+    <div>
+      <ol className="space-y-3">
+        {free.map((s, idx) => (
+          <StockRow key={s.ticker} s={s} idx={idx} tone={tone} max={max} />
+        ))}
+      </ol>
+      {locked.length > 0 && (
+        <div className="relative mt-3">
+          <ol
+            aria-hidden
+            className="space-y-3 select-none blur-[5px] [mask-image:linear-gradient(to_bottom,black,transparent)]"
           >
-            {tone === "pos" ? "+" : ""}
-            {s.score.toFixed(3)}
-          </span>
-        </li>
-      ))}
-    </ol>
+            {locked.map((s, idx) => (
+              <StockRow
+                key={s.ticker}
+                s={s}
+                idx={limit + idx}
+                tone={tone}
+                max={max}
+              />
+            ))}
+          </ol>
+          <GateOverlay count={locked.length} noun="ticker" />
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -608,10 +688,39 @@ function ArticleTagsRow({
   );
 }
 
+function KeyPointRow({
+  row,
+  idx,
+}: {
+  row: { id: string; impact: number; text: string };
+  idx: number;
+}) {
+  return (
+    <li className="py-3 first:pt-0 last:pb-0">
+      <div className="flex items-start gap-3">
+        <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full border border-border/60 bg-muted/30 font-mono text-[10px] text-muted-foreground">
+          {idx + 1}
+        </span>
+        <div className="min-w-0 flex-1">
+          <div className="flex items-baseline justify-between gap-3">
+            <p className="text-sm leading-relaxed text-foreground/90">
+              {row.text}
+            </p>
+            <ScoreText value={row.impact} digits={2} />
+          </div>
+        </div>
+      </div>
+    </li>
+  );
+}
+
 function KeyPointsList({
   rows,
+  lockAfter,
 }: {
   rows: Array<{ id: string; impact: number; text: string }>;
+  /** Show this many claims free, then blur + gate the rest. */
+  lockAfter?: number;
 }) {
   if (rows.length === 0) {
     return (
@@ -620,26 +729,30 @@ function KeyPointsList({
       </p>
     );
   }
+  const limit = lockAfter ?? rows.length;
+  const free = rows.slice(0, limit);
+  const locked = rows.slice(limit);
   return (
-    <ol className="divide-y divide-border/40">
-      {rows.map((row, idx) => (
-        <li key={row.id} className="py-3 first:pt-0 last:pb-0">
-          <div className="flex items-start gap-3">
-            <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full border border-border/60 bg-muted/30 font-mono text-[10px] text-muted-foreground">
-              {idx + 1}
-            </span>
-            <div className="min-w-0 flex-1">
-              <div className="flex items-baseline justify-between gap-3">
-                <p className="text-sm leading-relaxed text-foreground/90">
-                  {row.text}
-                </p>
-                <ScoreText value={row.impact} digits={2} />
-              </div>
-            </div>
-          </div>
-        </li>
-      ))}
-    </ol>
+    <div>
+      <ol className="divide-y divide-border/40">
+        {free.map((row, idx) => (
+          <KeyPointRow key={row.id} row={row} idx={idx} />
+        ))}
+      </ol>
+      {locked.length > 0 && (
+        <div className="relative mt-3.5">
+          <ol
+            aria-hidden
+            className="divide-y divide-border/40 select-none blur-[5px] [mask-image:linear-gradient(to_bottom,black,transparent)]"
+          >
+            {locked.map((row, idx) => (
+              <KeyPointRow key={row.id} row={row} idx={limit + idx} />
+            ))}
+          </ol>
+          <GateOverlay count={locked.length} noun="claim" />
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -719,6 +832,11 @@ function AnalyticsRegion({
   ctaTickers,
   ctaArticle,
   bridge,
+  claimLockAfter,
+  loserLockAfter,
+  sourceUrl,
+  sourceLabel,
+  showEmailCapture,
 }: {
   clusterProfile: Array<{
     id: string;
@@ -741,6 +859,15 @@ function AnalyticsRegion({
   ctaTickers: string[];
   ctaArticle: { slug: string; id: number; title: string };
   bridge: ScreenerBridge | null;
+  /** Gate claims after N (set when the story has 6+ claims). */
+  claimLockAfter?: number;
+  /** Gate the negatively-impacted ledger after N (set on short/cold stories). */
+  loserLockAfter?: number;
+  /** Original-source URL + label, rendered as an attribution badge above the gate. */
+  sourceUrl: string | null;
+  sourceLabel: string;
+  /** Show the soft mid-page email capture (logged-out visitors only). */
+  showEmailCapture: boolean;
 }) {
   return (
     <div className="space-y-12">
@@ -752,7 +879,7 @@ function AnalyticsRegion({
           <h2 className="mb-5 text-base font-semibold tracking-tight text-foreground/90">
             What matters in this story
           </h2>
-          <KeyPointsList rows={storyKeyPoints} />
+          <KeyPointsList rows={storyKeyPoints} lockAfter={claimLockAfter} />
         </section>
 
         <section>
@@ -772,6 +899,29 @@ function AnalyticsRegion({
             </div>
           </div>
         </section>
+
+        {/* Just above the gate: source attribution (moved off the top of the
+            page) + a soft email capture aimed at cold organic arrivals. */}
+        {sourceUrl ? (
+          <div className="-mb-6">
+            <Link
+              href={sourceUrl}
+              target="_blank"
+              rel="noreferrer"
+              className="group inline-flex items-center gap-1.5 rounded-full border border-border/60 bg-muted/20 px-3 py-1 font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground transition-colors hover:border-border hover:text-foreground"
+            >
+              Read original · {sourceLabel}
+              <ArrowUpRight
+                size={11}
+                className="transition-transform duration-200 group-hover:-translate-y-px group-hover:translate-x-px"
+              />
+            </Link>
+          </div>
+        ) : null}
+
+        {showEmailCapture ? (
+          <MidPageEmailCapture screeningSlugs={["nis-momentum"]} />
+        ) : null}
 
         <ArticleEarlyAccessCTA
           tickers={ctaTickers}
@@ -826,7 +976,7 @@ function AnalyticsRegion({
                   Offered
                 </span>
               </div>
-              <StockLedger rows={losers} tone="neg" />
+              <StockLedger rows={losers} tone="neg" lockAfter={loserLockAfter} />
             </div>
           </div>
         </section>
@@ -844,6 +994,7 @@ function AnalyticsRegion({
 }
 
 type ArticleMetaRow = {
+  id: number;
   slug: string | null;
   title: string | null;
   image_url: string | null;
@@ -852,6 +1003,36 @@ type ArticleMetaRow = {
   created_at: string;
   search_tags: string[] | null;
 };
+
+function sentimentLabel(score: number): string {
+  if (score > 0.05) return "positive";
+  if (score < -0.05) return "negative";
+  return "neutral";
+}
+
+/** Top ticker (by |sentiment|) for an article, from its TICKER_SENTIMENT head. */
+function primaryTickerSentiment(
+  heads: HeadRow[],
+): { ticker: string; score: number } | null {
+  const head = heads.find((h) => h.cluster === "TICKER_SENTIMENT");
+  const scores = asNumberMap(head?.scores_json ?? {});
+  const top = Object.entries(scores).sort(
+    (a, b) => Math.abs(b[1]) - Math.abs(a[1]),
+  )[0];
+  if (!top) return null;
+  return { ticker: String(top[0]).toUpperCase().trim(), score: top[1] };
+}
+
+/** Highest-impact claim summary for an article, from its STORY_KEY_POINTS head. */
+function firstClaimSummary(heads: HeadRow[]): string {
+  const head = heads.find((h) => h.cluster === "STORY_KEY_POINTS");
+  const scores = asNumberMap(head?.scores_json ?? {});
+  const text = asStringMap(head?.reasoning_json ?? {});
+  const top = Object.entries(scores)
+    .filter(([id]) => (text[id] ?? "").trim())
+    .sort((a, b) => Math.abs(b[1]) - Math.abs(a[1]))[0];
+  return top ? (text[top[0]] ?? "").trim() : "";
+}
 
 export async function generateMetadata({
   params,
@@ -865,7 +1046,9 @@ export async function generateMetadata({
   const { data: article } = await dataClient
     .schema("swingtrader")
     .from("news_articles")
-    .select("slug, title, image_url, publisher, published_at, created_at, search_tags")
+    .select(
+      "id, slug, title, image_url, publisher, published_at, created_at, search_tags",
+    )
     .eq("slug", slug)
     .single<ArticleMetaRow>();
 
@@ -873,23 +1056,44 @@ export async function generateMetadata({
     return { title: "Article not found | News Impact Screener" };
   }
 
-  const canonical = `/articles/${slug}`;
-  const tickers = (article.search_tags ?? [])
-    .filter((t) => /^[A-Z]{1,6}$/.test(t))
-    .slice(0, 3);
-  const tickerHint = tickers.length
-    ? ` Tracked tickers: ${tickers.join(", ")}.`
+  // Pull the model heads so the title/description can carry the primary ticker's
+  // sentiment and the lead claim — the highest-signal copy for SEO snippets.
+  const { data: headsData } = await dataClient
+    .schema("swingtrader")
+    .from("news_impact_heads")
+    .select("cluster, scores_json, reasoning_json")
+    .eq("article_id", article.id);
+  const heads = (headsData ?? []) as HeadRow[];
+  const primary = primaryTickerSentiment(heads);
+  const leadClaim = firstClaimSummary(heads);
+
+  // Absolute canonical → always the newsimpactscreener.com URL, never the source.
+  const canonical = `${SITE_BASE_URL.replace(/\/$/, "")}/articles/${slug}`;
+
+  // Title: "[headline] — WMT +0.80 | NewsImpactScreener", bounded to 60 chars,
+  // with the primary ticker + its sentiment score when available.
+  const tickerTag = primary
+    ? ` — ${primary.ticker} ${signedScore(primary.score)}`
+    : "";
+  const title = buildBoundedTitle(article.title, tickerTag);
+
+  // Description: "[Ticker] scores [sentiment] on this story. [lead claim]."
+  const descPrefix = primary
+    ? `${primary.ticker} scores ${sentimentLabel(primary.score)} on this story.`
     : "";
   const description = clampText(
-    `News-impact analysis of "${article.title}" — which stocks the story moves, the key claims, sentiment, and market reaction, scored by News Impact Screener.${tickerHint}`,
-    160,
+    [descPrefix, leadClaim].filter(Boolean).join(" ") ||
+      `News-impact analysis of "${article.title}".`,
+    155,
   );
-  const title = clampText(`${article.title} | News Impact Screener`, 70);
+
   const publishedTime = article.published_at ?? article.created_at;
   const images = article.image_url ? [{ url: article.image_url }] : undefined;
 
   return {
-    title,
+    // `absolute` bypasses the root layout's "%s · News Impact Screener" template
+    // so the title lands exactly as built (no double brand) and stays within 60.
+    title: { absolute: title },
     description,
     alternates: { canonical },
     openGraph: {
@@ -1031,26 +1235,62 @@ async function ArticleData({ params }: { params: Promise<{ slug?: string }> }) {
   // screening's latest run. Null when the screening can't be resolved.
   const screenerBridge = await loadScreenerBridge(ctaTickers);
 
+  // Every ticker the story touches (sentiment heads + ticker search tags),
+  // deduped — emitted as schema.org `about` Corporations for entity SEO.
+  const aboutTickers = [
+    ...new Set([
+      ...tickerSentiment.map((t) => t.ticker.toUpperCase()),
+      ...searchTags.filter((t) => /^[A-Z]{1,6}$/.test(t)),
+    ]),
+  ].slice(0, 12);
+
   // NewsArticle structured data — lets Google render this as a news result and
   // attributes the analysis to us while crediting the original source.
   const articleJsonLd = {
     "@context": "https://schema.org",
     "@type": "NewsArticle",
     headline: clampText(article.title || "Untitled article", 110),
-    image: article.image_url ? [article.image_url] : undefined,
     datePublished: publishedIso,
+    dateModified: article.created_at ?? publishedIso,
+    image: article.image_url ? [article.image_url] : undefined,
     url: canonicalUrl,
     mainEntityOfPage: { "@type": "WebPage", "@id": canonicalUrl },
     publisher: {
       "@type": "Organization",
-      name: "News Impact Screener",
+      name: "NewsImpactScreener",
+      url: "https://www.newsimpactscreener.com",
     },
+    about: aboutTickers.length
+      ? aboutTickers.map((ticker) => ({
+          "@type": "Corporation",
+          tickerSymbol: ticker,
+        }))
+      : undefined,
     isBasedOn: article.url || undefined,
     description: clampText(
       `News-impact analysis: which stocks "${article.title}" moves, key claims, sentiment, and market reaction.`,
       200,
     ),
   };
+
+  // Gate calibration for cold organic traffic. Short stories (≤5 claims) show
+  // all claims free but gate the high-value payoff rows (the negatively-impacted
+  // ledger; the cluster profile already gates its own top-4). Longer stories
+  // (6+ claims) gate the claim list itself from claim 5 onward.
+  const coldGate = storyKeyPoints.length <= 5;
+  const claimLockAfter = coldGate ? undefined : 4;
+  const loserLockAfter = coldGate ? 2 : undefined;
+
+  // Auth state — only used to suppress the mid-page email capture for members.
+  let isAuthenticated = false;
+  try {
+    const authClient = await createClient();
+    const { data: claims } = await authClient.auth.getClaims();
+    isAuthenticated = Boolean(claims?.claims?.sub);
+  } catch {
+    isAuthenticated = false;
+  }
+  const sourceLabel = article.source || article.publisher || "feed";
 
   return (
     <div className="mx-auto w-full max-w-5xl px-4 py-8 sm:px-6 sm:py-10">
@@ -1079,22 +1319,18 @@ async function ArticleData({ params }: { params: Promise<{ slug?: string }> }) {
           {article.title || "Untitled article"}
         </h1>
 
-        <div className="mt-5 flex flex-wrap items-center justify-between gap-x-6 gap-y-3">
+        {/* One-line product explainer above the fold — intentionally quiet
+            (13px, secondary color, no bold) so it never competes with the H1. */}
+        <p className="mt-3 text-[13px] text-muted-foreground">
+          NewsImpactScreener rates every claim in this story for market impact
+          and maps it to the tickers most exposed.
+        </p>
+
+        {/* The "Read original" attribution link is deliberately not here — it's
+            moved down to just above the gate (see AnalyticsRegion) so it isn't
+            the first interactive element a cold visitor sees. */}
+        <div className="mt-5">
           <ShareButtons title={article.title || "Article"} url={canonicalUrl} />
-          {article.url ? (
-            <Link
-              href={article.url}
-              target="_blank"
-              rel="noreferrer"
-              className="group inline-flex items-center gap-2 font-mono text-[10px] uppercase tracking-[0.2em] text-muted-foreground transition-colors hover:text-amber-400"
-            >
-              Read original · {article.source || article.publisher || "feed"}
-              <ArrowUpRight
-                size={12}
-                className="transition-transform duration-200 group-hover:-translate-y-px group-hover:translate-x-px"
-              />
-            </Link>
-          ) : null}
         </div>
 
         {article.image_url ? (
@@ -1127,6 +1363,11 @@ async function ArticleData({ params }: { params: Promise<{ slug?: string }> }) {
             title: article.title ?? "",
           }}
           bridge={screenerBridge}
+          claimLockAfter={claimLockAfter}
+          loserLockAfter={loserLockAfter}
+          sourceUrl={article.url}
+          sourceLabel={sourceLabel}
+          showEmailCapture={!isAuthenticated}
         />
       </div>
 
