@@ -85,10 +85,26 @@ export const FREE_HERE_BULLETS: readonly string[] = [
   "How the market reaction breaks down",
 ] as const;
 
+const VARIANT_STORAGE_KEY = "article_value_prop_variant";
+
 export function getValuePropVariant(id: string | null): ValuePropVariant {
   return (
     VALUE_PROP_VARIANTS.find((v) => v.id === id) ?? DEFAULT_VALUE_PROP_VARIANT
   );
+}
+
+/**
+ * Read the assigned variant id WITHOUT assigning one. Safe for analytics — a
+ * reader who never reached the block (no assignment) reports null instead of
+ * being silently bucketed.
+ */
+export function readValuePropVariantId(): string | null {
+  if (typeof window === "undefined") return null;
+  try {
+    return window.localStorage.getItem(VARIANT_STORAGE_KEY);
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -100,9 +116,8 @@ export function getValuePropVariant(id: string | null): ValuePropVariant {
 export function pickValuePropVariant(): ValuePropVariant {
   if (typeof window === "undefined") return DEFAULT_VALUE_PROP_VARIANT;
 
-  const KEY = "article_value_prop_variant";
   try {
-    const stored = window.localStorage.getItem(KEY);
+    const stored = window.localStorage.getItem(VARIANT_STORAGE_KEY);
     const existing = VALUE_PROP_VARIANTS.find((v) => v.id === stored);
     if (existing) return existing;
 
@@ -110,7 +125,7 @@ export function pickValuePropVariant(): ValuePropVariant {
       VALUE_PROP_VARIANTS[
         Math.floor(Math.random() * VALUE_PROP_VARIANTS.length)
       ];
-    window.localStorage.setItem(KEY, chosen.id);
+    window.localStorage.setItem(VARIANT_STORAGE_KEY, chosen.id);
     return chosen;
   } catch {
     return DEFAULT_VALUE_PROP_VARIANT;

@@ -21,6 +21,18 @@ type EventMap = {
   podcast_completed: { mode: "single_agent" | "multi_agent"; duration_s: number };
 
   article_opened: { article_id: string; source?: string };
+  article_engagement: {
+    article_id: number;
+    slug: string;
+    /** Time on this article (ms), measured from mount — SPA-nav safe. */
+    dwell_ms: number;
+    /** Deepest scroll reached on this article, 0–100. */
+    max_scroll_pct: number;
+    /** Whether the Tier-2 "go deeper" block scrolled into view. */
+    reached_cta: boolean;
+    /** The value-prop experiment variant the reader was assigned, if any. */
+    value_prop_variant: string | null;
+  };
   trade_logged: { trade_id: string; ticker: string; side: string };
 
   feature_viewed: { feature: string };

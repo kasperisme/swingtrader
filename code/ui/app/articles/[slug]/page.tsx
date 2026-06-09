@@ -13,6 +13,7 @@ import { DeeperValueBlock } from "./_components/deeper-value-block";
 import { ClusterScoreCard } from "./_components/cluster-score-card";
 import { ScreenerBridgeCTA } from "./_components/screener-bridge-cta";
 import { FloatingCTA } from "./_components/floating-cta";
+import { ArticleEngagementTracker } from "./_components/article-engagement-tracker";
 import {
   getLatestMarketScreeningResultRows,
   getMarketScreeningBySlug,
@@ -1407,6 +1408,10 @@ async function ArticleData({ params }: { params: Promise<{ slug?: string }> }) {
       <RelatedArticles related={relatedArticles} baseUrl={siteBaseUrl} />
 
       <FloatingCTA targetId="early-access" delayMs={4000} />
+      <ArticleEngagementTracker
+        articleId={article.id}
+        slug={article.slug ?? slug}
+      />
     </div>
   );
 }
