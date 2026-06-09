@@ -9,11 +9,10 @@ import { createClient } from "@/lib/supabase/server";
 import { getTrendingLookup, type TrendingLookupEntry } from "@/lib/trends";
 import { CLUSTERS, DIMENSION_MAP } from "@/app/protected/vectors/dimensions";
 import { ShareButtons } from "@/app/blog/[slug]/share-buttons";
-import { ArticleEarlyAccessCTA } from "./_components/article-early-access-cta";
+import { DeeperValueBlock } from "./_components/deeper-value-block";
 import { ClusterScoreCard } from "./_components/cluster-score-card";
 import { ScreenerBridgeCTA } from "./_components/screener-bridge-cta";
 import { FloatingCTA } from "./_components/floating-cta";
-import { MidPageEmailCapture } from "./_components/mid-page-email-capture";
 import {
   getLatestMarketScreeningResultRows,
   getMarketScreeningBySlug,
@@ -836,7 +835,7 @@ function AnalyticsRegion({
   loserLockAfter,
   sourceUrl,
   sourceLabel,
-  showEmailCapture,
+  authenticated,
 }: {
   clusterProfile: Array<{
     id: string;
@@ -866,42 +865,71 @@ function AnalyticsRegion({
   /** Original-source URL + label, rendered as an attribution badge above the gate. */
   sourceUrl: string | null;
   sourceLabel: string;
-  /** Show the soft mid-page email capture (logged-out visitors only). */
-  showEmailCapture: boolean;
+  /** Whether the visitor is signed in — members skip the email capture. */
+  authenticated: boolean;
 }) {
+  const hasSentiment = tickerSentiment.length > 0;
+  const hasRelationships = tickerRelationships.length > 0;
+  const hasTickerAttribution = hasSentiment || hasRelationships;
+  const hasImpactVectors =
+    clusterProfile.some((c) => Math.abs(c.score) > 0.03) ||
+    topDimensions.length > 0;
+  const hasMarketReaction = winners.length > 0 || losers.length > 0;
   return (
     <div className="space-y-12">
-        <section>
-          <Eyebrow
-            label="Story key points"
-            meta={`${storyKeyPoints.length} claims · impact-rated`}
-          />
-          <h2 className="mb-5 text-base font-semibold tracking-tight text-foreground/90">
-            What matters in this story
-          </h2>
-          <KeyPointsList rows={storyKeyPoints} lockAfter={claimLockAfter} />
-        </section>
+        {storyKeyPoints.length > 0 ? (
+          <section>
+            <Eyebrow
+              label="What the story claims"
+              meta={`${storyKeyPoints.length} claim${
+                storyKeyPoints.length === 1 ? "" : "s"
+              } · each scored for market impact`}
+            />
+            <h2 className="mb-5 text-base font-semibold tracking-tight text-foreground/90">
+              What matters in this story
+            </h2>
+            <KeyPointsList rows={storyKeyPoints} lockAfter={claimLockAfter} />
+          </section>
+        ) : null}
 
-        <section>
-          <Eyebrow label="Ticker attribution" meta="Model heads" />
-          <div className="grid gap-10 md:grid-cols-2">
-            <div>
-              <h2 className="mb-5 text-base font-semibold tracking-tight text-foreground/90">
-                Sentiment in this article
-              </h2>
-              <TickerSentimentList rows={tickerSentiment} />
+        {hasTickerAttribution ? (
+          <section>
+            <Eyebrow label="Which stocks this story touches" />
+            <div
+              className={
+                hasSentiment && hasRelationships
+                  ? "grid gap-10 md:grid-cols-2"
+                  : ""
+              }
+            >
+              {hasSentiment ? (
+                <div>
+                  <h2 className="mb-5 text-base font-semibold tracking-tight text-foreground/90">
+                    How each ticker is affected
+                  </h2>
+                  <TickerSentimentList rows={tickerSentiment} />
+                </div>
+              ) : null}
+              {hasRelationships ? (
+                <div
+                  className={
+                    hasSentiment
+                      ? "md:border-l md:border-border/40 md:pl-10"
+                      : ""
+                  }
+                >
+                  <h2 className="mb-5 text-base font-semibold tracking-tight text-foreground/90">
+                    Connected tickers
+                  </h2>
+                  <TickerRelationshipList rows={tickerRelationships} />
+                </div>
+              ) : null}
             </div>
-            <div className="md:border-l md:border-border/40 md:pl-10">
-              <h2 className="mb-5 text-base font-semibold tracking-tight text-foreground/90">
-                Relationships in this article
-              </h2>
-              <TickerRelationshipList rows={tickerRelationships} />
-            </div>
-          </div>
-        </section>
+          </section>
+        ) : null}
 
-        {/* Just above the gate: source attribution (moved off the top of the
-            page) + a soft email capture aimed at cold organic arrivals. */}
+        {/* Source attribution (moved off the top of the page) sits just above
+            the Tier-2 "go deeper" block, as a quiet badge rather than a CTA. */}
         {sourceUrl ? (
           <div className="-mb-6">
             <Link
@@ -919,67 +947,72 @@ function AnalyticsRegion({
           </div>
         ) : null}
 
-        {showEmailCapture ? (
-          <MidPageEmailCapture screeningSlugs={["nis-momentum"]} />
-        ) : null}
-
-        <ArticleEarlyAccessCTA
+        <DeeperValueBlock
           tickers={ctaTickers}
           article={ctaArticle}
           impactedCount={winners.length + losers.length}
+          authenticated={authenticated}
         />
 
-        <section>
-          <Eyebrow
-            label="Impact vectors"
-            meta={`${topDimensions.length} dimensions · ${clusterProfile.length} clusters`}
-          />
-          <div className="grid gap-10 lg:grid-cols-5">
-            <div className="lg:col-span-3">
-              <h2 className="mb-5 text-base font-semibold tracking-tight text-foreground/90">
-                Analytical profile by cluster
-              </h2>
-              <ClusterScoreCard rows={clusterProfile} />
+        {hasImpactVectors ? (
+          <section>
+            <Eyebrow
+              label="How the impact breaks down"
+              meta="Where the story's weight lands"
+            />
+            <div className="grid gap-10 lg:grid-cols-5">
+              <div className="lg:col-span-3">
+                <h2 className="mb-5 text-base font-semibold tracking-tight text-foreground/90">
+                  Impact by category
+                </h2>
+                <ClusterScoreCard rows={clusterProfile} />
+              </div>
+              <div className="lg:col-span-2 lg:border-l lg:border-border/40 lg:pl-10">
+                <h2 className="mb-5 text-base font-semibold tracking-tight text-foreground/90">
+                  Biggest drivers
+                </h2>
+                <DimensionList rows={topDimensions} />
+              </div>
             </div>
-            <div className="lg:col-span-2 lg:border-l lg:border-border/40 lg:pl-10">
-              <h2 className="mb-5 text-base font-semibold tracking-tight text-foreground/90">
-                Top impact dimensions
-              </h2>
-              <DimensionList rows={topDimensions} />
-            </div>
-          </div>
-        </section>
+          </section>
+        ) : null}
 
-        <section>
-          <Eyebrow
-            label="Market reaction"
-            meta={`${winners.length} bid · ${losers.length} offered`}
-          />
-          <div className="grid gap-10 md:grid-cols-2">
-            <div>
-              <div className="mb-5 flex items-baseline justify-between">
-                <h2 className="text-base font-semibold tracking-tight text-foreground/90">
-                  Most positively impacted
-                </h2>
-                <span className="font-mono text-[10px] uppercase tracking-widest text-emerald-500/80">
-                  Bid
-                </span>
+        {hasMarketReaction ? (
+          <section>
+            <Eyebrow
+              label="Stocks most exposed"
+              meta="Modeled from each name's sensitivity to this story"
+            />
+            <div className="grid gap-10 md:grid-cols-2">
+              <div>
+                <div className="mb-5 flex items-baseline justify-between">
+                  <h2 className="text-base font-semibold tracking-tight text-foreground/90">
+                    Most positively impacted
+                  </h2>
+                  <span className="font-mono text-[10px] uppercase tracking-widest text-emerald-500/80">
+                    Upside
+                  </span>
+                </div>
+                <StockLedger rows={winners} tone="pos" />
               </div>
-              <StockLedger rows={winners} tone="pos" />
-            </div>
-            <div className="md:border-l md:border-border/40 md:pl-10">
-              <div className="mb-5 flex items-baseline justify-between">
-                <h2 className="text-base font-semibold tracking-tight text-foreground/90">
-                  Most negatively impacted
-                </h2>
-                <span className="font-mono text-[10px] uppercase tracking-widest text-rose-500/80">
-                  Offered
-                </span>
+              <div className="md:border-l md:border-border/40 md:pl-10">
+                <div className="mb-5 flex items-baseline justify-between">
+                  <h2 className="text-base font-semibold tracking-tight text-foreground/90">
+                    Most negatively impacted
+                  </h2>
+                  <span className="font-mono text-[10px] uppercase tracking-widest text-rose-500/80">
+                    Downside
+                  </span>
+                </div>
+                <StockLedger
+                  rows={losers}
+                  tone="neg"
+                  lockAfter={loserLockAfter}
+                />
               </div>
-              <StockLedger rows={losers} tone="neg" lockAfter={loserLockAfter} />
             </div>
-          </div>
-        </section>
+          </section>
+        ) : null}
 
         {bridge ? (
           <ScreenerBridgeCTA
@@ -1367,7 +1400,7 @@ async function ArticleData({ params }: { params: Promise<{ slug?: string }> }) {
           loserLockAfter={loserLockAfter}
           sourceUrl={article.url}
           sourceLabel={sourceLabel}
-          showEmailCapture={!isAuthenticated}
+          authenticated={isAuthenticated}
         />
       </div>
 
