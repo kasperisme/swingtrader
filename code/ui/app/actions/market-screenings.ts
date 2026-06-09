@@ -294,7 +294,8 @@ export async function submitEarlyAccessSignup(input: {
     return { ok: false, error: "Screening not found." };
   }
 
-  // Best-effort: attach the current auth user if they have a session.
+  // Best-effort: resolve the current auth user (for analytics only — not
+  // persisted on the signup row).
   let userId: string | null = null;
   try {
     const supabase = await createClient();
@@ -304,20 +305,19 @@ export async function submitEarlyAccessSignup(input: {
     userId = null;
   }
 
-  const headerList = await headers();
-  const referrer = headerList.get("referer");
-  const userAgent = headerList.get("user-agent");
-
+  // early_access_signups is a pure lead-capture list, unique on email. We do
+  // not add per-signup columns for the screening — the screening that drove
+  // the signup is recorded in the free-form `metadata` JSONB instead.
   const insertRes = await service
     .schema(SCHEMA)
     .from("early_access_signups")
     .insert({
       email,
-      market_screening_id: screening.id,
-      user_id: userId,
       source: input.source || "gallery_subscribe",
-      referrer,
-      user_agent: userAgent,
+      metadata: {
+        market_screening_id: screening.id,
+        market_screening_slug: input.screeningSlug,
+      },
     });
 
   // Duplicate is a success path from the user's perspective.

@@ -21,6 +21,7 @@ import {
 } from "@/components/screening-results-table";
 import { ScreeningDescription } from "@/components/screening-description";
 import { SubscribeButton } from "../_components/subscribe-button";
+import { DeliveryPromptLink } from "@/components/DeliveryPromptLink";
 
 type Props = { params: Promise<{ slug: string }> };
 
@@ -233,18 +234,30 @@ export default async function MarketScreeningDetailPage({ params }: Props) {
             actions={
               tableRows.length > 0 ? (
                 <div className="flex items-center gap-2">
-                  <ToolbarAction
+                  <DeliveryPromptLink
                     href={`/marketscreenings/${screening.slug}/export`}
                     download
-                    icon={<DownloadIcon className="h-3.5 w-3.5" />}
-                    label="CSV"
-                  />
-                  <ToolbarAction
+                    screeningSlug={screening.slug}
+                    screeningName={screening.name}
+                    source="detail_csv_download"
+                    title="Download latest results as CSV"
+                    className="inline-flex cursor-pointer items-center gap-1.5 rounded-md border border-border/70 bg-background px-2.5 py-1.5 text-xs font-medium text-muted-foreground transition-colors hover:border-border hover:text-foreground"
+                  >
+                    <DownloadIcon className="h-3.5 w-3.5" />
+                    CSV
+                  </DeliveryPromptLink>
+                  <DeliveryPromptLink
                     href={`/api/market-screenings/${screening.slug}`}
                     external
-                    icon={<CodeIcon className="h-3.5 w-3.5" />}
-                    label="JSON"
-                  />
+                    screeningSlug={screening.slug}
+                    screeningName={screening.name}
+                    source="detail_json_open"
+                    title="Fetch latest results as JSON"
+                    className="inline-flex cursor-pointer items-center gap-1.5 rounded-md border border-border/70 bg-background px-2.5 py-1.5 text-xs font-medium text-muted-foreground transition-colors hover:border-border hover:text-foreground"
+                  >
+                    <CodeIcon className="h-3.5 w-3.5" />
+                    JSON
+                  </DeliveryPromptLink>
                 </div>
               ) : null
             }
@@ -413,29 +426,3 @@ function SectionHeader({
   );
 }
 
-function ToolbarAction({
-  href,
-  icon,
-  label,
-  download,
-  external,
-}: {
-  href: string;
-  icon: React.ReactNode;
-  label: string;
-  download?: boolean;
-  external?: boolean;
-}) {
-  return (
-    <a
-      href={href}
-      download={download}
-      target={external ? "_blank" : undefined}
-      rel={external ? "noopener noreferrer" : undefined}
-      className="inline-flex cursor-pointer items-center gap-1.5 rounded-md border border-border/70 bg-background px-2.5 py-1.5 text-xs font-medium text-muted-foreground transition-colors hover:border-border hover:text-foreground"
-    >
-      {icon}
-      {label}
-    </a>
-  );
-}

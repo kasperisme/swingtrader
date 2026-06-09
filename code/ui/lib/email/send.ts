@@ -4,6 +4,13 @@ export type SendEmailResult =
   | { ok: true; id: string }
   | { ok: false; error: string };
 
+export type SendEmailAttachment = {
+  filename: string;
+  /** File contents — Buffer or base64/utf8 string, per the Resend SDK. */
+  content: Buffer | string;
+  contentType?: string;
+};
+
 export type SendEmailInput = {
   to: string | string[];
   subject: string;
@@ -12,6 +19,7 @@ export type SendEmailInput = {
   from?: string;
   replyTo?: string;
   tags?: { name: string; value: string }[];
+  attachments?: SendEmailAttachment[];
 };
 
 export type SendTemplateEmailInput = {
@@ -46,6 +54,7 @@ export async function sendEmail(input: SendEmailInput): Promise<SendEmailResult>
     text: input.text,
     replyTo: input.replyTo ?? EMAIL_REPLY_TO,
     tags: input.tags,
+    attachments: input.attachments,
   });
 
   if (error) return { ok: false, error: error.message };

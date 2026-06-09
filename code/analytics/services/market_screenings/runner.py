@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import csv
+import io
 import json
 import logging
 from datetime import date, datetime, timezone
@@ -14,6 +16,8 @@ from shared.telegram import (
     log_telegram_message,
     send_telegram_chunks,
 )
+
+from shared.email import build_unsubscribe_url, send_email
 
 from .registry import get_script
 from .types import ScreeningResult
@@ -604,6 +608,13 @@ def _write_scan_artefacts_for_subscriber(
 
 def fan_out_to_subscribers(result: dict[str, Any]) -> None:
     client = get_supabase_client()
+    # Email-only subscribers are delivered as part of the same fan-out, the
+    # moment results (and any LLM enrichment) conclude. Best-effort: a failure
+    # here never blocks the authed Telegram/in-app fan-out below.
+    try:
+        fan_out_email_to_subscribers(result)
+    except Exception as exc:  # noqa: BLE001
+        log.exception("[fan-out] email delivery raised, continuing: %s", exc)
     screening_id = result["screening_id"]
     name = result.get("name") or "Market screening"
     triggered = bool(result.get("triggered"))
@@ -803,4 +814,146 @@ def fan_out_to_subscribers(result: dict[str, Any]) -> None:
         delivered,
         skipped,
         failed,
+    )
+
+
+# ── Email-only subscriber fan-out ───────────────────────────────────────────
+
+_EMAIL_SYMBOL_KEYS = {"symbol", "ticker", "Symbol"}
+_EMAIL_SKIP_KEYS = {"llm_analysis"}  # nested objects don't belong in a flat CSV
+
+
+def _build_results_csv(symbols: list[dict[str, Any]]) -> str:
+    """Serialize per-ticker result rows to a flat CSV string (no BOM)."""
+    keys: list[str] = []
+    seen: set[str] = set()
+    for row in symbols:
+        if not isinstance(row, dict):
+            continue
+        for k in row.keys():
+            if k in _EMAIL_SYMBOL_KEYS or k in _EMAIL_SKIP_KEYS or k in seen:
+                continue
+            seen.add(k)
+            keys.append(k)
+
+    buf = io.StringIO()
+    writer = csv.writer(buf, lineterminator="\r\n")
+    writer.writerow(["Symbol", *keys])
+    for row in symbols:
+        if not isinstance(row, dict):
+            continue
+        sym = row.get("symbol") or row.get("ticker") or ""
+        cells = [sym]
+        for k in keys:
+            v = row.get(k)
+            if isinstance(v, (dict, list)):
+                v = json.dumps(v, separators=(",", ":"))
+            cells.append("" if v is None else v)
+        writer.writerow(cells)
+    return buf.getvalue()
+
+
+def _results_email_html(*, name: str, slug: str, count: int, unsubscribe_url: str) -> str:
+    from shared.email import _app_url  # local import to avoid cycle at module load
+
+    base = _app_url()
+    bg, card, text, muted, border, accent = (
+        "#0b0f17", "#111620", "#e6e9ef", "#8b93a7", "#1e2533", "#f5a623",
+    )
+    sans = ("'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', "
+            "Roboto, Helvetica, Arial, sans-serif")
+    mono = "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace"
+    return f"""<!doctype html>
+<html><body style="margin:0;padding:0;background:{bg};">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:{bg};padding:32px 16px;">
+<tr><td align="center">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:520px;background:{card};border:1px solid {border};border-radius:12px;">
+<tr><td style="padding:28px;">
+<div style="font-family:{mono};font-size:11px;letter-spacing:0.18em;text-transform:uppercase;color:{accent};">News Impact Screener</div>
+<h1 style="font-family:{sans};font-size:22px;line-height:1.3;color:{text};margin:14px 0 0 0;">
+Fresh results: <span style="font-family:{mono};">{name}</span></h1>
+<p style="font-family:{sans};font-size:14px;line-height:1.6;color:{muted};margin:10px 0 18px 0;">
+A new run just concluded with {count} ticker{'' if count == 1 else 's'}. The full results are attached as a CSV.</p>
+<a href="{base}/marketscreenings/{slug}" style="display:inline-block;font-family:{sans};font-size:14px;font-weight:600;color:{bg};background:{accent};padding:11px 20px;border-radius:8px;text-decoration:none;">View on the web</a>
+<p style="font-family:{sans};font-size:11px;line-height:1.6;color:{muted};margin:22px 0 0 0;border-top:1px solid {border};padding-top:16px;">
+You're getting this because you subscribed to {name} results.
+<a href="{unsubscribe_url}" style="color:{muted};text-decoration:underline;">Unsubscribe</a>.</p>
+</td></tr></table></td></tr></table></body></html>"""
+
+
+def fan_out_email_to_subscribers(result: dict[str, Any]) -> None:
+    """Deliver the concluded screening's results to email-only subscribers.
+
+    Runs inside the main fan-out so email lands at the same time as the authed
+    Telegram/in-app delivery (and, for LLM screenings, after enrichment via the
+    fan_out_from_db path). Best-effort throughout.
+    """
+    if bool(result.get("error")):
+        return  # don't email error runs
+
+    client = get_supabase_client()
+    screening_id = result["screening_id"]
+
+    data_used = result.get("data_used") or {}
+    symbols = data_used.get("symbols") if isinstance(data_used, dict) else None
+    symbols = [s for s in symbols if isinstance(s, dict)] if isinstance(symbols, list) else []
+    if not symbols:
+        log.info("[email-fan-out] screening %s: no result rows, skipping", screening_id)
+        return
+
+    meta_res = (
+        client.schema(_SCHEMA)
+        .table("market_screenings")
+        .select("name, slug")
+        .eq("id", screening_id)
+        .limit(1)
+        .execute()
+    )
+    meta = (meta_res.data or [{}])[0]
+    name = meta.get("name") or result.get("name") or "Market screening"
+    slug = meta.get("slug") or str(screening_id)
+
+    subs_res = (
+        client.schema(_SCHEMA)
+        .table("market_screening_email_subscriptions")
+        .select("email")
+        .eq("market_screening_id", screening_id)
+        .eq("status", "active")
+        .execute()
+    )
+    emails = sorted({
+        (r.get("email") or "").strip().lower()
+        for r in (subs_res.data or [])
+        if r.get("email")
+    })
+    if not emails:
+        log.info("[email-fan-out] screening %s: no email subscribers", screening_id)
+        return
+
+    csv_text = _build_results_csv(symbols)
+    attachment = {"filename": f"{slug}-latest.csv", "content": csv_text}
+    subject = f"{name}: {len(symbols)} new result{'' if len(symbols) == 1 else 's'}"
+
+    delivered = failed = 0
+    for email in emails:
+        unsubscribe_url = build_unsubscribe_url(email, [slug])
+        html = _results_email_html(
+            name=name, slug=slug, count=len(symbols), unsubscribe_url=unsubscribe_url
+        )
+        ok, info = send_email(
+            to=email,
+            subject=subject,
+            html=html,
+            attachments=[attachment],
+            tags=[{"name": "type", "value": "market_screening_results"}],
+        )
+        if ok:
+            delivered += 1
+        else:
+            failed += 1
+            log.warning("[email-fan-out] send to %s failed: %s", email, info)
+
+    log.info(
+        "[email-fan-out] screening %s: email_delivered=%d email_failed=%d (rows=%d)",
+        screening_id, delivered, failed, len(symbols),
     )

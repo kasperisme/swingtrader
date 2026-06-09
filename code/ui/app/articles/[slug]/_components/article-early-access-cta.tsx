@@ -31,11 +31,24 @@ import {
 export function ArticleEarlyAccessCTA({
   tickers,
   article,
+  impactedCount = 0,
 }: {
   tickers: string[];
   article: { slug: string; id: number; title: string };
+  /**
+   * How many tickers this story moves (winners + losers). Drives the
+   * value-explicit unlock headline; falls back to generic copy when 0.
+   */
+  impactedCount?: number;
 }) {
   const tracked = tickers.slice(0, 4);
+  // Value-explicit unlock copy. [N] = impacted tickers, else the tracked count.
+  const unlockN = impactedCount || tracked.length;
+  const unlockHeading = unlockN
+    ? `See which ${unlockN} tickers this story hits hardest`
+    : "See which tickers this story hits hardest";
+  const unlockBody =
+    "Unlock the full impact breakdown — and whether these names are in a Stage 2 uptrend right now. Free account, 30 seconds.";
   const [variant, setVariant] = useState<ArticleCtaVariant>(
     DEFAULT_ARTICLE_CTA_VARIANT,
   );
@@ -83,10 +96,10 @@ export function ArticleEarlyAccessCTA({
         </p>
       ) : null}
       <h2 className="mt-4 max-w-2xl text-2xl font-bold leading-tight tracking-tight md:text-3xl">
-        {variant.heading}
+        {unlockHeading}
       </h2>
       <p className="mt-3 max-w-2xl text-sm leading-relaxed text-muted-foreground">
-        {variant.body}
+        {unlockBody}
       </p>
 
       {tracked.length > 0 ? (
@@ -112,9 +125,9 @@ export function ArticleEarlyAccessCTA({
         variant={variant.id}
         ctaText={{
           eyebrow: "Early access",
-          heading: variant.heading,
-          body: variant.body,
-          ctaLabel: variant.ctaLabel,
+          heading: unlockHeading,
+          body: unlockBody,
+          ctaLabel: "Unlock free →",
         }}
         article={{
           slug: article.slug,
@@ -122,8 +135,12 @@ export function ArticleEarlyAccessCTA({
           title: article.title,
           tickers: tracked,
         }}
-        ctaLabel={variant.ctaLabel}
+        ctaLabel="Unlock free →"
       />
+
+      <p className="mt-3 text-xs text-muted-foreground/70">
+        No credit card. Cancel anytime.
+      </p>
 
       <Link
         href="/marketscreenings"

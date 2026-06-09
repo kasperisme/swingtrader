@@ -10,11 +10,72 @@ import { getTrendingLookup, type TrendingLookupEntry } from "@/lib/trends";
 import { CLUSTERS, DIMENSION_MAP } from "@/app/protected/vectors/dimensions";
 import { ShareButtons } from "@/app/blog/[slug]/share-buttons";
 import { ArticleEarlyAccessCTA } from "./_components/article-early-access-cta";
+import { ClusterScoreCard } from "./_components/cluster-score-card";
+import { ScreenerBridgeCTA } from "./_components/screener-bridge-cta";
 import { FloatingCTA } from "./_components/floating-cta";
+import {
+  getLatestMarketScreeningResultRows,
+  getMarketScreeningBySlug,
+} from "@/app/actions/market-screenings";
 import {
   fetchRelatedArticles,
   RelatedArticles,
 } from "./_components/related-articles";
+
+// Screening the article-bridge CTA points at. Slug must match a published
+// market screening; the block is hidden if it can't be resolved.
+const BRIDGE_SCREENING_SLUG =
+  process.env.NEXT_PUBLIC_BRIDGE_SCREENING_SLUG ?? "nis-momentum";
+
+function getTelegramJoinUrl(): string | null {
+  const explicit = process.env.NEXT_PUBLIC_TELEGRAM_JOIN_URL;
+  if (explicit) return explicit;
+  const username = process.env.TELEGRAM_BOT_USERNAME;
+  return username ? `https://t.me/${username}` : null;
+}
+
+type ScreenerBridge = {
+  matchedTickers: string[];
+  screeningSlug: string;
+  screeningName: string;
+  telegramUrl: string | null;
+};
+
+/**
+ * Resolve the article→screener bridge: which of the article's tickers appear in
+ * the bridge screening's latest run. Returns null when the screening can't be
+ * resolved (so the block is omitted rather than linking to a dead subscribe).
+ */
+async function loadScreenerBridge(
+  articleTickers: string[],
+): Promise<ScreenerBridge | null> {
+  try {
+    const screening = await getMarketScreeningBySlug(BRIDGE_SCREENING_SLUG);
+    if (!screening) return null;
+
+    let matchedTickers: string[] = [];
+    if (articleTickers.length > 0) {
+      const { rows } = await getLatestMarketScreeningResultRows(screening.id);
+      const inScreen = new Set(
+        rows
+          .map((r) => (r.symbol ?? "").toUpperCase().trim())
+          .filter(Boolean),
+      );
+      matchedTickers = articleTickers.filter((t) =>
+        inScreen.has(t.toUpperCase()),
+      );
+    }
+
+    return {
+      matchedTickers,
+      screeningSlug: screening.slug,
+      screeningName: screening.name,
+      telegramUrl: getTelegramJoinUrl(),
+    };
+  } catch {
+    return null;
+  }
+}
 
 const SITE_BASE_URL =
   process.env.NEXT_PUBLIC_SITE_URL ?? "https://www.newsimpactscreener.com";
@@ -278,32 +339,6 @@ function ScoreText({ value, digits = 3 }: { value: number; digits?: number }) {
       {sign}
       {value.toFixed(digits)}
     </span>
-  );
-}
-
-function ClusterProfile({
-  rows,
-}: {
-  rows: Array<{ id: string; label: string; score: number; docSlug: string }>;
-}) {
-  const max = rows.reduce((m, r) => Math.max(m, Math.abs(r.score)), 0);
-  return (
-    <ul className="space-y-3.5">
-      {rows.map((c) => (
-        <li key={c.id}>
-          <div className="mb-1 flex items-baseline justify-between gap-3">
-            <Link
-              href={c.docSlug}
-              className="truncate text-sm text-foreground/90 hover:text-amber-400"
-            >
-              {c.label}
-            </Link>
-            <ScoreText value={c.score} />
-          </div>
-          <SignedBar score={c.score} max={max} />
-        </li>
-      ))}
-    </ul>
   );
 }
 
@@ -683,6 +718,7 @@ function AnalyticsRegion({
   tickerRelationships,
   ctaTickers,
   ctaArticle,
+  bridge,
 }: {
   clusterProfile: Array<{
     id: string;
@@ -704,6 +740,7 @@ function AnalyticsRegion({
   }>;
   ctaTickers: string[];
   ctaArticle: { slug: string; id: number; title: string };
+  bridge: ScreenerBridge | null;
 }) {
   return (
     <div className="space-y-12">
@@ -736,7 +773,11 @@ function AnalyticsRegion({
           </div>
         </section>
 
-        <ArticleEarlyAccessCTA tickers={ctaTickers} article={ctaArticle} />
+        <ArticleEarlyAccessCTA
+          tickers={ctaTickers}
+          article={ctaArticle}
+          impactedCount={winners.length + losers.length}
+        />
 
         <section>
           <Eyebrow
@@ -748,7 +789,7 @@ function AnalyticsRegion({
               <h2 className="mb-5 text-base font-semibold tracking-tight text-foreground/90">
                 Analytical profile by cluster
               </h2>
-              <ClusterProfile rows={clusterProfile} />
+              <ClusterScoreCard rows={clusterProfile} />
             </div>
             <div className="lg:col-span-2 lg:border-l lg:border-border/40 lg:pl-10">
               <h2 className="mb-5 text-base font-semibold tracking-tight text-foreground/90">
@@ -789,6 +830,15 @@ function AnalyticsRegion({
             </div>
           </div>
         </section>
+
+        {bridge ? (
+          <ScreenerBridgeCTA
+            matchedTickers={bridge.matchedTickers}
+            screeningSlug={bridge.screeningSlug}
+            screeningName={bridge.screeningName}
+            telegramUrl={bridge.telegramUrl}
+          />
+        ) : null}
     </div>
   );
 }
@@ -977,6 +1027,10 @@ async function ArticleData({ params }: { params: Promise<{ slug?: string }> }) {
     ]),
   ].slice(0, 4);
 
+  // Article → screener bridge: which of this story's tickers are in the bridge
+  // screening's latest run. Null when the screening can't be resolved.
+  const screenerBridge = await loadScreenerBridge(ctaTickers);
+
   // NewsArticle structured data — lets Google render this as a news result and
   // attributes the analysis to us while crediting the original source.
   const articleJsonLd = {
@@ -1072,6 +1126,7 @@ async function ArticleData({ params }: { params: Promise<{ slug?: string }> }) {
             id: article.id,
             title: article.title ?? "",
           }}
+          bridge={screenerBridge}
         />
       </div>
 

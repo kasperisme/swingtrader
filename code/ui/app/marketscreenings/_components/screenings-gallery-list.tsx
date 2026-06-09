@@ -8,10 +8,17 @@ import {
   BellRing,
   Code as CodeIcon,
   Download as DownloadIcon,
+  Mail,
   Search,
   Sparkles,
 } from "lucide-react";
 import { Input } from "@/components/ui/input";
+import { Button } from "@/components/ui/button";
+import {
+  EmailSubscribeModal,
+  type SubscribeScreeningOption,
+} from "@/components/EmailSubscribeModal";
+import { DeliveryPromptLink } from "@/components/DeliveryPromptLink";
 import { humanizeCron } from "@/lib/cron-format";
 import type { MarketScreening } from "@/app/actions/market-screenings";
 
@@ -49,6 +56,11 @@ export function ScreeningsGalleryList({ screenings, subscribedIds }: Props) {
 
   const subscribedSet = useMemo(() => new Set(subscribedIds), [subscribedIds]);
   const subscribedCount = subscribedSet.size;
+
+  const subscribeOptions = useMemo<SubscribeScreeningOption[]>(
+    () => screenings.map((s) => ({ slug: s.slug, name: s.name })),
+    [screenings],
+  );
 
   const categories = useMemo(() => {
     const set = new Set<string>();
@@ -156,6 +168,30 @@ export function ScreeningsGalleryList({ screenings, subscribedIds }: Props) {
           ))}
         </ol>
       )}
+
+      {/* Inbox capture — follow any set of screenings by email. */}
+      <section className="mt-16 rounded-xl border border-border/70 border-l-[3px] border-l-primary bg-card/40 p-6 sm:p-8">
+        <div className="flex flex-col gap-5 md:flex-row md:items-center md:justify-between">
+          <div>
+            <h2 className="text-2xl font-semibold tracking-tight text-foreground">
+              Get results in your inbox
+            </h2>
+            <p className="mt-2 max-w-[52ch] text-sm leading-6 text-muted-foreground">
+              Choose which screenings to follow. Delivered on schedule.
+            </p>
+          </div>
+          <EmailSubscribeModal
+            screenings={subscribeOptions}
+            source="gallery_footer"
+            trigger={
+              <Button size="lg" className="shrink-0">
+                <Mail className="mr-2 h-4 w-4" />
+                Choose screenings
+              </Button>
+            }
+          />
+        </div>
+      </section>
     </>
   );
 }
@@ -328,11 +364,29 @@ function ScreeningRow({
           </div>
 
           <div className="pointer-events-auto flex items-center gap-1">
-            <a
+            <EmailSubscribeModal
+              screeningSlug={screening.slug}
+              screeningName={screening.name}
+              source="gallery_card_subscribe"
+              trigger={
+                <button
+                  type="button"
+                  title={`Subscribe to ${screening.name} by email`}
+                  aria-label={`Subscribe to ${screening.name} by email`}
+                  className="inline-flex cursor-pointer items-center gap-1.5 rounded-md border border-transparent px-1.5 py-1 text-[11px] font-mono text-muted-foreground transition-colors hover:border-border hover:bg-background hover:text-primary"
+                >
+                  <Mail className="h-3.5 w-3.5" />
+                  <span>Subscribe</span>
+                </button>
+              }
+            />
+            <DeliveryPromptLink
               href={`/marketscreenings/${screening.slug}/export`}
               download
+              screeningSlug={screening.slug}
+              screeningName={screening.name}
+              source="gallery_csv_download"
               title={`Download latest results as CSV — ${screening.download_count} download${screening.download_count === 1 ? "" : "s"}`}
-              aria-label="Download latest results as CSV"
               className="group/dl inline-flex cursor-pointer items-center gap-1.5 rounded-md border border-transparent px-1.5 py-1 text-[11px] font-mono tabular-nums text-muted-foreground transition-colors hover:border-border hover:bg-background hover:text-foreground"
             >
               <DownloadIcon className="h-3.5 w-3.5" />
@@ -345,14 +399,18 @@ function ScreeningRow({
               >
                 {formatCount(screening.download_count ?? 0)}
               </span>
-            </a>
-            <SecondaryAction
+            </DeliveryPromptLink>
+            <DeliveryPromptLink
               href={`/api/market-screenings/${screening.slug}`}
-              title="Fetch latest results as JSON"
               external
+              screeningSlug={screening.slug}
+              screeningName={screening.name}
+              source="gallery_json_open"
+              title="Fetch latest results as JSON"
+              className="inline-flex h-7 w-7 cursor-pointer items-center justify-center rounded-md border border-transparent text-muted-foreground transition-colors hover:border-border hover:bg-background hover:text-foreground"
             >
               <CodeIcon className="h-3.5 w-3.5" />
-            </SecondaryAction>
+            </DeliveryPromptLink>
             <span
               aria-hidden
               className="ml-1 inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground transition-all group-hover:translate-x-0.5 group-hover:text-primary"
@@ -392,31 +450,3 @@ function SignalDot({
   return <span className="inline-block h-1.5 w-1.5 rounded-full bg-border" />;
 }
 
-function SecondaryAction({
-  href,
-  title,
-  children,
-  download,
-  external,
-}: {
-  href: string;
-  title: string;
-  children: React.ReactNode;
-  download?: boolean;
-  external?: boolean;
-}) {
-  return (
-    <a
-      href={href}
-      title={title}
-      aria-label={title}
-      download={download}
-      target={external ? "_blank" : undefined}
-      rel={external ? "noopener noreferrer" : undefined}
-      onClick={(e) => e.stopPropagation()}
-      className="inline-flex h-7 w-7 cursor-pointer items-center justify-center rounded-md border border-transparent text-muted-foreground transition-colors hover:border-border hover:bg-background hover:text-foreground"
-    >
-      {children}
-    </a>
-  );
-}
