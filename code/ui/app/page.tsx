@@ -8,6 +8,8 @@ import {
   Bell,
   Check,
   Compass,
+  Download,
+  FileText,
   Filter,
   Newspaper,
   Target,
@@ -25,7 +27,50 @@ import { PricingTierSwitcher } from "@/components/pricing-tier-switcher";
 import { isSanityConfigured, sanityFetch } from "@/lib/sanity/client";
 import { landingPageQuery } from "@/lib/sanity/queries";
 import type { LandingPage, LandingCardItem, LandingStep, LandingPricingPlan } from "@/lib/sanity/types";
-import { listMarketScreenings } from "@/app/actions/market-screenings";
+import { listMarketScreenings, getLatestMarketScreeningResultRows } from "@/app/actions/market-screenings";
+import {
+  collectAllRowDataKeys,
+  orderedDataColumnKeys,
+} from "@/app/protected/screenings/screenings-row-data";
+
+// Sample briefing PDF served from /public — offered as a direct download in
+// the hero so visitors can grab a real example without signing up.
+const SAMPLE_BRIEFING_PDF = "/sample-news-briefing.pdf";
+const SAMPLE_BRIEFING_DATE = "Jun 11, 2026";
+
+// ── Screening preview cell formatting (server-rendered, read-only) ─────────────
+
+function formatScreeningHeader(key: string): string {
+  return key
+    .replace(/_/g, " ")
+    .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
+    .replace(/\b\w/g, (c) => c.toUpperCase())
+    .trim();
+}
+
+function renderScreeningCell(v: unknown): React.ReactNode {
+  if (v === null || v === undefined || v === "") {
+    return <span className="text-muted-foreground/40">—</span>;
+  }
+  if (typeof v === "boolean") {
+    return v ? (
+      <Check className="h-3.5 w-3.5 text-emerald-400" />
+    ) : (
+      <span className="text-muted-foreground/40">—</span>
+    );
+  }
+  if (typeof v === "number") {
+    return (
+      <span className="tabular-nums">
+        {Number.isInteger(v)
+          ? v.toLocaleString()
+          : v.toLocaleString(undefined, { maximumFractionDigits: 2 })}
+      </span>
+    );
+  }
+  const s = String(v);
+  return <span>{s.length > 18 ? `${s.slice(0, 17)}…` : s}</span>;
+}
 import { humanizeCron } from "@/lib/cron-format";
 
 // ── Icon mapping ──────────────────────────────────────────────────────────────
@@ -299,12 +344,50 @@ export default async function Home() {
 
   // Market screenings preview — up to 3 to highlight on the landing page.
   let marketScreeningsPreview: Awaited<ReturnType<typeof listMarketScreenings>> = [];
+  // Direct CSV download + a rendered preview of the latest momentum screening,
+  // shown alongside the sample briefing PDF. momentumExportHref/momentumPreview
+  // are only set when the screening exists AND has published result rows, so the
+  // download never lands on the export route's "no results" 404.
+  let momentumExportHref: string | null = null;
+  let momentumPreview:
+    | {
+        slug: string;
+        name: string;
+        runAt: string | null;
+        rows: { symbol: string | null; rowData: Record<string, unknown> }[];
+      }
+    | null = null;
   try {
     const all = await listMarketScreenings();
     marketScreeningsPreview = all.slice(0, 3);
+    const momentum = all.find(
+      (s) => /momentum/i.test(s.slug) || /momentum/i.test(s.name),
+    );
+    if (momentum) {
+      const { rows, runAt } = await getLatestMarketScreeningResultRows(momentum.id);
+      if (rows.length > 0) {
+        momentumExportHref = `/marketscreenings/${momentum.slug}/export`;
+        momentumPreview = {
+          slug: momentum.slug,
+          name: momentum.name,
+          runAt,
+          rows: rows.map((r) => ({ symbol: r.symbol, rowData: r.rowData })),
+        };
+      }
+    }
   } catch {
     marketScreeningsPreview = [];
   }
+
+  // Derived preview shape for the momentum results "document": top picks + the
+  // first few priority-ordered data columns.
+  const momentumPreviewRows = momentumPreview?.rows.slice(0, 8) ?? [];
+  const momentumPreviewCols = momentumPreview
+    ? orderedDataColumnKeys(collectAllRowDataKeys(momentumPreview.rows)).slice(0, 3)
+    : [];
+  const momentumDate = momentumPreview?.runAt
+    ? momentumPreview.runAt.slice(0, 10)
+    : null;
 
   return (
     <main className="min-h-screen bg-background text-foreground">
@@ -369,10 +452,7 @@ export default async function Home() {
 
                 <div className="mt-4 grid gap-3">
                   {/* Path A — Market screenings */}
-                  <Link
-                    href="/marketscreenings"
-                    className="group relative block rounded-2xl border border-border bg-background/50 p-5 transition duration-300 hover:-translate-y-0.5 hover:border-amber-400/60 hover:bg-amber-500/[0.06] hover:shadow-[0_16px_50px_-20px_rgba(245,158,11,0.35)]"
-                  >
+                  <div className="group relative rounded-2xl border border-border bg-background/50 p-5 transition duration-300 hover:-translate-y-0.5 hover:border-amber-400/60 hover:bg-amber-500/[0.06] hover:shadow-[0_16px_50px_-20px_rgba(245,158,11,0.35)]">
                     <div className="flex items-start gap-4">
                       <span className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-border bg-background/80 transition-colors duration-300 group-hover:border-amber-400/50 group-hover:bg-amber-500/10">
                         <Filter className="h-5 w-5 text-amber-400" />
@@ -390,13 +470,29 @@ export default async function Home() {
                           Platform-run Stage 2 setups, breakouts and
                           fundamentals. Subscribe once; results hit your inbox.
                         </p>
-                        <span className="mt-3 inline-flex items-center gap-1.5 text-sm font-semibold text-amber-400">
-                          Set up screenings
-                          <ArrowRight className="h-4 w-4 transition-transform duration-300 group-hover:translate-x-1" />
-                        </span>
+                        <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-2">
+                          {/* Stretched primary action — covers the whole card. */}
+                          <Link
+                            href="/marketscreenings"
+                            className="inline-flex items-center gap-1.5 text-sm font-semibold text-amber-400 after:absolute after:inset-0 after:content-['']"
+                          >
+                            Set up screenings
+                            <ArrowRight className="h-4 w-4 transition-transform duration-300 group-hover:translate-x-1" />
+                          </Link>
+                          {momentumExportHref && (
+                            <a
+                              href={momentumExportHref}
+                              download
+                              className="relative z-10 inline-flex items-center gap-1.5 rounded-lg border border-border bg-background/60 px-2.5 py-1.5 text-xs font-medium text-muted-foreground transition-colors hover:border-amber-400/60 hover:bg-amber-500/10 hover:text-amber-400"
+                            >
+                              <Download className="h-3.5 w-3.5" />
+                              Download latest momentum picks (CSV)
+                            </a>
+                          )}
+                        </div>
                       </div>
                     </div>
-                  </Link>
+                  </div>
 
                   {/* OR — make the either/or unmistakable */}
                   <div className="relative flex items-center justify-center py-0.5">
@@ -407,10 +503,7 @@ export default async function Home() {
                   </div>
 
                   {/* Path B — News briefings */}
-                  <Link
-                    href="/briefings"
-                    className="group relative block rounded-2xl border border-border bg-background/50 p-5 transition duration-300 hover:-translate-y-0.5 hover:border-amber-400/60 hover:bg-amber-500/[0.06] hover:shadow-[0_16px_50px_-20px_rgba(245,158,11,0.35)]"
-                  >
+                  <div className="group relative rounded-2xl border border-border bg-background/50 p-5 transition duration-300 hover:-translate-y-0.5 hover:border-amber-400/60 hover:bg-amber-500/[0.06] hover:shadow-[0_16px_50px_-20px_rgba(245,158,11,0.35)]">
                     <div className="flex items-start gap-4">
                       <span className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-border bg-background/80 transition-colors duration-300 group-hover:border-amber-400/50 group-hover:bg-amber-500/10">
                         <Newspaper className="h-5 w-5 text-amber-400" />
@@ -418,23 +511,39 @@ export default async function Home() {
                       <div className="min-w-0 flex-1">
                         <div className="flex items-center gap-2">
                           <h2 className="text-[15px] font-semibold tracking-tight transition-colors group-hover:text-amber-400">
-                            Free news briefings
+                            Your own personal briefing
                           </h2>
                           <span className="rounded-full border border-border px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
                             Daily PDF · pre-open
                           </span>
                         </div>
                         <p className="mt-1.5 text-sm leading-6 text-muted-foreground">
-                          Last 24h of news — summaries and market impact — for
-                          your tickers and tags, an hour before the open.
+                          You choose the exact tickers and tags — we send a daily
+                          PDF of just their news, summaries and market impact, an
+                          hour before the open. Built around your watchlist, no one
+                          else&rsquo;s.
                         </p>
-                        <span className="mt-3 inline-flex items-center gap-1.5 text-sm font-semibold text-amber-400">
-                          Set up briefings
-                          <ArrowRight className="h-4 w-4 transition-transform duration-300 group-hover:translate-x-1" />
-                        </span>
+                        <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-2">
+                          {/* Stretched primary action — covers the whole card. */}
+                          <Link
+                            href="/briefings"
+                            className="inline-flex items-center gap-1.5 text-sm font-semibold text-amber-400 after:absolute after:inset-0 after:content-['']"
+                          >
+                            Build my briefing
+                            <ArrowRight className="h-4 w-4 transition-transform duration-300 group-hover:translate-x-1" />
+                          </Link>
+                          <a
+                            href={SAMPLE_BRIEFING_PDF}
+                            download
+                            className="relative z-10 inline-flex items-center gap-1.5 text-xs font-medium text-muted-foreground transition-colors hover:text-foreground"
+                          >
+                            <Download className="h-3.5 w-3.5" />
+                            Download a sample (PDF)
+                          </a>
+                        </div>
                       </div>
                     </div>
-                  </Link>
+                  </div>
                 </div>
               </div>
             </div>
@@ -452,6 +561,182 @@ export default async function Home() {
                   {item}
                 </span>
               ))}
+            </div>
+          </div>
+        </div>
+      </section>
+
+      {/* ── DOCUMENT PREVIEWS ────────────────────────────────────── */}
+      <section className="border-t border-border py-14 md:py-20">
+        <div className="mx-auto max-w-6xl px-4 sm:px-6 lg:px-8">
+          <p className="font-mono text-xs uppercase tracking-[0.2em] text-amber-500">
+            See it first
+          </p>
+          <h2 className="mt-3 text-balance text-2xl font-bold tracking-tight sm:text-3xl">
+            Real output, before you sign up
+          </h2>
+          <p className="mt-2 max-w-2xl text-sm leading-relaxed text-muted-foreground">
+            A genuine sample of each free tool — the morning briefing PDF and the
+            latest momentum screening. Download either, no account needed.
+          </p>
+
+          {/* Horizontally stacked document previews */}
+          <div className="mt-10 grid gap-6 lg:grid-cols-2">
+            {/* Briefing PDF — live prerender */}
+            <div className="group relative flex flex-col overflow-hidden rounded-2xl border border-border bg-card shadow-[0_24px_80px_-32px_rgba(0,0,0,0.6)]">
+              <div className="flex items-center gap-2 border-b border-border bg-background/60 px-4 py-2.5">
+                <span className="h-2.5 w-2.5 rounded-full bg-border" />
+                <span className="h-2.5 w-2.5 rounded-full bg-border" />
+                <span className="h-2.5 w-2.5 rounded-full bg-border" />
+                <span className="ml-2 truncate font-mono text-xs text-muted-foreground">
+                  news-briefing-{SAMPLE_BRIEFING_DATE}.pdf
+                </span>
+                <span className="ml-auto shrink-0 rounded-full border border-amber-500/30 bg-amber-500/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-amber-400">
+                  Daily PDF
+                </span>
+              </div>
+
+              <div className="relative h-[360px] overflow-hidden">
+                <a
+                  href={SAMPLE_BRIEFING_PDF}
+                  download
+                  aria-label="Download the sample briefing PDF"
+                  className="absolute inset-0 z-10"
+                />
+                {/* Desktop: real first-page render */}
+                <iframe
+                  title="Sample briefing preview"
+                  src={`${SAMPLE_BRIEFING_PDF}#view=FitH&toolbar=0&navpanes=0`}
+                  loading="lazy"
+                  className="pointer-events-none hidden h-full w-full sm:block"
+                />
+                {/* Mobile: PDFs render poorly in iframes — show a doc card */}
+                <div className="flex h-full items-center justify-center sm:hidden">
+                  <div className="flex flex-col items-center gap-2 text-center">
+                    <FileText className="h-8 w-8 text-amber-400" />
+                    <p className="text-sm font-semibold">Sample briefing</p>
+                    <p className="text-xs text-muted-foreground">Tap to view the PDF</p>
+                  </div>
+                </div>
+                <div className="pointer-events-none absolute inset-x-0 bottom-0 h-20 bg-gradient-to-t from-card to-transparent" />
+                <span className="pointer-events-none absolute bottom-4 left-1/2 -translate-x-1/2 rounded-full border border-amber-500/30 bg-background/90 px-4 py-1.5 text-xs font-semibold text-amber-400 opacity-0 shadow-lg transition-opacity duration-300 group-hover:opacity-100">
+                  Open full briefing →
+                </span>
+              </div>
+
+              <div className="flex items-center justify-between gap-3 border-t border-border px-4 py-3">
+                <Link
+                  href="/briefings"
+                  className="relative z-20 inline-flex items-center gap-1.5 text-sm font-semibold text-amber-400 transition-colors hover:text-amber-300"
+                >
+                  Build my briefing
+                  <ArrowRight className="h-4 w-4" />
+                </Link>
+                <a
+                  href={SAMPLE_BRIEFING_PDF}
+                  download
+                  className="relative z-20 inline-flex items-center gap-1.5 rounded-lg border border-border bg-background/60 px-2.5 py-1.5 text-xs font-medium text-muted-foreground transition-colors hover:border-amber-400/60 hover:bg-amber-500/10 hover:text-amber-400"
+                >
+                  <Download className="h-3.5 w-3.5" />
+                  PDF
+                </a>
+              </div>
+            </div>
+
+            {/* Momentum screening — live prerender of the latest results */}
+            <div className="group relative flex flex-col overflow-hidden rounded-2xl border border-border bg-card shadow-[0_24px_80px_-32px_rgba(0,0,0,0.6)]">
+              <div className="flex items-center gap-2 border-b border-border bg-background/60 px-4 py-2.5">
+                <span className="h-2.5 w-2.5 rounded-full bg-border" />
+                <span className="h-2.5 w-2.5 rounded-full bg-border" />
+                <span className="h-2.5 w-2.5 rounded-full bg-border" />
+                <span className="ml-2 truncate font-mono text-xs text-muted-foreground">
+                  {momentumPreview
+                    ? `${momentumPreview.slug}${momentumDate ? `-${momentumDate}` : ""}.csv`
+                    : "momentum-screening.csv"}
+                </span>
+                <span className="ml-auto shrink-0 rounded-full border border-amber-500/30 bg-amber-500/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-amber-400">
+                  Live screen
+                </span>
+              </div>
+
+              <div className="relative h-[360px] overflow-hidden">
+                <a
+                  href={
+                    momentumPreview
+                      ? `/marketscreenings/${momentumPreview.slug}`
+                      : "/marketscreenings"
+                  }
+                  aria-label="Open the momentum screening"
+                  className="absolute inset-0 z-10"
+                />
+                {momentumPreview ? (
+                  <div className="pointer-events-none overflow-hidden">
+                    <table className="w-full border-collapse text-left text-xs">
+                      <thead>
+                        <tr className="border-b border-border bg-background/40 text-[10px] uppercase tracking-wider text-muted-foreground">
+                          <th className="px-3 py-2 font-medium">Symbol</th>
+                          {momentumPreviewCols.map((k) => (
+                            <th key={k} className="px-3 py-2 font-medium">
+                              {formatScreeningHeader(k)}
+                            </th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {momentumPreviewRows.map((row, i) => (
+                          <tr
+                            key={`${row.symbol ?? "row"}-${i}`}
+                            className="border-b border-border/50"
+                          >
+                            <td className="px-3 py-2 font-semibold text-foreground">
+                              {row.symbol ?? "—"}
+                            </td>
+                            {momentumPreviewCols.map((k) => (
+                              <td key={k} className="px-3 py-2 text-muted-foreground">
+                                {renderScreeningCell(row.rowData[k])}
+                              </td>
+                            ))}
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                ) : (
+                  <div className="flex h-full items-center justify-center">
+                    <div className="flex flex-col items-center gap-2 text-center">
+                      <BarChart3 className="h-8 w-8 text-amber-400" />
+                      <p className="text-sm font-semibold">Latest picks publishing soon</p>
+                      <p className="text-xs text-muted-foreground">
+                        Browse the screening gallery
+                      </p>
+                    </div>
+                  </div>
+                )}
+                <div className="pointer-events-none absolute inset-x-0 bottom-0 h-20 bg-gradient-to-t from-card to-transparent" />
+                <span className="pointer-events-none absolute bottom-4 left-1/2 -translate-x-1/2 rounded-full border border-amber-500/30 bg-background/90 px-4 py-1.5 text-xs font-semibold text-amber-400 opacity-0 shadow-lg transition-opacity duration-300 group-hover:opacity-100">
+                  Open screening →
+                </span>
+              </div>
+
+              <div className="flex items-center justify-between gap-3 border-t border-border px-4 py-3">
+                <Link
+                  href="/marketscreenings"
+                  className="relative z-20 inline-flex items-center gap-1.5 text-sm font-semibold text-amber-400 transition-colors hover:text-amber-300"
+                >
+                  Set up screenings
+                  <ArrowRight className="h-4 w-4" />
+                </Link>
+                {momentumExportHref && (
+                  <a
+                    href={momentumExportHref}
+                    download
+                    className="relative z-20 inline-flex items-center gap-1.5 rounded-lg border border-border bg-background/60 px-2.5 py-1.5 text-xs font-medium text-muted-foreground transition-colors hover:border-amber-400/60 hover:bg-amber-500/10 hover:text-amber-400"
+                  >
+                    <Download className="h-3.5 w-3.5" />
+                    CSV
+                  </a>
+                )}
+              </div>
             </div>
           </div>
         </div>

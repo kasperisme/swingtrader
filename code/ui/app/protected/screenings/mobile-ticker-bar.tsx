@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import {
   ChevronLeft,
   ChevronRight,
@@ -39,6 +39,9 @@ interface MobileTickerBarProps {
    * Used in caveman mode where those controls live in the dedicated floating
    * action bar above the ticker nav, so showing them here is duplication. */
   hideSelectedActionStrip?: boolean;
+  /** Optional search / add-ticker control pinned at the top of the bar, so it
+   * stays reachable when the screening's top controls are collapsed. */
+  searchSlot?: ReactNode;
 }
 
 export function MobileTickerBar({
@@ -60,6 +63,7 @@ export function MobileTickerBar({
   onOpenChat,
   chatHasIndicator = false,
   hideSelectedActionStrip = false,
+  searchSlot,
 }: MobileTickerBarProps) {
   const [sheetOpen, setSheetOpen] = useState(false);
 
@@ -97,6 +101,9 @@ export function MobileTickerBar({
     <>
       {/* Sticky nav bar — mobile only, pinned at the bottom of the screenings layout */}
       <div className="sm:hidden flex flex-col border-t border-border bg-background shrink-0">
+        {searchSlot && (
+          <div className="border-b border-border/60 p-2">{searchSlot}</div>
+        )}
         {/* Selected-ticker action strip: note + dismiss / restore — sits above the nav row */}
         {selectedTicker && !hideSelectedActionStrip && (
           <button

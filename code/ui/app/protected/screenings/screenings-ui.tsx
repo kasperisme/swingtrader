@@ -2510,6 +2510,58 @@ export function ScreeningsUI({
     return true;
   }, [selectedRunId, search, filtered.length, rows]);
 
+  // The search/add-ticker control, rendered inside the ticker selection
+  // (sidebar) so it stays reachable when the top controls are collapsed — in
+  // both caveman and businessman mode. Filters the visible tickers and offers to
+  // add an unknown symbol to the screening.
+  const searchControl = (
+    <div className="flex flex-col gap-1.5">
+      <div className="relative w-full">
+        <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none" />
+        <input
+          type="text"
+          placeholder={
+            selectedRunId != null ? "Search or add a symbol…" : "Search symbol…"
+          }
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key !== "Enter") return;
+            if (!searchAddTickerOffer || addTickerBusy) return;
+            e.preventDefault();
+            void handleAddTickerFromSearch();
+          }}
+          disabled={addTickerBusy}
+          className="w-full pl-8 pr-3 py-1.5 text-sm rounded-md border border-input bg-background focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-60"
+        />
+      </div>
+      {searchAddTickerOffer ? (
+        <div className="flex flex-col gap-1.5 rounded-md border border-border bg-muted/30 px-2.5 py-2 text-xs">
+          <p className="text-muted-foreground leading-snug">
+            No matches for{" "}
+            <span className="font-mono font-medium text-foreground">
+              {search.trim().toUpperCase()}
+            </span>
+            .
+          </p>
+          <button
+            type="button"
+            disabled={addTickerBusy}
+            onClick={() => void handleAddTickerFromSearch()}
+            className="inline-flex w-fit items-center gap-1.5 rounded-md border border-border bg-background px-2 py-1 font-medium text-foreground transition-colors hover:bg-muted disabled:pointer-events-none disabled:opacity-40"
+          >
+            {addTickerBusy ? (
+              <Loader2 className="h-3.5 w-3.5 animate-spin shrink-0" aria-hidden />
+            ) : (
+              <Plus className="h-3.5 w-3.5 shrink-0" aria-hidden />
+            )}
+            Add to this screening
+          </button>
+        </div>
+      ) : null}
+    </div>
+  );
+
   const filteredSymbols = useMemo(
     () => filtered.map((r) => r.symbol).filter(Boolean) as string[],
     [filtered],
@@ -3074,7 +3126,10 @@ export function ScreeningsUI({
             hide the search/count siblings so it gets the full row, matching
             the businessman pattern. */}
         <div data-tour="screen-filters" className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center sm:gap-3 mb-2">
-          {!(isCaveman && addFilterOpen) && (
+          {/* In deep-dive views the search lives inside the ticker sidebar (so it
+              survives collapsing the controls); only show it here for the
+              table/quotes/etc. views that have no sidebar. */}
+          {!isDeepDiveView(activeView) && !(isCaveman && addFilterOpen) && (
           <div className="flex flex-col gap-1.5 min-w-0 shrink-0 w-full max-w-[min(100%,20rem)] sm:w-56">
             <div className="relative w-full">
               <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none" />
@@ -3338,7 +3393,7 @@ export function ScreeningsUI({
       <div className="flex flex-1 min-h-0 min-w-0">
       {/* View content — scrollable area */}
       <div
-        className={`flex-1 min-w-0 min-h-0 ${isDeepDiveView(activeView) && filteredSymbols.length > 0 ? "overflow-hidden" : "overflow-y-auto"}`}
+        className={`flex-1 min-w-0 min-h-0 ${isDeepDiveView(activeView) ? "overflow-hidden" : "overflow-y-auto"}`}
         {...tickerSwipeHandlers}
       >
         {rows.length === 0 ? (
@@ -3347,11 +3402,12 @@ export function ScreeningsUI({
               ? "No results for this run."
               : "Select a scan run to view results."}
           </div>
-        ) : isDeepDiveView(activeView) && filteredSymbols.length > 0 ? (
+        ) : isDeepDiveView(activeView) ? (
           <div className="flex flex-col h-full min-h-0">
             <div className="flex min-h-0 flex-1 items-stretch gap-0">
               <div className="hidden min-h-0 w-56 shrink-0 self-stretch border-r border-border sm:flex sm:flex-col sm:overflow-hidden xl:w-64">
                 <TickerSidebar
+                  searchSlot={searchControl}
                   symbols={deepDiveListSymbols}
                   quotes={quotes}
                   selectedTicker={selectedTicker}
@@ -3379,7 +3435,8 @@ export function ScreeningsUI({
               <div
                 className={`flex-1 min-w-0 min-h-0 flex flex-col ${activeView === "charts" || activeView === "relationship" ? "overflow-hidden" : "overflow-y-auto gap-4"}`}
               >
-                {activeView === "charts" ? (
+                {filteredSymbols.length > 0 ? (
+                  activeView === "charts" ? (
                   <div className="flex-1 flex flex-col gap-3 w-full min-h-0">
                     <div className="flex-1 flex items-stretch w-full min-h-0">
                       <div
@@ -3605,6 +3662,11 @@ export function ScreeningsUI({
                     onEditComment={editTickerComment}
                     getTickerMeta={getTickerMeta}
                   />
+                  )
+                ) : (
+                  <div className="flex flex-1 items-center justify-center p-8 text-center text-sm text-muted-foreground">
+                    No tickers match your search.
+                  </div>
                 )}
               </div>
             </div>
@@ -3627,6 +3689,7 @@ export function ScreeningsUI({
 
             {/* Mobile ticker nav bar — pinned at bottom on mobile, hidden on sm+ */}
             <MobileTickerBar
+              searchSlot={searchControl}
               symbols={deepDiveListSymbols}
               selectedTicker={selectedTicker}
               onSelect={setSelectedTicker}

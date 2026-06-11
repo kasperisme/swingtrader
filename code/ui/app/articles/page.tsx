@@ -12,6 +12,7 @@ import {
   TrendingScoreboard,
   TrendingScoreboardSkeleton,
 } from "@/components/trending-scoreboard";
+import { BriefingBanner } from "@/components/briefing-banner";
 
 async function ArticlesData({ initialTag }: { initialTag?: string }) {
   // Use service-role client so logged-out visitors can read the public
@@ -61,6 +62,8 @@ export default async function ArticlesPage({
 
   return (
     <div className="mx-auto flex w-full min-w-0 max-w-7xl flex-1 flex-col gap-8 px-4 py-8 sm:px-6 lg:px-8">
+      <BriefingBanner />
+
       <header className="grid gap-6 border-b border-border/60 pb-6 md:grid-cols-[1fr_auto] md:items-end">
         <div>
           <p className="mb-3 inline-flex items-center gap-2 font-mono text-[10px] uppercase tracking-[0.2em] text-amber-500/80">

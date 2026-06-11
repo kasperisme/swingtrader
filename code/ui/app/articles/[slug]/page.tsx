@@ -10,6 +10,7 @@ import { getTrendingLookup, type TrendingLookupEntry } from "@/lib/trends";
 import { CLUSTERS, DIMENSION_MAP } from "@/app/protected/vectors/dimensions";
 import { ShareButtons } from "@/app/blog/[slug]/share-buttons";
 import { ClusterScoreCard } from "./_components/cluster-score-card";
+import { BriefingBanner } from "@/components/briefing-banner";
 import { ArticleBriefingCTA } from "./_components/article-briefing-cta";
 import { ArticleEngagementTracker } from "./_components/article-engagement-tracker";
 import {
@@ -1244,6 +1245,9 @@ async function ArticleData({ params }: { params: Promise<{ slug?: string }> }) {
         type="application/ld+json"
         dangerouslySetInnerHTML={{ __html: JSON.stringify(articleJsonLd) }}
       />
+      <div className="mb-6">
+        <BriefingBanner />
+      </div>
       <div className="mb-8">
         <Link
           href="/articles"

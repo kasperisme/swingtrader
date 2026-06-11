@@ -260,17 +260,16 @@ export function ChartAiChat({
   const [pendingConfirm, setPendingConfirm] = useState<{ personas: PersonaId[]; question: string } | null>(null);
   const abortRef = useRef<AbortController | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
-  // The first positioning (mount / when a ticker's saved chat loads) jumps
-  // straight to the newest message with no animation, so the panel simply
-  // opens already showing the latest. Only later updates — new messages during
-  // an active session — animate the scroll.
-  const didInitialScrollRef = useRef(false);
 
   useEffect(() => {
+    // Loading/replacing messages (mount, ticker switch, restoring a saved chat)
+    // happens while `loading` is false — jump straight to the newest message
+    // with no animation, so the panel just opens already showing the latest.
+    // Only an active send/stream (loading=true) animates, so a fresh reply
+    // scrolls smoothly into view.
     bottomRef.current?.scrollIntoView({
-      behavior: didInitialScrollRef.current ? "smooth" : "auto",
+      behavior: loading ? "smooth" : "auto",
     });
-    didInitialScrollRef.current = true;
   }, [messages, loading]);
 
   // Core streaming function — shared by send() and handleConfirm().

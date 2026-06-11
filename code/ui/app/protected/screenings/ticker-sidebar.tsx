@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Eye, EyeOff, MoreHorizontal, StickyNote } from "lucide-react";
 import type { FmpQuote } from "@/lib/use-quotes";
 import type { EntryMarker } from "@/components/ticker-charts/types";
@@ -36,6 +36,10 @@ interface TickerSidebarProps {
   /** Simplified two-column layout (Symbol + Chg%) for non-technical users.
    * Hides Last / Dist columns and locks sort to symbol. */
   isCaveman?: boolean;
+  /** Optional search / add-ticker control pinned at the top of the sidebar, so
+   * it stays reachable when the screening's top controls are collapsed (both
+   * caveman and businessman mode). */
+  searchSlot?: ReactNode;
 }
 
 function SortArrow({ active, dir }: { active: boolean; dir: SortDir }) {
@@ -63,6 +67,7 @@ export function TickerSidebar({
   onToggleShowDismissed,
   onSortedOrderChange,
   isCaveman = false,
+  searchSlot,
 }: TickerSidebarProps) {
   const listRef = useRef<HTMLDivElement>(null);
   const [sortKey, setSortKey] = useState<SortKey>("symbol");
@@ -165,6 +170,11 @@ export function TickerSidebar({
 
   return (
     <div className="flex min-h-0 flex-1 flex-col bg-background">
+      {searchSlot && (
+        <div className="shrink-0 border-b border-border bg-background p-2">
+          {searchSlot}
+        </div>
+      )}
       {hiddenDismissedCount > 0 && onToggleShowDismissed && (
         <button
           type="button"
