@@ -34,6 +34,11 @@ def _app_url() -> str:
     ).rstrip("/")
 
 
+def app_url() -> str:
+    """Public accessor for the canonical site base URL (no trailing slash)."""
+    return _app_url()
+
+
 def _b64url_nopad(raw: bytes) -> str:
     """Unpadded base64url — matches Node Buffer.toString('base64url')."""
     return base64.urlsafe_b64encode(raw).decode("ascii").rstrip("=")
@@ -62,6 +67,38 @@ def build_unsubscribe_url(email: str, slugs: list[str]) -> str:
 
     token = sign_unsubscribe_token(email, slugs)
     return f"{_app_url()}/api/unsubscribe?token={quote(token, safe='')}"
+
+
+def sign_briefing_token(email: str) -> str:
+    """HMAC-signed token for the news-briefing manage / unsubscribe links.
+
+    Payload is just ``{email}`` — one briefing per email, so the email is the
+    whole identity. Mirrors the TS ``signBriefingToken`` in
+    code/ui/lib/email/briefing-subscriptions.ts (same secret, same body bytes),
+    so links minted here verify there and vice-versa.
+    """
+    secret = os.environ.get("UNSUBSCRIBE_SECRET", "")
+    body = _b64url_nopad(
+        json.dumps({"email": email}, separators=(",", ":")).encode("utf-8")
+    )
+    sig = _b64url_nopad(
+        hmac.new(secret.encode("utf-8"), body.encode("ascii"), hashlib.sha256).digest()
+    )
+    return f"{body}.{sig}"
+
+
+def build_briefing_manage_url(email: str) -> str:
+    from urllib.parse import quote
+
+    token = sign_briefing_token(email)
+    return f"{_app_url()}/briefings/manage?token={quote(token, safe='')}"
+
+
+def build_briefing_unsubscribe_url(email: str) -> str:
+    from urllib.parse import quote
+
+    token = sign_briefing_token(email)
+    return f"{_app_url()}/api/briefings/unsubscribe?token={quote(token, safe='')}"
 
 
 def send_email(

@@ -86,6 +86,8 @@ export async function updateSession(request: NextRequest) {
     pathname === "/api/early-access" ||  // public waitlist signup — no auth required
     pathname === "/api/subscribe" ||  // public email-only screening subscription — no auth required
     pathname === "/api/unsubscribe" ||  // public one-click unsubscribe — token-signed, no auth required
+    pathname.startsWith("/briefings") ||  // free news-briefing signup + manage (no account)
+    pathname.startsWith("/api/briefings") ||  // briefing subscribe/manage/unsubscribe/suggestions — no auth (manage/unsub are token-signed)
     pathname.startsWith("/api/market-screenings") ||  // public read-only screening JSON API
     pathname.startsWith("/api/stripe/checkout") ||  // creates checkout session (has own auth check)
     pathname === "/pricing" ||  // public pricing page

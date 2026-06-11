@@ -9,74 +9,13 @@ import { createClient } from "@/lib/supabase/server";
 import { getTrendingLookup, type TrendingLookupEntry } from "@/lib/trends";
 import { CLUSTERS, DIMENSION_MAP } from "@/app/protected/vectors/dimensions";
 import { ShareButtons } from "@/app/blog/[slug]/share-buttons";
-import { DeeperValueBlock } from "./_components/deeper-value-block";
 import { ClusterScoreCard } from "./_components/cluster-score-card";
-import { ScreenerBridgeCTA } from "./_components/screener-bridge-cta";
-import { FloatingCTA } from "./_components/floating-cta";
+import { ArticleBriefingCTA } from "./_components/article-briefing-cta";
 import { ArticleEngagementTracker } from "./_components/article-engagement-tracker";
-import {
-  getLatestMarketScreeningResultRows,
-  getMarketScreeningBySlug,
-} from "@/app/actions/market-screenings";
 import {
   fetchRelatedArticles,
   RelatedArticles,
 } from "./_components/related-articles";
-
-// Screening the article-bridge CTA points at. Slug must match a published
-// market screening; the block is hidden if it can't be resolved.
-const BRIDGE_SCREENING_SLUG =
-  process.env.NEXT_PUBLIC_BRIDGE_SCREENING_SLUG ?? "nis-momentum";
-
-function getTelegramJoinUrl(): string | null {
-  const explicit = process.env.NEXT_PUBLIC_TELEGRAM_JOIN_URL;
-  if (explicit) return explicit;
-  const username = process.env.TELEGRAM_BOT_USERNAME;
-  return username ? `https://t.me/${username}` : null;
-}
-
-type ScreenerBridge = {
-  matchedTickers: string[];
-  screeningSlug: string;
-  screeningName: string;
-  telegramUrl: string | null;
-};
-
-/**
- * Resolve the article→screener bridge: which of the article's tickers appear in
- * the bridge screening's latest run. Returns null when the screening can't be
- * resolved (so the block is omitted rather than linking to a dead subscribe).
- */
-async function loadScreenerBridge(
-  articleTickers: string[],
-): Promise<ScreenerBridge | null> {
-  try {
-    const screening = await getMarketScreeningBySlug(BRIDGE_SCREENING_SLUG);
-    if (!screening) return null;
-
-    let matchedTickers: string[] = [];
-    if (articleTickers.length > 0) {
-      const { rows } = await getLatestMarketScreeningResultRows(screening.id);
-      const inScreen = new Set(
-        rows
-          .map((r) => (r.symbol ?? "").toUpperCase().trim())
-          .filter(Boolean),
-      );
-      matchedTickers = articleTickers.filter((t) =>
-        inScreen.has(t.toUpperCase()),
-      );
-    }
-
-    return {
-      matchedTickers,
-      screeningSlug: screening.slug,
-      screeningName: screening.name,
-      telegramUrl: getTelegramJoinUrl(),
-    };
-  } catch {
-    return null;
-  }
-}
 
 const SITE_BASE_URL =
   process.env.NEXT_PUBLIC_SITE_URL ?? "https://www.newsimpactscreener.com";
@@ -830,13 +769,11 @@ function AnalyticsRegion({
   tickerSentiment,
   tickerRelationships,
   ctaTickers,
-  ctaArticle,
-  bridge,
+  ctaTags,
   claimLockAfter,
   loserLockAfter,
   sourceUrl,
   sourceLabel,
-  authenticated,
 }: {
   clusterProfile: Array<{
     id: string;
@@ -857,8 +794,7 @@ function AnalyticsRegion({
     reason: string;
   }>;
   ctaTickers: string[];
-  ctaArticle: { slug: string; id: number; title: string };
-  bridge: ScreenerBridge | null;
+  ctaTags: string[];
   /** Gate claims after N (set when the story has 6+ claims). */
   claimLockAfter?: number;
   /** Gate the negatively-impacted ledger after N (set on short/cold stories). */
@@ -866,8 +802,6 @@ function AnalyticsRegion({
   /** Original-source URL + label, rendered as an attribution badge above the gate. */
   sourceUrl: string | null;
   sourceLabel: string;
-  /** Whether the visitor is signed in — members skip the email capture. */
-  authenticated: boolean;
 }) {
   const hasSentiment = tickerSentiment.length > 0;
   const hasRelationships = tickerRelationships.length > 0;
@@ -948,12 +882,7 @@ function AnalyticsRegion({
           </div>
         ) : null}
 
-        <DeeperValueBlock
-          tickers={ctaTickers}
-          article={ctaArticle}
-          impactedCount={winners.length + losers.length}
-          authenticated={authenticated}
-        />
+        <ArticleBriefingCTA tickers={ctaTickers} tags={ctaTags} />
 
         {hasImpactVectors ? (
           <section>
@@ -1015,14 +944,6 @@ function AnalyticsRegion({
           </section>
         ) : null}
 
-        {bridge ? (
-          <ScreenerBridgeCTA
-            matchedTickers={bridge.matchedTickers}
-            screeningSlug={bridge.screeningSlug}
-            screeningName={bridge.screeningName}
-            telegramUrl={bridge.telegramUrl}
-          />
-        ) : null}
     </div>
   );
 }
@@ -1265,9 +1186,9 @@ async function ArticleData({ params }: { params: Promise<{ slug?: string }> }) {
     ]),
   ].slice(0, 4);
 
-  // Article → screener bridge: which of this story's tickers are in the bridge
-  // screening's latest run. Null when the screening can't be resolved.
-  const screenerBridge = await loadScreenerBridge(ctaTickers);
+  // Theme tags this story carries (non-ticker search tags) — seed the briefing
+  // CTA so a reader can follow the story's themes, not just its tickers.
+  const ctaTags = searchTags.filter((t) => !/^[A-Z]{1,6}$/.test(t)).slice(0, 4);
 
   // Every ticker the story touches (sentiment heads + ticker search tags),
   // deduped — emitted as schema.org `about` Corporations for entity SEO.
@@ -1315,15 +1236,6 @@ async function ArticleData({ params }: { params: Promise<{ slug?: string }> }) {
   const claimLockAfter = coldGate ? undefined : 4;
   const loserLockAfter = coldGate ? 2 : undefined;
 
-  // Auth state — only used to suppress the mid-page email capture for members.
-  let isAuthenticated = false;
-  try {
-    const authClient = await createClient();
-    const { data: claims } = await authClient.auth.getClaims();
-    isAuthenticated = Boolean(claims?.claims?.sub);
-  } catch {
-    isAuthenticated = false;
-  }
   const sourceLabel = article.source || article.publisher || "feed";
 
   return (
@@ -1391,23 +1303,16 @@ async function ArticleData({ params }: { params: Promise<{ slug?: string }> }) {
           tickerSentiment={tickerSentiment}
           tickerRelationships={tickerRelationships}
           ctaTickers={ctaTickers}
-          ctaArticle={{
-            slug: article.slug ?? slug,
-            id: article.id,
-            title: article.title ?? "",
-          }}
-          bridge={screenerBridge}
+          ctaTags={ctaTags}
           claimLockAfter={claimLockAfter}
           loserLockAfter={loserLockAfter}
           sourceUrl={article.url}
           sourceLabel={sourceLabel}
-          authenticated={isAuthenticated}
         />
       </div>
 
       <RelatedArticles related={relatedArticles} baseUrl={siteBaseUrl} />
 
-      <FloatingCTA targetId="early-access" delayMs={4000} />
       <ArticleEngagementTracker
         articleId={article.id}
         slug={article.slug ?? slug}

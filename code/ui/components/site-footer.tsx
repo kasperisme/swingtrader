@@ -36,6 +36,9 @@ export function SiteFooter() {
           >
             {INSTAGRAM_HANDLE} on Instagram
           </a>
+          <Link href="/briefings" className="transition-colors hover:text-foreground">
+            Briefings
+          </Link>
           <Link href="/terms" className="transition-colors hover:text-foreground">
             Terms
           </Link>

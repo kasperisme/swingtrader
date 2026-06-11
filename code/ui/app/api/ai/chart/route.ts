@@ -98,6 +98,52 @@ const SHOW_HOW_TO_TOOL: Anthropic.Tool = {
   },
 };
 
+/**
+ * A short "what time is it, and is the market open" block injected into every
+ * LLM call. Without it the model only sees OHLC dates and has no idea what
+ * "today", "recent", or "this week" mean, nor whether it's reasoning about a
+ * live session or a stale weekend chart. Computed in US/Eastern (market time).
+ */
+function buildMarketTemporalContext(ohlcData: OhlcBar[]): string {
+  const now = new Date();
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: "America/New_York",
+    weekday: "short",
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).formatToParts(now);
+  const get = (t: string) => parts.find((p) => p.type === t)?.value ?? "";
+  const weekday = get("weekday");
+  const hh = get("hour");
+  const mm = get("minute");
+  const dateStr = `${weekday} ${get("month")} ${get("day")}, ${get("year")}`;
+  const minutesOfDay = Number(hh) * 60 + Number(mm);
+  const isWeekend = weekday === "Sat" || weekday === "Sun";
+
+  let session: string;
+  if (isWeekend) session = "Market CLOSED (weekend)";
+  else if (minutesOfDay < 4 * 60) session = "Market CLOSED (overnight)";
+  else if (minutesOfDay < 9 * 60 + 30) session = "PRE-MARKET (opens 9:30 ET)";
+  else if (minutesOfDay < 16 * 60) session = "Market OPEN — regular session";
+  else if (minutesOfDay < 20 * 60) session = "AFTER-HOURS";
+  else session = "Market CLOSED (overnight)";
+
+  const lastBar = ohlcData[ohlcData.length - 1];
+  const staleness = lastBar?.date
+    ? ` The latest candle in the chart data is dated ${lastBar.date.slice(0, 10)} — treat it as the most recent confirmed close and never assume price data beyond it.`
+    : "";
+
+  return (
+    `## Current time & market session\n` +
+    `It is currently ${dateStr}, ${hh}:${mm} ET. ${session}.${staleness}\n` +
+    `Anchor every time-relative judgement ("today", "recent", "this week", "the last few sessions", how soon earnings/catalysts are) to this current date — not to the end of the OHLC window, which may be older.\n\n`
+  );
+}
+
 async function callPersona(
   personaId: PersonaId,
   symbol: string,
@@ -105,9 +151,12 @@ async function callPersona(
   personaContext: string,
   existingAnnotations: ChartAnnotation[],
   tradingStrategy?: string,
+  temporalContext?: string,
 ): Promise<{ analysis: string; scores?: PersonaScores; error?: string; ms: number }> {
   const t0 = performance.now();
-  const systemPrompt = withTradingStrategy(PERSONA_PROMPTS[personaId](symbol), tradingStrategy ?? "");
+  const systemPrompt =
+    (temporalContext ?? "") +
+    withTradingStrategy(PERSONA_PROMPTS[personaId](symbol), tradingStrategy ?? "");
   const dataBlock = `OHLC data for ${symbol} (last 60 sessions):\n\`\`\`\n${ohlcSummary(ohlcData)}\n\`\`\``;
 
   const annotationContext = existingAnnotations.length > 0
@@ -209,6 +258,7 @@ export async function POST(req: Request) {
     console.log(`[chart-ai] router: needs_personas=${String(needsPersonas)} personas=[${requestedPersonas.join(",")}] t=${Math.round(performance.now() - tTotal)}ms`);
   }
 
+  const temporalContext = buildMarketTemporalContext(ohlcData);
   const ohlcBlock = `OHLC data for ${symbol} (last 60 sessions):\n\`\`\`\n${ohlcSummary(ohlcData)}\n\`\`\``;
   const annotationBlock = existingAnnotations.length > 0
     ? `\nExisting chart annotations (${existingAnnotations.length}):\n${formatAnnotationList(existingAnnotations)}`
@@ -262,7 +312,7 @@ export async function POST(req: Request) {
 
           const tPersonas = performance.now();
           await Promise.all(requestedPersonas.map((personaId) =>
-            callPersona(personaId, symbol, ohlcData, personaContexts[personaId], existingAnnotations, tradingStrategy)
+            callPersona(personaId, symbol, ohlcData, personaContexts[personaId], existingAnnotations, tradingStrategy, temporalContext)
               .then((r) => {
                 emit(controller, { type: "persona", id: personaId, label: PERSONA_LABELS[personaId], analysis: r.analysis, scores: r.scores ?? null, error: r.error ?? null });
                 const text = r.error ? `[Error: ${r.error}]` : (r.analysis || "[No data available]");
@@ -309,6 +359,7 @@ export async function POST(req: Request) {
           `When the user asks about news, catalysts, recent headlines, or what's been moving the stock, call search_ticker_news first to fetch articles, then incorporate the findings into your analysis. The tool defaults to searching the current ticker — pass \`tags\` (e.g. ["earnings"], ["lawsuit"], ["AI"]) or a natural-language \`query\` to drill into a specific theme. Cite specific headlines and dates when relevant. You may call it multiple times with different filters.`;
 
         const orchestratorSystem =
+          temporalContext +
           withTradingStrategy(ORCHESTRATOR_PROMPT(symbol), tradingStrategy ?? "") +
           howToSystem +
           newsSystem;

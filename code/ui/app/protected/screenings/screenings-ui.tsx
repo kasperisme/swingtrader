@@ -1649,6 +1649,11 @@ export function ScreeningsUI({
   const selectedTickerRef = useRef(selectedTicker);
   selectedTickerRef.current = selectedTicker;
   const tickerMessagesCache = useRef(new Map<string, ChartAiChatMessage[]>());
+  // Parallel to tickerMessagesCache: the AI chat's chart annotations, cached
+  // per-ticker so a message-cache hit (in-flight stream, navigate-back, or a
+  // neighbour warmed by prefetch) restores the saved drawings too instead of
+  // resetting them to []. Kept fresh by the write-through effect below.
+  const tickerAnnotationsCache = useRef(new Map<string, ChartAnnotation[]>());
   // Mirror of the sidebar's currently-visible sort order, so dismiss/advance
   // logic can jump to the closest ticker the user actually sees.
   const sortedSidebarOrderRef = useRef<string[]>([]);
@@ -1678,26 +1683,38 @@ export function ScreeningsUI({
 
   useEffect(() => {
     setChartWorkspaceReady(false);
-    setChartAnnotations([]);
 
-    // If there's cached messages for this ticker (e.g. from an in-flight stream
-    // that was running while the user navigated away), restore from cache
-    // instead of reloading from DB.
+    // If there's cached messages for this ticker — from an in-flight stream that
+    // was running while the user navigated away, or a neighbour the prefetch
+    // effect warmed — restore the whole workspace (annotations + chat) from the
+    // in-memory caches instead of reloading from DB, so the panel renders
+    // instantly with no empty flash.
     const cached = selectedTicker
       ? tickerMessagesCache.current.get(selectedTicker)
       : undefined;
     if (cached !== undefined) {
+      setChartAnnotations(
+        selectedTicker
+          ? (tickerAnnotationsCache.current.get(selectedTicker) ?? [])
+          : [],
+      );
       setChartAiMessages(cached);
       setChartWorkspaceReady(true);
       return;
     }
 
+    setChartAnnotations([]);
     setChartAiMessages([]);
     if (!selectedTicker) return;
     let cancelled = false;
     void chartWorkspaceLoad(selectedTicker).then((res) => {
       if (cancelled) return;
       if (res.ok) {
+        // Seed the caches so flipping back to this ticker is a cache hit (the
+        // write-through effect keeps annotations fresh after edits; the scoped
+        // setMessages keeps the chat fresh).
+        tickerAnnotationsCache.current.set(selectedTicker, res.data.annotations);
+        tickerMessagesCache.current.set(selectedTicker, res.data.aiChatMessages);
         setChartAnnotations(res.data.annotations);
         setChartAiMessages(res.data.aiChatMessages);
       }
@@ -1707,6 +1724,14 @@ export function ScreeningsUI({
       cancelled = true;
     };
   }, [selectedTicker]);
+
+  // Write-through: mirror the selected ticker's live annotations into the
+  // per-ticker cache so a later cache-hit restore (navigate-back / prefetched
+  // neighbour) reflects the latest drawings, not the stale load-time snapshot.
+  useEffect(() => {
+    if (!selectedTicker || !chartWorkspaceReady) return;
+    tickerAnnotationsCache.current.set(selectedTicker, chartAnnotations);
+  }, [chartAnnotations, selectedTicker, chartWorkspaceReady]);
 
   // Scoped setter: writes to the per-ticker cache and only updates the display
   // state when the owning ticker is still active. This keeps in-flight streams
@@ -2586,6 +2611,7 @@ export function ScreeningsUI({
   //   • OHLC chart — at the chart's current granularity + range (desktop only;
   //     caveman OHLC is warmed by the effect above with its own range presets)
   //   • company profile + per-ticker sentiment (the info cards)
+  //   • AI chat workspace — saved chat messages + chart annotations
   // Forward-biased, since arrows usually advance. In-flight guards keep each
   // symbol's profile/sentiment to a single fetch; prefetchOhlc dedupes itself.
   //
@@ -2602,6 +2628,7 @@ export function ScreeningsUI({
   //      yields to the selected ticker's render + in-flight fetches.
   const prefetchProfileInflight = useRef<Set<string>>(new Set());
   const prefetchSentimentInflight = useRef<Set<string>>(new Set());
+  const prefetchChatInflight = useRef<Set<string>>(new Set());
   useEffect(() => {
     if (!selectedTicker) return;
     // Walk the sidebar's *visible* sorted order so the symbols we warm are the
@@ -2670,6 +2697,29 @@ export function ScreeningsUI({
               if (res.ok) sentimentCacheRef.current.set(sym, res.data);
             })
             .finally(() => prefetchSentimentInflight.current.delete(sym));
+        }
+
+        // AI chat workspace → tickerMessagesCache + tickerAnnotationsCache.
+        // Warm the saved conversation + chart drawings the same way as the
+        // info cards, so arrow/▶ navigation to a neighbour restores its chat
+        // instantly instead of flashing empty during the chartWorkspaceLoad
+        // round-trip. Keyed by the raw symbol — the on-select effect and scoped
+        // setter read these caches by the unmodified selectedTicker value.
+        if (
+          !tickerMessagesCache.current.has(raw) &&
+          !prefetchChatInflight.current.has(raw)
+        ) {
+          prefetchChatInflight.current.add(raw);
+          void chartWorkspaceLoad(raw)
+            .then((res) => {
+              // Don't clobber a cache another path (a stream, a direct select)
+              // populated while this fetch was in flight.
+              if (res.ok && !tickerMessagesCache.current.has(raw)) {
+                tickerAnnotationsCache.current.set(raw, res.data.annotations);
+                tickerMessagesCache.current.set(raw, res.data.aiChatMessages);
+              }
+            })
+            .finally(() => prefetchChatInflight.current.delete(raw));
         }
       }
     };
