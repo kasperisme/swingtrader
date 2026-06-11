@@ -48,21 +48,71 @@ def _most_recent_fire(now_utc: datetime) -> datetime:
     return prev_local.replace(tzinfo=_DAILY_TZ).astimezone(timezone.utc)
 
 
-def _mark_sent(client, sub_id: str, *, clear_initial: bool) -> None:
-    now_iso = datetime.now(timezone.utc).isoformat()
-    patch = {"last_sent_at": now_iso, "updated_at": now_iso}
-    if clear_initial:
-        patch["initial_briefing_requested_at"] = None
-    client.schema(_SCHEMA).table("news_briefing_subscriptions").update(patch).eq("id", sub_id).execute()
+_TABLE = "news_briefing_subscriptions"
+
+
+def _now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def _claim_immediate(client, sub_id: str) -> bool:
+    """Atomically claim a pending immediate send by clearing the flag.
+
+    Only one tick wins: the conditional update matches only while the flag is
+    still set, so a concurrent (overlapping) tick that already cleared it gets
+    zero rows back. Returns True if THIS tick claimed the row.
+    """
+    res = (
+        client.schema(_SCHEMA).table(_TABLE)
+        .update({"initial_briefing_requested_at": None, "updated_at": _now_iso()})
+        .eq("id", sub_id)
+        .not_.is_("initial_briefing_requested_at", "null")
+        .execute()
+    )
+    return bool(res.data)
+
+
+def _claim_daily(client, sub_id: str, fire_iso: str) -> bool:
+    """Atomically claim a daily send by stamping last_sent_at=now.
+
+    The conditional update only matches while last_sent_at is still before this
+    fire, so overlapping ticks claim disjoint rows — never the same one twice.
+    """
+    res = (
+        client.schema(_SCHEMA).table(_TABLE)
+        .update({"last_sent_at": _now_iso(), "updated_at": _now_iso()})
+        .eq("id", sub_id)
+        .or_(f"last_sent_at.is.null,last_sent_at.lt.{fire_iso}")
+        .execute()
+    )
+    return bool(res.data)
+
+
+def _rearm_immediate(client, sub_id: str) -> None:
+    """Send failed after claiming — restore the flag so a later tick retries."""
+    client.schema(_SCHEMA).table(_TABLE).update(
+        {"initial_briefing_requested_at": _now_iso(), "updated_at": _now_iso()}
+    ).eq("id", sub_id).execute()
+
+
+def _release_daily(client, sub_id: str) -> None:
+    """Send failed after claiming — clear last_sent_at so a later tick retries."""
+    client.schema(_SCHEMA).table(_TABLE).update(
+        {"last_sent_at": None, "updated_at": _now_iso()}
+    ).eq("id", sub_id).execute()
 
 
 def _send_immediate(client, budget: int) -> int:
-    """Send to subscriptions awaiting their first/forced briefing."""
+    """Send to subscriptions awaiting their first/forced briefing.
+
+    Claim-before-send makes this safe under overlapping crontab ticks: each row
+    is sent at most once; a send failure re-arms the flag for a later retry.
+    """
     if budget <= 0:
         return 0
     rows = (
         client.schema(_SCHEMA)
-        .table("news_briefing_subscriptions")
+        .table(_TABLE)
         .select("*")
         .eq("status", "active")
         .not_.is_("initial_briefing_requested_at", "null")
@@ -73,17 +123,27 @@ def _send_immediate(client, budget: int) -> int:
 
     sent = 0
     for sub in rows:
+        if not _claim_immediate(client, sub["id"]):
+            continue  # another tick already took this one
         ok, _info = send_briefing(sub, is_welcome=True)
-        # Clear the flag on success so we don't retry forever; on failure we
-        # leave it set and the next tick retries.
         if ok:
-            _mark_sent(client, sub["id"], clear_initial=True)
+            # Stamp the delivery time (the claim already cleared the flag).
+            client.schema(_SCHEMA).table(_TABLE).update(
+                {"last_sent_at": _now_iso(), "updated_at": _now_iso()}
+            ).eq("id", sub["id"]).execute()
             sent += 1
+        else:
+            _rearm_immediate(client, sub["id"])
     return sent
 
 
 def _send_daily(client, fire_utc: datetime, budget: int) -> int:
-    """Send the daily briefing to active subs not yet served for ``fire_utc``."""
+    """Send the daily briefing to active subs not yet served for ``fire_utc``.
+
+    Claim-before-send (stamping last_sent_at) means overlapping ticks drain the
+    queue in parallel on disjoint rows; a send failure clears the stamp so the
+    row is retried on a later tick.
+    """
     if budget <= 0:
         return 0
     fire_iso = fire_utc.isoformat()
@@ -91,7 +151,7 @@ def _send_daily(client, fire_utc: datetime, budget: int) -> int:
     # never sent or last sent before this fire.
     rows = (
         client.schema(_SCHEMA)
-        .table("news_briefing_subscriptions")
+        .table(_TABLE)
         .select("*")
         .eq("status", "active")
         .is_("initial_briefing_requested_at", "null")
@@ -103,10 +163,13 @@ def _send_daily(client, fire_utc: datetime, budget: int) -> int:
 
     sent = 0
     for sub in rows:
+        if not _claim_daily(client, sub["id"], fire_iso):
+            continue  # another tick already took this one
         ok, _info = send_briefing(sub, is_welcome=False)
         if ok:
-            _mark_sent(client, sub["id"], clear_initial=False)
             sent += 1
+        else:
+            _release_daily(client, sub["id"])
     return sent
 
 
