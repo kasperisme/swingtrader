@@ -76,10 +76,16 @@ export async function POST(req: Request) {
     return new Response("Invalid JSON", { status: 400 });
   }
 
-  const history: Anthropic.MessageParam[] = (body.messages ?? []).map((m) => ({
-    role: m.role === "assistant" ? "assistant" : "user",
-    content: m.content,
-  }));
+  // Defensive: drop any empty/whitespace-content messages before they reach
+  // Anthropic — an empty content block hard-fails messages.create, which would
+  // make every turn after a broken one error out. The client already filters
+  // failed turns; this guards against older clients and partial payloads.
+  const history: Anthropic.MessageParam[] = (body.messages ?? [])
+    .map((m) => ({
+      role: (m.role === "assistant" ? "assistant" : "user") as "assistant" | "user",
+      content: typeof m.content === "string" ? m.content.trim() : "",
+    }))
+    .filter((m) => m.content.length > 0);
 
   // On first open the client sends no messages. Seed a kickoff turn so the
   // assistant takes the first word: the standard welcome (below) is emitted

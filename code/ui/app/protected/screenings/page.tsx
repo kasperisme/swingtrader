@@ -9,6 +9,8 @@ import {
 import { normalizeRowData } from "./screenings-row-data";
 import { getOnboardingTours } from "@/app/actions/onboarding";
 import { PageTour } from "@/app/protected/_components/page-tour";
+import { getUserSubscriptionTier } from "@/lib/subscription";
+import { PRELAUNCH_OPEN_ACCESS } from "@/lib/launch";
 
 async function ScreeningsTourMount() {
   const tours = await getOnboardingTours();
@@ -251,9 +253,15 @@ async function ScreeningsData({
         vectorTickers={new Set()}
         companyVectorDimensions={{}}
         initialNotes={[]}
+        aiEnabled={false}
       />
     );
   }
+
+  // AI chat is a paid/trial feature: Observers see the full breakdown + data but
+  // not the AI customization. During the open beta, gates are bypassed.
+  const tier = await getUserSubscriptionTier(supabase);
+  const aiEnabled = PRELAUNCH_OPEN_ACCESS || tier !== "observer";
 
   const [
     runs,
@@ -281,6 +289,7 @@ async function ScreeningsData({
       vectorTickers={vectorTickers}
       companyVectorDimensions={companyVectorDimensions}
       initialNotes={initialNotes}
+      aiEnabled={aiEnabled}
     />
   );
 }

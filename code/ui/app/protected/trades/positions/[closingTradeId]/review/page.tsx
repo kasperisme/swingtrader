@@ -3,6 +3,8 @@ import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { ChevronLeft } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
+import { getUserSubscriptionTier } from "@/lib/subscription";
+import { PRELAUNCH_OPEN_ACCESS } from "@/lib/launch";
 import { tradeReviewBootstrap } from "@/app/actions/trade-reviews";
 import { fmpGetOhlc } from "@/app/actions/fmp";
 import type { OhlcBar } from "@/components/ticker-charts/types";
@@ -51,6 +53,11 @@ async function ReviewData({ closingTradeId }: { closingTradeId: number }) {
   const ohlcRes = await fmpGetOhlc(position.ticker, "1day", { from, to });
   const ohlcData: OhlcBar[] = ohlcRes.ok ? ohlcRes.data : [];
 
+  // AI trade review is a paid/trial feature — Observers see the trade + chart
+  // but a locked review panel. Open beta bypasses the gate.
+  const tier = await getUserSubscriptionTier(supabase);
+  const aiEnabled = PRELAUNCH_OPEN_ACCESS || tier !== "observer";
+
   return (
     <TradeReviewView
       closingTradeId={closingTradeId}
@@ -64,6 +71,7 @@ async function ReviewData({ closingTradeId }: { closingTradeId: number }) {
         side: t.side,
         position_side: position.side,
       }))}
+      aiEnabled={aiEnabled}
     />
   );
 }

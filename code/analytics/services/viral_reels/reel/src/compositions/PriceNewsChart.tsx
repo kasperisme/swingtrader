@@ -21,11 +21,45 @@ const indexForDate = (points: {t: string}[], t: string): number => {
   return best;
 };
 
+// Piecewise-linear lookups over a variable-speed draw schedule (sorted by t).
+// `idxAtSecond` drives the live draw; `secondAtIdx` (its inverse) tells us when
+// a given candle is reached, so an event's card appears exactly on schedule.
+const idxAtSecond = (kf: {t: number; idx: number}[], sec: number): number => {
+  if (sec <= kf[0].t) return kf[0].idx;
+  const last = kf[kf.length - 1];
+  if (sec >= last.t) return last.idx;
+  for (let i = 1; i < kf.length; i++) {
+    if (sec <= kf[i].t) {
+      const a = kf[i - 1];
+      const b = kf[i];
+      const f = (sec - a.t) / Math.max(1e-6, b.t - a.t);
+      return a.idx + f * (b.idx - a.idx);
+    }
+  }
+  return last.idx;
+};
+
+const secondAtIdx = (kf: {t: number; idx: number}[], idx: number): number => {
+  if (idx <= kf[0].idx) return kf[0].t;
+  const last = kf[kf.length - 1];
+  if (idx >= last.idx) return last.t;
+  for (let i = 1; i < kf.length; i++) {
+    if (idx <= kf[i].idx) {
+      const a = kf[i - 1];
+      const b = kf[i];
+      const f = (idx - a.idx) / Math.max(1e-6, b.idx - a.idx);
+      return a.t + f * (b.t - a.t);
+    }
+  }
+  return last.t;
+};
+
 const ChartSection: React.FC<PriceNewsProps & {mainFrames: number}> = ({spec, mainFrames}) => {
   const frame = useCurrentFrame();
   const {width, height, fps} = useVideoConfig();
   const theme = getTheme(spec.theme);
   const {points, events} = spec.chart;
+  const keyframes = spec.chart.keyframes;
   const n = points.length;
 
   // Each event's pass-frame is when the line reaches its date (linear draw).
@@ -40,14 +74,26 @@ const ChartSection: React.FC<PriceNewsProps & {mainFrames: number}> = ({spec, ma
   // the chart holds on the final point for the remaining frames.
   const holdFrames = events.length ? Math.round(2.2 * fps) : 0;
   const drawF = Math.max(1, lastF - holdFrames);
-  const progress = clamp(frame / drawF, 0, 1);
+
+  // With a keyframe schedule (dialog-reel), draw at a variable speed so each
+  // candle is reached at its scheduled second; otherwise draw linearly.
+  const hasSchedule = !!(keyframes && keyframes.length >= 2);
+  const progress = hasSchedule
+    ? clamp(idxAtSecond(keyframes!, frame / fps) / Math.max(1, n - 1), 0, 1)
+    : clamp(frame / drawF, 0, 1);
 
   // A card appears when the line reaches its date and then STAYS — the next
   // event's card animates in on top of it. Cards are opaque, so the newest
   // fully covers the prior (which peeks out behind it). No fade-outs, so an
   // article is always on screen once the first one has landed.
   const passed = eventsWithIndex
-    .map(({e, i, idx}) => ({e, i, passFrame: (idx / Math.max(1, n - 1)) * drawF}))
+    .map(({e, i, idx}) => ({
+      e,
+      i,
+      passFrame: hasSchedule
+        ? secondAtIdx(keyframes!, idx) * fps
+        : (idx / Math.max(1, n - 1)) * drawF,
+    }))
     .filter((x) => frame >= x.passFrame - 1e-3)
     .sort((a, b) => a.passFrame - b.passFrame);
   const current = passed.length ? passed[passed.length - 1] : null;

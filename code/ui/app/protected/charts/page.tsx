@@ -3,6 +3,8 @@ import { createClient } from "@/lib/supabase/server";
 import { ChartsPageClient } from "./charts-client";
 import { getOnboardingTours } from "@/app/actions/onboarding";
 import { PageTour } from "@/app/protected/_components/page-tour";
+import { getUserSubscriptionTier } from "@/lib/subscription";
+import { PRELAUNCH_OPEN_ACCESS } from "@/lib/launch";
 
 async function ChartsTourMount() {
   const tours = await getOnboardingTours();
@@ -45,11 +47,18 @@ async function ChartsBody({ searchParams }: PageProps) {
   const suggestionTickers = await fetchVectorTickers();
   const tickersParam = params.tickers;
 
+  // AI chat is a paid/trial feature — Observers see the charts/data but a locked
+  // AI panel. Open beta bypasses the gate.
+  const supabase = await createClient();
+  const tier = await getUserSubscriptionTier(supabase);
+  const aiEnabled = PRELAUNCH_OPEN_ACCESS || tier !== "observer";
+
   return (
     <ChartsPageClient
       key={tickersParam ?? "__default__"}
       tickersParam={tickersParam}
       suggestionTickers={suggestionTickers}
+      aiEnabled={aiEnabled}
     />
   );
 }

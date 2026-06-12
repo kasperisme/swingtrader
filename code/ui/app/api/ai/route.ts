@@ -1,10 +1,17 @@
 import { createClient } from "@/lib/supabase/server";
+import { aiFeaturesAllowed } from "@/lib/subscription";
 import { getAnthropicClient, DEFAULT_MODEL, splitSystemMessages, type ChatMessage } from "@/lib/anthropic";
 
 export async function POST(req: Request) {
   const supabase = await createClient();
   const { data: claims } = await supabase.auth.getClaims();
   if (!claims?.claims?.sub) return new Response("Unauthorized", { status: 401 });
+
+  // Raw model passthrough — gate to paid/trial so Observers can't call the model
+  // directly (open beta bypasses).
+  if (!(await aiFeaturesAllowed(supabase))) {
+    return new Response("AI features require a paid plan", { status: 403 });
+  }
 
   const rawText = await req.text();
   if (!rawText) return new Response("Empty request body", { status: 400 });

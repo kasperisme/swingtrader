@@ -17,6 +17,12 @@ export type AssistantChatMessage = {
   statuses?: string[];
   /** Set when a `telegram_link` event arrives — renders the connect button. */
   telegram?: { deep_link: string } | null;
+  /**
+   * A turn that failed or streamed nothing usable. Still shown in the UI, but
+   * excluded from the history replayed to the model so a failed step (e.g. a
+   * screening import) can't poison later steps (e.g. Telegram).
+   */
+  error?: boolean;
 };
 
 /** Small green ✓ confirmations for actions the agent performed this turn. */

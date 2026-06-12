@@ -71,6 +71,22 @@ function parseAssistant(content: string): { text: string; options: string[] } {
   return { text: content, options: [] };
 }
 
+/**
+ * Build the message history sent to the model. Drops broken assistant turns —
+ * ones flagged `error` or with empty/whitespace content — so a failed step
+ * never carries into later ones (an empty assistant turn also hard-fails the
+ * Anthropic call, which previously broke every subsequent step). User turns are
+ * always kept; content is trimmed and empty messages removed.
+ */
+function toApiHistory(
+  msgs: AssistantChatMessage[],
+): { role: "user" | "assistant"; content: string }[] {
+  return msgs
+    .filter((m) => !(m.role === "assistant" && (m.error || !m.content.trim())))
+    .map((m) => ({ role: m.role, content: m.content.trim() }))
+    .filter((m) => m.content.length > 0);
+}
+
 const SETUP_STEPS = [
   { key: "strategy", label: "Strategy" },
   { key: "holdings", label: "Holdings" },
@@ -206,12 +222,16 @@ export function SetupAssistantChat({ className = "" }: { className?: string }) {
           return copy;
         });
 
+      let sawText = false;
+
       try {
         const res = await fetch("/api/ai/onboarding", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            messages: withUser.map((m) => ({ role: m.role, content: m.content })),
+            // Only replay clean turns — a failed/empty step is dropped so it
+            // can't break the steps after it.
+            messages: toApiHistory(withUser),
             kickoff: !trimmed,
           }),
           signal: controller.signal,
@@ -219,7 +239,7 @@ export function SetupAssistantChat({ className = "" }: { className?: string }) {
 
         if (!res.ok || !res.body) {
           const errText = await res.text().catch(() => res.statusText);
-          updateLast({ content: `Error: ${errText || "request failed"}` });
+          updateLast({ content: `Error: ${errText || "request failed"}`, error: true });
           return;
         }
 
@@ -243,9 +263,9 @@ export function SetupAssistantChat({ className = "" }: { className?: string }) {
             }
 
             if (msg.type === "text") {
-              updateLast({
-                content: typeof msg.content === "string" ? msg.content : "",
-              });
+              const content = typeof msg.content === "string" ? msg.content : "";
+              if (content.trim()) sawText = true;
+              updateLast({ content });
             } else if (msg.type === "status") {
               const label = typeof msg.label === "string" ? msg.label : "";
               if (label) {
@@ -264,14 +284,28 @@ export function SetupAssistantChat({ className = "" }: { className?: string }) {
                 typeof msg.deep_link === "string" ? msg.deep_link : "";
               if (deepLink) updateLast({ telegram: { deep_link: deepLink } });
             } else if (msg.type === "error") {
-              updateLast({ content: `Error: ${String(msg.message)}` });
+              sawText = true;
+              updateLast({ content: `Error: ${String(msg.message)}`, error: true });
             }
           }
+        }
+
+        // The stream closed without any usable text (e.g. the server died mid
+        // tool call). Surface a retryable note and flag the turn so it's not
+        // replayed as an empty assistant message — which would 400 the next
+        // request and break the following step.
+        if (!sawText) {
+          updateLast({
+            content:
+              "That step got interrupted before I could finish. Tap your last choice again, or tell me what you'd like to do next.",
+            error: true,
+          });
         }
       } catch (err) {
         if (err instanceof Error && err.name === "AbortError") return;
         updateLast({
           content: `Error: ${err instanceof Error ? err.message : String(err)}`,
+          error: true,
         });
       } finally {
         setLoading(false);

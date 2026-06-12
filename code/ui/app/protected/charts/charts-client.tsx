@@ -18,6 +18,7 @@ import {
   type TickerChartNoteStatus,
 } from "@/components/ticker-charts";
 import { ChartAiChat } from "@/components/chart-ai-chat";
+import { AiChatLocked } from "@/components/ai-chat-locked";
 import { AddToScreening } from "@/components/add-to-screening";
 import { ChartDateRangePicker, type ChartGranularity } from "@/components/chart-date-range-picker";
 import { MobileAiChatSheet } from "@/components/mobile-ai-chat-sheet";
@@ -37,9 +38,15 @@ function parseTickersParam(raw: string | undefined): string[] {
 type Props = {
   tickersParam: string | undefined;
   suggestionTickers: string[];
+  /** Whether the AI chat is available (false → Observer gets a locked panel). */
+  aiEnabled?: boolean;
 };
 
-export function ChartsPageClient({ tickersParam, suggestionTickers }: Props) {
+export function ChartsPageClient({
+  tickersParam,
+  suggestionTickers,
+  aiEnabled = true,
+}: Props) {
   const initial = useMemo(
     () => parseTickersParam(tickersParam),
     [tickersParam],
@@ -288,20 +295,24 @@ export function ChartsPageClient({ tickersParam, suggestionTickers }: Props) {
           )}
         </button>
 
-        {/* AI chat side panel */}
-        {aiChatOpen && selectedTicker && (
+        {/* AI chat side panel (locked panel for Observers) */}
+        {aiChatOpen && (!aiEnabled || selectedTicker) && (
           <div data-tour="chart-ai-panel" className="hidden sm:block w-[340px] shrink-0 border-l border-border relative self-stretch">
             <div className="absolute inset-0 flex flex-col min-h-0">
-              <ChartAiChat
-                key={selectedTicker}
-                symbol={selectedTicker}
-                ohlcData={chartData}
-                annotations={annotations}
-                onAnnotations={handleAiAnnotations}
-                messages={aiChatMessages}
-                setMessages={setAiChatMessages}
-                side
-              />
+              {!aiEnabled ? (
+                <AiChatLocked />
+              ) : (
+                <ChartAiChat
+                  key={selectedTicker!}
+                  symbol={selectedTicker!}
+                  ohlcData={chartData}
+                  annotations={annotations}
+                  onAnnotations={handleAiAnnotations}
+                  messages={aiChatMessages}
+                  setMessages={setAiChatMessages}
+                  side
+                />
+              )}
             </div>
           </div>
         )}
@@ -315,15 +326,19 @@ export function ChartsPageClient({ tickersParam, suggestionTickers }: Props) {
               title={selectedTicker}
               hasIndicator={aiChatMessages.length > 0}
             >
-              <ChartAiChat
-                key={`mobile-${selectedTicker}`}
-                symbol={selectedTicker}
-                ohlcData={chartData}
-                annotations={annotations}
-                onAnnotations={handleAiAnnotations}
-                messages={aiChatMessages}
-                setMessages={setAiChatMessages}
-              />
+              {!aiEnabled ? (
+                <AiChatLocked />
+              ) : (
+                <ChartAiChat
+                  key={`mobile-${selectedTicker}`}
+                  symbol={selectedTicker}
+                  ohlcData={chartData}
+                  annotations={annotations}
+                  onAnnotations={handleAiAnnotations}
+                  messages={aiChatMessages}
+                  setMessages={setAiChatMessages}
+                />
+              )}
             </MobileAiChatSheet>
           </>
         )}

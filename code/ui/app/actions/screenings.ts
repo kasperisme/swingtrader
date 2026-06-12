@@ -2,6 +2,7 @@
 
 import type { ChartAiChatMessage } from "@/app/actions/chart-workspace";
 import { createClient } from "@/lib/supabase/server";
+import { aiFeaturesAllowed } from "@/lib/subscription";
 import { fetchAllPaged } from "@/lib/supabase/paginate";
 
 type ScreeningActionError = { ok: false; error: string };
@@ -620,6 +621,11 @@ export async function bulkAnalyzeScanRun(
   const { data: claims } = await supabase.auth.getClaims();
   const userId = claims?.claims?.sub;
   if (!userId) return { ok: false, error: "Unauthorized" };
+
+  // Bulk AI analysis is a paid/trial feature — gate Observers (open beta bypasses).
+  if (!(await aiFeaturesAllowed(supabase))) {
+    return { ok: false, error: "AI analysis requires a paid plan. Upgrade to use it." };
+  }
 
   // Confirm the run belongs to the caller.
   const { data: run, error: runErr } = await supabase

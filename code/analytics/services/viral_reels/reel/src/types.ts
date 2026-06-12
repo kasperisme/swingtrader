@@ -117,12 +117,22 @@ export interface NewsEvent {
   move?: string; // optional pre-baked reaction, e.g. "+3.2% next day"
 }
 
+// Optional variable-speed draw schedule: control points mapping a wall-clock
+// second to a fractional point index (0..n-1). When present, the line draws
+// piecewise-linearly through these instead of at a constant rate — used to land
+// each event's candle exactly when its voice-over beat starts (dialog-reel).
+export interface DrawKeyframe {
+  t: number; // seconds from the start of the reel
+  idx: number; // fractional point index the line should have reached by `t`
+}
+
 export interface PriceNewsChartSpec {
   ticker: string;
   label: string;
   valuePrefix?: string; // e.g. "$"
   points: OHLCPoint[];
   events: NewsEvent[];
+  keyframes?: DrawKeyframe[]; // optional variable-speed draw schedule
 }
 
 export interface PriceNewsSpec {

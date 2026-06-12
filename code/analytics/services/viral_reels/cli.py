@@ -175,15 +175,30 @@ def cmd_article_images(args):
 
 def cmd_price_news(args):
     """Scaffold a price+news ReelSpec: price line + scored news events on it."""
-    chart = ds.price_history(args.ticker, window_days=args.window_days)
+    chart = ds.price_history(args.ticker, window_days=args.window_days, interval=args.interval)
     chart["events"] = ds.news_events(
         args.ticker,
         window_days=args.window_days,
         max_events=args.max_events,
         points=chart["points"],
     )
-    # Put the first article on the 2nd rendered date so it shows up early.
-    chart = ds.align_first_event_to_second_point(chart, lead=1)
+    intraday = args.interval != "daily"
+    if intraday:
+        # Bare-date events would land on the prior session's last candle; snap
+        # each to a mid-session point of its own day.
+        chart = ds.anchor_events_to_points(chart)
+    else:
+        # Put the first article on the 2nd rendered date so it shows up early.
+        chart = ds.align_first_event_to_second_point(chart, lead=1)
+
+    # Match the reel length to a voice-over (or an explicit duration) by
+    # stretching the total render time — intraday gives enough points to draw
+    # smoothly over a long window.
+    fmt_overrides = None
+    total_s = _resolve_duration(args)
+    if total_s:
+        fmt_overrides = {"durationInSeconds": round(total_s, 2)}
+
     spec = spec_mod.build_price_news_spec(
         chart=chart,
         theme=args.theme,
@@ -191,11 +206,34 @@ def cmd_price_news(args):
         subtitle=f"Price vs. AI-scored headlines · last {args.window_days} days",
         outro_title="<EDIT: the takeaway>",
         outro_takeaway="<EDIT: which headlines moved it, and how much>",
+        format_overrides=fmt_overrides,
     )
     problems = spec_mod.validate(spec)
     if problems:
         log.warning("price-news scaffold has issues:\n- %s", "\n- ".join(problems))
+    if total_s:
+        log.info("reel duration set to %.1fs (%d points, interval=%s)",
+                 total_s, len(chart["points"]), args.interval)
     _emit(spec, args.out or str(_proj_dir(args.ticker) / "spec.json"))
+
+
+def _audio_duration_seconds(path: str) -> float:
+    """Probe an audio/video file's duration with ffprobe."""
+    out = subprocess.run(
+        ["ffprobe", "-v", "error", "-show_entries", "format=duration",
+         "-of", "default=nw=1:nk=1", path],
+        capture_output=True, text=True,
+    )
+    if out.returncode != 0:
+        raise RuntimeError(f"ffprobe failed for {path}: {out.stderr.strip()}")
+    return float(out.stdout.strip())
+
+
+def _resolve_duration(args) -> float | None:
+    """Total render seconds from --duration or --match-audio (else None)."""
+    if getattr(args, "match_audio", None):
+        return _audio_duration_seconds(args.match_audio)
+    return getattr(args, "duration", None)
 
 
 def cmd_card(args):
@@ -296,6 +334,72 @@ def cmd_fmp_press(args):
     _emit(press, args.out or _data_out(args.ticker, "fmp_press.json"))
 
 
+def cmd_dialog(args):
+    from services.viral_reels import dialog as dlg
+
+    default_dir = (_proj_dir(args.ticker) / "dialog") if args.ticker else (_OUT_DIR / "dialog")
+    out_dir = pathlib.Path(args.out_dir) if args.out_dir else default_dir
+    result = dlg.make_dialog(
+        ticker=args.ticker,
+        window_days=args.window_days,
+        turns=args.turns,
+        out_dir=out_dir,
+        model=args.model,
+        extra_direction=args.direction,
+        render=not args.no_render,
+    )
+    print(f"script: {result['script_path']}")
+    if result["audio_path"]:
+        print(f"audio:  {result['audio_path']}")
+    else:
+        print("audio:  (skipped — --no-render)")
+    for turn in result["script"]:
+        print(f"  {turn['speaker'].upper():>5}: {turn['text']}")
+
+
+def cmd_dialog_reel(args):
+    """Event-synced reel: a Nami×Luffy voice-over timed to the chart's pins.
+
+    One pipeline: pull an intraday chart + its plotted news events, write a beat
+    per event, lay the audio so each beat lands as its card appears, size the reel
+    to that audio, render, and mux the voice-over onto the video.
+    """
+    from services.viral_reels import dialog as dlg
+
+    proj = _proj_dir(args.ticker)
+    out_dir = pathlib.Path(args.out_dir) if args.out_dir else (proj / "dialog")
+    result = dlg.make_dialog_reel(
+        ticker=args.ticker,
+        window_days=args.window_days,
+        interval=args.interval,
+        max_events=args.max_events,
+        theme=args.theme,
+        provisional_duration=args.target_seconds,
+        out_dir=out_dir,
+        model=args.model,
+        extra_direction=args.direction,
+    )
+    spec_path = proj / "spec.json"
+    _emit(result["spec"], str(spec_path))
+    print(f"dialogue: {result['audio_path']} ({result['duration_s']}s)")
+    print("schedule (group @ start → event):")
+    for s in result["schedule"]:
+        ev = f" → {s['event']}" if s.get("event") else ""
+        print(f"  {s['start_s']:>6.1f}s  {s['group']:<8} ({s['dur_s']}s){ev}")
+
+    if args.no_render:
+        print("render skipped (--no-render). To finish:")
+        print(f"  python -m services.viral_reels.cli render {spec_path} --audio {result['audio_path']}")
+        return
+
+    # Reuse the render command (handles validation, Remotion, and the audio mux).
+    render_args = argparse.Namespace(
+        spec=str(spec_path), out=None, composition=None, force=False,
+        audio=result["audio_path"],
+    )
+    cmd_render(render_args)
+
+
 def cmd_validate(args):
     spec = spec_mod.load(args.spec)
     problems = spec_mod.validate(spec)
@@ -367,6 +471,28 @@ def cmd_render(args):
         sys.exit(result.returncode)
     print(f"rendered {out_path}")
 
+    if getattr(args, "audio", None) and not still:
+        _mux_audio(out_path, pathlib.Path(args.audio).resolve())
+
+
+def _mux_audio(video_path: pathlib.Path, audio_path: pathlib.Path) -> None:
+    """Mux an audio track onto a rendered reel (e.g. the Nami×Luffy dialog)."""
+    if not audio_path.exists():
+        print(f"audio not found, skipping mux: {audio_path}", file=sys.stderr)
+        return
+    muxed = video_path.with_name(video_path.stem + "_audio.mp4")
+    cmd = [
+        "ffmpeg", "-y", "-i", str(video_path), "-i", str(audio_path),
+        "-c:v", "copy", "-c:a", "aac", "-shortest",
+        "-map", "0:v:0", "-map", "1:a:0", str(muxed),
+    ]
+    log.info("muxing audio: %s", " ".join(cmd))
+    result = subprocess.run(cmd, capture_output=True, text=True)
+    if result.returncode != 0:
+        print(f"audio mux failed: {result.stderr[-400:]}", file=sys.stderr)
+        return
+    print(f"muxed {muxed}")
+
 
 def main():
     parser = argparse.ArgumentParser(description="Viral reel generator")
@@ -420,6 +546,13 @@ def main():
     p_pn.add_argument("--window-days", type=int, default=45)
     p_pn.add_argument("--max-events", type=int, default=8)
     p_pn.add_argument("--theme", default="midnight")
+    p_pn.add_argument("--interval", default="daily",
+                      choices=["daily", *sorted(ds.INTRADAY_INTERVALS)],
+                      help="bar interval; intraday (e.g. 1hour) yields a longer, smoother reel")
+    p_pn.add_argument("--duration", type=float, default=None,
+                      help="total reel length in seconds (stretches the candle draw)")
+    p_pn.add_argument("--match-audio", default=None,
+                      help="set reel length to this audio/video file's duration (e.g. a dialog.mp3)")
     p_pn.add_argument("--out", default=None,
                       help="defaults to output/viral_reels/<TICKER>/spec.json")
 
@@ -469,6 +602,35 @@ def main():
     p_fp.add_argument("--limit", type=int, default=100)
     p_fp.add_argument("--out", default=None)
 
+    p_dlg = sub.add_parser("dialog",
+                           help="Generate + voice a Nami×Luffy dialogue about the news (ElevenLabs)")
+    p_dlg.add_argument("--ticker", default=None,
+                       help="focus a ticker (else market-wide trend snapshot)")
+    p_dlg.add_argument("--window-days", type=int, default=7)
+    p_dlg.add_argument("--turns", type=int, default=8, help="approx number of dialogue turns")
+    p_dlg.add_argument("--direction", default=None, help="extra creative direction for the script")
+    p_dlg.add_argument("--model", default=None, help="override the Anthropic model")
+    p_dlg.add_argument("--no-render", action="store_true",
+                       help="write the script only, skip ElevenLabs voicing")
+    p_dlg.add_argument("--out-dir", default=None,
+                       help="defaults to output/viral_reels/<TICKER>/dialog/ (or .../dialog/)")
+
+    p_dr = sub.add_parser("dialog-reel",
+                          help="Event-synced Nami×Luffy voice-over timed to a price-news reel's pins")
+    p_dr.add_argument("--ticker", required=True)
+    p_dr.add_argument("--window-days", type=int, default=35, help="chart breadth (wider = faster candles)")
+    p_dr.add_argument("--interval", default="1hour",
+                      choices=["daily", *sorted(ds.INTRADAY_INTERVALS)])
+    p_dr.add_argument("--max-events", type=int, default=6, help="how many pins to feature/comment on")
+    p_dr.add_argument("--target-seconds", type=float, default=85.0,
+                      help="target talk length used to budget beats (final length = the spoken length)")
+    p_dr.add_argument("--theme", default="midnight")
+    p_dr.add_argument("--direction", default=None, help="extra creative direction for the script")
+    p_dr.add_argument("--model", default=None, help="override the Anthropic model")
+    p_dr.add_argument("--no-render", action="store_true", help="write spec + audio only, skip Remotion")
+    p_dr.add_argument("--out-dir", default=None,
+                      help="defaults to output/viral_reels/<TICKER>/dialog/")
+
     p_val = sub.add_parser("validate", help="Validate a ReelSpec JSON file")
     p_val.add_argument("spec")
 
@@ -478,6 +640,8 @@ def main():
     p_render.add_argument("--composition", default=None,
                           help="override the composition (default: inferred from the spec shape)")
     p_render.add_argument("--force", action="store_true", help="render even if validation fails")
+    p_render.add_argument("--audio", default=None,
+                          help="mux this audio track onto the reel (e.g. a dialog.mp3) → *_audio.mp4")
 
     args = parser.parse_args()
     dispatch = {
@@ -494,6 +658,8 @@ def main():
         "catalysts": cmd_catalysts,
         "fmp-news": cmd_fmp_news,
         "fmp-press": cmd_fmp_press,
+        "dialog": cmd_dialog,
+        "dialog-reel": cmd_dialog_reel,
         "validate": cmd_validate,
         "render": cmd_render,
     }

@@ -1838,7 +1838,17 @@ function AgentFormDialog({
 }) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="left-0 top-0 flex h-[100dvh] max-h-[100dvh] w-full max-w-xl translate-x-0 translate-y-0 flex-col gap-0 overflow-hidden rounded-none border-0 bg-card p-0 sm:left-[50%] sm:top-[50%] sm:h-auto sm:max-h-[88vh] sm:translate-x-[-50%] sm:translate-y-[-50%] sm:rounded-2xl sm:border">
+      <DialogContent
+        // The "Filter tickers" wizard renders its option list in a body-level
+        // portal (to escape overflow clipping). Without this guard, clicking a
+        // filter option registers as a pointer-down outside the dialog and Radix
+        // dismisses the whole form. Keep the dialog open for those interactions.
+        onInteractOutside={(e) => {
+          const target = e.detail.originalEvent.target as HTMLElement | null;
+          if (target?.closest("[data-filter-portal]")) e.preventDefault();
+        }}
+        className="left-0 top-0 flex h-[100dvh] max-h-[100dvh] w-full max-w-xl translate-x-0 translate-y-0 flex-col gap-0 overflow-hidden rounded-none border-0 bg-card p-0 sm:left-[50%] sm:top-[50%] sm:h-auto sm:max-h-[88vh] sm:translate-x-[-50%] sm:translate-y-[-50%] sm:rounded-2xl sm:border"
+      >
         <div className="flex shrink-0 items-center gap-2 border-b border-border px-4 py-3.5 sm:px-6">
           <span className="h-1.5 w-1.5 rounded-full bg-amber-500" />
           <DialogTitle className="font-mono text-[11px] font-semibold uppercase tracking-[0.16em] text-amber-500">

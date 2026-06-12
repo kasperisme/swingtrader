@@ -357,35 +357,116 @@ def price_overlay(ticker: str, window_days: int = 30) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 
-def price_history(ticker: str, window_days: int = 30) -> dict[str, Any]:
-    """Daily OHLC history for a ticker via FMP, shaped for the price-news chart."""
+# FMP intraday intervals accepted by /historical-chart/{interval}/{ticker}.
+INTRADAY_INTERVALS = {"1min", "5min", "15min", "30min", "1hour", "4hour"}
+
+
+def price_history(
+    ticker: str, window_days: int = 30, interval: str = "daily"
+) -> dict[str, Any]:
+    """OHLC history for a ticker via FMP, shaped for the price-news chart.
+
+    ``interval="daily"`` (default) returns one point per trading day. Any of
+    :data:`INTRADAY_INTERVALS` (e.g. ``"1hour"``, ``"30min"``) returns intraday
+    OHLC — many more points over the same window, so the candle draw can be
+    stretched to a much longer reel (e.g. to match a voice-over). Intraday
+    points carry a full ISO ``t`` (``YYYY-MM-DDTHH:MM:SS``) so same-day candles
+    stay distinct; daily points keep the bare ``YYYY-MM-DD`` date.
+    """
     ticker = ticker.upper().strip()
     to = datetime.now(timezone.utc).date()
     frm = to - timedelta(days=window_days)
-    url = f"https://financialmodelingprep.com/api/v3/historical-price-full/{ticker}"
-    resp = requests.get(
-        url,
-        params={"from": frm.isoformat(), "to": to.isoformat(), "apikey": _fmp_key()},
-        timeout=30,
-    )
-    if resp.status_code != 200:
-        raise RuntimeError(f"FMP historical-price returned {resp.status_code}: {resp.text[:200]}")
-    historical = (resp.json() or {}).get("historical", []) or []
+
+    if interval != "daily" and interval not in INTRADAY_INTERVALS:
+        raise ValueError(
+            f"interval {interval!r} not supported; use 'daily' or one of {sorted(INTRADAY_INTERVALS)}"
+        )
+
+    if interval == "daily":
+        url = f"https://financialmodelingprep.com/api/v3/historical-price-full/{ticker}"
+        resp = requests.get(
+            url,
+            params={"from": frm.isoformat(), "to": to.isoformat(), "apikey": _fmp_key()},
+            timeout=30,
+        )
+        if resp.status_code != 200:
+            raise RuntimeError(f"FMP historical-price returned {resp.status_code}: {resp.text[:200]}")
+        rows = (resp.json() or {}).get("historical", []) or []
+
+        def _t(raw: str) -> str:
+            return str(raw)[:10]
+    else:
+        url = f"https://financialmodelingprep.com/api/v3/historical-chart/{interval}/{ticker}"
+        resp = requests.get(
+            url,
+            params={"from": frm.isoformat(), "to": to.isoformat(), "apikey": _fmp_key()},
+            timeout=30,
+        )
+        if resp.status_code != 200:
+            raise RuntimeError(f"FMP historical-chart returned {resp.status_code}: {resp.text[:200]}")
+        rows = resp.json() or []
+
+        def _t(raw: str) -> str:
+            # FMP intraday stamps look like "2026-06-05 15:30:00" → ISO so the
+            # renderer's `new Date(t)` parses them unambiguously.
+            return str(raw)[:19].replace(" ", "T")
+
     points = sorted(
         (
             {
-                "t": str(r.get("date"))[:10],
+                "t": _t(r.get("date")),
                 "close": _round(r.get("close") or 0),
                 "open": _round(r.get("open") or 0),
                 "high": _round(r.get("high") or 0),
                 "low": _round(r.get("low") or 0),
             }
-            for r in historical
+            for r in rows
             if r.get("date") is not None and r.get("close") is not None
         ),
         key=lambda p: p["t"],
     )
-    return {"ticker": ticker, "label": ticker, "valuePrefix": "$", "points": points}
+    return {
+        "ticker": ticker,
+        "label": ticker,
+        "valuePrefix": "$",
+        "interval": interval,
+        "points": points,
+    }
+
+
+def anchor_events_to_points(chart: dict[str, Any]) -> dict[str, Any]:
+    """Snap each event's ``t`` to a real chart point on the same calendar day.
+
+    News events carry a bare date, but an intraday chart has many points per
+    day — and midnight would match the *prior* day's last candle. For every
+    event, pick the middle point of its calendar day (or the nearest day that
+    has points) so the pin lands mid-session where the viewer expects it.
+    """
+    points = chart.get("points") or []
+    events = chart.get("events") or []
+    if not points or not events:
+        return chart
+
+    by_day: dict[str, list[str]] = {}
+    for p in points:
+        by_day.setdefault(p["t"][:10], []).append(p["t"])
+    days = sorted(by_day)
+
+    def _nearest_day(d: str) -> str:
+        if d in by_day:
+            return d
+        return min(days, key=lambda x: abs(_date(x) - _date(d)))
+
+    def _date(s: str):
+        return datetime.fromisoformat(s[:10]).date()
+
+    for e in events:
+        day = _nearest_day(str(e.get("t"))[:10])
+        same_day = by_day[day]
+        e["t"] = same_day[len(same_day) // 2]  # mid-session point of that day
+    events.sort(key=lambda e: e["t"])
+    chart["events"] = events
+    return chart
 
 
 def _next_day_move_str(points: list[dict[str, Any]] | None, day: str) -> str | None:

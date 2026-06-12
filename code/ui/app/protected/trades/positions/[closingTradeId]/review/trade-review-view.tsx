@@ -3,6 +3,7 @@
 import { useMemo, useState } from "react";
 import { CandlestickSvg } from "@/components/ticker-charts/candlestick-svg";
 import { TradeReviewChat } from "@/components/trade-review-chat";
+import { AiChatLocked } from "@/components/ai-chat-locked";
 import type {
   ChartAnnotation,
   OhlcBar,
@@ -42,6 +43,8 @@ export interface TradeReviewViewProps {
     side: "buy" | "sell";
     position_side: "long" | "short";
   }>;
+  /** Whether the AI review is available (false → Observer gets a locked panel). */
+  aiEnabled?: boolean;
 }
 
 export function TradeReviewView({
@@ -50,6 +53,7 @@ export function TradeReviewView({
   initialMessages,
   ohlcData,
   tradeMarkers,
+  aiEnabled = true,
 }: TradeReviewViewProps) {
   const [messages, setMessages] = useState<ChartAiChatMessage[]>(initialMessages);
 
@@ -209,16 +213,20 @@ export function TradeReviewView({
         </div>
       </div>
 
-      {/* Right: AI review chat */}
+      {/* Right: AI review chat (locked panel for Observers) */}
       <div className="rounded-xl border border-border bg-card overflow-hidden flex flex-col min-h-[600px] lg:max-h-[calc(100vh-200px)]">
-        <TradeReviewChat
-          closingTradeId={closingTradeId}
-          ticker={position.ticker}
-          ohlcData={ohlcData}
-          messages={messages}
-          setMessages={setMessages}
-          autoStart={initialMessages.length === 0}
-        />
+        {aiEnabled ? (
+          <TradeReviewChat
+            closingTradeId={closingTradeId}
+            ticker={position.ticker}
+            ohlcData={ohlcData}
+            messages={messages}
+            setMessages={setMessages}
+            autoStart={initialMessages.length === 0}
+          />
+        ) : (
+          <AiChatLocked />
+        )}
       </div>
     </div>
   );

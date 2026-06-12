@@ -273,6 +273,28 @@ export const SETUP_TOOL_NAMES: ReadonlySet<string> = new Set(
 
 type Input = Record<string, unknown>;
 
+/**
+ * Race a promise against a timeout. On timeout the fallback value is returned
+ * and the underlying promise is left to settle in the background. Used to keep a
+ * slow screening import from blocking the whole onboarding turn (and the
+ * Telegram step that follows it) — the subscription is already committed by then.
+ */
+async function withTimeout<T>(
+  promise: Promise<T>,
+  ms: number,
+  onTimeout: () => T,
+): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<T>((resolve) => {
+    timer = setTimeout(() => resolve(onTimeout()), ms);
+  });
+  try {
+    return await Promise.race([promise, timeout]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
 const str = (v: unknown): string => (typeof v === "string" ? v : "");
 const strArr = (v: unknown): string[] =>
   Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : [];
@@ -364,17 +386,34 @@ export async function executeSetupTool(
         const sub = await subscribeToMarketScreening(slug);
         if (!sub.ok) return { result: sub };
 
+        // The subscription is the essential write and is now committed. Importing
+        // the latest results is heavy and best-effort — bound it so a slow or
+        // failing import can't hang the turn (which would block the Telegram step
+        // that comes next). On timeout/failure we report it and let onboarding
+        // continue; the next scheduled run will populate the picks.
         const importLatest = input.import_latest !== false;
-        let imported: unknown = null;
+        let imported: { ok: boolean; data?: unknown; error?: string } | null = null;
         if (importLatest) {
-          const imp = await importLatestMarketScreeningResultForMe(slug);
-          imported = imp.ok ? imp.data : { error: imp.error };
+          const imp = await withTimeout(
+            importLatestMarketScreeningResultForMe(slug),
+            20_000,
+            () => ({ ok: false as const, error: "Import is taking longer than expected." }),
+          );
+          imported = imp.ok
+            ? { ok: true, data: imp.data }
+            : { ok: false, error: imp.error };
         }
         return {
           result: {
             ok: true,
             already_subscribed: sub.data.alreadySubscribed,
+            // Subscription succeeded regardless; this only reflects the optional
+            // results import so the model can relay it and move on.
             imported,
+            import_note:
+              imported && !imported.ok
+                ? "Subscribed successfully, but the latest results didn't load yet — they'll arrive on the next scheduled run. Continue with setup."
+                : undefined,
           },
           statusLabel: sub.data.alreadySubscribed
             ? `Already subscribed to ${slug}`

@@ -376,8 +376,8 @@ export default function PricingPage() {
                   {
                     feature: "Result history",
                     observer: "24h",
-                    investor: "7 days",
-                    trader: "30 days",
+                    investor: "30 days",
+                    trader: "400 days",
                   },
                 ].map((row) => (
                   <GateRow key={row.feature} {...row} />
@@ -390,7 +390,7 @@ export default function PricingPage() {
                     feature: "AI stock summaries",
                     gate: "Summary card visible, content replaced with placeholder lines.",
                     observer: false,
-                    investor: false,
+                    investor: true,
                     trader: true,
                   },
                   {

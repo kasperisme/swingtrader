@@ -154,13 +154,26 @@ class technical:
         startdate="2024-01-01",
         enddate="2024-07-11",
         shares_outstanding=1,
+        sma_min_periods=None,
     ):
         chart = self.fmp.daily_chart(ticker, startdate, enddate)
 
-        # SMAs computed locally — replaces 3 separate API calls per ticker
-        chart["SMA200"] = chart["close"].rolling(window=200).mean()
-        chart["SMA150"] = chart["close"].rolling(window=150).mean()
-        chart["SMA50"] = chart["close"].rolling(window=50).mean()
+        # SMAs computed locally — replaces 3 separate API calls per ticker.
+        #
+        # `sma_min_periods` controls how much history an SMA needs before it
+        # produces a value. Default (None) keeps the strict behaviour: an SMA is
+        # NaN until its full window of bars exists (e.g. SMA200 needs 200 bars),
+        # so every existing screener is unchanged. When a floor is supplied
+        # (used by the IPO screener), the SMA instead averages whatever history
+        # is available — capped at the period — once at least `sma_min_periods`
+        # bars exist. This lets sub-200-session listings still get a (looser,
+        # shorter-window) 150/200-day read rather than NaN-ing every gate.
+        def _mp(period: int) -> int:
+            return min(sma_min_periods, period) if sma_min_periods is not None else period
+
+        chart["SMA200"] = chart["close"].rolling(window=200, min_periods=_mp(200)).mean()
+        chart["SMA150"] = chart["close"].rolling(window=150, min_periods=_mp(150)).mean()
+        chart["SMA50"] = chart["close"].rolling(window=50, min_periods=_mp(50)).mean()
 
         ####_SLOPE_####
         chart["SMA200_slope"] = chart["SMA200"].diff()
@@ -764,11 +777,14 @@ class technical:
 
     # ------------------------------------------------------------------
 
-    def get_screening(self, tickers, startdate, enddate):
+    def get_screening(self, tickers, startdate, enddate, sma_min_periods=None):
         error = False
         try:
             self.data = self.get_daily_chart(
-                tickers, startdate=startdate, enddate=enddate
+                tickers,
+                startdate=startdate,
+                enddate=enddate,
+                sma_min_periods=sma_min_periods,
             )
             self.minervini_trend_template(tickers, enddate)
 

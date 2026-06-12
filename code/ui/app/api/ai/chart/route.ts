@@ -1,4 +1,5 @@
 import { createClient } from "@/lib/supabase/server";
+import { aiFeaturesAllowed } from "@/lib/subscription";
 import type { ChartAnnotation } from "@/components/ticker-charts/types";
 import type { OhlcBar } from "@/components/ticker-charts/types";
 import type Anthropic from "@anthropic-ai/sdk";
@@ -187,6 +188,12 @@ export async function POST(req: Request) {
   const { data: claims } = await supabase.auth.getClaims();
   const userId = claims?.claims?.sub;
   if (!userId) return new Response("Unauthorized", { status: 401 });
+
+  // AI chat is a paid/trial feature — Observers are gated (the UI hides it; this
+  // enforces it for direct calls). Bypassed during the open beta.
+  if (!(await aiFeaturesAllowed(supabase))) {
+    return new Response("AI features require a paid plan", { status: 403 });
+  }
 
   const { data: strategyRow } = await supabase
     .schema("swingtrader")

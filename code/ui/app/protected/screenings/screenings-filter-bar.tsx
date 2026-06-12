@@ -703,6 +703,10 @@ export function AddFilterWidget({
         top: r.bottom + 1,
         width: Math.min(r.width, 448),
         zIndex: 50,
+        // A modal Radix Dialog (e.g. the agent form) sets pointer-events:none on
+        // everything outside its content. This portal lives on <body>, so without
+        // re-enabling here the option buttons would be unclickable inside a dialog.
+        pointerEvents: "auto",
       });
     }
     measure();
@@ -1067,7 +1071,10 @@ export function AddFilterWidget({
       </div>
 
       {typeof document !== "undefined" && createPortal(
-        <div ref={portalRef} style={portalStyle}>
+        // data-filter-portal lets a surrounding Radix overlay (e.g. the agent
+        // form Dialog) recognise clicks in this body-level portal as "inside",
+        // so picking a filter option doesn't dismiss the overlay.
+        <div ref={portalRef} data-filter-portal="" style={portalStyle}>
           <div className="rounded-lg border border-border bg-popover text-popover-foreground shadow-lg ring-1 ring-black/5 dark:ring-white/10">
           {step === "fields" && (
             <div className="flex flex-col max-h-80">

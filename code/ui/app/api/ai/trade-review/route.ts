@@ -1,4 +1,5 @@
 import { createClient } from "@/lib/supabase/server";
+import { aiFeaturesAllowed } from "@/lib/subscription";
 import type Anthropic from "@anthropic-ai/sdk";
 import { getAnthropicClient, DEFAULT_MODEL } from "@/lib/anthropic";
 import type { OhlcBar, ChartAnnotation } from "@/components/ticker-charts/types";
@@ -124,6 +125,11 @@ export async function POST(req: Request) {
   const { data: claims } = await supabase.auth.getClaims();
   const userId = claims?.claims?.sub;
   if (!userId) return new Response("Unauthorized", { status: 401 });
+
+  // AI trade review is a paid/trial feature — gate Observers (open beta bypasses).
+  if (!(await aiFeaturesAllowed(supabase))) {
+    return new Response("AI features require a paid plan", { status: 403 });
+  }
 
   const rawText = await req.text();
   if (!rawText) return new Response("Empty body", { status: 400 });

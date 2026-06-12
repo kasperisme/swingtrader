@@ -102,6 +102,7 @@ import {
 } from "@/app/actions/chart-workspace";
 import { ChartAiChat } from "@/components/chart-ai-chat";
 import { MobileAiChatSheet } from "@/components/mobile-ai-chat-sheet";
+import { AiChatLocked } from "@/components/ai-chat-locked";
 import { BulkAiPanel } from "@/components/bulk-ai-panel";
 import {
   ChartDateRangePicker,
@@ -1394,6 +1395,7 @@ export function ScreeningsUI({
   vectorTickers,
   companyVectorDimensions,
   initialNotes = [],
+  aiEnabled = true,
 }: {
   runs: ScanRun[];
   rows: ScreeningRow[];
@@ -1401,6 +1403,11 @@ export function ScreeningsUI({
   vectorTickers: Set<string>;
   companyVectorDimensions: Record<string, Record<string, number>>;
   initialNotes?: ScanRowNote[];
+  /**
+   * Whether the AI chat / customization is available. Observers (free tier) get
+   * the full breakdown + data but a locked AI panel — set false to gate it.
+   */
+  aiEnabled?: boolean;
 }) {
   const router = useRouter();
   // Mirror server rows into local state so optimistic inserts (e.g. "add ticker")
@@ -2879,6 +2886,9 @@ export function ScreeningsUI({
   );
 
   const renderChatBody = (variant: "desktop" | "mobile") => {
+    // Observers (free tier) keep the full breakdown + data, but the AI chat /
+    // customization is gated behind a paid plan (or the active trial).
+    if (!aiEnabled) return <AiChatLocked />;
     if (chatMode === "bulk") {
       return (
         <BulkAiPanel
@@ -3790,7 +3800,7 @@ export function ScreeningsUI({
         {/* Desktop: AI chat side panel (always available, regardless of view) */}
         {chartAiOpen && (
           <div className="hidden sm:flex w-[320px] shrink-0 flex-col border-l border-border min-h-0">
-            {chatModeTabs}
+            {aiEnabled && chatModeTabs}
             {renderChatBody("desktop")}
           </div>
         )}

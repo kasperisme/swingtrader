@@ -2,6 +2,7 @@
 
 import { createClient } from "@/lib/supabase/server";
 import { fetchAllPaged } from "@/lib/supabase/paginate";
+import { getNewsTrendsGate } from "@/app/actions/plan-gate";
 import type { HeatmapInputRow } from "@/lib/news-impact-heatmap/aggregate";
 
 export type NewsImpactHeatmapPayload = {
@@ -43,6 +44,15 @@ export async function getNewsImpactHeatmapData(
     since = new Date(now);
     since.setUTCMinutes(0, 0, 0);
     since.setUTCHours(since.getUTCHours() - 25);
+  }
+
+  // Enforce the plan's lookback window server-side (no-op during open beta):
+  // clamp `since` forward to the tier's allowed cutoff so a client can't request
+  // older data than its tier permits.
+  const gate = await getNewsTrendsGate();
+  if (gate.enabled && gate.fromGte) {
+    const floor = new Date(gate.fromGte);
+    if (Number.isFinite(floor.getTime()) && since < floor) since = floor;
   }
 
   const articlesRes = await fetchAllPaged<{

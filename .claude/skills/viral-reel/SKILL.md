@@ -142,6 +142,109 @@ Read its `README.md` once before your first run.
   fills `chart.points` and each event's sentiment/move/`imageUrl`. No on-reel
   hook/takeaway text; add it in IG.
 
+  **Longer reels — go intraday.** A daily chart over a short window has too few
+  candles to stretch past ~20s. To make a much longer reel (e.g. to run under a
+  voice-over), pull an **intraday** interval so there are many more points to
+  draw smoothly, and set the total length explicitly:
+
+  ```bash
+  # hourly bars over 7 days (~35 points), stretched to a fixed length…
+  python -m services.viral_reels.cli price-news --ticker MSFT --window-days 7 \
+      --interval 1hour --duration 60
+  # …or auto-match the length to a voice-over file (a Nami×Luffy dialog.mp3):
+  python -m services.viral_reels.cli price-news --ticker MSFT --window-days 7 \
+      --interval 1hour --match-audio output/viral_reels/MSFT/dialog/dialog.mp3
+  ```
+  `--interval` accepts `daily` (default) or FMP intraday intervals (`1min`,
+  `5min`, `15min`, `30min`, `1hour`, `4hour`). Intraday points carry a full ISO
+  `t` and events are snapped to a mid-session point of their day. `--duration`
+  sets the reel length in seconds; `--match-audio` reads it off any audio/video
+  file (ffprobe). Internal news is ~1/day, so expect non-fatal `coverage:` gap
+  warnings on an hourly chart (7-hour gaps between daily events) — fine when the
+  reel is a backing visual; widen with FMP events if you want denser pins.
+
+## Nami × Luffy news dialogue (voiced audio)
+
+A spin-off deliverable: a short, **voiced** comedy dialogue where One Piece's
+money-obsessed navigator **Nami** breaks the day's market-moving headlines down
+for the carefree captain **Luffy**. Nami is the analyst (she loves treasure →
+loves a good trade); Luffy reacts and asks the dumb-smart questions. Great as an
+audio hook over a reel, or a standalone short.
+
+Two stages mirror the rest of the service: **Claude writes the script**
+(Anthropic, grounded in real headlines pulled from the data layer), then
+**ElevenLabs voices each turn** and ffmpeg stitches them into one MP3.
+
+```bash
+# ticker-focused (pulls that ticker's strongest recent headlines + sentiment/move)
+python -m services.viral_reels.cli dialog --ticker NVDA --window-days 7 --turns 8
+# market-wide (trend snapshot + top headlines) — omit --ticker
+python -m services.viral_reels.cli dialog --window-days 7
+# script only, no API spend on voice:
+python -m services.viral_reels.cli dialog --ticker NVDA --no-render
+# → output/viral_reels/<TICKER>/dialog/{dialog_script.json, dialog.mp3}
+#   (market-wide → output/viral_reels/dialog/)
+```
+
+Flags: `--turns N` (approx turn count), `--direction "<extra creative note>"`,
+`--model <anthropic model>`, `--no-render` (script only), `--out-dir <dir>`.
+
+Voices (canonical One Piece fan voices, override via env):
+`ELEVENLABS_LUFFY_VOICE_ID=UnDWNGYfYVHrYbgQXZOS`,
+`ELEVENLABS_NAMI_VOICE_ID=uzAAg0A7FBedb5sTJjXA`. Needs `ANTHROPIC_API_KEY` +
+`ELEVENLABS_API_KEY` in `code/analytics/.env`, plus ffmpeg on PATH. Implemented
+in `services/viral_reels/dialog.py`. The script grounds the banter in the real
+tickers/moves from the news pull — never invents a price; review
+`dialog_script.json` and re-run (tweak `--direction`/`--turns`) if a beat is off.
+The first line **always opens with "Stop" or "Wait"** (a scroll-stopper hook),
+enforced in both the prompt and a code safety net.
+
+**Pair the dialog with a reel (voiced price-news video).** Generate the dialog,
+build a length-matched **intraday** price-news reel for the same ticker, then mux
+the audio onto the render so the Nami×Luffy banter plays over the moving chart:
+
+```bash
+python -m services.viral_reels.cli dialog --ticker MSFT --window-days 7 --turns 8
+python -m services.viral_reels.cli price-news --ticker MSFT --window-days 7 \
+    --interval 1hour --match-audio output/viral_reels/MSFT/dialog/dialog.mp3
+python -m services.viral_reels.cli render output/viral_reels/MSFT/spec.json \
+    --audio output/viral_reels/MSFT/dialog/dialog.mp3
+# → reel.mp4 (silent) + reel_audio.mp4 (dialog muxed in)
+```
+`render --audio <file>` muxes any audio track onto the rendered reel (copies
+video, encodes AAC, `-shortest`) and writes a sibling `*_audio.mp4`.
+
+### `dialog-reel` — event-synced voice-over (the connected version)
+
+`dialog` + `price-news` above only *length*-match; the talk doesn't track the
+chart. **`dialog-reel`** ties them together so Nami comments on each plotted
+headline **exactly as its card slides onto the chart**:
+
+```bash
+python -m services.viral_reels.cli dialog-reel --ticker MSFT \
+    --window-days 35 --interval 1hour --max-events 6
+# → spec.json (with a draw schedule), dialog/dialog.mp3, reel.mp4, reel_audio.mp4
+```
+
+How it works:
+- Pulls the intraday chart + the news events it plots, then writes a script as a
+  **hook + one beat per event + outro**, each beat naming that headline and its
+  real move/sentiment (never invents numbers).
+- Voices the beats back-to-back (no dead air) and emits a variable-speed **draw
+  schedule** (`chart.keyframes`: `{t, idx}`) so the candle line reaches each
+  event's bar at the exact second its beat starts. The renderer draws faster
+  through quiet stretches and slows where events cluster.
+- The reel length equals the spoken length; video and audio stay locked.
+
+The first line still opens with **"Stop"/"Wait"**. Flags: `--max-events` (pins to
+feature), `--target-seconds` (budgets beat length; final length = the spoken
+length), `--window-days`/`--interval` (chart breadth & candle pace), `--direction`,
+`--theme`, `--no-render` (writes spec + audio, prints the finishing `render`
+command), `--model`. The `chart.keyframes` schedule is what makes the sync work —
+keep it when hand-editing the spec; drop it and the draw reverts to constant
+speed. Inspect `dialog/dialog_script.json` → `schedule` to see each beat's start
+vs. its pin time (they should match).
+
 ## Cover / poster image (the standard way — don't hand-roll one)
 
 When you need a still **cover/thumbnail** for the reel (IG feed poster, CEO/hero
