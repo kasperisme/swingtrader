@@ -101,9 +101,6 @@ export function MobileTickerBar({
     <>
       {/* Sticky nav bar — mobile only, pinned at the bottom of the screenings layout */}
       <div className="sm:hidden flex flex-col border-t border-border bg-background shrink-0">
-        {searchSlot && (
-          <div className="border-b border-border/60 p-2">{searchSlot}</div>
-        )}
         {/* Selected-ticker action strip: note + dismiss / restore — sits above the nav row */}
         {selectedTicker && !hideSelectedActionStrip && (
           <button
@@ -301,7 +298,7 @@ export function MobileTickerBar({
         <div
           className="overflow-y-auto"
           style={{
-            maxHeight: `calc(82dvh - ${hiddenDismissedCount > 0 ? "9rem" : "5rem"})`,
+            maxHeight: `calc(82dvh - ${hiddenDismissedCount > 0 ? "9rem" : "5rem"}${searchSlot ? " - 4.5rem" : ""})`,
           }}
         >
           {symbols.length === 0 && (
@@ -395,6 +392,14 @@ export function MobileTickerBar({
             );
           })}
         </div>
+
+        {/* Search / add-ticker — pinned at the bottom of the popped-out
+            selector. Only reachable while the sheet is open. */}
+        {searchSlot && (
+          <div className="shrink-0 border-t border-border bg-background p-3">
+            {searchSlot}
+          </div>
+        )}
       </div>
     </>
   );
