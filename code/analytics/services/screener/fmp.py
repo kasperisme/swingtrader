@@ -443,3 +443,38 @@ class fmp:
         if not data:
             return pd.DataFrame()
         return pd.DataFrame(data)
+
+    # ── Congressional (STOCK Act) trading ────────────────────────────────────
+    # Senate + House periodic-transaction disclosures. These sit on higher FMP
+    # plan tiers and have been renamed across API versions, so the helpers are
+    # intentionally DEFENSIVE: any non-200 (e.g. the plan doesn't include
+    # congressional data) or parse failure yields an empty frame, letting
+    # callers degrade to insider-only instead of erroring the whole run.
+
+    def _congress_feed(self, path: str, page: int, limit: int) -> pd.DataFrame:
+        url = f"https://financialmodelingprep.com/stable/{path}"
+        try:
+            r = requests.get(
+                url, params={"apikey": self.APIKEY, "page": page, "limit": limit}
+            )
+            if r.status_code != 200:
+                return pd.DataFrame()
+            data = r.json()
+            return pd.DataFrame(data) if data else pd.DataFrame()
+        except Exception:
+            return pd.DataFrame()
+
+    def senate_trades_latest(self, page: int = 0, limit: int = 100) -> pd.DataFrame:
+        """Latest US Senate trading disclosures (STOCK Act) across all tickers.
+
+        Columns typically include: symbol, disclosureDate, transactionDate,
+        firstName/lastName (or office), type (Purchase/Sale/Exchange), amount
+        (a range string like "$15,001 - $50,000"), and sometimes district/party.
+        Defensive — see the section comment above.
+        """
+        return self._congress_feed("senate-latest", page, limit)
+
+    def house_trades_latest(self, page: int = 0, limit: int = 100) -> pd.DataFrame:
+        """Latest US House trading disclosures (STOCK Act) across all tickers.
+        Defensive — see senate_trades_latest."""
+        return self._congress_feed("house-latest", page, limit)
