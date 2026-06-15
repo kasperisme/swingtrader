@@ -182,8 +182,11 @@ export type ScreeningTickerSentimentHeadRow = {
 const TICKER_SENTIMENT_HEAD_TICKER_CHUNK = 40;
 
 /**
- * Loads ticker sentiment rows from `swingtrader.ticker_sentiment_heads_v` for the given symbols.
- * Matches the Explore relationship panel sentiment feed (view over TICKER_SENTIMENT heads + articles).
+ * Loads ticker sentiment rows from `swingtrader.ticker_sentiment_heads` (the
+ * pre-exploded, indexed materialization) for the given symbols. From the
+ * screenings UI this is invoked via the /api/screenings/ticker-sentiment route
+ * handler (see fetchTickerSentimentHeadRows) so it stays off the serialized
+ * server-action queue and doesn't block the chart's OHLC fetch.
  */
 export async function screeningsGetTickerSentimentHeadRows(
   symbols: string[],
@@ -204,7 +207,11 @@ export async function screeningsGetTickerSentimentHeadRows(
     const chunk = tickers.slice(i, i + TICKER_SENTIMENT_HEAD_TICKER_CHUNK);
     const { data, error } = await supabase
       .schema("swingtrader")
-      .from("ticker_sentiment_heads_v")
+      // Pre-exploded, indexed materialization of ticker_sentiment_heads_v
+      // (see 20260615120000_ticker_sentiment_heads_materialization). Indexed on
+      // (ticker, article_ts) so this is a range scan instead of re-exploding
+      // every TICKER_SENTIMENT head's JSON on each call.
+      .from("ticker_sentiment_heads")
       .select("article_id, ticker, sentiment_score, article_ts")
       .in("ticker", chunk)
       .gte("article_ts", sinceIso);

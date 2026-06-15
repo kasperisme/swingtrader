@@ -2,7 +2,6 @@
 
 import { useState, useEffect } from "react";
 import { getCachedQuotes, setCachedQuotes } from "./quote-cache";
-import { fmpGetQuote } from "@/app/actions/fmp";
 
 export interface FmpQuote {
   symbol: string;
@@ -45,23 +44,27 @@ export function useQuotes(symbols: string[]): {
       if (missing.length === 0) return;
 
       setLoading(true);
-      const chunks: string[][] = [];
-      for (let i = 0; i < missing.length; i += 10) chunks.push(missing.slice(i, i + 10));
 
-      const fresh: Record<string, FmpQuote | null> = {};
-      for (const chunk of chunks) {
-        await Promise.all(
-          chunk.map(async sym => {
-            try {
-              const res = await fmpGetQuote(sym);
-              if (!res.ok) { fresh[sym] = null; return; }
-              const data = res.data;
-              fresh[sym] = Array.isArray(data) ? (data[0] ?? null) : null;
-            } catch {
-              fresh[sym] = null;
-            }
-          })
-        );
+      // One round-trip to the bulk route handler instead of one server action
+      // per symbol. Next.js serializes client-invoked Server Actions, so the old
+      // per-symbol fan-out ran sequentially (~60 × ~120ms) and starved the
+      // chart's OHLC fetch on the same queue. The route handler runs off that
+      // queue and fans the FMP requests out concurrently server-side.
+      let fresh: Record<string, FmpQuote | null> = {};
+      try {
+        const res = await fetch("/api/fmp/quotes", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ symbols: missing }),
+        });
+        if (res.ok) {
+          const json = (await res.json()) as {
+            quotes?: Record<string, FmpQuote | null>;
+          };
+          fresh = json.quotes ?? {};
+        }
+      } catch {
+        fresh = {};
       }
 
       if (cancelled) return;

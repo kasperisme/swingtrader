@@ -816,3 +816,17 @@ def refresh_ticker_relationship_materialization() -> None:
     client = get_supabase_client()
     schema = os.environ.get("SUPABASE_SCHEMA", "swingtrader")
     client.schema(schema).rpc("exec_ticker_relationship_heads_refresh").execute()
+
+
+def refresh_ticker_sentiment_materialization() -> None:
+    """
+    Recompute ticker_sentiment_heads (pre-exploded, indexed) from all
+    TICKER_SENTIMENT heads.
+
+    Call after batch news ingest (score_cli). Not run synchronously on each
+    head insert — same deferred-refresh rationale as the relationship graph
+    (see migration 20260615120000_ticker_sentiment_heads_materialization).
+    """
+    client = get_supabase_client()
+    schema = os.environ.get("SUPABASE_SCHEMA", "swingtrader")
+    client.schema(schema).rpc("exec_ticker_sentiment_heads_refresh").execute()

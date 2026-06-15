@@ -2,10 +2,8 @@
 
 import React, { useState, useMemo, useEffect } from "react";
 import { ChevronUp, ChevronDown, Loader2 } from "lucide-react";
-import {
-  screeningsGetTickerSentimentHeadRows,
-  type ScreeningTickerSentimentHeadRow,
-} from "@/app/actions/screenings";
+import type { ScreeningTickerSentimentHeadRow } from "@/app/actions/screenings";
+import { fetchTickerSentimentHeadRows } from "@/lib/ticker-sentiment-client";
 
 type SentimentSort = {
   key: "symbol" | "s7d" | "s30d" | "s90d";
@@ -124,7 +122,7 @@ export function SentimentView({
     let cancelled = false;
     setLoading(true);
     setError(null);
-    screeningsGetTickerSentimentHeadRows(symbols)
+    fetchTickerSentimentHeadRows(symbols)
       .then((res) => {
         if (cancelled) return;
         if (!res.ok) {

@@ -16,6 +16,7 @@ import {
   relationshipsGetNeighborhood,
   relationshipsGetNodeNews,
   relationshipsGetNodeSentiment,
+  relationshipsGetPairStats,
   relationshipsResolveTicker,
   type AliasRow,
   type AliasMap,
@@ -23,6 +24,7 @@ import {
   type NodeNewsRow,
   type NodeSentimentRow,
   type NodeSentimentWindow,
+  type PairStat,
   type RelationshipEdge,
 } from "@/app/actions/relationships";
 import {
@@ -151,6 +153,174 @@ function GraphDetailsEdgeEvidence({
   );
 }
 
+/** Map a z-score to a 0–100% position on a [-4, +4] track. */
+function zToPct(z: number): number {
+  const clamped = Math.max(-4, Math.min(4, z));
+  return ((clamped + 4) / 8) * 100;
+}
+
+/** Trading regime + colour for the current |z|, mirroring the CLI thresholds. */
+function zRegime(z: number): { label: string; color: string } {
+  const az = Math.abs(z);
+  if (az >= 3.5) return { label: "Stop — diverging", color: "hsl(var(--destructive))" };
+  if (az >= 2) return { label: "Entry signal", color: "hsl(var(--chart-3))" };
+  if (az >= 0.5) return { label: "Watch", color: "hsl(var(--chart-5))" };
+  return { label: "At mean — no signal", color: "hsl(var(--muted-foreground))" };
+}
+
+/** Long/short read of a z-score for a cointegrated pair (spread = A − β·B). */
+function zTradeRead(z: number, a: string, b: string): string {
+  if (z >= 2) return `${a} rich vs ${b} → short ${a}, long ${b}`;
+  if (z <= -2) return `${a} cheap vs ${b} → long ${a}, short ${b}`;
+  return "Within band — wait for |z| > 2";
+}
+
+/** -4…+4 z-score band with entry/exit/stop ticks and the live marker. */
+function ZScoreGauge({ z }: { z: number }) {
+  const ticks = [-3.5, -2, -0.5, 0.5, 2, 3.5];
+  const regime = zRegime(z);
+  return (
+    <div className="mt-2">
+      <div className="relative h-6">
+        {/* track */}
+        <div className="absolute inset-x-0 top-1/2 h-1.5 -translate-y-1/2 rounded-full bg-muted" />
+        {/* threshold ticks */}
+        {ticks.map((t) => (
+          <div
+            key={t}
+            className="absolute top-1/2 h-3 w-px -translate-y-1/2 bg-border"
+            style={{ left: `${zToPct(t)}%` }}
+          />
+        ))}
+        {/* zero line */}
+        <div
+          className="absolute top-1/2 h-4 w-px -translate-y-1/2 bg-foreground/40"
+          style={{ left: "50%" }}
+        />
+        {/* live marker */}
+        <div
+          className="absolute top-1/2 h-4 w-4 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-background shadow"
+          style={{ left: `${zToPct(z)}%`, backgroundColor: regime.color }}
+        />
+      </div>
+      <div className="mt-0.5 flex justify-between text-[10px] text-muted-foreground">
+        <span>-3.5</span>
+        <span>-2</span>
+        <span>0</span>
+        <span>+2</span>
+        <span>+3.5</span>
+      </div>
+    </div>
+  );
+}
+
+/** Cointegration / pairs-trading metrics for the selected edge's pair. */
+function PairCointegrationPanel({
+  pairStat,
+  loading,
+}: {
+  pairStat: PairStat | null;
+  loading: boolean;
+}) {
+  const header = (
+    <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+      Cointegration
+    </p>
+  );
+
+  if (loading) {
+    return (
+      <div className="mb-3">
+        {header}
+        <div className="mt-1 flex items-center gap-2 p-2 text-xs text-muted-foreground">
+          <Loader2 className="h-3 w-3 animate-spin" /> Loading pair stats…
+        </div>
+      </div>
+    );
+  }
+
+  if (!pairStat || pairStat.hedge_ratio == null) {
+    return (
+      <div className="mb-3">
+        {header}
+        <p className="mt-1 p-2 text-xs text-muted-foreground">
+          No price calibration yet for this pair. It will be fitted on the next
+          calibration run if it clears the candidate threshold.
+        </p>
+      </div>
+    );
+  }
+
+  const { ticker_a, ticker_b, is_cointegrated, coint_pvalue, half_life_days, current_zscore } =
+    pairStat;
+  const z = current_zscore;
+  const regime = z == null ? null : zRegime(z);
+
+  return (
+    <div className="mb-3">
+      <div className="flex items-center justify-between">
+        {header}
+        <span
+          className="rounded px-1.5 py-0.5 text-[10px] font-semibold"
+          style={{
+            color: is_cointegrated ? "hsl(var(--chart-3))" : "hsl(var(--muted-foreground))",
+            backgroundColor: is_cointegrated
+              ? "hsl(var(--chart-3) / 0.12)"
+              : "hsl(var(--muted))",
+          }}
+        >
+          {is_cointegrated ? "COINTEGRATED" : "NOT COINTEGRATED"}
+        </span>
+      </div>
+
+      <div className="mt-1 grid grid-cols-3 gap-2 text-xs">
+        <Metric label="p-value" value={coint_pvalue == null ? "—" : coint_pvalue.toFixed(3)} />
+        <Metric label="half-life" value={half_life_days == null ? "—" : `${half_life_days.toFixed(1)}d`} />
+        <Metric
+          label="z-score"
+          value={z == null ? "—" : `${z >= 0 ? "+" : ""}${z.toFixed(2)}`}
+          valueColor={regime?.color}
+        />
+      </div>
+
+      {z == null ? (
+        <p className="mt-2 text-[11px] text-muted-foreground">Awaiting z-score refresh.</p>
+      ) : (
+        <>
+          <ZScoreGauge z={z} />
+          <p className="mt-1.5 text-[11px]" style={{ color: regime?.color }}>
+            {regime?.label}
+          </p>
+          <p className="mt-0.5 text-[11px] text-muted-foreground">
+            {is_cointegrated
+              ? zTradeRead(z, ticker_a, ticker_b)
+              : `Not cointegrated (p=${coint_pvalue == null ? "—" : coint_pvalue.toFixed(2)}) — a large |z| here is divergence risk, not a signal.`}
+          </p>
+        </>
+      )}
+    </div>
+  );
+}
+
+function Metric({
+  label,
+  value,
+  valueColor,
+}: {
+  label: string;
+  value: string;
+  valueColor?: string;
+}) {
+  return (
+    <div className="rounded border border-border px-2 py-1">
+      <p className="text-[10px] uppercase tracking-wide text-muted-foreground">{label}</p>
+      <p className="font-mono text-sm font-medium" style={valueColor ? { color: valueColor } : undefined}>
+        {value}
+      </p>
+    </div>
+  );
+}
+
 function formatCompactNumber(n: number | undefined): string {
   if (n == null || !Number.isFinite(n)) return "—";
   return new Intl.NumberFormat(undefined, {
@@ -228,6 +398,8 @@ export function RelationshipNetworkExplorer(
   const [sentimentError, setSentimentError] = useState<string | null>(null);
   const [evidenceRows, setEvidenceRows] = useState<EdgeEvidence[]>([]);
   const [evidencePage, setEvidencePage] = useState(1);
+  const [pairStat, setPairStat] = useState<PairStat | null>(null);
+  const [pairStatLoading, setPairStatLoading] = useState(false);
   const [manualPositions, setManualPositions] = useState<
     Record<string, { x: number; y: number }>
   >({});
@@ -580,6 +752,33 @@ export function RelationshipNetworkExplorer(
       setEvidenceRows(res.data.rows);
     });
   }, [selectedEdge, evidencePage]);
+
+  useEffect(() => {
+    if (!selectedEdge) {
+      setPairStat(null);
+      setPairStatLoading(false);
+      return;
+    }
+    let cancelled = false;
+    setPairStatLoading(true);
+    relationshipsGetPairStats({
+      fromTicker: selectedEdge.from_ticker,
+      toTicker: selectedEdge.to_ticker,
+    })
+      .then((res) => {
+        if (cancelled) return;
+        setPairStat(res.ok ? res.data : null);
+        setPairStatLoading(false);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setPairStat(null);
+        setPairStatLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedEdge]);
 
   useEffect(() => {
     if (!selectedNode) {
@@ -1299,13 +1498,19 @@ export function RelationshipNetworkExplorer(
                     </div>
 
                     {edgeFocusMode ? (
-                      <GraphDetailsEdgeEvidence
-                        selectedEdge={selectedEdge}
-                        evidencePage={evidencePage}
-                        setEvidencePage={setEvidencePage}
-                        evidenceRows={evidenceRows}
-                        listMaxClass="max-h-[min(38rem,76vh)]"
-                      />
+                      <>
+                        <PairCointegrationPanel
+                          pairStat={pairStat}
+                          loading={pairStatLoading}
+                        />
+                        <GraphDetailsEdgeEvidence
+                          selectedEdge={selectedEdge}
+                          evidencePage={evidencePage}
+                          setEvidencePage={setEvidencePage}
+                          evidenceRows={evidenceRows}
+                          listMaxClass="max-h-[min(30rem,64vh)]"
+                        />
+                      </>
                     ) : null}
 
                     {!edgeFocusMode ? (

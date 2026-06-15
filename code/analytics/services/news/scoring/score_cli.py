@@ -119,6 +119,7 @@ from shared.db import (
     get_supabase_client,
     is_source_day_dry,
     refresh_ticker_relationship_materialization,
+    refresh_ticker_sentiment_materialization,
     load_article_tickers,
     mark_source_day_dry,
     patch_news_article_image_if_missing,
@@ -1159,7 +1160,9 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
 
 def _maybe_refresh_relationship_graph(args: argparse.Namespace) -> None:
-    """Refresh materialized ticker relationship tables after a batch ingest."""
+    """Refresh materialized ticker derivations (relationship graph + sentiment)
+    after a batch ingest. Both re-explode JSON heads and are deferred off the
+    write path for the same reason — see the deferred-refresh migrations."""
     if args.no_persist or getattr(args, "skip_relationship_refresh", False):
         return
     console.print("[dim]Refreshing ticker relationship graph…[/dim]")
@@ -1170,6 +1173,16 @@ def _maybe_refresh_relationship_graph(args: argparse.Namespace) -> None:
         logger.warning("[score_news] relationship graph refresh failed: %s", exc)
         console.print(
             f"[yellow]Relationship graph refresh failed (ingest OK): {exc}[/yellow]",
+        )
+
+    console.print("[dim]Refreshing ticker sentiment materialization…[/dim]")
+    try:
+        refresh_ticker_sentiment_materialization()
+        console.print("[dim]Ticker sentiment materialization refreshed.[/dim]")
+    except Exception as exc:
+        logger.warning("[score_news] ticker sentiment refresh failed: %s", exc)
+        console.print(
+            f"[yellow]Ticker sentiment refresh failed (ingest OK): {exc}[/yellow]",
         )
 
 

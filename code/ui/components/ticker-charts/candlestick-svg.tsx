@@ -306,6 +306,12 @@ export function CandlestickSvg({
       setData([]);
     }
 
+    // Opt-in latency tracing: run `localStorage.OHLC_PERF = "1"` in the console.
+    const perf =
+      typeof window !== "undefined" &&
+      window.localStorage?.getItem("OHLC_PERF") === "1";
+    const tStart = perf ? performance.now() : 0;
+
     void (async () => {
       try {
         // Read cached view and OHLC data in parallel. When OHLC is already in
@@ -316,6 +322,13 @@ export function CandlestickSvg({
             : fmpGetOhlc(sym, interval, dateRange),
           readChartViewCache(),
         ]);
+        if (perf) {
+          // eslint-disable-next-line no-console
+          console.log(
+            `[ohlc-perf:client] ${sym} ${interval} cacheHit=${Boolean(cachedRows)} ` +
+              `roundTrip=${(performance.now() - tStart).toFixed(0)}ms`,
+          );
+        }
         if (sym !== symbolRef.current) return; // navigated away
 
         if (!ohlcResult.ok) {

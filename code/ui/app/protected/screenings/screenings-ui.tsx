@@ -56,11 +56,11 @@ import {
   screeningsDeleteRun,
   screeningsUpsertDismissNote,
   screeningsGetUserTrades,
-  screeningsGetTickerSentimentHeadRows,
   type BulkAnalysisJob,
   type LoggedTrade,
   type ScreeningTickerSentimentHeadRow,
 } from "@/app/actions/screenings";
+import { fetchTickerSentimentHeadRows } from "@/lib/ticker-sentiment-client";
 import {
   fmpGetCompanyProfile,
   type FmpCompanyProfile,
@@ -1626,7 +1626,7 @@ export function ScreeningsUI({
       return;
     }
     let cancelled = false;
-    void screeningsGetTickerSentimentHeadRows([sym]).then((res) => {
+    void fetchTickerSentimentHeadRows([sym]).then((res) => {
       if (cancelled) return;
       if (res.ok) {
         sentimentCacheRef.current.set(sym, res.data);
@@ -2751,7 +2751,7 @@ export function ScreeningsUI({
           !prefetchSentimentInflight.current.has(sym)
         ) {
           prefetchSentimentInflight.current.add(sym);
-          void screeningsGetTickerSentimentHeadRows([sym])
+          void fetchTickerSentimentHeadRows([sym])
             .then((res) => {
               if (res.ok) sentimentCacheRef.current.set(sym, res.data);
             })

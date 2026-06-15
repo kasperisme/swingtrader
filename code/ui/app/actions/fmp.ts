@@ -218,14 +218,27 @@ export async function fmpGetOhlc(
 
   const isIntraday = interval === "1hour" || interval === "4hour";
 
+  // OHLC is intraday-stable (daily/weekly bars change once per session, intraday
+  // every few minutes), so cache server-side like the other FMP actions instead
+  // of `no-store`. This dedupes the cold-load prefetch burst and amortizes the
+  // ~0.7s FMP round-trip across reloads/users. Keyed by the full URL (symbol +
+  // range + interval), so distinct windows still cache independently.
+  const revalidate = isIntraday ? 60 : interval === "1week" ? 900 : 300;
+
+  // Opt-in latency tracing: set OHLC_PERF=1 to log per-layer timings.
+  const perf = process.env.OHLC_PERF === "1";
+  const t0 = perf ? performance.now() : 0;
+
   let historical: unknown[] = [];
   let fetched = false;
+  let candidatesTried = 0;
   for (const candidate of symbolCandidates) {
+    candidatesTried += 1;
     const url = isIntraday
       ? `https://financialmodelingprep.com/stable/historical-chart/${interval}?symbol=${candidate}&from=${fromStr}&to=${toStr}&apikey=${encodeURIComponent(apiKey)}`
       : `https://financialmodelingprep.com/api/v3/historical-price-full/${candidate}?from=${fromStr}&to=${toStr}&apikey=${encodeURIComponent(apiKey)}`;
 
-    const res = await fetch(url, { cache: "no-store" });
+    const res = await fetch(url, { next: { revalidate } });
     if (!res.ok) continue;
 
     const data = await res.json();
@@ -235,6 +248,7 @@ export async function fmpGetOhlc(
     fetched = true;
     break;
   }
+  const tFetch = perf ? performance.now() : 0;
 
   if (!fetched) {
     return { ok: false, error: "FMP request failed" };
@@ -262,6 +276,16 @@ export async function fmpGetOhlc(
   const sorted = [...normalized].sort(
     (a, b) => new Date(a.date).getTime() - new Date(b.date).getTime(),
   );
+
+  if (perf) {
+    const tDone = performance.now();
+    // eslint-disable-next-line no-console
+    console.log(
+      `[ohlc-perf] ${symbol} ${interval} ${fromStr}..${toStr} ` +
+        `fetch=${(tFetch - t0).toFixed(0)}ms parse=${(tDone - tFetch).toFixed(0)}ms ` +
+        `total=${(tDone - t0).toFixed(0)}ms bars=${sorted.length} candidates=${candidatesTried}`,
+    );
+  }
 
   if (interval === "1week") {
     return { ok: true, data: aggregateToWeekly(sorted) };

@@ -35,6 +35,26 @@ export type EdgeEvidence = {
   impact_json_snapshot: Record<string, number> | null;
 };
 
+/**
+ * Cointegration / pairs-trading metrics for an (unordered) ticker pair.
+ * Sourced from swingtrader.ticker_pair_stats, keyed by the order-normalized
+ * pair (ticker_a < ticker_b). hedge_ratio is the OLS beta of A on B, so the
+ * z-score sign is read against ticker_a (spread = A - hedge_ratio*B).
+ */
+export type PairStat = {
+  ticker_a: string;
+  ticker_b: string;
+  hedge_ratio: number | null;
+  coint_pvalue: number | null;
+  is_cointegrated: boolean;
+  half_life_days: number | null;
+  spread_mean: number | null;
+  spread_std: number | null;
+  current_zscore: number | null;
+  zscore_at: string | null;
+  calibrated_at: string | null;
+};
+
 export type AliasRow = {
   alias_kind: string;
   alias_value: string;
@@ -250,6 +270,53 @@ export async function relationshipsGetEdgeEvidence(input: {
   }));
 
   return { ok: true, data: { rows, page, pageSize } };
+}
+
+/**
+ * Cointegration stats for the pair touched by an edge. Returns null data when
+ * the pair has no row yet (i.e. it has not been calibrated by calibrate_cli).
+ * The lookup is order-normalized to match the table's (ticker_a < ticker_b) key.
+ */
+export async function relationshipsGetPairStats(input: {
+  fromTicker: string;
+  toTicker: string;
+}): Promise<RelationshipActionSuccess<PairStat | null> | RelationshipActionError> {
+  const a0 = normalizeTicker(input.fromTicker ?? "");
+  const b0 = normalizeTicker(input.toTicker ?? "");
+  if (!a0 || !b0) return { ok: false, error: "fromTicker and toTicker are required" };
+  const [tickerA, tickerB] = a0 < b0 ? [a0, b0] : [b0, a0];
+
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .schema("swingtrader")
+    .from("ticker_pair_stats")
+    .select(
+      "ticker_a,ticker_b,hedge_ratio,coint_pvalue,is_cointegrated,half_life_days,spread_mean,spread_std,current_zscore,zscore_at,calibrated_at",
+    )
+    .eq("ticker_a", tickerA)
+    .eq("ticker_b", tickerB)
+    .maybeSingle();
+
+  if (error) return { ok: false, error: error.message };
+  if (!data) return { ok: true, data: null };
+
+  const num = (v: unknown): number | null => (v == null ? null : Number(v));
+  return {
+    ok: true,
+    data: {
+      ticker_a: normalizeTicker(String(data.ticker_a ?? tickerA)),
+      ticker_b: normalizeTicker(String(data.ticker_b ?? tickerB)),
+      hedge_ratio: num(data.hedge_ratio),
+      coint_pvalue: num(data.coint_pvalue),
+      is_cointegrated: Boolean(data.is_cointegrated),
+      half_life_days: num(data.half_life_days),
+      spread_mean: num(data.spread_mean),
+      spread_std: num(data.spread_std),
+      current_zscore: num(data.current_zscore),
+      zscore_at: data.zscore_at ? String(data.zscore_at) : null,
+      calibrated_at: data.calibrated_at ? String(data.calibrated_at) : null,
+    },
+  };
 }
 
 export async function relationshipsGetAliases(
