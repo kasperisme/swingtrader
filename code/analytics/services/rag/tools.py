@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from typing import Any, Callable
 
-from .articles import get_top_articles, get_ticker_news
+from .articles import get_top_articles, get_ticker_news, get_news_by_tag
 from .sentiment import get_cluster_trends, get_dimension_trends, get_ticker_sentiment
 from .graph import get_ticker_relationships, get_company_vectors
 from .embeddings import search_news
@@ -239,6 +239,29 @@ TOOL_SCHEMAS: list[dict] = [
     {
         "type": "function",
         "function": {
+            "name": "get_news_by_tag",
+            "description": (
+                "Latest articles carrying any of the given tags (ticker symbols "
+                "or theme/event slugs), newest first — the same tag feed as the "
+                "/articles?tag=X page. Case-insensitive; a tag like 'SPCX' matches "
+                "both the ticker and theme forms. Use for a news briefing/digest "
+                "scoped to specific tags rather than per-article sentiment."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "tags": {"type": "array", "items": {"type": "string"}},
+                    "hours": {"type": "integer", "default": 720},
+                    "limit": {"type": "integer", "default": 20},
+                    "article_stream": {"type": "string"},
+                },
+                "required": ["tags"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "fetch_url",
             "description": "Fetch the full text content of a URL.",
             "parameters": {
@@ -263,6 +286,7 @@ def get_market_tools() -> dict[str, Callable]:
         "get_ticker_relationships": get_ticker_relationships,
         "get_company_vectors": get_company_vectors,
         "get_ticker_news": get_ticker_news,
+        "get_news_by_tag": get_news_by_tag,
         "search_news": search_news,
     }
 

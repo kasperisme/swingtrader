@@ -133,10 +133,16 @@ def load(ticker: str, lookback_days: int = 420):
     enddate = date.today()
     startdate = enddate - timedelta(days=lookback_days)
     t = bsc.technical()
+    # RS is universe-relative; standalone we can't compute it, so we stub df_rs only
+    # to let the trend template run. The animation never has a real universe rank.
     t.df_rs = pd.DataFrame([{"symbol": ticker, "RS": 0.0, "RS_Rank": 0}])
     data, tt, error = t.get_screening(ticker, startdate.isoformat(), enddate.isoformat())
     if error or tt is None or data is None:
         sys.exit(f"screening failed for {ticker} (check APIKEY / ticker)")
+    # Null the stubbed rank (mirror build_setup_chart) so standout() never reads the
+    # meaningless 0 as a real "rank 0 — top of the market" hook.
+    tt["RS_Rank"] = None
+    tt["RSOver70"] = None
     full = data if "date" in data.columns else data.reset_index()
     close = float(full["close"].iloc[-1])
     sma50 = float(full["SMA50"].iloc[-1])

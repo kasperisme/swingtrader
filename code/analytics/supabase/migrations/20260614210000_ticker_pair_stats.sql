@@ -145,3 +145,17 @@ GRANT SELECT ON swingtrader.ticker_pair_candidates_v TO anon, authenticated, ser
 GRANT SELECT ON swingtrader.ticker_relationship_network_pairs_v TO anon, authenticated, service_role;
 GRANT INSERT, UPDATE ON swingtrader.ticker_pair_stats TO service_role;
 GRANT USAGE, SELECT ON SEQUENCE swingtrader.ticker_pair_stats_id_seq TO service_role;
+
+-- RLS: new tables in this project ship with row level security enabled by
+-- default, and the REST API reads as the `authenticated` role — which gets ZERO
+-- rows without a permissive policy. Mirror the "Authenticated access to schemas"
+-- SELECT policy the sibling tables carry so the relationship panel can read the
+-- pair stats. (service_role bypasses RLS for the calibrate/zscore writers.)
+ALTER TABLE swingtrader.ticker_pair_stats ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "Authenticated access to schemas" ON swingtrader.ticker_pair_stats;
+CREATE POLICY "Authenticated access to schemas"
+  ON swingtrader.ticker_pair_stats
+  FOR SELECT
+  TO authenticated
+  USING (true);

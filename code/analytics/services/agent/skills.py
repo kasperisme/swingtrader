@@ -51,7 +51,7 @@ _TICKER_PLACEHOLDER = "{TICKER}"
 # keep flagging just past it (post band). We'd rather alert slightly early than
 # miss a breakout. Both are percentages of the reference price.
 _BREAKOUT_LOOKBACK = 20       # trailing daily bars: high reference + volume average
-_INTRADAY_LOOKBACK_BARS = 14  # trailing intraday (hourly) bars for the same
+_INTRADAY_LOOKBACK_BARS = 20  # trailing intraday (hourly) bars for the same
 _VOLUME_SURGE = 1.5           # volume ≥ 1.5× trailing average to confirm
 _ENTRY_PRE_BAND_PCT = 5.0     # begin flagging this far BEFORE the entry/high
 _ENTRY_POST_BAND_PCT = 5.0    # keep flagging this far PAST the entry
@@ -60,9 +60,15 @@ _ENTRY_POST_BAND_PCT = 5.0    # keep flagging this far PAST the entry
 # the skill's `chart` calls) to a label; daily uses the realtime quote as the
 # live price, intraday uses the latest bar. Add a slot here + a matching chart
 # call in the skill to scan another timeframe.
+#
+# `tod_bucket`: also compute a time-of-day-bucketed relative volume (current bar
+# vs the average of the SAME hour-of-day across prior days) — an ADD-ON context
+# signal, not the trigger. The flat trailing average (`lookback`) still decides
+# vol_ok; the bucketed ratio just tells the agent whether a surge is real or just
+# open/close seasonality (volume is U-shaped intraday).
 _BREAKOUT_TIMEFRAMES = (
     {"label": "daily", "slot": "chart_daily", "use_quote": True, "lookback": _BREAKOUT_LOOKBACK},
-    {"label": "1h", "slot": "chart_1h", "use_quote": False, "lookback": _INTRADAY_LOOKBACK_BARS},
+    {"label": "1h", "slot": "chart_1h", "use_quote": False, "lookback": _INTRADAY_LOOKBACK_BARS, "tod_bucket": True},
 )
 
 # Internal RAG tool names. Anything in a skill's tool_plan NOT in this set is
@@ -75,6 +81,7 @@ _INTERNAL_TOOLS = frozenset(
         "get_company_vectors",
         "get_ticker_relationships",
         "get_top_articles",
+        "get_news_by_tag",
         "get_cluster_trends",
         "get_dimension_trends",
         "search_news",
@@ -260,6 +267,19 @@ def _series_bars(data: dict[str, Any], slot: str) -> list[dict]:
     return bars
 
 
+def _hour_of(date_str: Any) -> int | None:
+    """Hour-of-day (0–23) from a bar's date stamp ('2026-06-05 15:30:00' or ISO).
+    None if there's no time component (e.g. a daily bar)."""
+    s = str(date_str or "")
+    for sep in (" ", "T"):
+        if sep in s:
+            try:
+                return int(s.split(sep, 1)[1][:2])
+            except (ValueError, IndexError):
+                return None
+    return None
+
+
 def _entry_from_metadata(meta: Any) -> dict | None:
     """Parse a planned entry out of a raw ``metadata_json`` value (string or
     dict) — a fallback for paths that don't pre-parse ``entry``."""
@@ -347,6 +367,67 @@ def _analytics_news_impact(ticker: str, data: dict[str, Any]) -> TickerSignal:
     )
 
 
+def _tag_articles(data: dict[str, Any]) -> list[dict]:
+    """Rows from the per-ticker ``get_news_by_tag`` result (newest first)."""
+    return [r for r in _as_list(data.get("get_news_by_tag")) if isinstance(r, dict)]
+
+
+def _analytics_news_briefing(ticker: str, data: dict[str, Any]) -> TickerSignal:
+    """Deterministic news briefing for one ticker — never escalates.
+
+    Pulls the ticker's tagged articles via the same feed the public
+    /articles?tag=X page uses (``get_news_by_tag`` → search_news_by_tags), and
+    compiles a recency-ordered digest. Optional ``get_ticker_sentiment`` adds an
+    aggregate tone. This is informational (always-send): the per-ticker verdict
+    is just the brief; the LLM concluder stitches the per-ticker briefs into the
+    final message and never re-judges relevance.
+    """
+    articles = _tag_articles(data)
+    sent_rows = [r for r in _as_list(data.get("get_ticker_sentiment")) if isinstance(r, dict)]
+    has_tone = len(sent_rows) > 0
+    mean_tone = _mean_sentiment(sent_rows)
+
+    # Structured headlines for the concluder to render (title + provenance).
+    headlines: list[dict[str, Any]] = []
+    for a in articles[:6]:
+        title = str(a.get("title") or "").strip()
+        if not title:
+            continue
+        headlines.append({
+            "title": title[:140],
+            "source": str(a.get("source") or "").strip() or None,
+            "url": a.get("url") or None,
+            "published_at": a.get("published_at") or None,
+        })
+
+    metrics: dict[str, Any] = {
+        "article_count": len(articles),
+        "headlines": headlines,
+    }
+    if has_tone:
+        metrics["mean_sentiment"] = round(mean_tone, 3)
+
+    if not articles:
+        return TickerSignal.decided(
+            ticker,
+            triggered=False,
+            facts=f"{ticker}: no tagged articles in the briefing window.",
+            metrics=metrics,
+            confidence="high",
+        )
+
+    tone = f", tone {mean_tone:+.2f}" if has_tone else ""
+    bullets = " ".join(
+        f"• {h['title'][:90]}"
+        + (f" ({h['source']})" if h.get("source") else "")
+        for h in headlines
+    )
+    facts = f"{ticker}: {len(articles)} tagged articles{tone}. {bullets}".strip()
+    return TickerSignal.decided(
+        ticker, triggered=True, facts=facts, metrics=metrics, confidence="medium",
+    )
+
+
 def _breakout_band(current: float, ref_high: float, entry: dict | None) -> tuple[bool, float, str]:
     """(in_band, pct_vs_ref, ref_label) for one timeframe's current price.
 
@@ -398,6 +479,24 @@ def _eval_breakout_timeframe(
     vol_ok = vol_ratio is not None and vol_ratio >= _VOLUME_SURGE
     ref_high = max(prior_highs)
     in_band, pct, ref = _breakout_band(current, ref_high, entry)
+
+    # Time-of-day-bucketed relative volume: current bar vs the average of the
+    # SAME hour-of-day across prior bars. ADD-ON context only (does not gate
+    # `confirmed`) — corrects for the intraday U-shape so the agent can tell a
+    # real surge from the open/close hours always being heavy.
+    vol_ratio_tod: float | None = None
+    tod_label: str | None = None
+    if tf.get("tod_bucket"):
+        dated = [(_hour_of(b.get("date")), v) for b in bars if (v := _num(b, "volume", "v")) is not None]
+        if dated and dated[-1][0] is not None:
+            cur_hr = dated[-1][0]
+            same_hour = [v for (h, v) in dated[:-1] if h == cur_hr]
+            if len(same_hour) >= 2:
+                tod_avg = sum(same_hour) / len(same_hour)
+                if tod_avg:
+                    vol_ratio_tod = round(cur_vol / tod_avg, 2)
+                    tod_label = f"{cur_hr:02d}:00"
+
     return {
         "label": tf["label"],
         "confirmed": bool(in_band and vol_ok),
@@ -406,6 +505,8 @@ def _eval_breakout_timeframe(
         "current": round(current, 2),
         "pct": pct,
         "vol_ratio": round(vol_ratio, 2) if vol_ratio is not None else None,
+        "vol_ratio_tod": vol_ratio_tod,  # vs same hour-of-day (context, not a gate)
+        "tod_label": tod_label,
         "ref": ref,
     }
 
@@ -443,7 +544,9 @@ def _analytics_breakout(ticker: str, data: dict[str, Any]) -> TickerSignal:
     for r in results:
         status = "CONFIRMED" if r["confirmed"] else ("in-band" if r["in_band"] else "no")
         vr = f"{r['vol_ratio']:.2f}x" if r["vol_ratio"] is not None else "n/a"
-        frags.append(f"{r['label']}={status} ({r['current']:.2f} vs {r['ref']}, vol {vr})")
+        tod = (f", {r['vol_ratio_tod']:.2f}x vs {r['tod_label']} hour-avg"
+               if r.get("vol_ratio_tod") is not None else "")
+        frags.append(f"{r['label']}={status} ({r['current']:.2f} vs {r['ref']}, vol {vr}{tod})")
     head = (
         f"{ticker}: CONFIRMED breakout on {'+'.join(confirmed_tfs)}"
         if triggered else f"{ticker}: no confirmed breakout"
@@ -528,6 +631,42 @@ SKILLS: list[ScreeningSkill] = [
         conclude_hint="Lead with the tickers carrying the strongest fresh catalysts.",
     ),
     ScreeningSkill(
+        id="news_briefing",
+        description=(
+            "News briefing / digest: compile the latest tagged articles for each "
+            "ticker into a readable brief — the same tag feed as the website's "
+            "/articles?tag=X page. 'news briefing', 'daily digest', 'catch me up "
+            "on the headlines', 'what's been written about these names', 'roundup'. "
+            "Informational digest of coverage, NOT a conditional catalyst alert "
+            "(that's news_impact)."
+        ),
+        # The tag IS the ticker: search_news_by_tags matches the ticker tag the
+        # same way /articles?tag=TICKER does (alias-cased automatically). Sentiment
+        # is a light tone annotation; the digest spine is the tagged articles.
+        tool_plan=[
+            {"name": "get_news_by_tag", "args": {"tags": [_TICKER_PLACEHOLDER], "hours": 168, "limit": 12}},
+            {"name": "get_ticker_sentiment", "args": {"tickers": [_TICKER_PLACEHOLDER], "hours": 168}},
+        ],
+        analytics=_analytics_news_briefing,
+        # Decided deterministically per ticker (digest, never escalates), so this
+        # focus is unused unless the pipeline path changes; kept for eval parity.
+        eval_focus=(
+            "News briefing. The per-ticker digest (article count + headlines + "
+            "tone) is already compiled. Summarise the coverage; do not gate or "
+            "re-judge relevance."
+        ),
+        requires=("get_news_by_tag",),
+        conclude_hint=(
+            "Write a scannable news briefing: a short section per ticker with its "
+            "headline count, aggregate tone where present, and its top 2-3 "
+            "headlines (title + source). Link the article where a url is given. "
+            "This is always-send and informational — never return summary=null, "
+            "and don't decide whether anything is 'tradeable'. Tickers with no "
+            "tagged articles get a one-line 'quiet' note."
+        ),
+        always_send=True,
+    ),
+    ScreeningSkill(
         id="breakout",
         description=(
             "Multi-timeframe technical breakouts (daily + intraday): price "
@@ -555,18 +694,29 @@ SKILLS: list[ScreeningSkill] = [
         # parity with the eval contract.
         eval_focus=(
             "Multi-timeframe breakout. The metrics already give the verdict per "
-            "timeframe (price vs entry/high band + volume_ratio). Do not re-judge."
+            "timeframe (price vs entry/high band + volume_ratio). Do not re-judge. "
+            "Volume context: `vol_ratio` is the current bar vs a flat trailing "
+            "average (20 daily bars / 20 hourly bars) and is what gates the trigger. "
+            "On the hourly timeframe, `vol_ratio_tod` is an ADD-ON — the same bar vs "
+            "the average of the SAME hour-of-day on prior days — so you can tell a "
+            "genuine surge from the open/close hours that are always heavy."
         ),
         requires=("get_ticker_news",),
         conclude_hint=(
             "Each per-ticker verdict was decided deterministically across "
             "timeframes (daily + intraday hourly): price entered the breakout "
             "band around the planned entry or the trailing high AND volume ≥1.5× "
-            "the trailing average. The facts/metrics name WHICH timeframe(s) "
-            "confirmed. Write the message from these verdicts: list EVERY ticker "
-            "whose verdict is triggered=true, add or re-judge NONE, call out the "
-            "timeframe (e.g. intraday-only moves are early), and note the planned-"
-            "entry context where present. Detection is biased early."
+            "the flat trailing average (20 daily / 20 hourly bars). The "
+            "facts/metrics name WHICH timeframe(s) confirmed. Volume note: the "
+            "hourly verdict triggers on `vol_ratio` (vs the flat 20-hour average); "
+            "`vol_ratio_tod` is extra context (vs the same hour-of-day on prior "
+            "days) — a high vol_ratio that's NOT matched by a high vol_ratio_tod "
+            "may just be a normally-heavy open/close hour, so mention that nuance "
+            "for intraday-only triggers rather than overclaiming. Write the message "
+            "from these verdicts: list EVERY ticker whose verdict is triggered=true, "
+            "add or re-judge NONE, call out the timeframe (intraday-only moves are "
+            "early), and note the planned-entry context where present. Detection is "
+            "biased early."
         ),
     ),
     ScreeningSkill(

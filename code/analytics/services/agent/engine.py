@@ -110,6 +110,13 @@ get_ticker_news(tickers: list[str], hours: int = 24, per_ticker_limit: int = 5)
   Returns {ticker, article_id, title, url, published_at, sentiment_score, \
   sentiment_reason, relationships}. Resolves ticker aliases automatically.
 
+get_news_by_tag(tags: list[str], hours: int = 720, limit: int = 20)
+  Latest articles carrying any of the given tags (ticker symbols or theme/event \
+  slugs), newest first — the same tag feed as the /articles?tag=X page. \
+  Case-insensitive (e.g. 'SPCX' matches both ticker and theme forms). Returns \
+  {article_id, title, url, source, slug, published_at, snippet}. Use to compile \
+  a news briefing/digest scoped to specific tags.
+
 fetch_url(url: str)
   Fetch the full text content of a URL. Use to read article body when the \
   title/snippet is not enough to evaluate a screening condition. \

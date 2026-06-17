@@ -71,6 +71,7 @@ The caveman/businessman toggle is global (localStorage-backed via `lib/caveman-m
 | `taste-skill` | Building any UI — enforces premium design standards, kills generic AI patterns |
 | `viral-reel` | Producing short vertical data-reels (bar chart race videos) from the news-impact data foundation; Claude directs the story, Remotion renders |
 | `nis-stock-breakdown` | Making an Instagram-ready swing-trade breakdown of one stock from its NIS Momentum setup — annotated price+volume chart, fundamentals, and a derived entry/stop/target trade, assembled into a carousel + caption |
+| `ticker-pair-divergence` | Making a viral reel about a ticker PAIR — the non-obvious relationship (from `ticker_pair_stats` + the relationship graph), normalized line charts with company logos riding each line, the divergence flagged, and the mean-reversion (pairs) trade voiced |
 
 ## Scheduled Screenings (Agent)
 

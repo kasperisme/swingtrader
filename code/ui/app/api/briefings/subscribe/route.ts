@@ -7,6 +7,7 @@ import {
   normalizeTickers,
   upsertBriefingSubscription,
 } from "@/lib/email/briefing-subscriptions";
+import { recordEarlyAccessSignup } from "@/lib/email/early-access-signups";
 import { captureServer } from "@/lib/analytics/server";
 
 const bodySchema = z.object({
@@ -50,12 +51,14 @@ export async function POST(req: NextRequest) {
     userId = null;
   }
 
+  const source = parsed.data.source || "briefing_subscribe";
+
   try {
     await upsertBriefingSubscription({
       email,
       tickers,
       tags,
-      source: parsed.data.source || "briefing_subscribe",
+      source,
       userId,
       referrer: req.headers.get("referer"),
       userAgent: req.headers.get("user-agent"),
@@ -64,10 +67,31 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "server_error" }, { status: 500 });
   }
 
+  // Every briefing subscriber also belongs on the early-access list. Best-effort
+  // and idempotent — never fail the subscription if this insert hiccups.
+  try {
+    const result = await recordEarlyAccessSignup({
+      email,
+      source,
+      metadata: {
+        via: "news_briefing",
+        tickers,
+        tags,
+        authenticated: Boolean(userId),
+        referrer: req.headers.get("referer") ?? undefined,
+      },
+    });
+    if (!result.ok) {
+      console.error("[briefings/subscribe] early-access record failed", result.error);
+    }
+  } catch (err) {
+    console.error("[briefings/subscribe] early-access record threw", err);
+  }
+
   captureServer(userId ?? email, "briefing_subscribed", {
     tickers,
     tags,
-    source: parsed.data.source || "briefing_subscribe",
+    source,
     authenticated: Boolean(userId),
     $set: { email },
   });

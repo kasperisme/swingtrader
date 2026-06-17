@@ -319,28 +319,36 @@ def standout(tt: dict, fund: dict):
 
     if tt.get("rs_line_new_high"):
         return ("THE TELL PROS WATCH", "Its strength line hit a", "new high before price.", "rsline", None)
-    # turnaround: the Street modeled a loss and it printed a profit — overlooked & valuable
-    if recent and (recent[-1].get("est") or 0) < 0 and (recent[-1].get("actual") or 0) > 0:
-        return ("WHAT EVERYONE MISSED", "Wall Street modeled a loss.", "It posted a profit.", "turnaround", recent[-1])
+    # Concrete earnings/strength hooks rank ABOVE the abstract up/down-volume hook:
+    # a number-drop or streak gives a scroller something to feel; a bare ratio doesn't
+    # (RLJ's "3.6-to-1" reel flopped, and worse, was contradicted by below-avg volume).
     if last_s is not None and last_s >= 30:
         return ("WHAT EVERYONE MISSED", "It beat earnings by", f"{last_s:.0f}% — and held it.", "surprise", recent[-1])
-    if udr and udr >= 2.2:
-        return ("HIDING IN THE TAPE", "Buyers took every down", f"day — {udr:.1f} to 1.", "updown", udr)
-    if (tt.get("vol_contracting_in_base") and tt.get("PriceWithin25Percent52WeekHigh")
-            and not tt.get("below_pivot")):  # only when it's actually pressing the highs
-        return ("THE QUIET PART", "New highs — while volume", "quietly dried up.", "coil", None)
     if last_s is not None and last_s >= 18:
         return ("THE BEAT NOBODY CLOCKED", "It beat estimates by", f"{last_s:.0f}% last quarter.", "surprise", recent[-1])
     if beats and beats >= 12:
         return ("NOBODY'S TALKING ABOUT IT", "It's beaten estimates", f"{beats} quarters running.", "streak", beats)
-    if rs is not None and rs <= 8:
+    if rs is not None and 1 <= rs <= 8:  # rank is 1..N; 0/None means unknown, never "top"
         return ("THE RANK NOBODY CHECKS", "Relative-strength rank", f"{int(rs)} — top of the market.", "rank", rs)
-    if udr and udr >= 1.5:
-        return ("HIDING IN THE TAPE", "Buyers are taking the", f"dips — {udr:.1f} to 1.", "updown", udr)
+    if (tt.get("vol_contracting_in_base") and tt.get("PriceWithin25Percent52WeekHigh")
+            and not tt.get("below_pivot")):  # only when it's actually pressing the highs
+        return ("THE QUIET PART", "New highs — while volume", "quietly dried up.", "coil", None)
     if beats and beats >= 6:
         return ("THE STREAK YOU MISSED", "It's beaten estimates", f"{beats} quarters running.", "streak", beats)
     if max_s is not None and max_s >= 15:
         return ("THE BEAT NOBODY CLOCKED", "It beat estimates by", f"{max_s:.0f}% recently.", "surprise", best_surprise_rec())
+    # abstract up/down-volume ratio — a real accumulation tell but a weak scroll-stopper;
+    # below every concrete earnings/strength angle above.
+    if udr and udr >= 2.2:
+        return ("HIDING IN THE TAPE", "Buyers took every down", f"day — {udr:.1f} to 1.", "updown", udr)
+    if udr and udr >= 1.5:
+        return ("HIDING IN THE TAPE", "Buyers are taking the", f"dips — {udr:.1f} to 1.", "updown", udr)
+    # turnaround (loss→profit): a real "what everyone missed" tell, but a WEAK reel hook —
+    # it quietly admits the company was broken, which invites skepticism instead of FOMO
+    # (HOFT's turnaround reel was the worst performer). Last resort, below every cleaner
+    # momentum/earnings angle. Such names should usually fail the SKILL Step-1 reel gate.
+    if recent and (recent[-1].get("est") or 0) < 0 and (recent[-1].get("actual") or 0) > 0:
+        return ("WHAT EVERYONE MISSED", "Wall Street modeled a loss.", "It posted a profit.", "turnaround", recent[-1])
     if tt.get("accumulation"):
         return ("HIDING IN THE TAPE", "It's been quietly", "accumulated for weeks.", "updown", udr or 1.5)
     return ("WHAT THE SCREEN CAUGHT", "One clean move from", "a textbook breakout.", "breakout", None)

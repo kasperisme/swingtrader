@@ -33,15 +33,80 @@ is the chart; fundamentals are the permission slip; the trade is concrete and ho
 
 Two ways in:
 
-- **A ticker is given** ("break down NVDA"): use it directly.
+- **A ticker is given** ("break down NVDA"): use it directly, but still run it through
+  the reel-ability gate below and *tell the user* if it's a weak reel candidate.
 - **No ticker / "what's on the NIS Momentum board"**: run the screening and pick a
   name. The screen lives at
   `code/analytics/services/market_screenings/scripts/nis_momentum.py`; run it via
   the market-screenings runner/CLI, or pull the latest stored results the
   `/screenings` UI reads. Each row carries `symbol`, `RS_Rank`, `sector`,
-  `within_buy_range`, `extended`, `accumulation`, `PASSED_FUNDAMENTALS`. Prefer a
-  name that's **in or near its buy range** with **accumulation** — it makes the most
-  actionable post. Note its real `RS_Rank` to pass along in Step 2.
+  `within_buy_range`, `extended`, `accumulation`, `PASSED_FUNDAMENTALS`. Note its real
+  `RS_Rank` to pass along in Step 2.
+
+### The reel-ability gate — pick for *views*, not just for the screen
+
+> **The biggest lesson from past reels: passing the screen ≠ making a watchable reel.**
+> The two best-performing reels (ENVA 345 views, NWPX 219) were clean, higher-priced
+> momentum names whose chart was visibly *launching* and whose data let the narration
+> stay 100% confident. The two worst (RLJ 49, HOFT 29) passed the same screen but were
+> hard to pitch without hedging — and the hedge killed the scroll.
+
+The gate has **two layers**. Layer A is pure NIS Momentum methodology, expressed in the
+screen's own fields and thresholds (see `references/nis-momentum-framework.md`) — a name
+that's weak *here* is a weak NIS setup, not just a weak reel. Layer B is an editorial
+overlay for *views* that sits on top — explicitly **not** part of NIS, so never present
+it as the screen's verdict.
+
+#### Layer A — NIS-methodology quality (use the screen's own constants)
+
+Every board name already cleared `RS > 80`, the full Minervini stack, near-highs, and
+`PASSED_FUNDAMENTALS`. For a reel, verify *where in the setup it is* and *whether volume
+confirms*, in methodology terms:
+
+- **Position in the buy range.** Prefer `within_buy_range` (pivot → +5%) or `below_pivot`
+  but **coiled** — small negative `extension_pct` (roughly ≥ −5%) with
+  `vol_contracting_in_base` true (the classic pre-breakout coil). **Avoid `extended`**
+  (>5% above pivot — the framework says *don't chase*; a chase reel ages badly) and
+  deep-below-pivot watches (e.g. HOFT at `extension_pct` −7% — a legitimate NIS *watch*,
+  but the breakout isn't imminent, so there's no urgency to film).
+- **Volume conviction — NIS's "conviction tell".** Require `accumulation` true
+  (`up_down_vol_ratio ≥ 1.25`). **If the name is `within_buy_range`** (you're calling a
+  live breakout), it also needs `vol_ratio_today ≥ 1.4` — the framework's
+  institutional-interest bar. *This is the methodology-correct reason RLJ was weak:* it
+  was in the buy range but printed `vol_ratio_today` ≈ 0.4× — a breakout on
+  **below-average volume is an unconfirmed breakout by NIS's own rule**, so the pitch is
+  forced to hedge. (For a `below_pivot` coil, low `vol_ratio_today` is *expected* and
+  fine — but then narrate it as a watch, not a confirmed move.)
+- **ADR in the swing band.** `adr_pct` 3–15% is the framework's sweet spot — **6% is
+  fine** (HOFT's ADR was never the problem), and a 4–8% stop is just the methodology's
+  own `1.5×ADR` clamp, not a flaw. Only flag `adr_pct` <2% (too slow — a flat-looking
+  chart) or >15% (too wild).
+- **Leadership signal (best hooks are the truest).** A real `RS_Rank` near the top
+  (1–99, **lower = stronger**, so top-decile ≈ ≤ 8) and/or `rs_line_new_high` true
+  (leadership confirmed before price) are the most methodology-honest scroll-stoppers —
+  prefer names that have them.
+
+#### Layer B — reel-ability overlay (editorial, NOT NIS — for views only)
+
+1. **Chart shape (most important).** The reel lives on `chart.png`: you want a *visibly
+   accelerating uptrend* with recent candles pushing into the pivot (ENVA, NWPX).
+   **Reject** choppy/range-bound charts or a red/falling last candle (HOFT). This is the
+   visual expression of Layer A's "coiled near the pivot, volume confirming" — if Layer A
+   is clean, the chart usually looks the part.
+2. **Price legitimacy.** Prefer **price ≥ ~$30**. NIS has *no* price floor (RLJ $11 and
+   HOFT $15 passed it fairly), but sub-$20 names read as "cheap" to this audience — the
+   two losers were the two cheapest. An editorial preference, not a screen rule.
+3. **Hook-able fundamentals.** A clean positive P/E with a clear positive earnings story
+   photographs better than a turnaround. NIS *legitimately* passes a loss→profit
+   turnaround (it can satisfy `increasing_eps` + `beat_estimate`), and the framework
+   treats fundamentals as *supporting cast* — but a turnaround makes a weak hook (it
+   admits the company was broken). Prefer clean names; this is a reel choice, not a
+   fundamental gate.
+
+If a *user-given* ticker fails the gate, build it if they insist — but say plainly which
+layer/criterion it failed (and whether that's a NIS weakness or just a reel weakness). If
+you're **picking** from the board, take the name that's strongest on Layer A *and* clears
+Layer B — not merely the most "actionable" one.
 
 ---
 
@@ -86,45 +151,98 @@ drives what the post tells the reader.
 
 ---
 
+## Step 3.5 — The narrative spine: the Hot Take Arc (non-negotiable)
+
+> **The single structural lesson from past reels.** The winners (ENVA, NWPX) and
+> losers (RLJ, HOFT) *all opened a loop* in their hook. The difference: the winners
+> **closed the loop with a conviction pivot**, while the losers opened the loop and
+> then **deflated it with caveats** ("one honest caveat: today's volume came in
+> light…", "two honest caveats…"). A deflated pivot betrays the promise the hook
+> made, and the scroll dies. HOFT had one of the *best* hooks of the four and still
+> flopped — because the body retracted it.
+
+Every caption **and** every reel VO is written on the **Hot Take Arc**:
+
+```
+HOOK   → Contradict what they expect + open a loop      (no hedging, < 12 words spoken)
+BUILD  → Steel-man the obvious read (earn trust)         (1–3 lines)
+PIVOT  → Reveal the mechanism that makes it real         (concrete numbers — volume, beats)
+CLOSE  → Resolve the loop: the trade, stated with conviction
+CTA    → Direct address — speak to the viewer's situation
+```
+
+**The one hard rule: NO HEDGING IN THE PIVOT OR CLOSE.** The PIVOT must resolve
+*toward conviction* — "this is real, and here's the mechanism" (volume confirms,
+earnings back it). Never argue against your own thesis in the persuasive spine.
+
+- Risk and what-invalidates-it have exactly **one home**: the invalidation slide
+  (Slide 7) and one closing line. Never let "but it's not confirmed", "honest caveat",
+  "size smaller because…" leak into the hook, pivot, or close.
+- If the data *forces* a hedge into the pivot (volume below average, far below pivot,
+  negative earnings), **the ticker failed the Step 1 conviction-pivot gate — go back
+  and pick another name.** The arc structurally cannot close on a weak setup; that is
+  the real reason RLJ and HOFT lost, not just their charts.
+
+This arc drives Step 4 (carousel + caption) and Step 7A (reel script) identically.
+
+---
+
 ## Step 4 — Write the carousel
 
 Call `get_carousel_style_guide()` (the carousel MCP) first and follow its voice +
-cover-hook rules. Output **6–8 slides** plus a caption. Adapt the count, but this is
-the spine:
+cover-hook rules. Output **6–8 slides** plus a caption, laid out on the **Hot Take
+Arc** from Step 3.5. Adapt the count, but this is the spine:
 
 ```
-SLIDE 1 — Cover / hook
-  A specific, stakes-driven line. Not a label.
-  e.g. "NVDA just cleared its pivot on 1.4x volume. Here's the trade."
+SLIDE 1 — Cover / HOOK            [arc: HOOK]
+  Contradict what they expect + open a loop. A specific, stakes-driven line, not a
+  label. Lead with the single most surprising number or an expectation-flip.
+  e.g. "NVDA just cleared its pivot on 1.4x volume — and most watchlists missed it."
 
-SLIDE 2 — The setup (why it screened)
-  One line on the NIS Momentum read: RS rank, stacked MAs, near highs, beats.
+SLIDE 2 — The setup (why it screened)   [arc: BUILD]
+  Steel-man the obvious read, then the NIS Momentum tell: RS rank, stacked MAs,
+  near highs, beats.
   e.g. "RS rank 7. Stacked above the 50/150/200. Three straight earnings beats."
 
-SLIDE 3 — The chart (price + volume)  ← chart.png lives here
-  Narrate what the chart shows: the base, the pivot, the volume signature.
+SLIDE 3 — The chart (price + volume)  ← chart.png lives here   [arc: PIVOT]
+  Narrate the mechanism: the base, the pivot, the volume signature.
   Point at the amber volume bars and the accumulation read.
 
-SLIDE 4 — Volume & price detail
+SLIDE 4 — Volume & price detail    [arc: PIVOT]
   The conviction tell. vol_ratio_today, up_down_vol_ratio, adr_pct — in plain words.
+  This must resolve *toward* conviction (it does, because Step 1 gated out weak volume).
 
 SLIDE 5 — Fundamentals that matter
-  2–3 numbers only. Rising EPS, the beats, the sector it's leading.
+  2–3 numbers only. Rising EPS, the beats, the sector it's leading. Positive only —
+  if the numbers aren't clean, the ticker should not have passed the Step 1 gate.
 
-SLIDE 6 — The trade
-  Entry / stop / target / R:R from trade_setup. State the status honestly
-  (actionable now vs. watch vs. don't-chase). Add the position-size reminder.
+SLIDE 6 — The trade               [arc: CLOSE]
+  Entry / stop / target / R:R from trade_setup, stated with conviction. Add the
+  position-size reminder. (Status is "watch" vs "actionable" — but frame it as the
+  plan, not a hedge.)
 
-(Optional SLIDE 7 — the risk / what invalidates it: "loses the 50-day, setup's done".)
+SLIDE 7 — The risk / what invalidates it   ← the ONLY place caveats live
+  "Loses the 50-day on volume, the setup's done." One clean rule. Keep every hedge
+  here; never let it bleed into the hook, pivot, or close.
 
-LAST — CTA
-  Drive to newsimpactscreener.com. Concrete next step, not "follow for more".
+LAST — CTA                        [arc: CTA — direct address]
+  Speak to the viewer's situation, then drive to newsimpactscreener.com. Not "follow
+  for more". e.g. "If you're still waiting for a setup to look 'obvious', you already
+  missed this one. The screener flags them here → newsimpactscreener.com".
 ```
 
-Then a **caption** (see the style guide's Caption section): first 125 chars hook,
-4–7 short paragraphs that ADD context beyond the slides, a swipe prompt, the CTA,
-and 8–14 hashtags mixing broad (#swingtrading #stocks), niche (#$NVDA, the sector),
-and method (#relativestrength #breakout). No emojis.
+Then a **caption** written on the same arc (see the style guide's Caption section):
+
+- **HOOK** — first 125 chars. Self-contained, scroll-stopping, no hedging. This is the
+  feed preview before "more".
+- **BUILD → PIVOT → CLOSE** — 4–6 short paragraphs that ADD context beyond the slides.
+  The pivot paragraph delivers the mechanism (volume + earnings confirm); the close
+  states the trade with conviction.
+- **One** caveat/invalidation line — and only one. If you find yourself writing "one
+  honest caveat" or "two honest caveats", stop: the ticker failed the conviction gate.
+- **CTA** — direct-address "you" line, then `newsimpactscreener.com` + disclaimer.
+- 8–14 hashtags mixing broad (#swingtrading #stocks), niche (#$NVDA, the sector), and
+  method (#relativestrength #breakout). No emojis.
 
 ---
 
@@ -185,7 +303,9 @@ is non-negotiable: write it before passing anything to ElevenLabs.
 
 ### 7A — Write the reel script using the Hook-Value-Trade arc
 
-The reel has three zones:
+The reel has three zones, and the VO across them follows the **Hot Take Arc** from
+Step 3.5 — HOOK (Zone 1) → BUILD+PIVOT (Zone 2 + chart/volume scenes) → CLOSE (trade
+scene) → CTA (outro):
 
 ```
 ZONE 1: HOOK          (0–3s)   Stop the scroll. One verbal + one visual statement.
@@ -197,6 +317,14 @@ This structure is the opposite of most trading content, which builds to a reveal
 **NIS reels lead with the reveal, then explain it.** The viewer gets the trade in the
 first 25 seconds. That's the retention mechanic.
 
+**The no-hedge rule applies to the VO exactly as it does to the caption.** The hook
+opens a loop; the pivot (chart + volume scenes) and close (trade scene) must resolve
+it *toward conviction*. The ONLY place a caveat is spoken is Scene G (invalidation)
+and the disclaimer — never in the hook, the walkthrough, or the trade close. If the
+data forces "but it's not confirmed" earlier than Scene G, the ticker failed the
+Step 1 gate; pick another. (Past losers RLJ/HOFT voiced their caveats mid-pitch and
+the retention collapsed.)
+
 ---
 
 #### ZONE 1: HOOK (0–3 seconds)
@@ -204,15 +332,27 @@ first 25 seconds. That's the retention mechanic.
 Write TWO parallel hooks — one verbal (what Hans says), one visual (what appears on screen).
 They must reinforce each other but not duplicate each other.
 
-**Verbal hook — use one of these types (ranked by effectiveness for this audience):**
+**Verbal hook — use one of these types (ranked by *measured* effectiveness for this
+audience).** The top two are what the best reels actually used: ENVA's 345-view reel
+ran Direct address + FOMO ("one breakout away from a run — most watchlists don't have
+it yet"); NWPX's 219-view reel ran a Specific number drop ("beat by 59% — and held
+the move"). The bottom-tier hooks below are what the *losers* leaned on — prefer the
+top of this list, and pair it with a clean expectation-flip:
 
-| Type | Pattern | Example |
-|---|---|---|
-| Stakes contradiction | "[What traders expect]. [What the chart shows instead]." | "Most traders are watching the wrong level on ENVA. Here's the one that matters." |
-| Specific number drop | Lead with the most surprising number from setup.json | "1.6x up/down volume. This stock has been under accumulation for 11 weeks." |
-| Direct address + FOMO | Name what they're missing RIGHT NOW | "If ENVA isn't on your watchlist, you're about to watch it from the sidelines." |
-| Confession-flip | A belief the audience holds → what the data shows instead | "You probably think this kind of setup is rare. It screened clean on all 7 criteria." |
-| Hard question | A question they're already asking themselves | "Is this a real breakout or a fake? Here's how to tell before it happens." |
+| Type | Tier | Pattern | Example |
+|---|---|---|---|
+| Direct address + FOMO | 🥇 proven | Name what they're missing RIGHT NOW | "If ENVA isn't on your watchlist, you're about to watch it from the sidelines." |
+| Specific number drop | 🥇 proven | Lead with the most surprising number from setup.json | "Beat earnings by 59% last quarter — and held every point of it." |
+| Stakes contradiction | 🥈 strong | "[What traders expect]. [What the chart shows instead]." | "Most traders are watching the wrong level on ENVA. Here's the one that matters." |
+| Confession-flip | 🥈 strong | A belief the audience holds → what the data shows instead | "You probably think this kind of setup is rare. It screened clean on all 7 criteria." |
+| Hard question | 🥉 ok | A question they're already asking themselves | "Is this a real breakout or a fake? Here's how to tell before it happens." |
+| Abstract technical stat | ⚠️ weak | An isolated indicator value with no stakes | "2.9-to-1 up/down volume." (RLJ — flopped; it's a real NIS accumulation tell, but too abstract to *open* on — use it in the walkthrough, don't lead with it) |
+| Turnaround / loss-to-profit | ⚠️ weak | "They were losing money, now they're not" | "Wall Street modeled a loss — it posted a profit." (HOFT — flopped; abstract + invites doubt) |
+
+**Avoid the ⚠️ tier.** They correlate with the lowest-view reels: an abstract stat
+gives a scroller nothing to feel, and a turnaround hook quietly admits the company was
+broken, which invites skepticism instead of FOMO. If the only honest hook for a ticker
+is a ⚠️ one, that's a signal the ticker failed the Step 1 conviction gate.
 
 **Rules for the verbal hook:**
 - Under 15 words
@@ -330,6 +470,10 @@ Before finalising the verbal hook, check:
 - [ ] Does it work as a spoken line — not just as text?
 - [ ] Would someone who's mid-scroll stop at this line?
 - [ ] Is it true to what `setup.json` actually shows?
+- [ ] Is it a 🥇/🥈 hook type (FOMO, number-drop, contradiction) — **not** an abstract
+      stat or a turnaround? If it's ⚠️-tier, the ticker probably failed the Step 1 gate.
+- [ ] Does the loop it opens get **closed with conviction** later — with no "honest
+      caveat" between the hook and the trade? (Caveats live only in Scene G.)
 
 If any box is unchecked, revise before passing to ElevenLabs.
 

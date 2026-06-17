@@ -9,6 +9,7 @@ Consolidates:
 from __future__ import annotations
 
 import logging
+import re
 from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 from typing import Any
@@ -20,6 +21,85 @@ log = logging.getLogger(__name__)
 
 def _client():
     return get_supabase_client(), "swingtrader"
+
+
+# ── Tag search (mirror of the /articles?tag= path) ───────────────────────────
+#
+# The public articles page filters by tag through the search_news_by_tags RPC,
+# expanding each token into its plausible stored forms first. We replicate the
+# UI's lib/news/search-tags.ts expansion exactly so the agent's tag search
+# returns the same rows the website does for the same tag.
+
+_TICKER_RE = re.compile(r"^[A-Za-z]{1,6}$")
+
+
+def _slugify_theme_tag(raw: str) -> str:
+    """Lowercase snake_case theme slug (mirror of slugifyThemeTag)."""
+    s = re.sub(r"[^a-z0-9]+", "_", str(raw or "").lower())
+    return s.strip("_")[:48]
+
+
+def expand_search_tag_candidates(raw: str) -> list[str]:
+    """Expand one token into every plausible stored tag form.
+
+    Mirror of lib/news/search-tags.ts:expandSearchTagCandidates — a short token
+    could be stored as a lowercase theme slug or an uppercase ticker, so emit
+    both (e.g. "SPCX" -> ["spcx", "SPCX"], "japan" -> ["japan", "JAPAN"]). The
+    GIN overlap in search_news_by_tags then matches whichever the article holds.
+    """
+    t = str(raw or "").strip()
+    if not t:
+        return []
+    out: list[str] = []
+    slug = _slugify_theme_tag(t)
+    if slug:
+        out.append(slug)
+    if _TICKER_RE.match(t):
+        upper = t.upper()
+        if upper not in out:
+            out.append(upper)
+    return out
+
+
+def get_news_by_tag(
+    tags: list[str],
+    hours: int = 720,
+    limit: int = 20,
+    article_stream: str | None = None,
+) -> list[dict[str, Any]]:
+    """Latest articles carrying any of the given tags, newest first.
+
+    The exact search the /articles?tag=X feed uses: each tag is expanded into
+    its stored forms and matched against news_articles.search_tags via the
+    GIN-indexed search_news_by_tags RPC. Returns:
+    {article_id, title, url, source, slug, image_url, article_stream,
+     published_at, snippet, similarity}.
+    """
+    client, schema = _client()
+    seen: set[str] = set()
+    expanded: list[str] = []
+    for tag in tags or []:
+        for cand in expand_search_tag_candidates(tag):
+            if cand not in seen:
+                seen.add(cand)
+                expanded.append(cand)
+    if not expanded:
+        return []
+
+    res = (
+        client.schema(schema)
+        .rpc(
+            "search_news_by_tags",
+            {
+                "tag_filter": expanded,
+                "match_count": max(1, min(int(limit), 100)),
+                "lookback_hours": max(0, int(hours)),
+                "stream_filter": article_stream,
+            },
+        )
+        .execute()
+    )
+    return res.data or []
 
 
 def get_top_articles(
