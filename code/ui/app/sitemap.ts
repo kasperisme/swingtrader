@@ -133,6 +133,7 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
     ...staticRoutes,
     ...screeningRoutes,
     ...articleRoutes,
+    ...quoteRoutes,
     ...docRoutes,
     ...blogRoutes,
   ];
