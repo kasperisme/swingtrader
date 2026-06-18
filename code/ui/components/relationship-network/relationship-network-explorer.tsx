@@ -374,9 +374,9 @@ export function RelationshipNetworkExplorer(
   const [nodes, setNodes] = useState<string[]>([]);
   const [truncated, setTruncated] = useState(false);
 
-  const [hops] = useState<2>(2);
-  /** Full graph vs 2-hop subgraph around the selected node (requires a selected node). */
-  const [graphScope, setGraphScope] = useState<"full" | "twoHop">("full");
+  // Fetch depth: tier-1 (direct neighbours) by default; tier-2 pulls in the
+  // neighbours-of-neighbours when the user opts in.
+  const [hops, setHops] = useState<1 | 2>(1);
   const [selectedRelTypes, setSelectedRelTypes] = useState<string[]>([
     ...REL_TYPES,
   ]);
@@ -426,35 +426,20 @@ export function RelationshipNetworkExplorer(
     [edges, selectedRelTypes],
   );
 
+  // The loaded neighborhood, with the rel-type legend applied live (all types are
+  // selected by default, so the default view shows everything). Fetch depth is the
+  // Tier 1 / Tier 2 toggle. Nodes left with no visible edge are dropped, but the
+  // seed and the selected node are always kept.
   const visibleGraph = useMemo(() => {
-    // "Entire network": every node and every edge from the loaded neighborhood (ignore legend rel-type filters).
-    const fullGraph = { nodes, edges };
-    if (graphScope === "full" || !selectedNode) {
-      return fullGraph;
+    const present = new Set<string>();
+    for (const e of filteredEdges) {
+      present.add(e.from_ticker);
+      present.add(e.to_ticker);
     }
-    const visited = new Set<string>([selectedNode]);
-    const depth = new Map<string, number>([[selectedNode, 0]]);
-    const queue: string[] = [selectedNode];
-    while (queue.length > 0) {
-      const current = queue.shift()!;
-      const d = depth.get(current) ?? 0;
-      if (d >= 2) continue;
-      for (const edge of filteredEdges) {
-        let next: string | null = null;
-        if (edge.from_ticker === current) next = edge.to_ticker;
-        else if (edge.to_ticker === current) next = edge.from_ticker;
-        if (!next || visited.has(next)) continue;
-        visited.add(next);
-        depth.set(next, d + 1);
-        queue.push(next);
-      }
-    }
-    const visibleNodes = nodes.filter((n) => visited.has(n));
-    const visibleEdges = filteredEdges.filter(
-      (e) => visited.has(e.from_ticker) && visited.has(e.to_ticker),
-    );
-    return { nodes: visibleNodes, edges: visibleEdges };
-  }, [edges, filteredEdges, graphScope, nodes, selectedNode]);
+    if (seedTicker) present.add(seedTicker);
+    if (selectedNode) present.add(selectedNode);
+    return { nodes: nodes.filter((n) => present.has(n)), edges: filteredEdges };
+  }, [nodes, filteredEdges, seedTicker, selectedNode]);
 
   const connectedSet = useMemo(() => {
     if (!selectedNode) return new Set<string>();
@@ -662,6 +647,18 @@ export function RelationshipNetworkExplorer(
     void loadNeighborhood(true);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Re-fetch the neighbourhood at the new depth when the tier toggle changes
+  // (skip the initial mount, which the effect above already covers).
+  const hopsInitialized = useRef(false);
+  useEffect(() => {
+    if (!hopsInitialized.current) {
+      hopsInitialized.current = true;
+      return;
+    }
+    void loadNeighborhood(false);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hops]);
 
   useEffect(() => {
     if (!selectedNode) return;
@@ -904,44 +901,37 @@ export function RelationshipNetworkExplorer(
               <div className="ml-auto inline-flex rounded-md border border-border bg-muted/40 p-0.5">
                 <button
                   type="button"
-                  onClick={() => setGraphScope("full")}
+                  onClick={() => setHops(1)}
                   className={`cursor-pointer rounded px-2 py-0.5 text-[11px] font-medium transition-colors ${
-                    graphScope === "full"
+                    hops === 1
                       ? "bg-background text-foreground"
                       : "text-muted-foreground hover:text-foreground"
                   }`}
-                  title="Show every node and every edge in the loaded neighborhood"
+                  title="Show only directly-connected (tier-1) companies"
                 >
-                  All
+                  Tier 1
                 </button>
                 <button
                   type="button"
-                  onClick={() => setGraphScope("twoHop")}
+                  onClick={() => setHops(2)}
                   className={`cursor-pointer rounded px-2 py-0.5 text-[11px] font-medium transition-colors ${
-                    graphScope === "twoHop"
+                    hops === 2
                       ? "bg-background text-foreground"
                       : "text-muted-foreground hover:text-foreground"
                   }`}
-                  title={
-                    selectedNode
-                      ? "Show only nodes within 2 hops of the selected node"
-                      : "Select a node first, then use 2-hop to focus"
-                  }
+                  title="Also include tier-2 — the connections of the connected companies"
                 >
-                  2-hop
+                  Tier 2
                 </button>
               </div>
               {seedTicker ? (
-                <span className="text-[11px] text-muted-foreground">
+                <span className="ml-2 text-[11px] text-muted-foreground">
                   <span className="font-mono text-foreground">
                     {seedTicker}
                   </span>
                   {" · "}
                   {visibleGraph.nodes.length}N · {visibleGraph.edges.length}E
                   {truncated ? " (capped)" : ""}
-                  {graphScope === "twoHop" && !selectedNode
-                    ? " · select node first"
-                    : ""}
                 </span>
               ) : null}
             </div>
@@ -979,11 +969,7 @@ export function RelationshipNetworkExplorer(
                 selectedNode={selectedNode}
                 selectedEdge={selectedEdge}
                 connectedSet={connectedSet}
-                dimDistantGraph={
-                  graphScope === "twoHop" &&
-                  Boolean(selectedNode) &&
-                  !selectedEdge
-                }
+                dimDistantGraph={false}
                 manualPositions={manualPositions}
                 onManualPositionsMerge={onManualPositionsMerge}
                 onNodeClick={onGraphNodeClick}

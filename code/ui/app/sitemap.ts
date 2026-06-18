@@ -11,6 +11,10 @@ const baseUrl = process.env.NEXT_PUBLIC_SITE_URL ?? "https://newsimpactscreener.
 // matter most for indexing. Older pieces remain reachable via internal links.
 const ARTICLE_SITEMAP_LIMIT = 5000;
 
+// Cap /quote/[symbol] URLs to the most-covered tickers. Sourced from recent
+// sentiment heads so only symbols with real news-impact data get indexed.
+const QUOTE_SITEMAP_LIMIT = 1500;
+
 export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
   // Built from live DB + Sanity data, so generate at request time rather than
   // during the static prerender (which tears down the in-flight fetches).
@@ -72,8 +76,38 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
     console.warn("[sitemap] failed to list articles", e);
   }
 
+  // Per-ticker quote pages — distinct symbols with recent scored news, freshest
+  // first. Deduped in JS since the heads table has many rows per ticker.
+  let quoteRoutes: MetadataRoute.Sitemap = [];
+  try {
+    const supabase = createServiceClient();
+    const { data, error } = await supabase
+      .schema("swingtrader")
+      .from("ticker_sentiment_heads")
+      .select("ticker, article_ts")
+      .not("ticker", "is", null)
+      .order("article_ts", { ascending: false, nullsFirst: false })
+      .limit(QUOTE_SITEMAP_LIMIT * 20);
+    if (error) throw error;
+    const seen = new Map<string, Date>();
+    for (const r of data ?? []) {
+      const ticker = typeof r.ticker === "string" ? r.ticker.trim().toUpperCase() : "";
+      if (!ticker || !/^[A-Z][A-Z0-9.\-]{0,11}$/.test(ticker) || seen.has(ticker)) continue;
+      seen.set(ticker, r.article_ts ? new Date(r.article_ts) : now);
+      if (seen.size >= QUOTE_SITEMAP_LIMIT) break;
+    }
+    quoteRoutes = [...seen.entries()].map(([ticker, lastModified]) => ({
+      url: `${baseUrl}/quote/${ticker}`,
+      lastModified,
+      changeFrequency: "daily" as const,
+      priority: 0.6,
+    }));
+  } catch (e) {
+    console.warn("[sitemap] failed to list quote tickers", e);
+  }
+
   if (!isSanityConfigured) {
-    return [...staticRoutes, ...screeningRoutes, ...articleRoutes];
+    return [...staticRoutes, ...screeningRoutes, ...articleRoutes, ...quoteRoutes];
   }
 
   const [docSlugs, blogSlugs] = await Promise.all([

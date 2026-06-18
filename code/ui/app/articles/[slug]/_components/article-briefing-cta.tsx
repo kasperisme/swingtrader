@@ -16,9 +16,12 @@ import { Input } from "@/components/ui/input";
 export function ArticleBriefingCTA({
   tickers,
   tags,
+  source = "article_briefing",
 }: {
   tickers: string[];
   tags: string[];
+  /** Signup attribution channel (e.g. "quote_page"). Defaults to article CTA. */
+  source?: string;
 }) {
   const emailId = useId();
   const [email, setEmail] = useState("");
@@ -54,7 +57,7 @@ export function ArticleBriefingCTA({
             email,
             tickers: selTickers,
             tags: selTags,
-            source: "article_briefing",
+            source,
           }),
         });
         const data = (await res.json().catch(() => ({}))) as {

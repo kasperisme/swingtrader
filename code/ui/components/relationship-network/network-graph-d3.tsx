@@ -9,6 +9,16 @@ export type SelectedEdge = { from_ticker: string; to_ticker: string; rel_type?: 
 
 const EDGE_ARROW_MARKER_PREFIX = "swingtrader-rel-edge-arrow";
 
+// Type-clustered layout: each direct neighbour of the focused node is pulled to a
+// side by its edge type — suppliers left, customers right, partners below,
+// competitors above. (SVG y points down, so "below" is +y, "above" is −y.)
+const DIRECTION_BY_REL: Record<string, { x: number; y: number }> = {
+  supplier: { x: -1, y: 0 },
+  customer: { x: 1, y: 0 },
+  partner: { x: 0, y: 1 },
+  competitor: { x: 0, y: -1 },
+};
+
 function edgeMarkerId(relType: string) {
   const safe = relType.replace(/[^a-zA-Z0-9_-]/g, "_") || "unknown";
   return `${EDGE_ARROW_MARKER_PREFIX}-${safe}`;
@@ -126,9 +136,66 @@ export function NetworkGraphD3({
       strength: e.strength_avg,
     }));
 
+    // Type-clustered directions relative to the focused node. Tier-1 (direct)
+    // neighbours go to a side by their strongest typed edge to the anchor. Tier-2+
+    // nodes INHERIT their tier-1 ancestor's side and sit further out (the supplier's
+    // supplier is further left, the customer's customer further right, etc.). The
+    // returned vector carries the magnitude (unit × BFS depth); the layout places
+    // each node at center + vector × R, so depth-2 lands at 2R on the same axis.
+    const clusterDirections: Record<string, { x: number; y: number }> = {};
+    if (selectedNode) {
+      // tier-1 root direction: strongest typed edge between the node and the anchor.
+      const rootDir = new Map<string, { x: number; y: number }>();
+      const bestStrength = new Map<string, number>();
+      const adjacency = new Map<string, Set<string>>();
+      const link = (a: string, b: string) => {
+        const set = adjacency.get(a) ?? new Set<string>();
+        set.add(b);
+        adjacency.set(a, set);
+      };
+      for (const e of visibleEdges) {
+        link(e.from_ticker, e.to_ticker);
+        link(e.to_ticker, e.from_ticker);
+        const other =
+          e.from_ticker === selectedNode ? e.to_ticker
+            : e.to_ticker === selectedNode ? e.from_ticker : null;
+        if (!other) continue;
+        const dir = DIRECTION_BY_REL[e.rel_type];
+        if (!dir) continue;
+        if (e.strength_avg > (bestStrength.get(other) ?? -Infinity)) {
+          bestStrength.set(other, e.strength_avg);
+          rootDir.set(other, dir);
+        }
+      }
+      // BFS out from the anchor: depth-1 takes its own typed direction; deeper nodes
+      // inherit the direction of the parent they were first reached through.
+      const depthOf = new Map<string, number>([[selectedNode, 0]]);
+      const sideOf = new Map<string, { x: number; y: number }>();
+      const queue: string[] = [selectedNode];
+      while (queue.length > 0) {
+        const cur = queue.shift()!;
+        const depth = depthOf.get(cur)!;
+        for (const nb of adjacency.get(cur) ?? []) {
+          if (depthOf.has(nb)) continue;
+          depthOf.set(nb, depth + 1);
+          const side = depth === 0 ? rootDir.get(nb) : sideOf.get(cur);
+          if (side) sideOf.set(nb, side);
+          queue.push(nb);
+        }
+      }
+      for (const [node, depth] of depthOf) {
+        const side = sideOf.get(node);
+        if (node !== selectedNode && side) {
+          clusterDirections[node] = { x: side.x * depth, y: side.y * depth };
+        }
+      }
+    }
+
     // Seed layout from manual positions on graph (re)build only — omit `manualPositions` from effect
     // deps so drag-merge does not tear down the SVG and reset d3-zoom (felt like "zoom in" after drop).
-    const force = createGraphForceSimulation(GW, GH, NODE_R, nodeIds, layoutEdges, manualPositions);
+    const force = createGraphForceSimulation(
+      GW, GH, NODE_R, nodeIds, layoutEdges, manualPositions, selectedNode, clusterDirections,
+    );
 
     if (!force) {
       return;
@@ -329,7 +396,7 @@ export function NetworkGraphD3({
         dragGroupIds = Array.from(connected);
         select<SVGGElement, GraphForceNode>(event.sourceEvent?.currentTarget as SVGGElement).raise();
       })
-      .on("drag", (event: D3DragEvent<SVGGElement, GraphForceNode, GraphForceNode>, d) => {
+      .on("drag", (event: D3DragEvent<SVGGElement, GraphForceNode, GraphForceNode>) => {
         if (Math.abs(event.dx) + Math.abs(event.dy) > 0) dragMoved = true;
         for (const id of dragGroupIds) {
           const n = byId.get(id);
