@@ -294,6 +294,39 @@ def fetch_fundamentals(ticker: str) -> dict:
     return out
 
 
+def fetch_screening_stats(ticker: str) -> dict | None:
+    """The latest NIS Momentum screening row for a ticker, from Supabase — i.e. the
+    *universe-relative* fields (RS_Rank, RSOver70, rs_line_new_high) that can't be
+    computed for one ticker in isolation. Returns the screening's `row_data` dict
+    (with a `_scan_date` stamp) or None.
+
+    Source: swingtrader.market_screening_result_rows, filtered to the `nis_momentum`
+    screening (via market_screenings.script_key), newest scan_date first.
+
+    RS_Rank here is the production IBD-style 1-99 percentile — **higher = stronger**
+    (99 = strongest, computed in services/screener/technical.py)."""
+    try:
+        from shared.db import get_supabase_client
+        client = get_supabase_client()
+        schema = os.environ.get("SUPABASE_SCHEMA", "swingtrader")
+        ms = (client.schema(schema).table("market_screenings")
+              .select("id").eq("script_key", "nis_momentum").execute())
+        ids = [r["id"] for r in (ms.data or [])]
+        q = (client.schema(schema).table("market_screening_result_rows")
+             .select("scan_date,row_data").eq("symbol", ticker.upper()))
+        if ids:
+            q = q.in_("market_screening_id", ids)
+        res = q.order("scan_date", desc=True).limit(1).execute()
+        if res.data:
+            row = res.data[0]
+            rd = dict(row.get("row_data") or {})
+            rd["_scan_date"] = row.get("scan_date")
+            return rd
+    except Exception as exc:
+        print(f"[screening-fetch] {ticker}: {exc}", file=sys.stderr)
+    return None
+
+
 def standout(tt: dict, fund: dict):
     """The one weird, probably-overlooked tell for THIS ticker — framed as something
     the viewer most likely missed. Leans toward signals retail doesn't track over
@@ -328,7 +361,9 @@ def standout(tt: dict, fund: dict):
         return ("THE BEAT NOBODY CLOCKED", "It beat estimates by", f"{last_s:.0f}% last quarter.", "surprise", recent[-1])
     if beats and beats >= 12:
         return ("NOBODY'S TALKING ABOUT IT", "It's beaten estimates", f"{beats} quarters running.", "streak", beats)
-    if rs is not None and 1 <= rs <= 8:  # rank is 1..N; 0/None means unknown, never "top"
+    # RS_Rank is the IBD 1-99 percentile — HIGHER = stronger (99 = strongest). A
+    # top-decile rank is a pure number-drop hook; None/0 means unknown (never "top").
+    if rs is not None and rs >= 90:
         return ("THE RANK NOBODY CHECKS", "Relative-strength rank", f"{int(rs)} — top of the market.", "rank", rs)
     if (tt.get("vol_contracting_in_base") and tt.get("PriceWithin25Percent52WeekHigh")
             and not tt.get("below_pivot")):  # only when it's actually pressing the highs
@@ -337,6 +372,10 @@ def standout(tt: dict, fund: dict):
         return ("THE STREAK YOU MISSED", "It's beaten estimates", f"{beats} quarters running.", "streak", beats)
     if max_s is not None and max_s >= 15:
         return ("THE BEAT NOBODY CLOCKED", "It beat estimates by", f"{max_s:.0f}% recently.", "surprise", best_surprise_rec())
+    # A solid (top-quintile) RS rank is still a concrete number-drop — it outranks the
+    # abstract up/down-volume ratio below it.
+    if rs is not None and rs >= 80:
+        return ("THE LEADERSHIP TELL", "Relative-strength rank", f"{int(rs)} — a market leader.", "rank", rs)
     # abstract up/down-volume ratio — a real accumulation tell but a weak scroll-stopper;
     # below every concrete earnings/strength angle above.
     if udr and udr >= 2.2:
@@ -392,9 +431,28 @@ def main() -> None:
     data, tt, error = t.get_screening(ticker, startdate.isoformat(), enddate.isoformat())
     if error or tt is None or data is None:
         sys.exit(f"screening failed for {ticker} (check APIKEY / ticker)")
-    if not rs_known:
-        tt["RS_Rank"] = None  # stub value is meaningless solo
+    if rs_known:
+        rs_source = "passed via --rs-rank"
+    else:
+        # The stub RS is meaningless solo — null it, then try the latest stored NIS
+        # Momentum screening for the real universe-relative fields (RS_Rank / RSOver70 /
+        # rs_line_new_high). These can't be recomputed for one ticker.
+        tt["RS_Rank"] = None
         tt["RSOver70"] = None
+        row = fetch_screening_stats(ticker)
+        if row and row.get("RS_Rank") is not None:
+            tt["RS_Rank"] = int(row["RS_Rank"])
+            if row.get("RSOver70") is not None:
+                tt["RSOver70"] = bool(row["RSOver70"])
+            if tt.get("rs_line_new_high") is None and row.get("rs_line_new_high") is not None:
+                tt["rs_line_new_high"] = bool(row["rs_line_new_high"])
+            rs_known = True
+            rs_source = f"nis_momentum screening ({row.get('_scan_date')})"
+            print(f"[screening-fetch] {ticker}: RS_Rank={tt['RS_Rank']} "
+                  f"rs_line_new_high={tt.get('rs_line_new_high')} "
+                  f"(scan {row.get('_scan_date')})", file=sys.stderr)
+        else:
+            rs_source = "unknown — no stored NIS Momentum screening; pass --rs-rank"
 
     full = data if "date" in data.columns else data.reset_index()
     close = float(full["close"].iloc[-1])
@@ -438,7 +496,7 @@ def main() -> None:
         "sector": fundamentals.get("sector"),
         "as_of": str(tt.get("date")),
         "price": jn(close),
-        "rs_rank_source": "screening" if rs_known else "unknown — pass --rs-rank from the NIS Momentum run",
+        "rs_rank_source": rs_source,
         "technical": tech_fields,
         "screen_flags": {k: tt.get(k) for k in (
             "increasing_eps", "beat_estimate", "PASSED_FUNDAMENTALS",

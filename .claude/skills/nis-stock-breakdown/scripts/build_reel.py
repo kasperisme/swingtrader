@@ -195,8 +195,8 @@ def verbal_hook(ticker: str, tt: dict, fund: dict) -> str:
     if viz == "streak":
         return f"Here's the streak nobody's talking about on {ticker}: {int(data)} straight earnings beats."
     if viz == "rank":
-        return (f"Here's the number nobody checks on {ticker}: relative-strength rank {int(data)}, "
-                f"top of the market.")
+        tier = "top of the market" if (data or 0) >= 90 else "a market leader"
+        return (f"Here's the number nobody checks on {ticker}: relative-strength rank {int(data)}, {tier}.")
     if viz == "rsline":
         return (f"Here's the tell pros watch on {ticker}: its strength line hit a new high before "
                 f"the price did.")

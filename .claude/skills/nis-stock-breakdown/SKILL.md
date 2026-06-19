@@ -82,9 +82,10 @@ confirms*, in methodology terms:
   own `1.5×ADR` clamp, not a flaw. Only flag `adr_pct` <2% (too slow — a flat-looking
   chart) or >15% (too wild).
 - **Leadership signal (best hooks are the truest).** A real `RS_Rank` near the top
-  (1–99, **lower = stronger**, so top-decile ≈ ≤ 8) and/or `rs_line_new_high` true
+  (IBD 1–99, **higher = stronger**, so top-decile ≈ ≥ 90) and/or `rs_line_new_high` true
   (leadership confirmed before price) are the most methodology-honest scroll-stoppers —
-  prefer names that have them.
+  prefer names that have them. (Both are auto-fetched from the latest NIS Momentum
+  screening in Step 2 — see the RS caveat.)
 
 #### Layer B — reel-ability overlay (editorial, NOT NIS — for views only)
 
@@ -131,9 +132,13 @@ Outputs under `code/analytics/output/setups/<TICKER>/`:
   (`increasing_eps`, `beat_estimate`, `PASSED_FUNDAMENTALS`), and the derived
   `trade_setup` (entry / stop / target_2r / target_3r / risk_pct / R:R / status).
 
-**RS caveat:** RS rank is universe-relative and can't be computed for one ticker. If
-you don't pass `--rs-rank` from the screening run, `setup.json` marks it unknown —
-don't state a rank you don't have.
+**RS caveat:** RS rank is universe-relative and can't be computed for one ticker, so
+`build_setup_chart.py` **auto-fetches the latest stored NIS Momentum screening** for the
+ticker (Supabase `market_screening_result_rows` → `market_screenings.script_key =
+'nis_momentum'`) and fills `RS_Rank` (IBD 1–99, higher = stronger), `RSOver70`, and
+`rs_line_new_high`. `setup.json.rs_rank_source` records the scan date. Pass `--rs-rank`
+only to override with a fresh value. If no stored screening exists, the rank is marked
+unknown — don't state one.
 
 For richer fundamentals (margins, growth, valuation) or a CEO/company profile, pull
 from `code/analytics/services/viral_reels/data_sources.py` (`company_profile`,
@@ -164,7 +169,7 @@ drives what the post tells the reader.
 Every caption **and** every reel VO is written on the **Hot Take Arc**:
 
 ```
-HOOK   → Contradict what they expect + open a loop      (no hedging, < 12 words spoken)
+HOOK   → Contradict what they expect + open a loop + a clock (no hedging, < 12 words spoken)
 BUILD  → Steel-man the obvious read (earn trust)         (1–3 lines)
 PIVOT  → Reveal the mechanism that makes it real         (concrete numbers — volume, beats)
 CLOSE  → Resolve the loop: the trade, stated with conviction
@@ -174,6 +179,18 @@ CTA    → Direct address — speak to the viewer's situation
 **The one hard rule: NO HEDGING IN THE PIVOT OR CLOSE.** The PIVOT must resolve
 *toward conviction* — "this is real, and here's the mechanism" (volume confirms,
 earnings back it). Never argue against your own thesis in the persuasive spine.
+
+**Urgency is built into the HOOK — non-negotiable.** A coiled NIS Momentum name is a
+*perishable* setup: it breaks (or fails) within a short window — days, not months — so
+the hook must carry a **clock**. The viewer has to feel that the move is imminent and
+that watching later means watching from the sidelines. This is *why we gate out
+extended and deep-below-pivot names in Step 1* — only a setup that's genuinely about to
+move can carry an honest time-pressing hook. Make the urgency real, not manufactured:
+the stock is **coiled at the pivot right now**, so the breakout is the next thing that
+happens, not someday. Lead with that compression and that countdown — "still basing,
+but not for long", "one volume day from the breakout", "the watchlists haven't caught
+this yet — they will by [next catalyst]". Never invent a deadline the data doesn't
+support; the truth (coiled at the pivot, volume building) *is* the urgency.
 
 - Risk and what-invalidates-it have exactly **one home**: the invalidation slide
   (Slide 7) and one closing line. Never let "but it's not confirmed", "honest caveat",
@@ -195,14 +212,18 @@ Arc** from Step 3.5. Adapt the count, but this is the spine:
 
 ```
 SLIDE 1 — Cover / HOOK            [arc: HOOK]
-  Contradict what they expect + open a loop. A specific, stakes-driven line, not a
-  label. Lead with the single most surprising number or an expectation-flip.
+  Contradict what they expect + open a loop + put a clock on it. A specific,
+  stakes-driven line, not a label. Lead with the single most surprising number or an
+  expectation-flip, and make the breakout feel *imminent* — the setup is coiled at the
+  pivot now and resolves in days, not months. The reader should feel they're early but
+  about to be late.
   e.g. "NVDA just cleared its pivot on 1.4x volume — and most watchlists missed it."
+  e.g. "This base is days from breaking. RS 96, coiled at the pivot — and nobody's watching yet."
 
 SLIDE 2 — The setup (why it screened)   [arc: BUILD]
   Steel-man the obvious read, then the NIS Momentum tell: RS rank, stacked MAs,
   near highs, beats.
-  e.g. "RS rank 7. Stacked above the 50/150/200. Three straight earnings beats."
+  e.g. "RS rank 96. Stacked above the 50/150/200. Three straight earnings beats."
 
 SLIDE 3 — The chart (price + volume)  ← chart.png lives here   [arc: PIVOT]
   Narrate the mechanism: the base, the pivot, the volume signature.
@@ -333,14 +354,18 @@ Write TWO parallel hooks — one verbal (what Hans says), one visual (what appea
 They must reinforce each other but not duplicate each other.
 
 **Verbal hook — use one of these types (ranked by *measured* effectiveness for this
-audience).** The top two are what the best reels actually used: ENVA's 345-view reel
-ran Direct address + FOMO ("one breakout away from a run — most watchlists don't have
-it yet"); NWPX's 219-view reel ran a Specific number drop ("beat by 59% — and held
-the move"). The bottom-tier hooks below are what the *losers* leaned on — prefer the
-top of this list, and pair it with a clean expectation-flip:
+audience).** The proven 🥇 winners did two things: they named what the viewer was
+*missing right now* and they made the move feel *imminent*. ENVA's 345-view reel ran
+Direct address + FOMO with a built-in clock ("one breakout away from a run — most
+watchlists don't have it yet"); NWPX's 219-view reel ran a Specific number drop ("beat
+by 59% — and held the move"). The strongest hooks **fuse imminence with FOMO** — a
+specific number *and* a countdown ("RS 96, coiled at the pivot, days from breaking").
+The bottom-tier hooks below are what the *losers* leaned on — prefer the top of this
+list, pair it with a clean expectation-flip, and always put a clock on it:
 
 | Type | Tier | Pattern | Example |
 |---|---|---|---|
+| Imminence / countdown | 🥇 proven | Put a clock on the setup — it breaks in days, not months | "This base is days from breaking — and the watchlists haven't caught it yet." |
 | Direct address + FOMO | 🥇 proven | Name what they're missing RIGHT NOW | "If ENVA isn't on your watchlist, you're about to watch it from the sidelines." |
 | Specific number drop | 🥇 proven | Lead with the most surprising number from setup.json | "Beat earnings by 59% last quarter — and held every point of it." |
 | Stakes contradiction | 🥈 strong | "[What traders expect]. [What the chart shows instead]." | "Most traders are watching the wrong level on ENVA. Here's the one that matters." |
@@ -358,6 +383,11 @@ is a ⚠️ one, that's a signal the ticker failed the Step 1 conviction gate.
 - Under 15 words
 - No hedging: not "might", "could", "potentially"
 - Contains either a specific number OR a named consequence
+- **Carries a clock — the breakout is imminent.** The hook must make the viewer feel
+  the setup resolves in *days, not months*: coiled at the pivot, one volume day from
+  breaking, watchlists about to catch it. "Days from breaking", "before it moves", "by
+  next week", "you're early — but not for long". The urgency must be true (the name was
+  gated in Step 1 precisely because it's about to move); never fabricate a deadline.
 - Written for spoken delivery — rhythm beats grammar
 - Hans's voice: calm authority, not hype. He states facts like they're obvious.
 
@@ -466,6 +496,9 @@ newsimpactscreener.com. Link in bio."
 Before finalising the verbal hook, check:
 - [ ] Under 15 words?
 - [ ] Contains a specific number OR a named consequence?
+- [ ] **Carries a clock — does it make the breakout feel imminent (days, not months)?**
+      If the hook would read the same whether the move were tomorrow or next quarter,
+      it has no urgency — add the countdown.
 - [ ] No hedging language?
 - [ ] Does it work as a spoken line — not just as text?
 - [ ] Would someone who's mid-scroll stop at this line?
@@ -481,31 +514,69 @@ If any box is unchecked, revise before passing to ElevenLabs.
 
 #### 7C — ElevenLabs render
 
+**Default: the evolving-chart reel (`build_chart_reel.py`).** This is the
+stacked-curiosity format — ONE full-frame **1080×1920** price chart that *animates as it
+expands* across the entire reel: candles draw in one-per-data-point with **both axes
+growing** (newest candle pinned to the right, earlier ones compressing left; the y-range
+expanding as new highs/lows arrive), exactly like the viral_reels `PriceChart`. It grows
+through the real display window, then projects the validated breakout to the 2R target.
+The Hot-Take-Arc copy rides on top as **floating semi-transparent cards that cut in/out**.
+Two things are always moving — the chart growing *and* the cards changing — so the eye
+never rests (the retention trick the multi-element meme reels use, except the "background
+motion" is the actual trade developing). There is **no play-head line** — the live price
+tag on the leading candle is the moving edge.
+
 ```bash
 cd code/analytics
-.venv/bin/python ../../.claude/skills/nis-stock-breakdown/scripts/build_reel.py \
+.venv/bin/python ../../.claude/skills/nis-stock-breakdown/scripts/build_chart_reel.py \
     --ticker ENVA \
-    --hook-text "[chosen verbal hook]" \
-    --hook-visual [number_card|moment_crop|trade_card|split_screen]
-# → output/setups/ENVA/reel.mp4
+    --hook-text "[chosen verbal hook]"
+# → output/setups/ENVA/reel_chart.mp4   (1080×1920)
 ```
 
-`build_reel.py` conventions:
-- Uses `$ELEVENLABS_PRIMARY_VOICE_ID` (Hans). Override with `--voice-id`.
-- `--tempo 1.08` for snappier delivery.
-- Scene flow: ZONE 1 hook visual → **ZONE 2 rapid one-fact stat cards (≈1.5s cuts)** →
-  ZONE 3 proof tail (chart → breakout animation → invalidation → disclaimer). The
-  setup / volume / fundamentals facts live in the Zone-2 burst, so the tail stays short.
-- Stat cards + value/hook/disclaimer cards are generated by the script from
-  `setup.json` (fundamentals included) — no per-ticker hand-editing.
-- Each scene holds for its narration line then hard-cuts to the next.
-- Breakout animation plays in full — never trimmed.
-- Disclaimer card always closes.
-- Requires `slides/…` (for the carousel) + `chart_bare.png` and `breakout_story.mp4`
-  from Steps 5–6.
+`build_chart_reel.py` conventions:
+- **1080×1920** full vertical (Reels / TikTok / Shorts). Cards float in the top band so
+  the chart stays readable below and behind them.
+- Uses `$ELEVENLABS_PRIMARY_VOICE_ID` (Hans). Override with `--voice-id`. `--tempo 1.08`.
+- ONE chart for the whole reel: real display window (`--display-days`, default 126 ≈ half a year) +
+  appended **validated** breakout projection (reuses `animate_breakout.project()`), so
+  the on-chart Entry/Stop/Target and the spoken levels come from a single live snapshot
+  and can't drift apart. (Climax is the *validated* breakout only — no fake-out here.)
+- Growth timing is data-driven: the hook + rapid one-fact walkthrough grow the chart
+  through the real candles; the **climax scene draws in the projection** (price clears the
+  pivot on volume, runs to target); the invalidation + CTA cards hold the finished chart.
+- Real vs. future is made unmistakable: during the real phase the chart is just solid
+  candles + SMAs (no entry/stop/target — those aren't history). The moment the projection
+  begins, a blue **NOW** divider drops, the future region tints blue with a vertical
+  **PROJECTED** label, the projected candles + volume render **hollow + dashed**, and the
+  entry/stop/target/buy-band appear **only across the future region** (the plan, not the
+  tape). SMAs never extend past NOW.
+- As the projection starts, the camera **snap-zooms in** (eased push to the last
+  ~`ZOOM_BARS` real bars + the future, tightening both axes) over ~`ZOOM_SECS` (≈1s) — fast,
+  not a slow crawl — then holds while the breakout candles draw in. The real phase stays
+  full-frame.
+- All cards (hook / one-fact stat cards / breakout / invalidation / CTA) are generated
+  from `setup.json` + the live load — no per-ticker hand-editing. Each card fades in,
+  holds for its VO line, then hard-cuts.
+- The visual hook is the hook *card* over the quietly-building chart — you are NOT
+  opening on a full static chart (it starts mostly hidden and draws in), so the
+  "don't open on the chart" rule from Zone 1 still holds in spirit.
+- Requires only `setup.json` + FMP/ElevenLabs creds. Does **not** need `breakout_story.mp4`
+  or the slide deck (it draws its own chart), so Step 6 is optional for this path.
 
-Target length: 70–90 seconds. If running long, trim Scene D (fundamentals) first —
-the trade, chart, and breakout are the core. Fundamentals are supporting cast.
+Target length: 40–70 seconds (it runs shorter than the legacy reel because the proof
+lives in the one continuous chart, not in separate scenes).
+
+**Legacy: the stacked-card reel (`build_reel.py`).** The earlier format — a sequence of
+full-frame 1080×1350 scenes (hook visual → rapid stat cards → breakout animation →
+proof tail). Use it when you specifically want the standalone real-vs-fake breakout
+animation as the climax, or a 4:5 feed crop.
+
+```bash
+.venv/bin/python ../../.claude/skills/nis-stock-breakdown/scripts/build_reel.py \
+    --ticker ENVA --hook-text "[hook]" --hook-visual [number_card|moment_crop|trade_card|split_screen]
+# → output/setups/ENVA/reel.mp4   (1080×1350); needs chart_bare.png + breakout_story.mp4 from Steps 5–6
+```
 
 ---
 

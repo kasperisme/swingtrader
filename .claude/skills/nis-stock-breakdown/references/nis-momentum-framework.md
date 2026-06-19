@@ -41,15 +41,18 @@ Lead with the one-line reason it's on the radar. Pull from `setup.json.technical
 
 | Field | Read it as |
 |-------|-----------|
-| `RS_Rank` (1–99, lower = stronger) | "Top X% relative strength." Only trustworthy when it came from the screening run — see the RS note below. |
+| `RS_Rank` (IBD 1–99, **higher = stronger**, 99 = strongest) | "Top X% relative strength." Comes from the screening — see the RS note below. |
 | `Passed` | All Minervini gates green. |
 | `PASSED_FUNDAMENTALS` | Earnings rising **and** beating. |
 | `rs_line_new_high` | RS line at/near a new high — leadership confirmed by the breakout. |
 
-**RS note:** RS rank is a percentile *across the whole screened universe*. The
-chart script can't compute it for a single ticker, so pass the real value from the
-NIS Momentum run with `--rs-rank`; otherwise `setup.json` marks it unknown and you
-must not state a rank.
+**RS note:** RS rank is an IBD 1–99 percentile *across the whole screened universe*
+(**higher = stronger**, 99 = strongest). The chart script can't compute it for a single
+ticker, so `build_setup_chart.py` **auto-fetches the latest stored NIS Momentum
+screening** for the ticker (Supabase `market_screening_result_rows`) and fills `RS_Rank`,
+`RSOver70`, and `rs_line_new_high` from it — `setup.json.rs_rank_source` records the scan
+date. Pass `--rs-rank` only to override (e.g. from a fresh run). If no stored screening
+exists, the rank is marked unknown and you must not state one.
 
 ## Aspect 2 — The chart: price + volume
 

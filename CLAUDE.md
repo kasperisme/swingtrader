@@ -125,6 +125,34 @@ Key files:
 - `code/analytics/services/viral_reels/reel/src/compositions/BarChartRace.tsx` — bar-chart-race animation
 - `code/analytics/services/viral_reels/reel/src/compositions/PriceNewsChart.tsx` — OHLC candlestick + news events animation
 
+## Social Publishing (Content Distribution)
+
+See `code/analytics/services/social_publishing/README.md`.
+
+The deterministic **last mile** that pushes finished nis-stock-breakdown assets
+(`output/setups/<TICKER>/`) to **Instagram, Facebook, TikTok, LinkedIn**.
+Producing the content is a hand-iterated creative process; this service does no
+creative work — it reads what's on disk, stages media to a public Supabase
+Storage URL, and posts via a **publishing aggregator** (one REST API instead of
+four native OAuth flows + Meta/TikTok app review). Backend is pluggable via
+`SOCIAL_BACKEND`: **`zernio`** (default, free tier, posts per `accountId`) or
+**`ayrshare`** (alternative); the asset/caption layer is identical for both —
+only `zernio.py`/`ayrshare.py` behind `backends.py` differ. No scheduler, no
+queue, no approval gate — run it per ticker when the assets are final.
+
+```bash
+cd code/analytics
+.venv/bin/python -m services.social_publishing.cli accounts          # map ZERNIO_ACCOUNT_* env
+.venv/bin/python -m services.social_publishing.cli publish --ticker NWPX --dry-run
+.venv/bin/python -m services.social_publishing.cli publish --ticker NWPX --platforms linkedin,instagram
+```
+
+Per-platform copy: drop `social/<platform>.txt` (e.g. a LinkedIn-voiced caption)
+or a `social/manifest.json` (override `kind`/`media`, e.g. LinkedIn as a slide
+carousel) in the ticker folder; both fall back to `caption.txt` / the reel.
+Needs `ZERNIO_API_KEY` + `ZERNIO_ACCOUNT_*` (or `AYRSHARE_API_KEY`) and a public
+`SOCIAL_MEDIA_BUCKET` Supabase bucket.
+
 ## Sanity Studio
 
 Mounted at `/studio`. Use Vision tool for GROQ queries.
