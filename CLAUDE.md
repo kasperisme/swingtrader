@@ -71,6 +71,8 @@ The caveman/businessman toggle is global (localStorage-backed via `lib/caveman-m
 | `taste-skill` | Building any UI — enforces premium design standards, kills generic AI patterns |
 | `viral-reel` | Producing short vertical data-reels (bar chart race videos) from the news-impact data foundation; Claude directs the story, Remotion renders |
 | `nis-stock-breakdown` | Making an Instagram-ready swing-trade breakdown of one stock from its NIS Momentum setup — annotated price+volume chart, fundamentals, and a derived entry/stop/target trade, assembled into a carousel + caption |
+| `nis-breakout-alert` | Hourly (`/loop 1h`) auto-poster: reads the breakout-screening agent's latest result; when tickers have just CONFIRMED price+volume breakouts, renders ONE roundup reel (live board of all breakouts, most-significant one highlighted + featured) and posts it immediately to IG+TikTok via Zernio. Live/urgency framing; reuses the nis-stock-breakdown render scripts + the social_publishing publisher |
+| `nis-ad-carousel` | Paid-ad carousel for Meta + TikTok selling the *product* (market screening + custom news screener) on a proof-driven arc (persona pain → features → a REAL screened winner vs the S&P → CTA). Renders 5–6 slides in both 4:5 and 9:16 from a Claude-authored `ad.json`, plus `ad_copy.txt` for Ads Manager. Creative package only — paid launch happens in Meta/TikTok Ads Manager, not the Zernio pipeline |
 | `ticker-pair-divergence` | Making a viral reel about a ticker PAIR — the non-obvious relationship (from `ticker_pair_stats` + the relationship graph), normalized line charts with company logos riding each line, the divergence flagged, and the mean-reversion (pairs) trade voiced |
 
 ## Scheduled Screenings (Agent)

@@ -1,7 +1,9 @@
 "use client";
 
-import { useId, useState, useTransition } from "react";
+import { useEffect, useId, useState, useTransition } from "react";
 import { Check } from "lucide-react";
+import { captureAttribution, getAttribution } from "@/lib/attribution";
+import { trackLead } from "@/lib/pixels";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -63,6 +65,8 @@ export function EmailSubscribeModal({
   const emailId = useId();
   const isMultiSelect = !screeningSlug;
 
+  useEffect(() => captureAttribution(), []); // first-touch, from the ad URL
+
   const reset = () => {
     setEmail("");
     setSelected(screeningSlug ? [screeningSlug] : []);
@@ -90,7 +94,12 @@ export function EmailSubscribeModal({
         const res = await fetch("/api/subscribe", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ email, screeningSlugs: slugs, source }),
+          body: JSON.stringify({
+            email,
+            screeningSlugs: slugs,
+            source,
+            attribution: getAttribution(),
+          }),
         });
         const data = (await res.json().catch(() => ({}))) as {
           success?: boolean;
@@ -99,6 +108,7 @@ export function EmailSubscribeModal({
 
         // already_subscribed is a success from the user's perspective.
         if (data.success || data.error === "already_subscribed") {
+          trackLead({ content_name: "market_screening" });
           setStatus({ kind: "success" });
           return;
         }

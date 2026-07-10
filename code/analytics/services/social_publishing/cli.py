@@ -30,6 +30,7 @@ import argparse
 import logging
 import sys
 from datetime import datetime, timezone
+from pathlib import Path
 
 from . import config, schedule, storage
 from .assets import PostPlan, build_plans
@@ -84,11 +85,25 @@ def cmd_publish(args: argparse.Namespace) -> int:
         return 1
     backend = get_backend(args.backend or config.SOCIAL_BACKEND)
     platforms = _parse_platforms(args.platforms)
-    try:
-        plans = build_plans(args.ticker, platforms)
-    except (FileNotFoundError, ValueError) as exc:
-        print(f"error: {exc}", file=sys.stderr)
-        return 1
+    if args.media:
+        # Ad-hoc mode: publish an arbitrary media file + caption (not a setups/
+        # <TICKER>/ folder). --ticker is just the storage-key label. Used by the
+        # breakout-alert roundup reel, which lives outside the per-ticker dirs.
+        media = Path(args.media)
+        if not media.is_file():
+            print(f"error: --media not found: {media}", file=sys.stderr)
+            return 1
+        cap = ""
+        if args.caption_file:
+            cap = Path(args.caption_file).read_text(encoding="utf-8").strip()
+        plans = [PostPlan(platform=p, caption=cap, kind="video", media=[media],
+                          caption_source=args.caption_file or "(none)") for p in platforms]
+    else:
+        try:
+            plans = build_plans(args.ticker, platforms)
+        except (FileNotFoundError, ValueError) as exc:
+            print(f"error: {exc}", file=sys.stderr)
+            return 1
 
     # Resolve account ids up front so dry-run surfaces any missing mapping.
     accounts = {
@@ -186,6 +201,9 @@ def main(argv: list[str] | None = None) -> int:
         help="comma list (instagram,facebook,tiktok,linkedin); default all",
     )
     p.add_argument("--backend", help=backend_help)
+    p.add_argument("--media", help="ad-hoc: publish this media file directly (skips the "
+                                   "setups/<TICKER> folder); --ticker is the storage label")
+    p.add_argument("--caption-file", help="ad-hoc: caption text file for --media")
     p.add_argument(
         "--at",
         help="schedule for an explicit local time, 'YYYY-MM-DD HH:MM' (see --tz)",

@@ -42,8 +42,8 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt  # noqa: E402
 from matplotlib.patches import FancyBboxPatch, Rectangle  # noqa: E402
 
-BG = "#0A0E1A"; INK = "#F5F7FF"; MUT = "#9AA3BC"; MUT2 = "#6B7488"
-AMBER = "#F5A623"; POS = "#3DD68C"; NEG = "#FF6B6B"
+BG = "#FBF7F1"; INK = "#10182B"; MUT = "#566377"; MUT2 = "#8A93A4"
+AMBER = "#F59E0B"; POS = "#16A34A"; NEG = "#DC2626"
 W, H, FPS = 1080, 1350, 30
 ELEVEN_MODEL = "eleven_multilingual_v2"
 ELEVEN_FORMAT = "mp3_44100_128"
@@ -117,34 +117,77 @@ def _status_bits(status: str):
 # Each beat is its own scene with a terse VO line. Returns a list of beats:
 #   {big, label, color, vo}
 # ------------------------------------------------------------------------------
+def _short_name(company: str) -> str:
+    """The name a person would say aloud — not the legal entity ('… Inc.', ', Corp')."""
+    n = company.split(",")[0]
+    for suf in (" Incorporated", " Inc", " Corporation", " Corp", " Company", " Co", " Ltd", " PLC", " Group"):
+        if n.endswith(suf):
+            n = n[: -len(suf)]
+    return n.strip(" .") or company
+
+
+def _pick(seed: int, *opts: str) -> str:
+    """Deterministic per-reel variation so every ticker doesn't read identically
+    (the copy version of DESIGN_VARIANCE — kills templated sameness)."""
+    return opts[seed % len(opts)]
+
+
 def walkthrough(s: dict, f: dict, ticker: str) -> list[dict]:
+    """Rapid one-fact cards. The VO does NOT read the card — the card shows the
+    number, the voice says the thing a real trader would say about it: the why,
+    the stance, the consequence. Conversational, contractions, a point of view.
+    Slop tells (label:value, 'X says Y', hollow filler) are banned here."""
     t = s["technical"]; tr = s["trade_setup"]
     pivot, stop, tgt = say_price(tr["buy_point_pivot"]), say_price(tr["stop"]), say_price(tr["target_2r"])
     risk = f"{tr['risk_pct']:.0f}"
-    company = f["company"]; beats = f.get("beats"); growth = f.get("eps_growth")
+    name = _short_name(f["company"]); beats = f.get("beats"); growth = f.get("eps_growth")
     rs = t.get("RS_Rank"); udr = t.get("up_down_vol_ratio")
     sword = "actionable" if t.get("within_buy_range") else "extended" if t.get("extended") else "a watch"
+    seed = sum(ord(c) for c in ticker)
+
+    status_vo = {
+        "actionable": _pick(seed,
+            f"{name}. And this one's live — it's in the buy zone right now.",
+            f"Here's {name}, and it's actionable today. Not a watch — a go."),
+        "extended": _pick(seed,
+            f"{name}. It's already run, though, so this is a chase. Treat it that way.",
+            f"{name}'s extended here, so I'm not chasing. But know the setup."),
+        "a watch": _pick(seed,
+            f"Here's {name}. Not a buy yet — a watch. But it's right on the edge.",
+            f"{name}. Watchlist, not buy list — yet. It's coiled, and it's close."),
+    }[sword]
 
     out = [
-        {"big": ticker, "label": sword.upper(), "color": AMBER, "vo": f"{company} — {sword}."},
-        {"big": "50·150·200", "label": "stacked & rising", "color": INK, "vo": "Trend: stacked and rising."},
+        {"big": ticker, "label": sword.upper(), "color": AMBER, "vo": status_vo},
+        {"big": "50·150·200", "label": "stacked & rising", "color": INK, "vo": _pick(seed,
+            "Trend's clean — every average stacked and turning up. Nothing fighting it.",
+            "Trend first: all the averages stacked and rising. That's what you want.")},
     ]
     if t.get("PriceWithin25Percent52WeekHigh"):
-        out.append({"big": "52-WK", "label": "and pressing the high", "color": INK, "vo": "Pressing its highs."})
-    if rs is not None:
-        out.append({"big": f"RS {int(rs)}", "label": "relative strength", "color": POS, "vo": f"Relative strength rank {int(rs)}."})
+        out.append({"big": "52-WK", "label": "and pressing the high", "color": INK, "vo": _pick(seed,
+            "And it's right at its highs — not stretched, not late.",
+            "Sitting at new highs, too. Leaders make highs; they don't wait.")})
+    # NOTE: no "RS / relative strength" card — that's jargon. The HOW IT STACKS UP
+    # comparison slide explains strength in plain numbers (vs NVDA/MSFT/AAPL/S&P).
     if beats:
-        out.append({"big": f"{beats}×", "label": "straight earnings beats", "color": POS, "vo": f"{beats} straight earnings beats."})
-    # show growth only when it's positive AND believable — a loss→profit swing makes
-    # the YoY % explode (divide by a tiny/negative base), so cap it out.
+        out.append({"big": f"{beats}×", "label": "straight earnings beats", "color": POS, "vo": _pick(seed,
+            f"Business backs it up — {beats} straight earnings beats.",
+            f"And it's not just the chart. {beats} beats in a row.")})
+    # growth only when positive AND believable — a loss→profit swing explodes the YoY %.
     if growth is not None and 0 < growth < 100:
-        out.append({"big": f"+{growth:.0f}%", "label": "EPS growth, YoY", "color": POS, "vo": f"Earnings up {growth:.0f} percent."})
+        out.append({"big": f"+{growth:.0f}%", "label": "EPS growth, YoY", "color": POS,
+                    "vo": f"Earnings up {growth:.0f} percent on the year — and the price is just catching up."})
     if udr:
-        out.append({"big": f"{udr:.1f}×", "label": "up / down volume", "color": POS, "vo": "Volume says accumulation."})
+        out.append({"big": f"{udr:.1f}×", "label": "up / down volume", "color": POS, "vo": _pick(seed,
+            "And the volume? That's big money loading, not leaving.",
+            "Watch the buying — way more on up days. Institutions stepping in.")})
     out += [
-        {"big": f"${tr['buy_point_pivot']:,.2f}", "label": "ENTRY · the pivot", "color": AMBER, "vo": f"Entry, a break through {pivot}."},
-        {"big": f"${tr['stop']:,.2f}", "label": f"STOP · {risk}% risk", "color": NEG, "vo": f"Stop, {stop}."},
-        {"big": f"${tr['target_2r']:,.2f}", "label": "TARGET · 2 : 1", "color": POS, "vo": f"Target, {tgt}. Two to one."},
+        {"big": f"${tr['buy_point_pivot']:,.2f}", "label": "ENTRY · the pivot", "color": AMBER,
+         "vo": f"Here's the plan: you don't buy it here. You wait for the break through {pivot}."},
+        {"big": f"${tr['stop']:,.2f}", "label": f"STOP · {risk}% risk", "color": NEG,
+         "vo": f"Lose {stop} and you're out. No argument — that's the line."},
+        {"big": f"${tr['target_2r']:,.2f}", "label": "TARGET · 2 : 1", "color": POS,
+         "vo": f"First target, {tgt} — two-to-one on your risk. Take some, trail the rest."},
     ]
     return out
 

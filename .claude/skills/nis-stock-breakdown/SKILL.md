@@ -324,6 +324,158 @@ is non-negotiable: write it before passing anything to ElevenLabs.
 
 ### 7A — Write the reel script using the Hook-Value-Trade arc
 
+#### Voice & copy — kill the AI tells (the `taste-skill`, applied to words)
+
+`build_chart_reel.py` writes `script.txt` for **you to record** (no TTS by default). The
+auto-generated lines are a solid *draft* — but treat them like the `taste-skill` treats a
+generic UI: **a draft you make yours.** A real person reading > a robot reading the data.
+The voice is one calm, certain trader telling **one friend** about a setup — opinionated,
+unhurried, never an announcer.
+
+**Banned copy tells** (the Inter-font of trading reels — they signal zero intent):
+
+| ❌ Slop (reads the dashboard) | ✅ Human (says why it matters) |
+|---|---|
+| "Relative strength rank 92." | "It's outrunning ninety-two percent of the market — that's a leader, not a laggard." |
+| "Volume says accumulation." | "And the volume tells you who's behind it — big money loading, not leaving." |
+| "Trend: stacked and rising." | "Trend's clean — every average stacked and turning up. Nothing fighting it." |
+| "Stop, 92.30." / "Target, 109. Two to one." | "Lose 92.30 and you're out, no argument." / "First target's 109 — two-to-one. Take some, let the rest run." |
+| "Interactive Brokers Group, Inc." | "Interactive Brokers." |
+| "That's the move." (hollow filler) | *(cut it — say nothing or say something true)* |
+| "Here's what almost everyone missed on…" | *(vary it — the formulaic opener is itself a tell)* |
+
+**Rules:** (1) the VO **never reads the on-screen card** — the card shows the number, the
+voice says the *why/stance/consequence*; (2) contractions, fragments, real speech rhythm —
+write for the ear, not the page; (3) one point of view (the trader has opinions); (4) cut
+any word you wouldn't say out loud; (5) **vary** phrasing so two reels never sound the same
+(the copy version of `DESIGN_VARIANCE`).
+
+#### Fewer terms, more comparisons (the most important content rule)
+
+A normal viewer doesn't know what "RS 92", "accumulation", "the pivot", or "stacked over the
+50/150/200" mean — and a term they don't understand is a scroll. **Explain every concept by
+comparison or plain language, not by jargon.** Translate:
+
+| ❌ Jargon term | ✅ Comparison / plain |
+|---|---|
+| "RS 92 / relative strength" | **the HOW IT STACKS UP slide** — "+40% in six months while the S&P did 7, and even NVDA did 6" |
+| "accumulation / 1.3× up-down volume" | "way more buyers than sellers — big money's stepping in" |
+| "stacked over the 50/150/200" | "it's been climbing for months — every trend line points up" |
+| "the pivot / buy point 96.75" | "the line it has to clear — 96.75" |
+| "ADR 6%" | "it swings about 6% a day, so give it room" |
+| "extended" | "it's already run, so you're chasing" |
+
+**Relative strength is now its own slide.** `build_chart_reel.py` auto-inserts the **HOW IT
+STACKS UP** comparison (the ticker vs NVDA/MSFT/AAPL/S&P, real returns) as the *first* body
+beat — it IS the strength fact, in numbers anyone gets. So **never use "RS / relative
+strength" as one of your 3 points** (it would be redundant jargon); spend those 3 on the
+business angle, the buying, the earnings, the setup — in plain words.
+
+**No analogy the viewer has to decode.** A clever metaphor ("it's a toll booth on trading")
+is the same failure as jargon — if it needs a sentence to land, it's a scroll. Say the
+*literal* thing instead: "it gets paid every time anyone trades — up market or down." The
+only comparisons that work in 1.5s are to things everyone already knows (the S&P, NVDA, "a
+toll" only if you're *literally* explaining a fee). When in doubt, plainest wording wins.
+
+#### Claude writes the script: the hook + the 3 most notable things
+
+The reel is **hook → 3 notable things → trade → CTA**. *You (Claude)* read `setup.json`
+and **choose + write it** — the Python templates are only a fallback. Don't dump every
+stat. Pick the **3 most notable, scroll-worthy facts** about *this specific* company and
+say each like a human.
+
+**Choosing the 3** (strength is already covered by the comparison slide — pick *other*
+standouts): a striking earnings beat/streak, a vivid business-model angle ("toll booth on
+trading volume"), heavy buying ("more buyers than sellers"), the coil-at-the-trigger tension,
+a clear catalyst. Rank by *"would a trader stop scrolling for this?"* and lead with the most
+arresting. Each point is `{big, label, color, vo}`: `big` = the card's number/word ("TOLL
+BOOTH", "4×", "+55%"), `label` = a tiny *plain* caption ("wins on volume, not direction"),
+`vo` = the spoken *why* — no jargon (see the comparisons table above).
+
+**The hook (1–3 s, and it must work as muted text — most scroll sound-off, which is why the
+cover poster carries it in big type).** Hook bank below adapts the opus.pro Instagram-hook
+formulas to swing trading. **Pro tip (from the source): rotate across 3–4 categories so your
+feed doesn't develop pattern fatigue** — don't open every reel with the same Shock formula.
+Generate 2–3 across *different* categories and keep the one truest to this ticker's standout
+fact. (Map `--hook-style`: a data/coil/question hook → `tension`; a contrarian/business-model
+hook → `curiosity`.)
+
+**Direct questions** — pose the one they're already asking:
+- "What if the strongest stock in the market is one you've never traded?"
+- "Want to know the #1 mistake traders make on breakouts?"
+- "Did you know $TICKER is outrunning ninety-two percent of the market?"
+
+**Shock / surprise** — flip an expectation, open a curiosity gap:
+- "A boring broker just quietly became a top-10% market leader."
+- "The biggest lie in trading: wait for the breakout to be 'confirmed.'"
+- "Harsh truth — by the time a breakout looks obvious, you've already missed it."
+
+**Story / anecdote** — a mini-narrative the viewer wants resolved:
+- "The screener flagged this at the open. By noon it was breaking out."
+- "I screened five thousand stocks this morning so you don't have to. This is the one."
+- "Here's how this went from a watch to a breakout in a single session."
+
+**Problem / solution** — name the pain, then the fix:
+- "Buying breakouts that fail? Wait for this one thing instead."
+- "You're losing trades because you buy here — instead of waiting for the break."
+- "Most people overcomplicate entries. It's one level. That's it."
+
+**Authority / credibility** — lean on the screener's edge (strong for this brand):
+- "We screened the whole market this morning. One name stood out."
+- "The data doesn't lie — this is the strongest setup on the board today."
+- "Every leader that runs does this first, and $TICKER just did it."
+
+**Engagement / save-it** (use sparingly, as on-screen text or the CTA — NOT the spoken hook;
+"tag a friend / double-tap" reads spammy for a finance brand):
+- "Save this before it triggers."
+- "Stop the scroll — this is the setup you've been waiting for."
+
+Avoid the worn "here's what nobody's talking about" unless you make it concrete and specific.
+
+Write it to `output/setups/<TICKER>/script.json` and render with `--script` (no `--hook-text`
+needed — the script carries the hook):
+
+```bash
+.venv/bin/python ../../.claude/skills/nis-stock-breakdown/scripts/build_chart_reel.py \
+    --ticker <T> --script output/setups/<T>/script.json
+```
+```json
+{
+  "hook": "spoken cover hook (1–3s, true to the data)",
+  "cover_line": "short hero line on the poster (≤5 words)",
+  "points": [
+    {"headline": "PROFITS", "number": "2×", "tag": "doubled, beat Wall St",
+     "signal": "spark", "color": "pos", "vo": "…plain why…"},
+    "×3 (NO 'RS' card)"
+  ],
+  "breakout_vo": "…the trade in one line…", "invalidation_vo": "…", "cta_vo": "…",
+  "benchmark_vo": "…anchor it to NVDA/MSFT/AAPL/S&P from setup.json.benchmarks…"
+}
+```
+
+**Point card fields** (each card is one white tile in the intro carousel — shown ONE
+at a time, sliding in from the right):
+- `headline` — the bold accent word(s), left (e.g. "PROFITS", "BIG BUYERS"). UPPERCASE.
+- `number` — the hero, oversized mono, anchored RIGHT (e.g. "2×", "4", "+73%"). Omit if none.
+- `tag` — small mono pill under the headline (e.g. "doubled, beat Wall St"). Plain words.
+- `signal` — ONE micro-motion, the real-time-feed tell: `"live"` (pulsing ● LIVE — use
+  when actionable/buying now), `"spark"` (rising sparkline — growth/earnings), `"arrow"`
+  (↑ — up/expanding), `"none"`. Pick the one that matches the fact; don't overuse "live".
+- `color` — accent: `pos` green · `amber` watch/trend · `neg` · `info`.
+Legacy `{big, label}` still works (auto-split into headline/number) but prefer the explicit
+fields. Keep `headline` short and let `number` carry the figure.
+
+**Anchor it to names everyone knows.** `setup.json` now carries a `benchmarks` block —
+the ticker's ~6-month return vs **NVDA, MSFT, AAPL, and the S&P 500** (real, honest numbers).
+The reel auto-inserts a **"HOW IT STACKS UP"** scene before the breakout: an animated bar
+leaderboard, the ticker highlighted, sorted, negatives in red. Read `benchmarks.returns` and
+write a tight `benchmark_vo` from the *actual* spread — e.g. *"Six months: up forty percent.
+The S&P did seven, Nvidia six, and Microsoft actually fell."* Keep it honest: if the ticker
+didn't beat NVDA, say "outpaced the S&P and most megacaps," not "beat everything." If
+`benchmarks` is missing (FMP hiccup), the scene is skipped. You can also make one of the 3
+cover `points` a benchmark stat (`"+40%"` / `"6mo — beats the S&P"`) when that's the most
+arresting fact.
+
 The reel has three zones, and the VO across them follows the **Hot Take Arc** from
 Step 3.5 — HOOK (Zone 1) → BUILD+PIVOT (Zone 2 + chart/volume scenes) → CLOSE (trade
 scene) → CTA (outro):
@@ -512,32 +664,59 @@ If any box is unchecked, revise before passing to ElevenLabs.
 
 ---
 
-#### 7C — ElevenLabs render
+#### 7C — Render the reel (SILENT by default + a `script.txt` to voice yourself)
 
-**Default: the evolving-chart reel (`build_chart_reel.py`).** This is the
-stacked-curiosity format — ONE full-frame **1080×1920** price chart that *animates as it
-expands* across the entire reel: candles draw in one-per-data-point with **both axes
-growing** (newest candle pinned to the right, earlier ones compressing left; the y-range
-expanding as new highs/lows arrive), exactly like the viral_reels `PriceChart`. It grows
-through the real display window, then projects the validated breakout to the 2R target.
-The Hot-Take-Arc copy rides on top as **floating semi-transparent cards that cut in/out**.
-Two things are always moving — the chart growing *and* the cards changing — so the eye
-never rests (the retention trick the multi-element meme reels use, except the "background
-motion" is the actual trade developing). There is **no play-head line** — the live price
-tag on the leading candle is the moving edge.
+**The cover IS the ad.** `build_chart_reel.py` opens on a deliberate **animated title card**
+— frame 1 must stop a muted scroll *as a still*, before any motion or voice registers.
+Generator rules baked in:
+- **Identity, instant.** Company **logo** (FMP, circle-cropped on a white disc) + the giant
+  `$TICKER` + company name + the **hook line** (`cover_line`) — all solid from frame 0, with
+  a soft amber glow breathing behind the ticker. This is the muted poster.
+- **A visual summary of the 3 facts.** The reel's three points (from `script.json`, else the
+  top 3 stat cards) render as **rounded fact chips** — big value + label + a colored accent
+  bar — that **cascade in** (staggered slide + fade over ~0.8 s). Motion that reads, not a
+  glitch. Taste-skill styling: radial-vignette depth, ONE amber accent, no clutter.
+- **Cover line** comes from `script.cover_line`, else `--cover-line`, else the `--hook-style`
+  default (`tension` → "one candle from triggering" / "breaking out — right now").
+- (No chart, no projection "tease" on the cover — the chart is the *body* of the reel.)
+
+After the cover, the chart grows through the real window and projects the validated
+breakout to the 2R target, with the Hot-Take-Arc copy on floating cards.
+
+**No ElevenLabs by default.** The reel renders **silent** and writes `script.txt` (VO per
+scene with cut timestamps) so **you record the voice yourself** — a human VO / talking-head
+massively out-performs TTS on TikTok, and native uploads beat API-posted ones. Pass `--tts`
+to bake the ElevenLabs voice instead.
 
 ```bash
 cd code/analytics
 .venv/bin/python ../../.claude/skills/nis-stock-breakdown/scripts/build_chart_reel.py \
-    --ticker ENVA \
-    --hook-text "[chosen verbal hook]"
-# → output/setups/ENVA/reel_chart.mp4   (1080×1920)
+    --ticker ENVA --script output/setups/ENVA/script.json [--hook-style tension|curiosity]
+# → output/setups/ENVA/reel_chart.mp4 (1080×1920, SILENT) + output/setups/ENVA/script.txt
+# add --tts to bake the ElevenLabs VO instead of writing a script
 ```
+
+**Green-screen / talking-head mode** — the strongest hook fix is *your face* in frame 1.
+`--green-screen` renders a **clean cover** (logo + ticker + hook, no cards baked in) and
+exports the intro fact-cards as a **transparent alpha video** (`intro_cards.mov`, ProRes
+4444) you drop over your talking-head intro. The cards play **one at a time**, each
+spring-sliding in from the right, holding, then pushing the previous out left:
+```bash
+… build_chart_reel.py --ticker ENVA --script … --green-screen \
+    [--card-hold 1.1] [--card-exit slide|cut]
+# → reel_chart.mp4 (clean cover) + intro_cards.mov (transparent intro cards)
+```
+`--card-hold` = seconds each card holds (default 1.1); `--card-exit cut` = hard cuts (no
+slide-out) so you trim transitions in CapCut. Without `--green-screen`, the cards are
+baked into the cover as the same one-at-a-time carousel.
 
 `build_chart_reel.py` conventions:
 - **1080×1920** full vertical (Reels / TikTok / Shorts). Cards float in the top band so
   the chart stays readable below and behind them.
-- Uses `$ELEVENLABS_PRIMARY_VOICE_ID` (Hans). Override with `--voice-id`. `--tempo 1.08`.
+- **Silent by default** (record VO to `script.txt`'s cut times). `--tts` uses
+  `$ELEVENLABS_PRIMARY_VOICE_ID` (Hans), override with `--voice-id`. `--tempo 1.08`.
+  In silent mode, scene durations are estimated from word count so the cuts land where a
+  natural read would.
 - ONE chart for the whole reel: real display window (`--display-days`, default 126 ≈ half a year) +
   appended **validated** breakout projection (reuses `animate_breakout.project()`), so
   the on-chart Entry/Stop/Target and the spoken levels come from a single live snapshot
@@ -561,8 +740,8 @@ cd code/analytics
 - The visual hook is the hook *card* over the quietly-building chart — you are NOT
   opening on a full static chart (it starts mostly hidden and draws in), so the
   "don't open on the chart" rule from Zone 1 still holds in spirit.
-- Requires only `setup.json` + FMP/ElevenLabs creds. Does **not** need `breakout_story.mp4`
-  or the slide deck (it draws its own chart), so Step 6 is optional for this path.
+- Requires only `setup.json` + FMP creds (ElevenLabs only when `--tts`). Does **not** need
+  `breakout_story.mp4` or the slide deck (it draws its own chart), so Step 6 is optional.
 
 Target length: 40–70 seconds (it runs shorter than the legacy reel because the proof
 lives in the one continuous chart, not in separate scenes).

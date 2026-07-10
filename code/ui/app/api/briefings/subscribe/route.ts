@@ -9,12 +9,14 @@ import {
 } from "@/lib/email/briefing-subscriptions";
 import { recordEarlyAccessSignup } from "@/lib/email/early-access-signups";
 import { captureServer } from "@/lib/analytics/server";
+import { cleanAttribution } from "@/lib/attribution-server";
 
 const bodySchema = z.object({
   email: z.string().trim().max(320),
   tickers: z.array(z.string().trim().max(20)).max(50).optional().default([]),
   tags: z.array(z.string().trim().max(50)).max(50).optional().default([]),
   source: z.string().trim().max(64).optional(),
+  attribution: z.unknown().optional(), // sanitised via cleanAttribution
 });
 
 export async function POST(req: NextRequest) {
@@ -52,6 +54,8 @@ export async function POST(req: NextRequest) {
   }
 
   const source = parsed.data.source || "briefing_subscribe";
+  const utm = cleanAttribution(parsed.data.attribution);
+  const hasUtm = Object.keys(utm).length > 0;
 
   try {
     await upsertBriefingSubscription({
@@ -62,6 +66,7 @@ export async function POST(req: NextRequest) {
       userId,
       referrer: req.headers.get("referer"),
       userAgent: req.headers.get("user-agent"),
+      metadata: hasUtm ? { utm } : undefined,
     });
   } catch {
     return NextResponse.json({ error: "server_error" }, { status: 500 });
@@ -79,6 +84,7 @@ export async function POST(req: NextRequest) {
         tags,
         authenticated: Boolean(userId),
         referrer: req.headers.get("referer") ?? undefined,
+        ...(hasUtm ? { utm } : {}),
       },
     });
     if (!result.ok) {
@@ -93,6 +99,7 @@ export async function POST(req: NextRequest) {
     tags,
     source,
     authenticated: Boolean(userId),
+    ...(hasUtm ? { utm_content: utm.utm_content, utm_campaign: utm.utm_campaign, utm } : {}),
     $set: { email },
   });
 

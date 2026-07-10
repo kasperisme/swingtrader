@@ -1,11 +1,13 @@
 "use client";
 
-import { useId, useState, useTransition } from "react";
+import { useEffect, useId, useState, useTransition } from "react";
 import { Check } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { WatchlistPicker } from "./watchlist-picker";
+import { captureAttribution, getAttribution } from "@/lib/attribution";
+import { trackLead } from "@/lib/pixels";
 
 const ERROR_COPY: Record<string, string> = {
   invalid_email: "That email doesn't look right. Check it and try again.",
@@ -36,6 +38,8 @@ export function SubscribeForm({
   const [status, setStatus] = useState<Status>({ kind: "idle" });
   const [isPending, startTransition] = useTransition();
 
+  useEffect(() => captureAttribution(), []); // first-touch, from the ad URL
+
   const submit = (e: React.FormEvent) => {
     e.preventDefault();
     setStatus({ kind: "idle" });
@@ -48,13 +52,20 @@ export function SubscribeForm({
         const res = await fetch("/api/briefings/subscribe", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ email, tickers, tags, source }),
+          body: JSON.stringify({
+            email,
+            tickers,
+            tags,
+            source,
+            attribution: getAttribution(),
+          }),
         });
         const data = (await res.json().catch(() => ({}))) as {
           success?: boolean;
           error?: string;
         };
         if (data.success) {
+          trackLead({ content_name: "news_briefing" });
           setStatus({ kind: "success" });
           return;
         }

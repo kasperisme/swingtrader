@@ -22,11 +22,13 @@ import {
   submitEarlyAccessSignup,
 } from "@/app/actions/market-screenings";
 import { captureServer } from "@/lib/analytics/server";
+import { cleanAttribution } from "@/lib/attribution-server";
 
 const bodySchema = z.object({
   email: z.string().trim().max(320),
   screeningSlugs: z.array(z.string().trim().max(200)).min(1).max(50),
   source: z.string().trim().max(64).optional(),
+  attribution: z.unknown().optional(), // sanitised via cleanAttribution
 });
 
 const APP_URL =
@@ -77,6 +79,8 @@ export async function POST(req: NextRequest) {
   }
   const referrer = req.headers.get("referer");
   const userAgent = req.headers.get("user-agent");
+  const utm = cleanAttribution(parsed.data.attribution);
+  const hasUtm = Object.keys(utm).length > 0;
 
   const outcome = await subscribeEmailToScreenings({
     email,
@@ -85,6 +89,7 @@ export async function POST(req: NextRequest) {
     userId,
     referrer,
     userAgent,
+    metadata: hasUtm ? { utm } : undefined,
   });
 
   // Also capture the lead in early_access_signups for continuity with the
@@ -201,6 +206,7 @@ export async function POST(req: NextRequest) {
     source: parsed.data.source || "email_subscribe",
     authenticated: Boolean(userId),
     email_sent: sendResult.ok,
+    ...(hasUtm ? { utm_content: utm.utm_content, utm_campaign: utm.utm_campaign, utm } : {}),
     $set: { email },
   });
 

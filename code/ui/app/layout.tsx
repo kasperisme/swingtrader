@@ -13,6 +13,7 @@ import {
 import { SiteHeader, SiteHeaderFallback } from "@/components/site-header";
 import { CavemanModeProvider } from "@/lib/caveman-mode";
 import { AnalyticsProvider } from "@/lib/analytics/AnalyticsProvider";
+import { Pixels } from "@/components/pixels";
 
 // Always anchor metadataBase to the canonical production URL. Vercel preview
 // deployments set VERCEL_URL to a hashed `*.vercel.app` host — using that as
@@ -92,6 +93,7 @@ export default function RootLayout({
             gtag('config', 'G-FQ87KHKLS5');
           `}
         </Script>
+        <Pixels />
       </head>
       <body className={`${jakartaSans.className} antialiased`}>
         <Analytics />

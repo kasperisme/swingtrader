@@ -393,6 +393,56 @@ def standout(tt: dict, fund: dict):
     return ("WHAT THE SCREEN CAUGHT", "One clean move from", "a textbook breakout.", "breakout", None)
 
 
+_BENCHMARKS = [("NVDA", "NVDA"), ("MSFT", "MSFT"), ("AAPL", "AAPL"), ("S&P 500", "SPY")]
+
+
+def compute_benchmarks(ticker: str, full, window: int = 126) -> dict:
+    """Over `window` trading days: the ticker vs household names (NVDA/MSFT/AAPL/S&P).
+    Stores trailing returns AND a date-aligned, base-100 normalized price `series` for
+    the ticker + S&P 500 — so the reel can draw both lines side by side. Honest: real
+    numbers; we never assume the ticker wins."""
+    sub = full.tail(window + 1).reset_index(drop=True)
+    tclose = sub["close"].astype(float).reset_index(drop=True)
+    sub_dates = pd.to_datetime(sub["date"])
+    start = str(sub_dates.iloc[0].date())
+    end = str(sub_dates.iloc[-1].date())
+
+    def ret(s):
+        s = [float(x) for x in s if x == x]
+        return (s[-1] / s[0] - 1.0) if len(s) >= 2 and s[0] else None
+
+    returns = {ticker: ret(tclose.tolist())}
+    spy_norm = None
+    try:
+        from services.screener.fmp import fmp
+        cli = fmp()
+        for label, sym in _BENCHMARKS:
+            try:
+                df = cli.daily_chart(sym, start, end)
+                df["date"] = pd.to_datetime(df["date"])
+                cl = pd.merge(pd.DataFrame({"date": sub_dates}), df[["date", "close"]],
+                              on="date", how="left")["close"].astype(float).ffill().bfill()
+                returns[label] = ret(cl.tolist())
+                if sym == "SPY" and cl.iloc[0]:
+                    spy_norm = cl / cl.iloc[0] * 100.0
+            except Exception as e:
+                print(f"[benchmarks] {sym} failed: {e}", file=sys.stderr)
+    except Exception as e:
+        print(f"[benchmarks] unavailable: {e}", file=sys.stderr)
+
+    series = None
+    if spy_norm is not None and tclose.iloc[0]:
+        tnorm = tclose / tclose.iloc[0] * 100.0
+        n = len(tnorm)
+        idx = sorted(set(np.linspace(0, n - 1, min(n, 64)).round().astype(int).tolist()))
+        series = {"TICKER": [round(float(tnorm.iloc[i]), 2) for i in idx],
+                  "S&P 500": [round(float(spy_norm.iloc[i]), 2) for i in idx]}
+
+    return {"window_days": window, "as_of": end,
+            "returns": {k: round(v, 4) for k, v in returns.items() if v is not None},
+            "series": series}
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(description="Annotated NIS-momentum setup chart for one ticker.")
     ap.add_argument("--ticker", required=True)
@@ -503,6 +553,7 @@ def main() -> None:
         ) if k in tt},
         "fundamentals": fundamentals,
         "trade_setup": setup,
+        "benchmarks": compute_benchmarks(ticker, full, window=min(126, len(full) - 1)),
         "chart_png": str(chart_path),
     }
     (out_dir / "setup.json").write_text(json.dumps(snapshot, indent=2, default=jn))
