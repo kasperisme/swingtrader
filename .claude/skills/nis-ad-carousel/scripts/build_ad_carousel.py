@@ -31,7 +31,7 @@ _BOLD = _fm.findfont(_fm.FontProperties(weight="bold"))
 _REG = _fm.findfont(_fm.FontProperties(weight="normal"))
 _MONO = _fm.findfont(_fm.FontProperties(family="monospace"))
 
-SIZES = {"4x5": (1080, 1350), "9x16": (1080, 1920)}
+SIZES = {"4x5": (1080, 1350), "9x16": (1080, 1920), "1x1": (1080, 1080)}
 MARGIN = 96
 
 
@@ -263,7 +263,7 @@ def render_slide(slide, ratio, accent, idx, total, brand):
 def main():
     ap = argparse.ArgumentParser(description="Render a Meta/TikTok ad carousel from a Claude spec.")
     ap.add_argument("--spec", required=True)
-    ap.add_argument("--ratios", default="4x5,9x16")
+    ap.add_argument("--ratios", default="4x5,9x16,1x1")
     args = ap.parse_args()
 
     spec = json.loads(pathlib.Path(args.spec).read_text())

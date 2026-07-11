@@ -155,6 +155,27 @@ carousel) in the ticker folder; both fall back to `caption.txt` / the reel.
 Needs `ZERNIO_API_KEY` + `ZERNIO_ACCOUNT_*` (or `AYRSHARE_API_KEY`) and a public
 `SOCIAL_MEDIA_BUCKET` Supabase bucket.
 
+## Meta Ads (read-only measurement)
+
+See `code/analytics/services/meta_ads/README.md`.
+
+Read-only Meta Marketing API access — the measurement half of the paid-ads loop.
+**No writes** (launch campaigns by hand in Ads Manager). Pulls per-ad CTR/CPC/
+spend/Leads and rolls them up by `utm_content` (feature: `market_screening` vs
+`news_briefing`, read from each ad's creative `url_tags`), then **reconciles Meta
+spend/clicks against the real email leads in Supabase** → cost per actual lead.
+
+```bash
+cd code/analytics
+.venv/bin/python -m services.meta_ads.cli verify
+.venv/bin/python -m services.meta_ads.cli insights [--since YYYY-MM-DD]
+.venv/bin/python -m services.meta_ads.cli reconcile [--since YYYY-MM-DD]
+```
+
+Needs `META_ADS_TOKEN` (System User, `ads_read`) + `META_AD_ACCOUNT_ID` in
+`code/analytics/.env`. Pairs with the UTM capture (`metadata.utm`) + pixel `Lead`
+events on the subscribe forms and the `/protected/attribution` UI view.
+
 ## Sanity Studio
 
 Mounted at `/studio`. Use Vision tool for GROQ queries.

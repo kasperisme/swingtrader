@@ -151,7 +151,7 @@ Unknown `script_key` or uncaught exceptions become an error result (runner does 
 2. Import it in `registry.py` and add `"<key>": module.run` to `SCRIPTS`.
 3. Insert/update a `market_screenings` row with `script_key = "<key>"` (admin UI or SQL). The row must be **`is_published`** for the scheduler to queue it.
 
-Current keys: `list_script_keys()` → e.g. `nis_momentum`, `stage_2`, `test_aapl`.
+Current keys: `list_script_keys()` → e.g. `nis_momentum`, `nis_short`, `stage_2`, `test_aapl`.
 
 ---
 
@@ -167,6 +167,7 @@ Current keys: `list_script_keys()` → e.g. `nis_momentum`, `stage_2`, `test_aap
 | `types.py` | `ScreeningResult` dataclass. |
 | `scripts/stage_2.py` | Example: full-universe Minervini stage-2-style screen via `services.screener.technical`; builds `data_used["symbols"]` for passers. |
 | `scripts/nis_momentum.py` | Example screening implementation. |
+| `scripts/nis_short.py` | Short-side inverse of NIS Momentum — Minervini/O'Neil Stage-4 decline of a **former leader** (up 100%+ prior, now rolling over), gated on a bearish market regime. See its module docstring. |
 | `scripts/test_aapl.py` | Minimal smoke script for pipeline testing. |
 
 ---
