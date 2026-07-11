@@ -7,12 +7,11 @@ over after a climax — you short distribution and failure, not perennial dogs.
 
 So this is not a naive "flip every long rule". The universe is deliberately
 seeded with ex-winners (up 100%+ in the prior 1–3 years) that are now in a
-Stage-4 decline, and the whole screen is gated on a bearish market regime
-(shorting works in a confirmed downtrend and gets you killed in a bull market).
+Stage-4 decline. Market regime (S&P vs its 200-day) is computed and surfaced
+for context — shorting works best in a confirmed downtrend — but it does NOT
+gate the scan; the screen always runs and the AI analysis pass weighs regime.
 
 Pipeline (mirror of nis_momentum, inverted):
-  0. MARKET REGIME GATE — bail early unless the S&P is below its 200-day.
-     Shorting into a confirmed uptrend is how you get run over.
   1. Universe: all NYSE + NASDAQ tickers.
   2. Inverted quote + RS pre-screen — actively traded, price < SMA200,
      SMA50 < SMA200, ≥25% below the 52-week high, AND weak RS (bottom ~30%).
@@ -43,8 +42,8 @@ and to demand rally-into-resistance entries with a hard stop. See
 ``_SQUEEZE_SI_MAX_PCT`` for the hook to wire it in once the data exists.
 
 Runtime note: like nis_momentum, hits FMP per surviving ticker (daily chart +
-earnings). Because the regime gate skips the whole scan in a bull market, most
-runs are cheap. Tune ``_TESTING_TICKER_CAP`` while iterating.
+earnings). Expect several minutes for a full run. Tune ``_TESTING_TICKER_CAP``
+while iterating.
 """
 
 from __future__ import annotations
@@ -75,10 +74,6 @@ _DISTRIBUTION_UD_MAX = 0.85    # up/down-vol ratio ≤ this = distribution
 _MIN_DOLLAR_VOL = 10_000_000   # avg daily $ volume floor (borrow/exit liquidity)
 _SESSIONS_52W = 252
 
-# Regime gate. Shorting is only run when the S&P 500 is below its 200-day MA.
-# Set False to let the scan run regardless (the AI layer still weighs regime).
-_REQUIRE_BEARISH_MARKET = True
-
 # Squeeze hook — max short-interest-as-%-of-float to allow. Not enforced yet
 # because FMP short-interest isn't wrapped in services.screener.fmp; wire a
 # fetch in _squeeze_ok() and flip this on when the data source exists.
@@ -96,8 +91,11 @@ def run(
     today = datetime.today()
     startdate = today - timedelta(days=_LOOKBACK_DAYS)
 
-    # ── Step 0: market regime gate ─────────────────────────────────────────
-    # Also populates tech.spx_df so the per-ticker RS-line metric works.
+    # ── Step 0: market regime (informational) ──────────────────────────────
+    # The screen no longer gates on regime — it always scans. We still compute
+    # the S&P read for context (surfaced in data_used and weighed by the AI
+    # analysis pass) and because get_market_direction populates tech.spx_df,
+    # which the per-ticker RS-line metric depends on.
     try:
         market = tech.get_market_direction()
     except Exception as exc:  # never let a data hiccup crash the run
@@ -112,22 +110,6 @@ def run(
         "distribution_days": market.get("distribution_days"),
         "favorable_for_shorts": spx_below_200,
     }
-
-    if _REQUIRE_BEARISH_MARKET and not spx_below_200:
-        log.info(
-            "[nis_short] regime gate: S&P above its 200-day — skipping scan "
-            "(shorts only run in a confirmed downtrend)"
-        )
-        return ScreeningResult(
-            triggered=False,
-            summary=(
-                "<b>NIS Short</b>\nMarket regime not favorable for shorts — "
-                "the S&P 500 is above its 200-day MA. Short screen is gated to a "
-                "confirmed market downtrend, so no scan was run."
-            ),
-            ticker_count=0,
-            data_used={"market_regime": regime, "gated": True},
-        )
 
     # ── Step 1: tickers ────────────────────────────────────────────────────
     df_col = []

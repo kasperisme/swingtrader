@@ -66,7 +66,9 @@ def create_creative(name, page_id, ig_id, dest, message, cta_type, image_hashes)
             },
         }
         if with_ig and ig_id:
-            s["instagram_actor_id"] = ig_id
+            # v21+ renamed instagram_actor_id → instagram_user_id (takes the
+            # IG-business-account id from act_.../instagram_accounts).
+            s["instagram_user_id"] = ig_id
         return s
 
     try:
