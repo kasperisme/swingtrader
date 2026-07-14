@@ -36,7 +36,31 @@ const STEPS: { title: string; body: string }[] = [
   },
 ];
 
-export default function BriefingsPage() {
+// Deep-link presets: an ad can land on /briefings?tags=geopolitics,oil&tickers=COIN,AAPL
+// and the sign-up form comes pre-filled, so the click-to-subscribe path is one step.
+function parseList(v: string | string[] | undefined, upper: boolean): string[] {
+  const raw = Array.isArray(v) ? v.join(",") : (v ?? "");
+  const out: string[] = [];
+  for (const part of raw.split(",")) {
+    const t = part.trim().slice(0, 24);
+    if (!t) continue;
+    const norm = upper ? t.toUpperCase() : t.toLowerCase();
+    if (!out.includes(norm)) out.push(norm);
+    if (out.length >= 12) break;
+  }
+  return out;
+}
+
+export default async function BriefingsPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ tags?: string | string[]; tickers?: string | string[] }>;
+}) {
+  const sp = await searchParams;
+  const presetTags = parseList(sp.tags, false);
+  const presetTickers = parseList(sp.tickers, true);
+  const hasPreset = presetTags.length > 0 || presetTickers.length > 0;
+
   return (
     <main className="mx-auto w-full max-w-5xl px-4 py-12 lg:px-6 lg:py-16">
       <div className="grid gap-10 lg:grid-cols-[1.05fr_0.95fr] lg:gap-14">
@@ -92,8 +116,22 @@ export default function BriefingsPage() {
               Add a few tickers or tags, drop your email, and your first briefing
               is on its way.
             </p>
+            {hasPreset && (
+              <p className="mt-3 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-300">
+                Preloaded for you
+                {presetTags.length > 0 && (
+                  <> · {presetTags.map((t) => `#${t}`).join(" ")}</>
+                )}
+                {presetTickers.length > 0 && <> · {presetTickers.join(" ")}</>}
+                . Add your email to get tomorrow&rsquo;s briefing.
+              </p>
+            )}
             <div className="mt-6">
-              <SubscribeForm source="briefings_page" />
+              <SubscribeForm
+                source={hasPreset ? "briefings_preset" : "briefings_page"}
+                initialTags={presetTags}
+                initialTickers={presetTickers}
+              />
             </div>
           </div>
         </section>

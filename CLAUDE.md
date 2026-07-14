@@ -72,7 +72,9 @@ The caveman/businessman toggle is global (localStorage-backed via `lib/caveman-m
 | `viral-reel` | Producing short vertical data-reels (bar chart race videos) from the news-impact data foundation; Claude directs the story, Remotion renders |
 | `nis-stock-breakdown` | Making an Instagram-ready swing-trade breakdown of one stock from its NIS Momentum setup — annotated price+volume chart, fundamentals, and a derived entry/stop/target trade, assembled into a carousel + caption |
 | `nis-breakout-alert` | Hourly (`/loop 1h`) auto-poster: reads the breakout-screening agent's latest result; when tickers have just CONFIRMED price+volume breakouts, renders ONE roundup reel (live board of all breakouts, most-significant one highlighted + featured) and posts it immediately to IG+TikTok via Zernio. Live/urgency framing; reuses the nis-stock-breakdown render scripts + the social_publishing publisher |
-| `nis-ad-carousel` | Paid-ad carousel for Meta + TikTok selling the *product* (market screening + custom news screener) on a proof-driven arc (persona pain → features → a REAL screened winner vs the S&P → CTA). Renders 5–6 slides in both 4:5 and 9:16 from a Claude-authored `ad.json`, plus `ad_copy.txt` for Ads Manager. Creative package only — paid launch happens in Meta/TikTok Ads Manager, not the Zernio pipeline |
+| `nis-ad-image` | Single-image ad for Meta + TikTok (eToro pattern: brand mark → bold headline w/ one accent → subhead → green-check benefits → optional REAL proof stat → CTA, over a branded hero). Renders 4:5 / 9:16 / 1:1 + `ad_copy.txt` from a Claude-authored `ad.json`. The creative for ads (esp. trend-driven lead-magnet ads from `nis-trend-radar`); feeds `nis-ad-launch` as a single-image creative |
+| `nis-ad-launch` | The paid last mile: pushes a rendered `nis-ad-image` (its `1x1/ad.png` + `ad.json`) into Meta Ads Manager as **PAUSED** campaign drafts via the `meta_ads` module. `preflight` checks every account/permission gate; `draft --go` builds the feature A/B (1 campaign → 1 ad set/feature → 1 single-image ad/feature, isolated budgets), all PAUSED until you flip Active by hand. Also the measurement side (`insights`/`reconcile` → cost per REAL lead) |
+| `nis-trend-radar` | Find the single most talked-about news **topic/trend of the last week** — a data-backed "trend brief" for downstream ad generation. Reuses the `/articles` trend views (tag + ticker daily aggregates), buckets current-vs-prior 7-day windows, excludes generic process tags, and picks the dominant thematic story by volume × acceleration; pulls real evidence headlines + tickers in play, a distilled `lead_story`, and preset `lead_magnets` deep-links. Writes `output/trends/<date>/trend_brief.{json,md}`; feeds the headline of `nis-ad-image` |
 | `ticker-pair-divergence` | Making a viral reel about a ticker PAIR — the non-obvious relationship (from `ticker_pair_stats` + the relationship graph), normalized line charts with company logos riding each line, the divergence flagged, and the mean-reversion (pairs) trade voiced |
 
 ## Scheduled Screenings (Agent)
@@ -155,26 +157,34 @@ carousel) in the ticker folder; both fall back to `caption.txt` / the reel.
 Needs `ZERNIO_API_KEY` + `ZERNIO_ACCOUNT_*` (or `AYRSHARE_API_KEY`) and a public
 `SOCIAL_MEDIA_BUCKET` Supabase bucket.
 
-## Meta Ads (read-only measurement)
+## Meta Ads (create drafts + measure)
 
-See `code/analytics/services/meta_ads/README.md`.
+See `code/analytics/services/meta_ads/README.md` and the `nis-ad-launch` skill.
 
-Read-only Meta Marketing API access — the measurement half of the paid-ads loop.
-**No writes** (launch campaigns by hand in Ads Manager). Pulls per-ad CTR/CPC/
-spend/Leads and rolls them up by `utm_content` (feature: `market_screening` vs
-`news_briefing`, read from each ad's creative `url_tags`), then **reconciles Meta
-spend/clicks against the real email leads in Supabase** → cost per actual lead.
+Meta Marketing API, both halves of the paid-ads loop:
+- **Create (write, `ads_management`):** `preflight` green/red-checks every gate, then
+  `draft --go` creates the feature A/B as **PAUSED** drafts — 1 campaign → 1 ad set per
+  feature → 1 single-image ad per feature, isolated budgets, rollback on any failure. Nothing
+  spends until you flip it Active by hand. Creative comes from `nis-ad-image`
+  (`output/ads/<slug>/1x1/ad.png`).
+- **Measure (read, `ads_read`):** `insights` rolls per-ad CTR/CPC/spend/Leads up by
+  `utm_content` (feature: `market_screening` vs `news_briefing`, from each creative's
+  `url_tags`); `reconcile` puts Meta spend/clicks next to the **real email leads in
+  Supabase** → cost per actual lead.
 
 ```bash
 cd code/analytics
 .venv/bin/python -m services.meta_ads.cli verify
+.venv/bin/python -m services.meta_ads.cli preflight               # check gates before creating
+.venv/bin/python -m services.meta_ads.cli draft [--go] [--budget 70]
 .venv/bin/python -m services.meta_ads.cli insights [--since YYYY-MM-DD]
 .venv/bin/python -m services.meta_ads.cli reconcile [--since YYYY-MM-DD]
 ```
 
-Needs `META_ADS_TOKEN` (System User, `ads_read`) + `META_AD_ACCOUNT_ID` in
-`code/analytics/.env`. Pairs with the UTM capture (`metadata.utm`) + pixel `Lead`
-events on the subscribe forms and the `/protected/attribution` UI view.
+Needs `META_ADS_TOKEN` (System User) + `META_AD_ACCOUNT_ID` in `code/analytics/.env`
+(+ `META_PAGE_ID`, optional `META_IG_ACCOUNT_ID` / `META_DSA_BENEFICIARY` for creation).
+Pairs with the UTM capture (`metadata.utm`) + pixel `Lead` events on the subscribe forms
+and the `/protected/attribution` UI view.
 
 ## Sanity Studio
 

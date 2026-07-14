@@ -1,17 +1,29 @@
 # meta_ads
 
-Read-only Meta Marketing API access — pull ad performance and tie it to the
-feature A/B. **No writes**: it never creates or edits a campaign (launch ads by
-hand in Ads Manager). This is the measurement half of the self-improving loop.
+Meta Marketing API — **create the ad drafts** and **measure** them. Two halves:
+
+- **Write (drafts):** `preflight` + `draft` create the feature A/B as **PAUSED**,
+  non-spending campaign drafts (see `nis-ad-launch` skill). Needs `ads_management`.
+- **Read (measurement):** `verify` / `insights` / `reconcile` pull performance and
+  reconcile it against real Supabase leads. Needs `ads_read`.
+
+Nothing this module creates can spend — everything is PAUSED until you flip it Active
+by hand in Ads Manager.
 
 ```bash
 cd code/analytics
 .venv/bin/python -m services.meta_ads.cli verify                 # confirm token + account
+.venv/bin/python -m services.meta_ads.cli preflight              # check every gate before creating
+.venv/bin/python -m services.meta_ads.cli draft                  # dry-run: print the plan
+.venv/bin/python -m services.meta_ads.cli draft --go             # create the PAUSED drafts
 .venv/bin/python -m services.meta_ads.cli insights [--since YYYY-MM-DD]
 .venv/bin/python -m services.meta_ads.cli reconcile [--since YYYY-MM-DD]
 ```
 
 - **verify** — confirms the token reaches the ad account (name, status, currency).
+- **preflight** — one-pass green/red check of every gate that blocks `draft --go`:
+  token scopes, ad-account status, Page assignment (CREATE_CONTENT), IG advertisability.
+  Run it before the first launch; it maps each failure to its fix.
 - **insights** — per-ad CTR / CPC / spend / Meta-attributed Leads, then a rollup by
   `utm_content` (the feature: `market_screening` vs `news_briefing`). The feature is
   read from each ad's creative `url_tags`, so name/UTM your ads and it groups itself.
@@ -42,7 +54,13 @@ META_SPECIAL_AD_CATEGORY=                    # optional — e.g. FINANCIAL_PRODU
 META_API_VERSION=v21.0                        # optional; bump if a call reports a version error
 ```
 
-The token is a System User token (Business Settings → System Users) with `ads_read`
-on the one ad account. Keep it in `.env` (gitignored); it's read-only but still a
-secret. To ever automate campaign *creation*, that's a separate `ads_management`
-scope + a deliberate write module with a dry-run/confirm gate — not built here.
+The token is a System User token (Business Settings → System Users). For measurement
+only, `ads_read` suffices; to create drafts it needs `ads_management` +
+`pages_read_engagement` + `pages_manage_ads`, the Page assigned to the System User
+(CREATE_CONTENT), and — for an explicit IG byline — the IG account assigned to the ad
+account. `preflight` verifies all of this. Keep the token in `.env` (gitignored); it's a
+secret. See the `nis-ad-launch` skill for the full launch + gate-troubleshooting flow.
+
+For EU targeting (e.g. DK), Meta requires a DSA beneficiary/payor on each ad set — set
+`META_DSA_BENEFICIARY` (default "News Impact Screener"). The App must also be in **Live**
+mode (developers.facebook.com → App Mode) for creative creation to succeed.

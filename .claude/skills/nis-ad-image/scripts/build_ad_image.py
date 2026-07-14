@@ -1,0 +1,282 @@
+"""Render ONE single-image ad (Meta + TikTok) from a Claude-authored spec.
+
+    python build_ad_image.py --spec output/ads/<slug>/ad.json          # all ratios
+    python build_ad_image.py --spec output/ads/<slug>/ad.json --ratios 4x5
+
+Outputs under output/ads/<slug>/:
+    4x5/ad.png      (1080×1350 — Meta feed)
+    9x16/ad.png     (1080×1920 — TikTok / Reels / Stories)
+    1x1/ad.png      (1080×1080 — square)
+    ad_copy.txt     (primary text · headline · CTA — paste into Ads Manager)
+
+One image, one message — the eToro pattern: brand mark → bold headline (one accent) →
+subhead → green-check benefits → optional proof stat → CTA button, over a branded hero
+(generated financial motif, or a real photo via `background_image`). No slides, no swipe.
+Every number must be real (from a trend brief / setup.json) — the renderer only lays out.
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import pathlib
+
+import matplotlib.font_manager as _fm
+from PIL import Image, ImageDraw, ImageFont, ImageFilter
+
+# ---- themes ---------------------------------------------------------------
+AMBER = "#F59E0B"; POS = "#22C55E"; NEG = "#EF4444"
+_ACCENT = {"amber": AMBER, "pos": POS, "green": POS, "neg": NEG}
+THEMES = {
+    # dark: eToro-style punch (default for ads)
+    "dark": {"bg_top": "#0A0F1C", "bg_bot": "#141E33", "ink": "#F4F7FB",
+             "mut": "#9BA9C0", "mut2": "#6B7791", "panel": "#131C30",
+             "grid": "#22304C", "scrim": (6, 10, 20)},
+    # light: matches the site / reels
+    "light": {"bg_top": "#FDFBF7", "bg_bot": "#F4ECE0", "ink": "#10182B",
+              "mut": "#566377", "mut2": "#8A93A4", "panel": "#FFFFFF",
+              "grid": "#E4DBCE", "scrim": (251, 247, 241)},
+}
+
+_BOLD = _fm.findfont(_fm.FontProperties(weight="bold"))
+_REG = _fm.findfont(_fm.FontProperties(weight="normal"))
+_MONO = _fm.findfont(_fm.FontProperties(family="monospace"))
+
+SIZES = {"4x5": (1080, 1350), "9x16": (1080, 1920), "1x1": (1080, 1080)}
+MARGIN = 96
+
+
+def _f(sz, kind="bold"):
+    return ImageFont.truetype({"bold": _BOLD, "reg": _REG, "mono": _MONO}[kind], int(sz))
+
+
+def _hex(c):
+    c = c.lstrip("#")
+    return tuple(int(c[i:i + 2], 16) for i in (0, 2, 4))
+
+
+def _mix(base, top, f):
+    a, b = _hex(base) if isinstance(base, str) else base, _hex(top) if isinstance(top, str) else top
+    return tuple(round(a[i] * (1 - f) + b[i] * f) for i in range(3))
+
+
+def _wrap(d, text, font, maxw):
+    lines, cur = [], ""
+    for w in text.split():
+        t = (cur + " " + w).strip()
+        if d.textlength(t, font=font) <= maxw or not cur:
+            cur = t
+        else:
+            lines.append(cur); cur = w
+    if cur:
+        lines.append(cur)
+    return lines
+
+
+# ---- background: real photo (cover + scrim) or generated financial motif ---
+def _background(W, H, T, ratio, bg_image: pathlib.Path | None, accent):
+    img = Image.new("RGB", (W, H), _hex(T["bg_top"]))
+    d = ImageDraw.Draw(img)
+    # vertical gradient
+    top, bot = _hex(T["bg_top"]), _hex(T["bg_bot"])
+    for y in range(H):
+        f = y / H
+        d.line([(0, y), (W, y)], fill=tuple(round(top[i] * (1 - f) + bot[i] * f) for i in range(3)))
+
+    if bg_image and bg_image.exists():
+        photo = Image.open(bg_image).convert("RGB")
+        # cover-fit
+        s = max(W / photo.width, H / photo.height)
+        photo = photo.resize((int(photo.width * s) + 1, int(photo.height * s) + 1))
+        photo = photo.crop((0, 0, W, H))
+        img.paste(photo, (0, 0))
+        # readability scrim: darker/lighter toward the content side (top-left/bottom)
+        scrim = Image.new("L", (W, H), 0)
+        sd = ImageDraw.Draw(scrim)
+        for y in range(H):
+            sd.line([(0, y), (W, y)], fill=int(210 * (0.35 + 0.65 * (y / H))))
+        tint = Image.new("RGB", (W, H), T["scrim"])
+        img = Image.composite(tint, img, scrim)
+        return img
+
+    # generated motif: faint grid + a rising line chart with a soft accent glow
+    d = ImageDraw.Draw(img, "RGBA")
+    grid = (*_hex(T["grid"]), 70)
+    step = 96
+    for x in range(0, W, step):
+        d.line([(x, 0), (x, H)], fill=grid, width=1)
+    for y in range(0, H, step):
+        d.line([(0, y), (W, y)], fill=grid, width=1)
+    # rising jagged line low in the frame — decorative, never over the copy block
+    import math
+    base_y = int(H * (0.86 if ratio != "9x16" else 0.80))
+    amp = int(H * 0.06)
+    pts = []
+    n = 26
+    for i in range(n + 1):
+        x = int(W * i / n)
+        drift = (i / n) * amp * 1.6                       # overall rise
+        wobble = math.sin(i * 0.9) * amp * 0.35 + math.sin(i * 2.3) * amp * 0.15
+        pts.append((x, int(base_y - drift + wobble)))
+    ac = _hex(accent)
+    # glow underlay
+    glow = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+    gd = ImageDraw.Draw(glow)
+    gd.line(pts, fill=(*ac, 90), width=14, joint="curve")
+    glow = glow.filter(ImageFilter.GaussianBlur(20))
+    img = Image.alpha_composite(img.convert("RGBA"), glow).convert("RGB")
+    d = ImageDraw.Draw(img, "RGBA")
+    d.line(pts, fill=(*ac, 160), width=4, joint="curve")
+    return img
+
+
+# ---- content elements (left-aligned stack) --------------------------------
+def _logo(d, x, y, T, accent, brand, mark_text="NIS"):
+    s = 60
+    d.rounded_rectangle([x, y, x + s, y + s], radius=16, fill=(*_hex(accent), 255))
+    d.text((x + s // 2, y + s // 2 + 2), mark_text, font=_f(26, "bold"),
+           fill=(*_hex("#0A0F1C"), 255), anchor="mm")
+    d.text((x + s + 22, y + s // 2), brand, font=_f(30, "bold"), fill=(*_hex(T["ink"]), 255), anchor="lm")
+    return s
+
+
+def _headline_accent(d, x, y, lines, font, base, accent, accent_words, lh):
+    aset = {w.strip(".,!?'\"").lower() for w in accent_words.split()} if accent_words else set()
+    for i, ln in enumerate(lines):
+        cx, ly = x, y + i * lh
+        for word in ln.split():
+            col = accent if word.strip(".,!?'\"").lower() in aset else base
+            d.text((cx, ly), word, font=font, fill=(*_hex(col), 255), anchor="lm")
+            cx += d.textlength(word + " ", font=font)
+
+
+def _check(d, x, y, T, accent, text, size=34):
+    r = 16
+    cy = y
+    d.ellipse([x, cy - r, x + 2 * r, cy + r], fill=(*_hex(POS), 255))
+    d.line([(x + 9, cy), (x + 15, cy + 7), (x + 24, cy - 8)], fill=(*_hex("#04140A"), 255), width=4, joint="curve")
+    d.text((x + 2 * r + 20, cy), text, font=_f(size, "reg"), fill=(*_hex(T["ink"]), 255), anchor="lm")
+
+
+def _proof(d, x, y, W, T, accent, ticker, ret, spy):
+    pw = W - 2 * MARGIN
+    ph = 200
+    d.rounded_rectangle([x, y, x + pw, y + ph], radius=24,
+                        fill=(*_mix(T["panel"], "#FFFFFF", 0.02 if T is THEMES["dark"] else 0), 235),
+                        outline=(*_hex(T["grid"]), 255), width=2)
+    d.text((x + 30, y + 40), f"${ticker}", font=_f(44, "bold"), fill=(*_hex(accent), 255), anchor="lm")
+    d.text((x + pw - 30, y + 44), f"+{ret:.0f}%", font=_f(60, "mono"), fill=(*_hex(POS), 255), anchor="rm")
+    bx, bw = x + 30, pw - 60
+    mx = max(ret, spy, 1)
+    for i, (lab, v, col) in enumerate([(ticker, ret, accent), ("S&P 500", spy, T["mut"])]):
+        by = y + 96 + i * 52
+        d.text((bx, by), lab, font=_f(22, "mono"), fill=(*_hex(T["mut"]), 255), anchor="lm")
+        track_l = bx + 150
+        d.rounded_rectangle([track_l, by - 12, bx + bw, by + 12], radius=12, fill=(*_hex(T["grid"]), 255))
+        fillw = track_l + max(0.05, v / mx) * (bx + bw - track_l)
+        d.rounded_rectangle([track_l, by - 12, fillw, by + 12], radius=12, fill=(*_hex(col), 255))
+    return ph
+
+
+def _cta(d, x, y, T, accent, label):
+    f = _f(38, "bold")
+    tw = d.textlength(label, font=f)
+    w, h = tw + 88, 92
+    d.rounded_rectangle([x, y, x + w, y + h], radius=20, fill=(*_hex(accent), 255))
+    d.text((x + w // 2, y + h // 2), label, font=f, fill=(*_hex("#0A0F1C"), 255), anchor="mm")
+    return h
+
+
+# ---- compose one image ----------------------------------------------------
+def render(spec, ratio, out_dir):
+    W, H = SIZES[ratio]
+    T = THEMES.get(spec.get("theme", "dark"), THEMES["dark"])
+    accent = _ACCENT.get(spec.get("accent", "amber"), AMBER)
+    brand = spec.get("brand", "newsimpactscreener.com")
+    bg_image = None
+    if spec.get("background_image"):
+        bg_image = (out_dir / spec["background_image"]).resolve()
+
+    img = _background(W, H, T, ratio, bg_image, accent)
+    d = ImageDraw.Draw(img, "RGBA")
+
+    x = MARGIN
+    safe_top = int(H * (0.10 if ratio == "9x16" else 0.075))
+    safe_bot = int(H * (0.82 if ratio == "9x16" else 0.90))
+    maxw = W - 2 * MARGIN
+
+    # measure the stack so we can vertically center it in the safe band
+    hl_size = 82 if ratio != "1x1" else 74
+    hl_font = _f(hl_size, "bold")
+    hl_lines = _wrap(d, spec["headline"], hl_font, maxw)
+    hl_lh = int(hl_size * 1.14)
+    sub_lines = _wrap(d, spec.get("subhead", ""), _f(38, "reg"), maxw) if spec.get("subhead") else []
+    sub_lh = int(38 * 1.34)
+    bullets = spec.get("bullets", [])
+    proof = spec.get("proof")
+
+    blocks = []  # (height, drawfn)
+    blocks.append((60, lambda yy: _logo(d, x, yy, T, accent, brand, spec.get("mark", "NIS"))))
+    if spec.get("kicker"):
+        kf = _f(26, "mono")
+        blocks.append((40, lambda yy, kf=kf: d.text((x, yy + 20), spec["kicker"].upper(), font=kf,
+                                                     fill=(*_hex(accent), 255), anchor="lm")))
+    blocks.append((hl_lh * len(hl_lines),
+                   lambda yy: _headline_accent(d, x, yy + hl_lh // 2, hl_lines, hl_font, T["ink"],
+                                               accent, spec.get("headline_accent", ""), hl_lh)))
+    if sub_lines:
+        blocks.append((sub_lh * len(sub_lines),
+                       lambda yy: [d.text((x, yy + i * sub_lh + sub_lh // 2), ln, font=_f(38, "reg"),
+                                          fill=(*_hex(T["mut"]), 255), anchor="lm")
+                                   for i, ln in enumerate(sub_lines)]))
+    for b in bullets:
+        blocks.append((54, lambda yy, b=b: _check(d, x, yy + 22, T, accent, b)))
+    if proof:
+        blocks.append((200, lambda yy: _proof(d, x, yy, W, T, accent, proof["ticker"],
+                                              float(proof["ret"]), float(proof["spy"]))))
+    blocks.append((92, lambda yy: _cta(d, x, yy, T, accent, spec.get("cta_label", "Learn more"))))
+
+    gaps = {0: 46, 1: 30}  # after logo / kicker; default below
+    total = sum(h for h, _ in blocks) + sum(28 for _ in blocks[:-1]) + 40
+    y = safe_top + max(0, (safe_bot - safe_top - total) // 2)
+    for i, (h, fn) in enumerate(blocks):
+        fn(y)
+        y += h + 40  # comfortable rhythm
+
+    # footer: brand + disclaimer
+    d.text((x, H - int(H * 0.05)), brand, font=_f(24, "bold"), fill=(*_hex(T["mut2"]), 255), anchor="lm")
+    if spec.get("disclaimer"):
+        d.text((W // 2, H - int(H * 0.022)), spec["disclaimer"], font=_f(19, "reg"),
+               fill=(*_hex(T["mut2"]), 255), anchor="mm")
+
+    return img.convert("RGB")
+
+
+def main():
+    ap = argparse.ArgumentParser(description="Render a single-image Meta/TikTok ad from a Claude spec.")
+    ap.add_argument("--spec", required=True)
+    ap.add_argument("--ratios", default="4x5,9x16,1x1")
+    args = ap.parse_args()
+
+    spec = json.loads(pathlib.Path(args.spec).read_text())
+    out = pathlib.Path(args.spec).resolve().parent
+
+    for ratio in [r.strip() for r in args.ratios.split(",") if r.strip()]:
+        rdir = out / ratio
+        rdir.mkdir(parents=True, exist_ok=True)
+        render(spec, ratio, out).save(rdir / "ad.png")
+        print(f"[{ratio}] → {rdir / 'ad.png'}")
+
+    ad = spec.get("ad", {})
+    copy = [f"# Ad copy — {spec.get('slug', out.name)}  (paste into Meta / TikTok Ads Manager)",
+            "", "## PRIMARY TEXT", ad.get("primary_text", ""), "",
+            f"## HEADLINE\n{ad.get('headline', spec.get('headline', ''))}", "",
+            f"## DESCRIPTION\n{ad.get('description', spec.get('subhead', ''))}", "",
+            f"## CALL TO ACTION\n{ad.get('cta_label', spec.get('cta_label', 'Learn More'))}"
+            f"   →   {ad.get('destination', spec.get('destination', 'newsimpactscreener.com'))}", ""]
+    (out / "ad_copy.txt").write_text("\n".join(copy))
+    print(f"ad copy → {out / 'ad_copy.txt'}")
+
+
+if __name__ == "__main__":
+    main()

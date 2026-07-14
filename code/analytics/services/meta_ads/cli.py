@@ -139,6 +139,11 @@ def cmd_reconcile(args) -> int:
     return 0
 
 
+def cmd_preflight(_args) -> int:
+    from . import campaigns
+    return 1 if campaigns.preflight() else 0
+
+
 def cmd_draft(args) -> int:
     from . import campaigns
     return campaigns.build_drafts(campaigns.FEATURES, args.budget, dry_run=not args.go)
@@ -148,6 +153,7 @@ def main(argv=None) -> int:
     ap = argparse.ArgumentParser(prog="meta_ads")
     sub = ap.add_subparsers(dest="cmd", required=True)
     sub.add_parser("verify").set_defaults(func=cmd_verify)
+    sub.add_parser("preflight", help="check every gate before `draft --go`").set_defaults(func=cmd_preflight)
     pi = sub.add_parser("insights"); pi.add_argument("--since"); pi.set_defaults(func=cmd_insights)
     pr = sub.add_parser("reconcile"); pr.add_argument("--since"); pr.set_defaults(func=cmd_reconcile)
     pd = sub.add_parser("draft", help="create the feature A/B as PAUSED drafts")
