@@ -4,6 +4,7 @@ import { useEffect, useId, useState, useTransition } from "react";
 import { Check } from "lucide-react";
 import { captureAttribution, getAttribution } from "@/lib/attribution";
 import { trackLead } from "@/lib/pixels";
+import { track } from "@/lib/analytics/events";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -83,9 +84,13 @@ export function EmailSubscribeModal({
     e.preventDefault();
     setStatus({ kind: "idle" });
 
+    const utm_content = getAttribution().utm_content;
+    track("lead_form_submitted", { magnet: "market_screening", utm_content });
+
     const slugs = screeningSlug ? [screeningSlug] : selected;
     if (slugs.length === 0) {
       setStatus({ kind: "error", message: ERROR_COPY.invalid_request });
+      track("lead_form_error", { magnet: "market_screening", reason: "no_screening_selected" });
       return;
     }
 
@@ -109,6 +114,7 @@ export function EmailSubscribeModal({
         // already_subscribed is a success from the user's perspective.
         if (data.success || data.error === "already_subscribed") {
           trackLead({ content_name: "market_screening" });
+          track("lead_subscribed", { magnet: "market_screening", utm_content });
           setStatus({ kind: "success" });
           return;
         }
@@ -116,8 +122,10 @@ export function EmailSubscribeModal({
           ERROR_COPY[data.error ?? "network"] ?? ERROR_COPY.network;
         // Do not clear the email field on error.
         setStatus({ kind: "error", message });
+        track("lead_form_error", { magnet: "market_screening", reason: data.error ?? "network" });
       } catch {
         setStatus({ kind: "error", message: ERROR_COPY.network });
+        track("lead_form_error", { magnet: "market_screening", reason: "network" });
       }
     });
   };
@@ -131,7 +139,15 @@ export function EmailSubscribeModal({
       open={open}
       onOpenChange={(next) => {
         setOpen(next);
-        if (!next) reset();
+        if (next) {
+          track("lead_form_viewed", {
+            magnet: "market_screening",
+            utm_content: getAttribution().utm_content,
+            preset: Boolean(screeningSlug),
+          });
+        } else {
+          reset();
+        }
       }}
     >
       <DialogTrigger asChild>{trigger}</DialogTrigger>

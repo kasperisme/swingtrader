@@ -163,10 +163,10 @@ See `code/analytics/services/meta_ads/README.md` and the `nis-ad-launch` skill.
 
 Meta Marketing API, both halves of the paid-ads loop:
 - **Create (write, `ads_management`):** `preflight` green/red-checks every gate, then
-  `draft --go` creates the feature A/B as **PAUSED** drafts — 1 campaign → 1 ad set per
-  feature → 1 single-image ad per feature, isolated budgets, rollback on any failure. Nothing
-  spends until you flip it Active by hand. Creative comes from `nis-ad-image`
-  (`output/ads/<slug>/1x1/ad.png`).
+  `draft --campaign <date>-<short-name> --go` creates a campaign from that folder — 1 ad set
+  per lead-magnet subfolder (`briefing` / `market-screening`) → 1 single-image ad each,
+  isolated budgets, rollback on any failure, all **PAUSED** until you flip Active by hand.
+  Creative comes from `nis-ad-image` (`output/ads/<date>-<short-name>/<lead-magnet>/1x1/ad.png`).
 - **Measure (read, `ads_read`):** `insights` rolls per-ad CTR/CPC/spend/Leads up by
   `utm_content` (feature: `market_screening` vs `news_briefing`, from each creative's
   `url_tags`); `reconcile` puts Meta spend/clicks next to the **real email leads in
@@ -176,9 +176,10 @@ Meta Marketing API, both halves of the paid-ads loop:
 cd code/analytics
 .venv/bin/python -m services.meta_ads.cli verify
 .venv/bin/python -m services.meta_ads.cli preflight               # check gates before creating
-.venv/bin/python -m services.meta_ads.cli draft [--go] [--budget 70]
+.venv/bin/python -m services.meta_ads.cli draft --campaign <date>-<short-name> [--go] [--budget 70]
 .venv/bin/python -m services.meta_ads.cli insights [--since YYYY-MM-DD]
 .venv/bin/python -m services.meta_ads.cli reconcile [--since YYYY-MM-DD]
+.venv/bin/python -m services.meta_ads.cli design [--by hook_type]   # perf ↔ ad design genome (join on ad_id)
 ```
 
 Needs `META_ADS_TOKEN` (System User) + `META_AD_ACCOUNT_ID` in `code/analytics/.env`

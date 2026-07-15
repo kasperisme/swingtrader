@@ -38,6 +38,28 @@ type EventMap = {
   feature_viewed: { feature: string };
 
   waitlist_joined: { source: string };
+
+  // Lead-magnet subscribe funnel (ad → landing → form → subscribe). `magnet` splits
+  // the news briefing from the market-screening flow; `utm_content` carries the ad
+  // feature so PostHog funnels segment by campaign. Pairs with the server-side
+  // `briefing_subscribed` / screening subscribe events for the confirmed conversion.
+  lead_form_viewed: {
+    magnet: "news_briefing" | "market_screening";
+    utm_content?: string;
+    preset?: boolean;
+  };
+  lead_form_submitted: {
+    magnet: "news_briefing" | "market_screening";
+    utm_content?: string;
+  };
+  lead_form_error: {
+    magnet: "news_briefing" | "market_screening";
+    reason: string;
+  };
+  lead_subscribed: {
+    magnet: "news_briefing" | "market_screening";
+    utm_content?: string;
+  };
   cta_exposed: { cta: string; variant: string };
   checkout_initiated: { plan: string; interval: string };
   api_key_created: { scopes: string[] };

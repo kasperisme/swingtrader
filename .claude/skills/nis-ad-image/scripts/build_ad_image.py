@@ -20,6 +20,8 @@ from __future__ import annotations
 import argparse
 import json
 import pathlib
+from datetime import datetime, timezone
+from urllib.parse import parse_qs, urlparse
 
 import matplotlib.font_manager as _fm
 from PIL import Image, ImageDraw, ImageFont, ImageFilter
@@ -252,6 +254,53 @@ def render(spec, ratio, out_dir):
     return img.convert("RGB")
 
 
+def _derive_design(spec: dict, out_dir: pathlib.Path, ratios: list[str]) -> dict:
+    """Factual design attributes of the rendered ad — auto-derived so the record is
+    objective and consistent across every ad (Claude can't forget or fudge them).
+    Merged with the authored `design` block into design.json for later engagement
+    analysis (join on ad_id via the launch manifest, or on utm_content)."""
+    ad = spec.get("ad", {}) or {}
+    dest = ad.get("destination") or spec.get("destination", "")
+    utm = {k: v[0] for k, v in parse_qs(urlparse(dest).query).items()}
+    hl = spec.get("headline", "") or ""
+    sub = spec.get("subhead", "") or ""
+    bullets = spec.get("bullets", []) or []
+    # provenance from the saved-content convention: …/<campaign>/<lead-magnet>/
+    lead_magnet = out_dir.name
+    campaign = out_dir.parent.name
+
+    derived = {
+        # factual creative attributes (the levers to test)
+        "theme": spec.get("theme", "dark"),
+        "accent": spec.get("accent", "amber"),
+        "background_type": "photo" if spec.get("background_image") else "motif",
+        "has_kicker": bool(spec.get("kicker")),
+        "headline_words": len(hl.split()),
+        "headline_chars": len(hl),
+        "has_headline_accent": bool(spec.get("headline_accent")),
+        "has_subhead": bool(sub),
+        "subhead_words": len(sub.split()),
+        "bullet_count": len(bullets),
+        "has_proof": bool(spec.get("proof")),
+        "proof_type": "ticker_vs_spy" if spec.get("proof") else "none",
+        "cta_label": spec.get("cta_label"),
+        "cta_words": len((spec.get("cta_label") or "").split()),
+        "primary_text_chars": len(ad.get("primary_text") or ""),
+        "formats": ratios,
+        # provenance / join keys
+        "slug": spec.get("slug"),
+        "lead_magnet": lead_magnet,
+        "campaign": campaign,
+        "brand": spec.get("brand"),
+        "destination": dest,
+        "utm_content": utm.get("utm_content"),
+        "utm_campaign": utm.get("utm_campaign"),
+        "rendered_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+    }
+    # authored intent (controlled vocab) wins for its own keys; derived facts win on overlap
+    return {**(spec.get("design") or {}), **derived}
+
+
 def main():
     ap = argparse.ArgumentParser(description="Render a single-image Meta/TikTok ad from a Claude spec.")
     ap.add_argument("--spec", required=True)
@@ -261,11 +310,17 @@ def main():
     spec = json.loads(pathlib.Path(args.spec).read_text())
     out = pathlib.Path(args.spec).resolve().parent
 
-    for ratio in [r.strip() for r in args.ratios.split(",") if r.strip()]:
+    ratios = [r.strip() for r in args.ratios.split(",") if r.strip()]
+    for ratio in ratios:
         rdir = out / ratio
         rdir.mkdir(parents=True, exist_ok=True)
         render(spec, ratio, out).save(rdir / "ad.png")
         print(f"[{ratio}] → {rdir / 'ad.png'}")
+
+    # resolved design metadata (authored + auto-derived) for engagement analysis
+    design = _derive_design(spec, out, ratios)
+    (out / "design.json").write_text(json.dumps(design, indent=2))
+    print(f"design → {out / 'design.json'}")
 
     ad = spec.get("ad", {})
     copy = [f"# Ad copy — {spec.get('slug', out.name)}  (paste into Meta / TikTok Ads Manager)",

@@ -12,6 +12,7 @@ from typing import Callable
 
 from .scripts import (
     ai_supercycle,
+    hormuz_winners,
     insider_congress,
     ipo_screener,
     nis_fundamentals,
@@ -28,6 +29,7 @@ ScriptFn = Callable[[object, dict], ScreeningResult]
 
 SCRIPTS: dict[str, ScriptFn] = {
     "ai_supercycle":     ai_supercycle.run,
+    "hormuz_winners":    hormuz_winners.run,
     "insider_congress":  insider_congress.run,
     "ipo_screener":      ipo_screener.run,
     "nis_fundamentals":  nis_fundamentals.run,

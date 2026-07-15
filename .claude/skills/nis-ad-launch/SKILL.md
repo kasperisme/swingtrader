@@ -29,8 +29,8 @@ path (`ads_management`); the measurement is read-only.
 ## The pipeline
 
 ```
-nis-ad-image     →  output/ads/<slug>/1x1/ad.png + ad.json           (the creative — default)
- (or carousel)      output/ads/<slug>/1x1/slide-*.png                (legacy swipe deck)
+nis-ad-image     →  output/ads/<date>-<short-name>/<lead-magnet>/1x1/ad.png + ad.json
+                    <lead-magnet> ∈ { briefing, market-screening }        (the creative)
         │
         ▼
    preflight      →  check every account/permission gate (green/red)
@@ -39,7 +39,7 @@ nis-ad-image     →  output/ads/<slug>/1x1/ad.png + ad.json           (the crea
    draft (dry-run)→  print the exact campaign/ad-set/ad plan, nothing created
         │
         ▼
-   draft --go     →  1 campaign → 1 ad set/feature → 1 single-image ad/feature, all PAUSED
+   draft --go     →  1 campaign (the folder) → 1 ad set per lead-magnet → 1 single-image ad, PAUSED
         │
         ▼
    YOU in Ads Mgr →  review creative/targeting/budget, then flip Active to launch
@@ -63,11 +63,28 @@ what `reconcile` groups by, so the loop closes on **real leads**, not just click
 META_ADS_TOKEN=<System User token — ads_management + pages_read_engagement + pages_manage_ads>
 META_AD_ACCOUNT_ID=2046577425934056        # act_ prefix optional
 META_PAGE_ID=<Facebook Page id ads run from>
+META_PIXEL_ID=891355590685260              # web Pixel id — REQUIRED for lead optimization (the default)
 META_IG_ACCOUNT_ID=<IG business account id> # optional — explicit @handle byline on IG placements
-META_DSA_BENEFICIARY=News Impact Screener   # optional — EU DSA payor/beneficiary (required for DK targeting)
+META_DSA_BENEFICIARY=News Impact Screener   # optional — EU DSA payor/beneficiary (required if EU in geo)
 META_SPECIAL_AD_CATEGORY=                    # optional — e.g. FINANCIAL_PRODUCTS_SERVICES if Meta demands it
 META_API_VERSION=v21.0                        # optional
+# ── audience + objective defaults (override to change targeting) ──
+META_TARGET_COUNTRIES=US,GB,CA,AU           # default geo (English-speaking, matches a US-stock product)
+META_AGE_MIN=18
+META_AGE_MAX=65
+META_OBJECTIVE=OUTCOME_LEADS                # default: optimize for sign-ups, not just clicks
+META_OPTIMIZATION_GOAL=OFFSITE_CONVERSIONS  # LEAD conversions via the pixel; set LINK_CLICKS for a cold-start
+META_CONVERSION_EVENT=LEAD                  # the pixel event to optimize toward
 ```
+
+**The default audience + goal:** `US, GB, CA, AU · 18–65 · broad` (Advantage+ expands it),
+campaign objective **`OUTCOME_LEADS`**, ad sets optimizing for the **LEAD pixel conversion** —
+i.e. Meta optimizes for *sign-ups*, not cheap clicks. All of it is env-overridable (e.g.
+`META_TARGET_COUNTRIES=US` to narrow, or `META_OPTIMIZATION_GOAL=LINK_CLICKS` to fall back to
+clicks). **Cold-start caveat:** conversion optimization needs pixel Lead volume (~50/week) to
+exit Meta's learning phase — with a fresh pixel it may under-deliver at first. If the pixel has
+near-zero Lead history, start on `LINK_CLICKS` (or `LANDING_PAGE_VIEWS`) and switch to
+conversions once leads accrue.
 
 The token is a **System User** token (Business Settings → System Users). It's a secret even
 though half its use is read-only — never print or commit it (`.env` is gitignored).
@@ -90,25 +107,32 @@ Green means safe to create. Two gates can't be checked via API and are printed a
 ## Step 2 — Dry-run the plan
 
 ```bash
-.venv/bin/python -m services.meta_ads.cli draft            # prints the plan, creates NOTHING
+# a trend campaign (the dated folder → the campaign; its magnet subfolders → the ad sets):
+.venv/bin/python -m services.meta_ads.cli draft --campaign 2026-07-14-geopolitics
+# or the legacy flat product A/B (campaigns.FEATURES):
+.venv/bin/python -m services.meta_ads.cli draft
 ```
 
-Confirms it can read each `output/ads/<slug>/1x1/` folder and prints the campaign → ad-set →
-ad tree with budgets, CTAs, and destinations. **The 1:1 image must exist** — render it first
-with `nis-ad-image` (writes `1x1/ad.png`). (Legacy: multiple `1x1/slide-*.png` are still
-uploaded as a carousel if present.)
+`--campaign <date>-<short-name>` discovers the `briefing/` + `market-screening/` subfolders
+under `output/ads/<date>-<short-name>/` and prints the campaign → ad-set → ad tree with
+budgets, CTAs, and destinations. **Each magnet's 1:1 image must exist** — render it first with
+`nis-ad-image` (writes `<magnet>/1x1/ad.png`). Creates NOTHING.
 
 ## Step 3 — Create the PAUSED drafts
 
 ```bash
-.venv/bin/python -m services.meta_ads.cli draft --go --budget 70   # DKK/day per ad set (default 70)
+.venv/bin/python -m services.meta_ads.cli draft --campaign 2026-07-14-geopolitics --go --budget 70
 ```
 
-Creates the campaign (`OUTCOME_TRAFFIC`, PAUSED) → one ad set per feature (DK 18–65, optimize
-`LINK_CLICKS`, isolated daily budget) → one single-image ad per feature (uploads `1x1/ad.png`,
+Creates the campaign (named after the folder, `OUTCOME_LEADS`, PAUSED) → one ad set per
+lead-magnet (US/GB/CA/AU 18–65, optimize **LEAD conversions** via the pixel, isolated daily
+budget) → one single-image ad
+per magnet (uploads `<magnet>/1x1/ad.png`,
 builds the `object_story_spec` link ad with the headline/description, attaches the CTA + UTM'd
 destination). If **any** step fails it **rolls back the whole campaign** — no orphans. On
-success it prints every id.
+success it prints every id and writes **`output/ads/<campaign>/launch_manifest.json`** — one
+row per ad joining the Meta `ad_id` to that ad's `design.json` (the creative genome), so you
+can later correlate design choices with engagement (see Step 5).
 
 If `META_IG_ACCOUNT_ID` is set and valid, ads carry the explicit `@handle` (via
 `instagram_user_id`); if that identity is rejected (e.g. the IG account's "less personalized
@@ -131,6 +155,24 @@ you do this.
 `reconcile` is the source of truth: it puts Meta spend next to the **actual email leads**
 captured on the subscribe forms (pixel-independent), by feature. Scale the feature with the
 lower cost-per-real-lead; feed the winner back into the next `nis-ad-image` spec.
+
+**What drives engagement (design × performance).**
+
+```bash
+.venv/bin/python -m services.meta_ads.cli design                       # per-ad: performance + its design
+.venv/bin/python -m services.meta_ads.cli design --by hook_type        # roll up by one design field
+.venv/bin/python -m services.meta_ads.cli design --leaderboard --min-impr 500   # rank every lever, best first
+.venv/bin/python -m services.meta_ads.cli design --json --min-impr 500          # machine-readable → next ad
+```
+
+Traceability runs on the Meta **`ad_id`**: `create_ad()` returns it, `launch_manifest.json`
+stores it next to that ad's `design` genome, and `insights` is reported by the same `ad_id`.
+`design` performs the join — so you see which *creative choices* lift CTR/CPL (dark vs light,
+proof vs none, `hook_type` question vs number-drop, bullet count, copy length). It works even
+before delivery (metrics show 0), so you can confirm the loop is wired the moment you create
+the drafts. `--leaderboard` ranks every lever best-first (low-sample rows flagged); `--json`
+is what `nis-ad-image` Step 0 reads to bias the next ad. Vary one lever per `variant` so the
+lift is attributable, respect `--min-impr` (ignore noise), and bake winners into the next spec.
 
 ---
 
@@ -158,11 +200,13 @@ the API-checkable ones; the last two it can only remind you about.
   never sets anything Active — launching is always a deliberate human click in Ads Manager.
 - **One campaign, two ad sets = the A/B.** Don't collapse the features into one ad set; the
   isolated-budget split is the whole point of the test.
-- **Creative is upstream.** This skill assumes `nis-ad-image` already wrote
-  `output/ads/<slug>/1x1/ad.png` + `ad.json`. If they're missing, render them first — don't
-  invent creative here.
-- **Change the feature set** by editing `campaigns.FEATURES` (the `<slug>` list) — it maps
-  directly to `output/ads/<slug>/`.
+- **Creative is upstream.** This skill assumes `nis-ad-image` already wrote each
+  `output/ads/<date>-<short-name>/<lead-magnet>/1x1/ad.png` + `ad.json`. If they're missing,
+  render them first — don't invent creative here.
+- **Saving convention.** A campaign is the `<date>-<short-name>` folder; its `briefing/` and
+  `market-screening/` subfolders are the ad sets. Add a magnet by adding a subfolder with an
+  `ad.json` + `1x1/ad.png`. (The legacy flat product A/B still runs via `campaigns.FEATURES`
+  when `--campaign` is omitted.)
 - **Budget** is per ad set per day, in DKK, via `--budget` (default 70). Start small; scale the
   winner after `reconcile`, not before.
 - **Never echo the token.** All diagnostics here read via the API; none print `META_ADS_TOKEN`.

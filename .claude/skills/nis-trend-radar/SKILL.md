@@ -188,11 +188,29 @@ Hand the chosen angle to **`nis-ad-image`** (single image — the clean default)
   wordmark; the long UTM'd URL never shows on the image.
 - **`ad.primary_text`** ← open on the trend, pivot to "you'd have known via {magnet}", close on
   the preset link.
+- **`design`** ← tag the creative genome for later engagement analysis: `angle`/`primary_emotion`
+  from `lead_story.framing` (risk-off → `fear`/`urgency`; opportunity → `greed`/`curiosity`),
+  `hook_type` from how the headline is built, `offer` = the magnet, `variant` to distinguish A/B
+  tries. Keep the vocab consistent across weeks so `launch_manifest.json` aggregates.
 
-Then render + launch: `nis-ad-image` (→ `output/ads/<slug>/`, incl. `1x1/ad.png`)
-→ `nis-ad-launch` (`preflight` → `draft --go`, which auto-detects the single image). Because
-the destination is preset per topic, click-to-configured-signup is one step — and `reconcile`
-tells you which magnet the trend converted better on.
+**Save the two ads under one dated campaign folder**, one subfolder per magnet:
+
+```
+output/ads/<date>-<short-name>/briefing/ad.json          (+ 1x1/ad.png …)
+output/ads/<date>-<short-name>/market-screening/ad.json  (+ 1x1/ad.png …)
+```
+
+`<date>` = the brief's run date (`YYYY-MM-DD`); `<short-name>` = the topic (e.g.
+`2026-07-14-geopolitics`). Then render each with `nis-ad-image`, and launch the whole campaign
+in one call:
+
+```bash
+.venv/bin/python -m services.meta_ads.cli draft --campaign <date>-<short-name> --go
+```
+
+`nis-ad-launch` makes the folder the campaign and each magnet subfolder an ad set. Because the
+destination is preset per topic, click-to-configured-signup is one step — and `reconcile` tells
+you which magnet the trend converted better on.
 
 ---
 

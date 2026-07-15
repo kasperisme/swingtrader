@@ -60,7 +60,7 @@ def _ad_insights(since: str | None) -> list[dict]:
     return client.paginate(client.get(
         f"{client.account()}/insights",
         {"level": "ad",
-         "fields": "ad_id,ad_name,impressions,clicks,ctr,cpc,spend,actions",
+         "fields": "ad_id,ad_name,impressions,reach,frequency,clicks,ctr,cpc,cpm,spend,actions",
          "time_range": json.dumps(_time_range(since)),
          "limit": 200},
     ))
@@ -146,7 +146,128 @@ def cmd_preflight(_args) -> int:
 
 def cmd_draft(args) -> int:
     from . import campaigns
+    if args.campaign:
+        slugs, camp_name = campaigns.discover_campaign(args.campaign)
+        return campaigns.build_drafts(slugs, args.budget, dry_run=not args.go, campaign_name=camp_name)
     return campaigns.build_drafts(campaigns.FEATURES, args.budget, dry_run=not args.go)
+
+
+def _load_manifests() -> dict[str, dict]:
+    """ad_id → manifest row (design genome + campaign/magnet), from every
+    output/ads/**/launch_manifest.json a `draft --go` wrote. This is the join
+    table from Meta performance (keyed by ad_id) back to the ad's design."""
+    root = client._ANALYTICS / "output" / "ads"
+    out: dict[str, dict] = {}
+    for mf in root.glob("**/launch_manifest.json"):
+        try:
+            rows = json.loads(mf.read_text())
+        except (OSError, ValueError):
+            continue
+        for r in rows if isinstance(rows, list) else []:
+            if r.get("ad_id"):
+                out[str(r["ad_id"])] = r
+    return out
+
+
+# The design levers a new ad can be biased on. Kept small + stable so history aggregates.
+_LEVERS = ["hook_type", "angle", "primary_emotion", "accent", "theme",
+           "background_type", "has_proof", "bullet_count", "cta_label"]
+
+
+def _rollup(per: list[dict], field: str, min_impr: float) -> list[dict]:
+    """Group delivered ads (impr ≥ min_impr) by one design field → normalized rates.
+    All comparisons are RATES (per-impression / per-spend), so budget & days-active
+    don't need dividing out. Rates are impression-weighted (pooled), and frequency is
+    carried as a fatigue covariate (impression-weighted mean)."""
+    roll: dict[str, dict] = {}
+    for p in per:
+        if p["impr"] < min_impr:
+            continue
+        key = str(p["design"].get(field, "—"))
+        g = roll.setdefault(key, {"value": key, "n": 0, "spend": 0.0, "impr": 0.0,
+                                  "clicks": 0.0, "leads": 0.0, "_freq_w": 0.0})
+        g["n"] += 1
+        for k in ("spend", "impr", "clicks", "leads"):
+            g[k] += p[k]
+        g["_freq_w"] += p["freq"] * p["impr"]        # impression-weighted frequency
+    for g in roll.values():
+        g["ctr"] = (g["clicks"] / g["impr"] * 100) if g["impr"] else 0.0       # per-impression
+        g["cpm"] = (g["spend"] / g["impr"] * 1000) if g["impr"] else 0.0       # per-1k-impr
+        g["cvr"] = (g["leads"] / g["clicks"] * 100) if g["clicks"] else 0.0    # per-click
+        g["cpl"] = (g["spend"] / g["leads"]) if g["leads"] else None           # per-lead
+        g["freq"] = (g["_freq_w"] / g["impr"]) if g["impr"] else 0.0
+        del g["_freq_w"]
+    # best first: lowest cost-per-lead when leads exist, else highest CTR
+    return sorted(roll.values(), key=lambda g: (g["cpl"] if g["cpl"] is not None else 1e9, -g["ctr"]))
+
+
+def cmd_design(args) -> int:
+    """Join Meta performance (by ad_id) to each ad's design genome — the loop that
+    tells you which creative choices drive engagement, and feeds the next ad's design.
+    Works even before delivery (shows the wired join with zero metrics)."""
+    manifests = _load_manifests()
+    if not manifests:
+        print("No launch_manifest.json found. Create ads with `draft --campaign <…> --go` first "
+              "(the manifest is what ties Meta ad_ids back to the design metadata).")
+        return 0
+    ins = {str(r.get("ad_id")): r for r in _ad_insights(args.since)}
+
+    # LEFT-join every created ad → its insights (0 if it hasn't delivered yet)
+    per = []
+    for aid, man in manifests.items():
+        r = ins.get(aid, {})
+        d = man.get("design", {}) or {}
+        spend, clicks = _num(r.get("spend")), _num(r.get("clicks"))
+        impr, leads = _num(r.get("impressions")), _leads(r.get("actions"))
+        per.append({"ad_id": aid, "campaign": man.get("campaign_name") or man.get("campaign"),
+                    "magnet": man.get("lead_magnet"), "design": d, "delivered": bool(r),
+                    "spend": spend, "clicks": clicks, "impr": impr, "leads": leads,
+                    "freq": _num(r.get("frequency")), "cpm": _num(r.get("cpm")),
+                    "ctr": (clicks / impr * 100) if impr else 0.0,
+                    "cvr": (leads / clicks * 100) if clicks else 0.0})
+    live = sum(1 for p in per if p["delivered"])
+
+    if args.json:
+        levers = {f: _rollup(per, f, args.min_impr) for f in _LEVERS}
+        print(json.dumps({"ads_total": len(per), "ads_delivered": live,
+                          "min_impr": args.min_impr, "per_ad": per, "levers": levers}, indent=2))
+        return 0
+
+    print(f"\nTraceability — {len(per)} created ad(s) joined to design; {live} with delivery"
+          f"{'' if live else ' yet (metrics 0 until you set them Active)'}:\n")
+    print(f"  {'ad_id':<20}{'magnet':<16}{'hook':<12}{'proof':<6}"
+          f"{'spend':>8}{'impr':>8}{'freq':>6}{'CPM':>7}{'CTR%':>7}{'leads':>6}{'CVR%':>7}")
+    for p in sorted(per, key=lambda x: -x["spend"]):
+        d = p["design"]
+        print(f"  {p['ad_id'][:18]:<20}{(p['magnet'] or '—')[:14]:<16}"
+              f"{str(d.get('hook_type') or '—')[:10]:<12}"
+              f"{('yes' if d.get('has_proof') else 'no'):<6}"
+              f"{p['spend']:>8.2f}{int(p['impr']):>8}{p['freq']:>6.1f}{p['cpm']:>7.2f}"
+              f"{p['ctr']:>7.2f}{int(p['leads']):>6}{p['cvr']:>7.1f}")
+
+    fields = _LEVERS if args.leaderboard else ([args.by] if args.by else [])
+    for f in fields:
+        rows = _rollup(per, f, args.min_impr)
+        if not rows:
+            continue
+        print(f"\nBy design.{f}  (best first; rates are normalized; min_impr={args.min_impr}):")
+        print(f"  {f:<20}{'ads':>5}{'impr':>9}{'freq':>6}{'CPM':>7}{'CTR%':>7}{'CVR%':>7}{'/lead':>9}")
+        for g in rows:
+            flags = ""
+            if g["impr"] < 500:
+                flags += "  ⚠low-n"
+            if g["freq"] >= 3.0:
+                flags += "  ⚠fatigue"          # high frequency depresses CTR — not a design loss
+            cpl = g["cpl"] if g["cpl"] is not None else 0
+            print(f"  {g['value'][:18]:<20}{g['n']:>5}{int(g['impr']):>9}{g['freq']:>6.1f}"
+                  f"{g['cpm']:>7.2f}{g['ctr']:>7.2f}{g['cvr']:>7.1f}{cpl:>9.2f}{flags}")
+
+    if args.leaderboard and live:
+        print("\n⚠ Rates already normalize budget & duration — don't divide by days/budget again.")
+        print("  Compare like-for-like: watch ⚠fatigue (high frequency deflates CTR) and CPM gaps")
+        print("  (budget/audience differences), treat a lever as a winner only above min_impr, and")
+        print("  keep varying ONE lever per new ad.")
+    return 0
 
 
 def main(argv=None) -> int:
@@ -156,7 +277,17 @@ def main(argv=None) -> int:
     sub.add_parser("preflight", help="check every gate before `draft --go`").set_defaults(func=cmd_preflight)
     pi = sub.add_parser("insights"); pi.add_argument("--since"); pi.set_defaults(func=cmd_insights)
     pr = sub.add_parser("reconcile"); pr.add_argument("--since"); pr.set_defaults(func=cmd_reconcile)
+    pg = sub.add_parser("design", help="join performance ↔ ad design genome (what drives engagement)")
+    pg.add_argument("--since")
+    pg.add_argument("--by", help="roll up by one design field, e.g. hook_type | accent | has_proof | theme")
+    pg.add_argument("--leaderboard", action="store_true", help="rank every design lever, best first")
+    pg.add_argument("--json", action="store_true", help="machine-readable (feed the next ad's design)")
+    pg.add_argument("--min-impr", type=float, default=0.0, dest="min_impr",
+                    help="ignore ads below this impression count in rollups (cut noise)")
+    pg.set_defaults(func=cmd_design)
     pd = sub.add_parser("draft", help="create the feature A/B as PAUSED drafts")
+    pd.add_argument("--campaign", help="a <date>-<short-name> dir under output/ads/ "
+                    "(its briefing/ + market-screening/ subfolders become the ad sets)")
     pd.add_argument("--budget", type=float, default=70.0, help="DKK/day per ad set (default 70)")
     pd.add_argument("--go", action="store_true", help="actually create (default is dry-run)")
     pd.set_defaults(func=cmd_draft)

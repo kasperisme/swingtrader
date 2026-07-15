@@ -172,3 +172,5 @@ news_impact/cache/*
 .claude/worktrees/
 
 content/
+
+.DS_Store

@@ -8,6 +8,7 @@ import { Label } from "@/components/ui/label";
 import { WatchlistPicker } from "./watchlist-picker";
 import { captureAttribution, getAttribution } from "@/lib/attribution";
 import { trackLead } from "@/lib/pixels";
+import { track } from "@/lib/analytics/events";
 
 const ERROR_COPY: Record<string, string> = {
   invalid_email: "That email doesn't look right. Check it and try again.",
@@ -38,13 +39,23 @@ export function SubscribeForm({
   const [status, setStatus] = useState<Status>({ kind: "idle" });
   const [isPending, startTransition] = useTransition();
 
-  useEffect(() => captureAttribution(), []); // first-touch, from the ad URL
+  useEffect(() => {
+    captureAttribution(); // first-touch, from the ad URL
+    track("lead_form_viewed", {
+      magnet: "news_briefing",
+      utm_content: getAttribution().utm_content,
+      preset: initialTickers.length > 0 || initialTags.length > 0,
+    });
+  }, [initialTickers.length, initialTags.length]);
 
   const submit = (e: React.FormEvent) => {
     e.preventDefault();
     setStatus({ kind: "idle" });
+    const utm_content = getAttribution().utm_content;
+    track("lead_form_submitted", { magnet: "news_briefing", utm_content });
     if (tickers.length === 0 && tags.length === 0) {
       setStatus({ kind: "error", message: ERROR_COPY.empty_watchlist });
+      track("lead_form_error", { magnet: "news_briefing", reason: "empty_watchlist" });
       return;
     }
     startTransition(async () => {
@@ -66,6 +77,7 @@ export function SubscribeForm({
         };
         if (data.success) {
           trackLead({ content_name: "news_briefing" });
+          track("lead_subscribed", { magnet: "news_briefing", utm_content });
           setStatus({ kind: "success" });
           return;
         }
@@ -73,8 +85,10 @@ export function SubscribeForm({
           kind: "error",
           message: ERROR_COPY[data.error ?? "network"] ?? ERROR_COPY.network,
         });
+        track("lead_form_error", { magnet: "news_briefing", reason: data.error ?? "network" });
       } catch {
         setStatus({ kind: "error", message: ERROR_COPY.network });
+        track("lead_form_error", { magnet: "news_briefing", reason: "network" });
       }
     });
   };

@@ -18,9 +18,18 @@ cd code/analytics
 .venv/bin/python -m services.meta_ads.cli draft --go             # create the PAUSED drafts
 .venv/bin/python -m services.meta_ads.cli insights [--since YYYY-MM-DD]
 .venv/bin/python -m services.meta_ads.cli reconcile [--since YYYY-MM-DD]
+.venv/bin/python -m services.meta_ads.cli design [--by hook_type]
 ```
 
 - **verify** — confirms the token reaches the ad account (name, status, currency).
+- **design** — joins per-ad performance to each ad's **design genome** (via `ad_id` in the
+  `launch_manifest.json`) → *which creative choices drive engagement*. `--by <field>` rolls up
+  one lever; `--leaderboard` ranks every lever best-first (low-sample rows flagged); `--json`
+  emits a machine-readable rollup that `nis-ad-image` Step 0 reads to bias the next ad;
+  `--min-impr N` cuts noise. Comparisons use **normalized rates** (CTR, CPM, CVR, CPL) — already
+  per-impression/per-spend, so budget & days-active don't need dividing out — with `frequency`
+  carried as a fatigue covariate (`⚠fatigue` flag) and CPM as an audience-cost signal. Works
+  before delivery too. This is the feedback half — performance → next ad's design.
 - **preflight** — one-pass green/red check of every gate that blocks `draft --go`:
   token scopes, ad-account status, Page assignment (CREATE_CONTENT), IG advertisability.
   Run it before the first launch; it maps each failure to its fix.
@@ -34,24 +43,43 @@ cd code/analytics
 ## Create the A/B as PAUSED drafts (write)
 
 ```bash
-.venv/bin/python -m services.meta_ads.cli draft            # dry-run: validate + print plan
-.venv/bin/python -m services.meta_ads.cli draft --go       # create the PAUSED drafts
+# a dated campaign folder (its briefing/ + market-screening/ subfolders = the ad sets):
+.venv/bin/python -m services.meta_ads.cli draft --campaign 2026-07-14-geopolitics        # dry-run
+.venv/bin/python -m services.meta_ads.cli draft --campaign 2026-07-14-geopolitics --go   # create
+# or the legacy flat product A/B (campaigns.FEATURES):
+.venv/bin/python -m services.meta_ads.cli draft [--go]
 ```
 
-Builds **1 campaign → 1 ad set per feature → 1 carousel ad per feature** from the ad
-specs + their 1:1 slides (`output/ads/<slug>/1x1/`). Everything is created **PAUSED** —
-it appears in Ads Manager, fully reviewable, and **cannot spend until you set it Active**.
-Objective is Traffic (LINK_CLICKS), targeting DK 18–65, `--budget` DKK/day per ad set
-(default 70). Needs `ads_management` scope + a Page.
+Content is saved as `output/ads/<date>-<short-name>/<lead-magnet>/` (`<lead-magnet>` ∈
+`briefing` | `market-screening`), each holding an `ad.json` + `1x1/ad.png` (from
+`nis-ad-image`). `--campaign` makes that folder **1 campaign → 1 ad set per lead-magnet →
+1 single-image ad per magnet**. Everything is created **PAUSED** — reviewable in Ads Manager,
+**cannot spend until you set it Active**. Default objective **`OUTCOME_LEADS`**, ad sets
+optimize the **LEAD pixel conversion** (sign-ups, not just clicks), audience **US/GB/CA/AU
+18–65 broad**, `--budget` DKK/day per ad set (default 70). All audience/objective knobs are
+env-overridable (see below). Needs `ads_management` scope, a Page, and `META_PIXEL_ID` for
+lead optimization.
+
+On `--go` it also writes `output/ads/<campaign>/launch_manifest.json` — one row per ad joining
+the Meta `ad_id` to that ad's `design.json` (the creative genome from `nis-ad-image`). Join it
+to `insights` (per-ad, keyed by `ad_id`) to see **which design choices drive engagement**.
 
 ## Setup (`code/analytics/.env`)
 ```
 META_ADS_TOKEN=<System User token — ads_read to read, ads_management to create drafts>
 META_AD_ACCOUNT_ID=2046577425934056        # act_ prefix optional
 META_PAGE_ID=<Facebook Page id ads run from> # required for `draft --go`
+META_PIXEL_ID=891355590685260              # required for lead optimization (the default)
 META_IG_ACCOUNT_ID=                          # optional — Instagram placements
 META_SPECIAL_AD_CATEGORY=                    # optional — e.g. FINANCIAL_PRODUCTS_SERVICES if Meta requires it
 META_API_VERSION=v21.0                        # optional; bump if a call reports a version error
+# audience + objective defaults (override to change targeting):
+META_TARGET_COUNTRIES=US,GB,CA,AU            # default geo
+META_AGE_MIN=18
+META_AGE_MAX=65
+META_OBJECTIVE=OUTCOME_LEADS                 # optimize for sign-ups, not just clicks
+META_OPTIMIZATION_GOAL=OFFSITE_CONVERSIONS   # LEAD conversions via the pixel; LINK_CLICKS for a cold-start
+META_CONVERSION_EVENT=LEAD
 ```
 
 The token is a System User token (Business Settings → System Users). For measurement

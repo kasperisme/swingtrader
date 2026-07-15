@@ -5,6 +5,7 @@ import { Suspense } from "react";
 import Script from "next/script";
 import "./globals.css";
 import { Analytics } from "@vercel/analytics/next";
+import { SpeedInsights } from "@vercel/speed-insights/next";
 import {
   SiteFooter,
   SITE_X_PROFILE_URL,
@@ -97,6 +98,7 @@ export default function RootLayout({
       </head>
       <body className={`${jakartaSans.className} antialiased`}>
         <Analytics />
+        <SpeedInsights />
         <AnalyticsProvider />
         <ThemeProvider
           attribute="class"

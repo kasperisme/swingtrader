@@ -34,13 +34,58 @@ one-line subhead                             ← the stakes / the specifics
 newsimpactscreener.com · disclaimer          ← footer
 ```
 
+## Where content is saved (the convention)
+
+All ad content lives under a dated campaign folder, one subfolder per lead magnet:
+
+```
+output/ads/<date>-<short-name>/<lead-magnet>/     ← <lead-magnet> ∈ { briefing, market-screening }
+    ad.json
+    ad_copy.txt
+    4x5/ad.png   9x16/ad.png   1x1/ad.png          ← the formats
+```
+
+e.g. `output/ads/2026-07-14-geopolitics/briefing/` and
+`output/ads/2026-07-14-geopolitics/market-screening/`. The `<date>` is the run date
+(`YYYY-MM-DD`); `<short-name>` is the trend/topic or feature slug. `nis-ad-launch` treats
+the `<date>-<short-name>` folder as one campaign and each lead-magnet subfolder as an ad set.
+
+## Step 0 — Learn from past performance (close the loop)
+
+Before authoring, pull what previous ads taught us and let it bias this ad's design:
+
+```bash
+cd code/analytics
+.venv/bin/python -m services.meta_ads.cli design --leaderboard --min-impr 500   # human read
+.venv/bin/python -m services.meta_ads.cli design --json --min-impr 500          # machine-readable
+```
+
+This joins each past ad's Meta performance to its `design` genome (via `ad_id` in
+`launch_manifest.json`) and ranks every lever best-first on the **normalized rates** — so you
+can see which `hook_type` / `accent` / `has_proof` / `theme` / `bullet_count` actually won.
+**Bias the new spec toward the winners**, but:
+
+- **Compare on rates, not totals.** CTR, CPM, CVR, CPL are already per-impression / per-spend,
+  so an ad that ran longer or on a bigger budget is directly comparable — **don't divide by
+  days-active or budget again** (double-normalizing). Raw clicks/leads totals are not comparable.
+- **Respect sample size.** Rows flagged `⚠low-n` (or below `--min-impr`) are noise — don't chase
+  them. Early on there won't be a verdict; that's fine.
+- **Mind the confounds (shown, not divided out).** `⚠fatigue` = high frequency deflating CTR (a
+  long-run artefact, not a weak creative); a big `CPM` gap = budget/audience differences. Prefer
+  comparing ads that ran concurrently at equal budget — which the isolated-budget A/B already does.
+- **Vary ONE lever at a time.** Hold the proven levers, change a single new hypothesis, bump
+  `design.variant` — so the next run can attribute the lift. (Explore vs. exploit: lean on
+  winners, keep one deliberate experiment.)
+- If there's no history yet, skip this and author from first principles (Step 1).
+
 ## Step 1 — Author the spec (you, Claude)
 
-Write `output/ads/<slug>/ad.json`:
+Write `output/ads/<date>-<short-name>/<lead-magnet>/ad.json` (the renderer writes the
+formats next to the spec). For example `output/ads/2026-07-14-geopolitics/briefing/ad.json`:
 
 ```json
 {
-  "slug": "geopolitics-briefing-v1",
+  "slug": "2026-07-14-geopolitics/briefing",
   "theme": "dark",                 // dark (default, high-punch) | light (site theme)
   "accent": "amber",               // amber (default) | pos (green)
   "brand": "newsimpactscreener.com",
@@ -62,6 +107,15 @@ Write `output/ads/<slug>/ad.json`:
     "description": "Free daily briefing. No account.",
     "cta_label": "Sign Up",
     "destination": "https://www.newsimpactscreener.com/briefings?tags=…&tickers=…"
+  },
+  "design": {                        // creative-genome metadata — for engagement analysis
+    "hook_type": "question",         // question|number_drop|contradiction|fomo|confession|how_to|authority
+    "angle": "fear_of_missing_news", // the persuasion angle in a word or two (snake_case)
+    "primary_emotion": "urgency",    // urgency|fear|greed|curiosity|trust
+    "visual_style": "data",          // data|editorial|photo
+    "persona": "busy_swing_trader",  // who it targets
+    "offer": "free_daily_briefing",  // the promise
+    "variant": "v1"                  // label to tell A/B variants of the same concept apart
   }
 }
 ```
@@ -82,18 +136,38 @@ scroll-stopper.
 ```bash
 cd code/analytics
 .venv/bin/python ../../.claude/skills/nis-ad-image/scripts/build_ad_image.py \
-    --spec output/ads/<slug>/ad.json          # all ratios; add --ratios 4x5 to limit
+    --spec output/ads/2026-07-14-geopolitics/briefing/ad.json   # all ratios; add --ratios 4x5 to limit
 ```
 
-Outputs under `output/ads/<slug>/`:
+Outputs next to the spec (`output/ads/<date>-<short-name>/<lead-magnet>/`):
 - `4x5/ad.png` — 1080×1350 (Meta feed)
 - `9x16/ad.png` — 1080×1920 (TikTok / Reels / Stories)
 - `1x1/ad.png` — 1080×1080 (square; the one `nis-ad-launch` uploads)
 - `ad_copy.txt` — primary text · headline · description · CTA (paste into Ads Manager)
+- `design.json` — the resolved creative genome (authored `design` + auto-derived facts)
 
 Review every render before shipping. `theme: dark` is the default for stopping power;
 `background_image` swaps the generated chart motif for a real photo (cover-fit + readability
 scrim), if you have one that fits.
+
+## Design metadata — what drives engagement
+
+Every render writes **`design.json`**: your authored `design` block merged with the factual
+attributes the renderer derives (`theme`, `accent`, `background_type`, `headline_words`,
+`bullet_count`, `has_proof`/`proof_type`, `cta_words`, `primary_text_chars`, `formats`) plus
+join keys (`slug`, `lead_magnet`, `campaign`, `utm_content`, `utm_campaign`, `rendered_at`).
+The derived facts are objective and consistent across every ad, so they aggregate cleanly.
+
+When you launch, `nis-ad-launch` writes **`output/ads/<campaign>/launch_manifest.json`** —
+one row per ad joining the Meta **`ad_id`** to that ad's `design`. Later, join `meta_ads
+insights` (per-ad CTR/CPC/spend, keyed by `ad_id`) to the manifest to answer *which design
+choices drive engagement* — dark vs light, proof vs no proof, `hook_type=question` vs
+`number_drop`, 1 bullet vs 3, short vs long primary text.
+
+**Author the `design` block with a controlled vocabulary** (snake_case, reuse values across
+ads — free text won't aggregate). The point is to vary *one lever at a time* across variants
+(`variant: "v1"`, `"v2"`, …) so the analysis can attribute the lift. Only describe what's
+actually in the creative — the derived facts are cross-checked against it.
 
 ## Trend-driven lead-magnet ads (the main use)
 
@@ -116,11 +190,13 @@ reconcile` attributes real sign-ups back to the trend + feature.
 ```bash
 cd code/analytics
 .venv/bin/python -m services.meta_ads.cli preflight
-.venv/bin/python -m services.meta_ads.cli draft --go     # creates a single-image PAUSED draft
+.venv/bin/python -m services.meta_ads.cli draft --campaign 2026-07-14-geopolitics --go
 ```
 
-`nis-ad-launch` auto-detects `1x1/ad.png` and builds a **single-image** creative (not a
-carousel); everything is PAUSED until you flip it Active. See the `nis-ad-launch` skill.
+`nis-ad-launch` treats the `<date>-<short-name>` folder as one campaign, turns each
+lead-magnet subfolder (`briefing`, `market-screening`) into an ad set, and builds a
+**single-image** creative from its `1x1/ad.png` — everything PAUSED until you flip it
+Active. See the `nis-ad-launch` skill.
 
 ## Notes
 
