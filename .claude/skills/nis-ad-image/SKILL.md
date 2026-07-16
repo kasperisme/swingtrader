@@ -169,6 +169,31 @@ ads — free text won't aggregate). The point is to vary *one lever at a time* a
 (`variant: "v1"`, `"v2"`, …) so the analysis can attribute the lift. Only describe what's
 actually in the creative — the derived facts are cross-checked against it.
 
+## Reel variant (video) — same ad, animated
+
+Meta favours Reels/video, and motion usually lifts CTR. `build_ad_reel.py` renders a
+~15s vertical (9:16) reel from the **same `ad.json`** — the text elements transition in
+one at a time (fade + slide-up), paced across the clip, finishing on the CTA. It reuses
+the exact static layout, so the reel is visually identical to the image, just animated.
+
+```bash
+cd code/analytics
+.venv/bin/python ../../.claude/skills/nis-ad-image/scripts/build_ad_reel.py \
+    --spec output/ads/<date>-<short-name>/<lead-magnet>/ad.json --seconds 15 --fps 30 [--music track.mp3]
+```
+
+Outputs next to the spec: `9x16/ad_reel.mp4`, `9x16/ad_reel_poster.png` (thumbnail), and a
+few `ad_reel_preview_*.png` stills for quick review (deletable). Tune with `--seconds`
+(shorter = punchier) and `--fps`.
+
+- **Music — do NOT bundle copyrighted audio.** Leave it silent and add **Meta's licensed
+  music** in the Reels ad editor (rights-cleared, and what Meta's own tip recommends), or
+  pass `--music` with a royalty-free file you own.
+- **Launching a video ad** needs a video-creative path in `nis-ad-launch` (upload to
+  `/advideos` + a `video_data` `object_story_spec` with a thumbnail) — not yet wired; the
+  current launch handles single-image link ads. For now upload the reel by hand, or ask to
+  have the video path added.
+
 ## Trend-driven lead-magnet ads (the main use)
 
 Built from a **`nis-trend-radar`** brief, this becomes a "would-have-helped" lead-magnet ad —

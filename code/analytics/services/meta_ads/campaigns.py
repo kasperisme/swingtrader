@@ -85,11 +85,6 @@ def create_creative(name, page_id, ig_id, dest, message, cta_type, image_hashes,
             "message": message,
             "call_to_action": {"type": cta_type, "value": {"link": dest}},
         }
-        # UTM lives in url_tags (Meta's canonical tracking field) — it appends them
-        # to every click (so the landing page + Supabase still capture utm_content)
-        # AND exposes them on the creative so insights/reconcile group by feature.
-        if url_tags:
-            link_data["url_tags"] = url_tags
         if single:                                   # single-image link ad
             link_data["image_hash"] = image_hashes[0]
             if headline:
@@ -107,9 +102,17 @@ def create_creative(name, page_id, ig_id, dest, message, cta_type, image_hashes,
             s["instagram_user_id"] = ig_id
         return s
 
+    # url_tags is a TOP-LEVEL creative field (not inside object_story_spec). Meta
+    # appends it to every outbound click (so the landing page + Supabase still capture
+    # utm_content) AND exposes it on the creative so insights/reconcile group by feature.
+    def body(with_ig: bool) -> dict:
+        b = {"name": name, "object_story_spec": json.dumps(spec(with_ig))}
+        if url_tags:
+            b["url_tags"] = url_tags
+        return b
+
     try:
-        return _post(f"{client.account()}/adcreatives",
-                     {"name": name, "object_story_spec": json.dumps(spec(True))})["id"]
+        return _post(f"{client.account()}/adcreatives", body(True))["id"]
     except MetaError as e:
         # Fall back to a Page-only creative when the IG identity is rejected — either
         # a plain access error ("instagram") or the IG account's "less-personalized
@@ -120,8 +123,7 @@ def create_creative(name, page_id, ig_id, dest, message, cta_type, image_hashes,
                       or "advertiser" in msg or "3858412" in msg):
             print("    (IG identity rejected — creating Page-only; set an IG account "
                   "on the ad in Ads Manager if you want a specific handle)")
-            return _post(f"{client.account()}/adcreatives",
-                         {"name": name, "object_story_spec": json.dumps(spec(False))})["id"]
+            return _post(f"{client.account()}/adcreatives", body(False))["id"]
         raise
 
 

@@ -13,6 +13,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { trackScreeningDownload } from "@/lib/pixels";
 
 type Props = {
   href: string;
@@ -62,6 +63,14 @@ export function DeliveryPromptLink({
 
   const proceedToDownload = () => {
     setOpen(false);
+    // Fire the ad-platform "download" signal so Meta/TikTok can build audiences
+    // of downloaders and optimize toward them. Covers both CSV and JSON here —
+    // this is the single choke point every download/open flows through.
+    trackScreeningDownload({
+      content_name: screeningName,
+      format: external ? "json" : "csv",
+      source,
+    });
     if (external) {
       window.open(href, "_blank", "noopener,noreferrer");
       return;

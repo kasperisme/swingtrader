@@ -26,4 +26,34 @@ export function trackLead(params: LeadParams = {}): void {
   }
 }
 
+type ScreeningDownloadParams = {
+  content_name?: string; // screening name or slug
+  format?: "csv" | "json";
+  source?: string; // which link/surface triggered it
+};
+
+/**
+ * Someone grabbed a market screening's results (CSV download or JSON open).
+ * Meta has no standard "Download" event, so this fires a **custom** event —
+ * build a Custom Audience of downloaders (and lookalikes) from it, or promote
+ * it to a Custom Conversion to optimize delivery toward people who download.
+ * TikTok does have a standard `Download` event, so use it there.
+ */
+export function trackScreeningDownload(params: ScreeningDownloadParams = {}): void {
+  const data: Record<string, unknown> = { content_type: "market_screening" };
+  if (params.content_name) data.content_name = params.content_name;
+  if (params.format) data.content_category = params.format;
+  if (params.source) data.source = params.source;
+  try {
+    window.fbq?.("trackCustom", "DownloadScreening", data);
+  } catch {
+    /* pixel not loaded */
+  }
+  try {
+    window.ttq?.track("Download", data);
+  } catch {
+    /* pixel not loaded */
+  }
+}
+
 export {};
