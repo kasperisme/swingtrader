@@ -13,6 +13,78 @@ const APP_BASE_URL = (
   Deno.env.get("APP_BASE_URL") ?? "https://www.newsimpactscreener.com"
 ).replace(/\/$/, "");
 
+// Meta Conversions API (server-side pixel). Fires a "Subscribe" standard event
+// on a real paid subscription — the value-bearing counterpart to the browser
+// "Lead" pixel on the free lead-magnet forms. No-op until both secrets are set.
+//   META_PIXEL_ID       — same pixel id as NEXT_PUBLIC_META_PIXEL_ID
+//   META_CAPI_TOKEN     — Conversions API access token (System User, ads perms)
+//   META_GRAPH_VERSION  — optional, defaults below
+//   META_TEST_EVENT_CODE— optional, routes to the pixel's Test Events tab
+const META_PIXEL_ID = Deno.env.get("META_PIXEL_ID") ?? "";
+const META_CAPI_TOKEN = Deno.env.get("META_CAPI_TOKEN") ?? "";
+const META_GRAPH_VERSION = Deno.env.get("META_GRAPH_VERSION") ?? "v21.0";
+const META_TEST_EVENT_CODE = Deno.env.get("META_TEST_EVENT_CODE") ?? "";
+
+// SHA-256 hex — Meta requires PII (email) hashed, lowercased and trimmed.
+async function sha256Hex(input: string): Promise<string> {
+  const data = new TextEncoder().encode(input.trim().toLowerCase());
+  const digest = await crypto.subtle.digest("SHA-256", data);
+  return Array.from(new Uint8Array(digest))
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("");
+}
+
+// Best-effort Meta "Subscribe" conversion. `eventId` should be stable per
+// subscription so a future browser-side Subscribe pixel can be deduplicated
+// against this server event.
+async function sendMetaSubscribe(opts: {
+  email: string;
+  value: number | null;
+  currency: string;
+  eventId: string;
+  predictedLtv?: number | null;
+  sourceUrl?: string;
+}): Promise<void> {
+  if (!META_PIXEL_ID || !META_CAPI_TOKEN) {
+    console.warn("META_PIXEL_ID/META_CAPI_TOKEN not set — skipping Meta Subscribe");
+    return;
+  }
+  try {
+    const customData: Record<string, unknown> = { currency: opts.currency };
+    if (opts.value != null) customData.value = opts.value;
+    if (opts.predictedLtv != null) customData.predicted_ltv = opts.predictedLtv;
+
+    const body: Record<string, unknown> = {
+      data: [
+        {
+          event_name: "Subscribe",
+          event_time: Math.floor(Date.now() / 1000),
+          action_source: "website",
+          event_id: opts.eventId,
+          ...(opts.sourceUrl ? { event_source_url: opts.sourceUrl } : {}),
+          user_data: { em: [await sha256Hex(opts.email)] },
+          custom_data: customData,
+        },
+      ],
+    };
+    if (META_TEST_EVENT_CODE) body.test_event_code = META_TEST_EVENT_CODE;
+
+    const res = await fetch(
+      `https://graph.facebook.com/${META_GRAPH_VERSION}/${META_PIXEL_ID}/events?access_token=${META_CAPI_TOKEN}`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      },
+    );
+    if (!res.ok) {
+      console.error("Meta CAPI Subscribe failed:", res.status, await res.text());
+    }
+  } catch (err) {
+    console.error("Meta CAPI Subscribe error:", err);
+  }
+}
+
 // Best-effort Telegram send from the webhook (e.g. the trial-ending heads-up).
 async function sendTelegram(chatId: string, html: string): Promise<void> {
   if (!TELEGRAM_BOT_TOKEN) {
@@ -139,6 +211,25 @@ serve(async (req: Request) => {
             .from("user_subscriptions")
             .insert(row);
         }
+
+        // Meta "Subscribe" conversion. Value is the recurring plan price from
+        // the subscription item — NOT session.amount_total, which is $0 on a
+        // trial checkout. This fires once per subscription (checkout completes
+        // once), even when the subscription starts in a trial.
+        const price = sub.items.data[0]?.price as Stripe.Price | undefined;
+        const value = price?.unit_amount != null ? price.unit_amount / 100 : null;
+        const currency = (price?.currency ?? "usd").toUpperCase();
+        // Rough 1-year LTV floor: annualize monthly plans; annual is already a year.
+        const predictedLtv =
+          value == null ? null : billingInterval === "annual" ? value : value * 12;
+        await sendMetaSubscribe({
+          email,
+          value,
+          currency,
+          predictedLtv,
+          eventId: subscriptionId,
+          sourceUrl: `${APP_BASE_URL}/pricing`,
+        });
 
         break;
       }
