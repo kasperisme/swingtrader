@@ -76,7 +76,7 @@ def _delete(node_id: str) -> None:
 
 
 def create_creative(name, page_id, ig_id, dest, message, cta_type, image_hashes,
-                    headline=None, description=None) -> str:
+                    headline=None, description=None, url_tags=None) -> str:
     single = len(image_hashes) == 1
 
     def spec(with_ig: bool) -> dict:
@@ -85,6 +85,11 @@ def create_creative(name, page_id, ig_id, dest, message, cta_type, image_hashes,
             "message": message,
             "call_to_action": {"type": cta_type, "value": {"link": dest}},
         }
+        # UTM lives in url_tags (Meta's canonical tracking field) — it appends them
+        # to every click (so the landing page + Supabase still capture utm_content)
+        # AND exposes them on the creative so insights/reconcile group by feature.
+        if url_tags:
+            link_data["url_tags"] = url_tags
         if single:                                   # single-image link ad
             link_data["image_hash"] = image_hashes[0]
             if headline:
@@ -358,9 +363,11 @@ def build_drafts(slugs: list[str], budget_dkk: float, dry_run: bool,
             ad = spec["ad"]
             hashes = [upload_image(c) for c in cards]
             cta = CTA_MAP.get((ad.get("cta_label") or "learn more").lower(), "LEARN_MORE")
-            creative = create_creative(f"{label}-creative", page, ig, ad["destination"],
+            clean_link, url_tags = _split_utm(ad["destination"])
+            creative = create_creative(f"{label}-creative", page, ig, clean_link,
                                        ad.get("primary_text", ""), cta, hashes,
-                                       headline=ad.get("headline"), description=ad.get("description"))
+                                       headline=ad.get("headline"), description=ad.get("description"),
+                                       url_tags=url_tags)
             adset = create_adset(label, campaign_id, budget_minor, targeting, dsa_eff,
                                  opt_goal, promoted_object)
             ad_id = create_ad(f"{label}-ad", adset, creative)
