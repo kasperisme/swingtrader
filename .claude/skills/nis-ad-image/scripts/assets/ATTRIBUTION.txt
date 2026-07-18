@@ -1,0 +1,9 @@
+Icon assets bundled for the reel background scenes:
+
+• cargo-ship.png / cargo-ship.svg
+  "Cargo ship" by Delapouite — Game Icons (https://game-icons.net)
+  Licensed CC BY 3.0 (https://creativecommons.org/licenses/by/3.0/)
+
+• fa-solid-900.ttf
+  Font Awesome 6 Free (Solid) — https://fontawesome.com
+  Fonts licensed under SIL OFL 1.1

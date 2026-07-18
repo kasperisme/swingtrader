@@ -13,6 +13,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import hmac
+import html as _stdhtml
 import json
 import logging
 import os
@@ -37,6 +38,66 @@ def _app_url() -> str:
 def app_url() -> str:
     """Public accessor for the canonical site base URL (no trailing slash)."""
     return _app_url()
+
+
+# --- promo blocks (cross-sell / soft upsell) -------------------------------
+# Reusable, self-contained HTML fragments for the dark-theme transactional
+# emails. They carry NO copy of their own so the caller controls the message;
+# only the styling is shared so briefing + screening emails stay consistent.
+# Subscribers are anonymous (no plan tier), so upsell copy must stay generic.
+
+_PROMO_ACCENT = "#f5a623"
+
+
+def _hesc(s: Any) -> str:
+    """HTML-escape text and URLs (quotes too) for safe interpolation."""
+    return _stdhtml.escape(str(s), quote=True)
+
+
+_SANS = "-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif"
+
+
+def cta_primary(label: str, url: str) -> str:
+    """The one dominant action — a solid amber button. Pass plain text."""
+    return (
+        f'<a href="{_hesc(url)}" style="display:inline-block;font-family:{_SANS};'
+        f'font-size:15px;font-weight:700;color:#0b0f17;background:{_PROMO_ACCENT};'
+        'padding:13px 22px;border-radius:8px;text-decoration:none;">'
+        f'{_hesc(label)} &rarr;</a>'
+    )
+
+
+def cta_secondary(label: str, url: str) -> str:
+    """Second-tier action — an outlined (ghost) amber button, ranked below primary."""
+    return (
+        f'<a href="{_hesc(url)}" style="display:inline-block;font-family:{_SANS};'
+        f'font-size:14px;font-weight:600;color:{_PROMO_ACCENT};background:transparent;'
+        'padding:11px 20px;border:1px solid #6b5620;border-radius:8px;'
+        f'text-decoration:none;">{_hesc(label)} &rarr;</a>'
+    )
+
+
+def cta_tertiary(label: str, url: str) -> str:
+    """Lowest-tier maintenance action — a quiet muted text link."""
+    return (
+        f'<a href="{_hesc(url)}" style="font-family:{_SANS};font-size:13px;'
+        f'color:#6f7a90;text-decoration:underline;">{_hesc(label)}</a>'
+    )
+
+
+def cta_stack(*, primary: tuple[str, str], secondary: tuple[str, str],
+              tertiary: tuple[str, str]) -> str:
+    """Stack the three CTA tiers vertically: solid → outlined → muted link.
+
+    Each arg is a (label, url) pair. Establishes one clear reading order —
+    cross-sell first, upsell second, maintenance last.
+    """
+    return (
+        f'<div style="margin:22px 0 0 0;">{cta_primary(*primary)}</div>'
+        f'<div style="margin:12px 0 0 0;">{cta_secondary(*secondary)}</div>'
+        '<div style="margin:16px 0 0 0;">'
+        f'{cta_tertiary(*tertiary)}</div>'
+    )
 
 
 def _b64url_nopad(raw: bytes) -> str:

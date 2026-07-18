@@ -146,19 +146,28 @@ Choose the angle for the ad:
   runner-ups `iran`, `oil`, `middle east`), the story is real and safe to lead with.
 
 The winning topic's `tickers_in_play` are the names moving *on that story* — computed
-**within the topic's own articles**, not market-wide:
-- `topic_mentions` — how often the ticker appears across the topic's articles (its
-  prominence *in this story*), from `news_article_tickers`.
+**within the topic's own articles** and ranked by **over-index**, not raw volume, so the
+ad names the tickers this trend is *unusually* about rather than the mega-caps mentioned
+everywhere every week:
+- `over_index` — **the ranking metric.** How over-represented the ticker is in the topic's
+  articles vs its baseline share of *all* news this week (`topic_share ÷ week_share`). `>1×`
+  means the name is disproportionately about this trend; a mega-cap mentioned everywhere
+  (huge baseline) sinks toward `1×`. E.g. on an inflation week `AAAU` (a gold ETF) over-indexes
+  `24.7×` while `NVDA` drops off the head entirely. A minimum in-topic mention floor
+  (`TICKER_MENTION_FLOOR`) keeps 1–2 mention obscure names out of the top.
+- `topic_mentions` — how often the ticker appears across the topic's articles (from
+  `news_article_tickers`) — the numerator, and the floor gate.
 - `topic_impact` — the mean per-article sentiment on that ticker **in these same
   articles** (from `ticker_sentiment_heads_v`) — i.e. how *this story* is hitting the
   name (− = the trend is a headwind, + = a tailwind). `—` when it's mentioned but not
   sentiment-scored in-topic.
-- `week_mentions` / `week_sentiment` — the ticker's overall weekly figures, for contrast
-  (is the topic sentiment better or worse than how the name reads market-wide?).
+- `week_mentions` — the ticker's total weekly mentions across all news (the over-index
+  denominator), shown for contrast.
 
-So for `#geopolitics` you get the names the story is actually moving and its direction on
-each (e.g. `COIN −0.30` as risk-off hits crypto, energy names catching a bid) — the exact
-tickers the ad should name, with the right fear-vs-opportunity framing.
+So for `#inflation` you get the names the story is *specifically* moving — gold/inflation
+hedges (`GLD`, `AAAU`), rate-sensitive brokers (`SCHW`, `HOOD`) and autos (`GM`, `TSLA`) —
+not the ubiquitous `NVDA`/`AAPL`; the exact tickers the ad should name, with the right
+fear-vs-opportunity framing.
 
 ---
 
@@ -183,6 +192,11 @@ Hand the chosen angle to **`nis-ad-image`** (single image — the clean default)
   - Ad B: `lead_magnets.market_screening.pitch` (the matched screen surfaces the names).
 - **`proof`** ← a real move tied to the trend: for Ad A, a `most_affected` name (e.g. `COIN`);
   for Ad B, a name from the matched screen / `tickers_in_play`. Drop it rather than fake it.
+- **`background.tickers`** (reel only) ← the topic's `tickers_in_play` / `most_affected` symbols
+  — they scroll as the reel's ticker-tape, linking the animated backdrop to the topic.
+- **`background.scene`** (reel only) ← pick the topic animation that fits the story (e.g.
+  `tanker` for geopolitics/oil, `pulse` for AI/semis) — the one literal, topic-specific visual;
+  see the scene table in `nis-ad-image`. Add a new scene if none fits the week's trend.
 - **`cta_label` + `ad.destination`** ← **`lead_magnets.<magnet>.url` verbatim** (the preset
   deep-link — the real click target `nis-ad-launch` sends to Meta). `brand` stays the short
   wordmark; the long UTM'd URL never shows on the image.

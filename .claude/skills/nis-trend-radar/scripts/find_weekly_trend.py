@@ -14,7 +14,10 @@ current / previous / delta / spark, ranks tags + tickers three ways
 (mentions · growth · new), then picks the single dominant TOPIC by a heat score
 that rewards both volume and acceleration. For that topic it pulls evidence
 headlines via the `search_news_by_tags` RPC (the /articles search) and links the
-tickers in play (from `news_article_tickers`), attaching their weekly sentiment.
+tickers in play (from `news_article_tickers`) — ranked by **over-index** (how
+concentrated the name is in this trend vs its baseline share of all news this week,
+so gold on an inflation week beats a mega-cap mentioned everywhere), with the
+topic's sentiment on each.
 
 Output → output/trends/<end-date>/trend_brief.{json,md}
 
@@ -62,6 +65,9 @@ OUT_ROOT = ANALYTICS_DIR / "output" / "trends"
 MIN_CURRENT_FOR_GROWTH = 5
 MIN_CURRENT_FOR_NEW = 3
 MIN_CURRENT_FOR_TOPIC = 8          # the winning topic must have real volume
+# A ticker must clear this many in-topic mentions before its over-index counts —
+# otherwise a 1–2 mention obscure name (over-indexed by accident) would top the board.
+TICKER_MENTION_FLOOR = 3
 PAGE_SIZE = 1000
 MAX_PAGES = 60
 
@@ -312,18 +318,38 @@ def topic_evidence(tag: str, window: int, match_count: int = 24, pool: int = 200
     why_points.sort(key=lambda p: -abs(p["impact"]))
     why_points = [{"text": p["text"], "impact": round(p["impact"], 2)} for p in why_points[:10]]
 
-    topic_tickers = _topic_tickers(article_ids)
+    topic_tickers = _topic_tickers(article_ids, window)
 
     return {"headlines": headlines, "article_ids": article_ids,
             "topic_tickers": topic_tickers, "why_points": why_points}
 
 
-def _topic_tickers(article_ids: list, limit: int = 15) -> list[dict]:
-    """The tickers most mentioned *within the topic's articles*, and the topic's
-    sentiment impact on each. Mention count comes from `news_article_tickers` (the
-    true mention frequency); the impact is the mean per-article `sentiment_score`
-    from `ticker_sentiment_heads_v` over the SAME articles — i.e. how this specific
-    story is hitting each name, not its overall weekly sentiment."""
+def _week_ticker_mentions(window: int) -> dict[str, int]:
+    """Each ticker's TOTAL mentions across ALL news in the current window (its
+    market-wide baseline), from `news_trends_ticker_daily_v`. This is the
+    denominator for a ticker's topic *over-index* — a mega-cap mentioned
+    everywhere has a huge baseline, so being in the topic barely moves its index."""
+    since = span_days(window)[0]
+    rows = _fetch_all("news_trends_ticker_daily_v", "ticker, mention_count",
+                      since, ["bucket_day", "ticker"])
+    out: dict[str, int] = defaultdict(int)
+    for r in rows:
+        t = str(r.get("ticker") or "").upper().strip()
+        if t and not t.isdigit():
+            out[t] += int(r.get("mention_count") or 0)
+    return out
+
+
+def _topic_tickers(article_ids: list, window: int, limit: int = 15) -> list[dict]:
+    """The tickers *most tied to this trend*, and the topic's sentiment impact on
+    each. Ranked by **over-index**, not raw volume: how over-represented a name is
+    in the topic's articles vs its baseline share of all news this week
+    (`over_index = topic_share ÷ week_share`). This surfaces the names the story is
+    unusually about (e.g. gold/energy on an inflation trend) instead of the mega-caps
+    that are mentioned everywhere regardless of topic. Mention count is from
+    `news_article_tickers`; the baseline from `news_trends_ticker_daily_v`; the impact
+    is the mean per-article `sentiment_score` from `ticker_sentiment_heads_v` over the
+    SAME articles (how this story hits the name, not its overall weekly sentiment)."""
     if not article_ids:
         return []
     client = get_supabase_client()
@@ -359,12 +385,32 @@ def _topic_tickers(article_ids: list, limit: int = 15) -> list[dict]:
     except Exception as e:                        # noqa: BLE001
         print(f"  (topic sentiment failed: {e})")
 
-    out = []
-    for t, n in sorted(freq.items(), key=lambda kv: -kv[1])[:limit]:
+    # Baseline share of all news this week → each ticker's topic over-index.
+    week_map = _week_ticker_mentions(window)
+    week_total = sum(week_map.values()) or 1
+    topic_total = sum(freq.values()) or 1
+
+    rows = []
+    for t, n in freq.items():
+        # guard the source mismatch (link-count vs view mention_count): a name can't
+        # be in more topic articles than it has all-week mentions, so floor base at n.
+        base = max(week_map.get(t, 0), n)
+        over = round((n / topic_total) / (base / week_total), 2) if base else None
         impact = round(imp_sum[t] / imp_n[t], 3) if imp_n.get(t) else None
-        out.append({"ticker": t, "topic_mentions": n, "topic_impact": impact,
-                    "scored_articles": imp_n.get(t, 0)})
-    return out
+        rows.append({"ticker": t, "topic_mentions": n,
+                     "week_mentions": week_map.get(t) or None, "over_index": over,
+                     "topic_impact": impact, "scored_articles": imp_n.get(t, 0)})
+
+    # Rank by over-index (unusual concentration in THIS trend), floored by a minimum
+    # mention count so a 1–2 mention obscure name can't top the board; names below the
+    # floor fall to the tail, ordered by raw mentions, so the list stays complete.
+    strong = [d for d in rows
+              if d["topic_mentions"] >= TICKER_MENTION_FLOOR and d["over_index"] is not None]
+    strong.sort(key=lambda d: (-d["over_index"], -d["topic_mentions"]))
+    strong_ids = {d["ticker"] for d in strong}
+    weak = sorted((d for d in rows if d["ticker"] not in strong_ids),
+                  key=lambda d: -d["topic_mentions"])
+    return (strong + weak)[:limit]
 
 
 def co_tags(article_ids: list, topic_key: str, limit: int = 6) -> list[str]:
@@ -768,13 +814,17 @@ def _render_md(b: dict) -> str:
             L.append(f"- {p['text']}  _(impact {p['impact']:+.2f})_")
     else:
         L.append("- (no scored key points found)")
-    L += ["", f"### Tickers most mentioned in #{t['label']} (topic impact)"]
+    L += ["", f"### Tickers unusually tied to #{t['label']} (over-index vs the whole week)"]
     if t["tickers_in_play"]:
         for tk in t["tickers_in_play"]:
             imp = tk.get("topic_impact")
             imp_txt = "—" if imp is None else f"{imp:+.2f}"
-            L.append(f"- **{tk['ticker']}** · {tk['topic_mentions']} mentions in-topic · "
-                     f"topic impact {imp_txt}")
+            over = tk.get("over_index")
+            over_txt = "—" if over is None else f"{over:.1f}×"
+            wk = tk.get("week_mentions")
+            wk_txt = "" if not wk else f"/{wk} all week"
+            L.append(f"- **{tk['ticker']}** · {over_txt} over-index · "
+                     f"{tk['topic_mentions']} in-topic{wk_txt} · topic impact {imp_txt}")
     else:
         L.append("- (none linked)")
     L += ["", "### Headline evidence"]

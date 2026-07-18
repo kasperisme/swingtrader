@@ -30,6 +30,7 @@ path (`ads_management`); the measurement is read-only.
 
 ```
 nis-ad-image     →  output/ads/<date>-<short-name>/<lead-magnet>/1x1/ad.png + ad.json
+ (or build_ad_reel)  …/<lead-magnet>/9x16/ad_reel.mp4 (+poster)   → launches as a VIDEO ad
                     <lead-magnet> ∈ { briefing, market-screening }        (the creative)
         │
         ▼
@@ -39,7 +40,8 @@ nis-ad-image     →  output/ads/<date>-<short-name>/<lead-magnet>/1x1/ad.png + 
    draft (dry-run)→  print the exact campaign/ad-set/ad plan, nothing created
         │
         ▼
-   draft --go     →  1 campaign (the folder) → 1 ad set per lead-magnet → 1 single-image ad, PAUSED
+   draft --go     →  1 campaign (the folder) → 1 ad set per lead-magnet → 1 ad each, PAUSED
+                    (single image, or a reel auto-uploaded to Meta — no manual upload)
         │
         ▼
    YOU in Ads Mgr →  review creative/targeting/budget, then flip Active to launch
@@ -194,15 +196,61 @@ the API-checkable ones; the last two it can only remind you about.
 
 ---
 
+## SIEP — keep trend ads out of the "social issues, elections or politics" bucket
+
+Our trend ads routinely hook on **social-issue-adjacent** topics — geopolitics/war, inflation
+and the economy, energy/climate, immigration, health. Meta classifies ads that are *about*
+such issues as **SIEP** ([Social Issues, Elections or Politics](https://transparency.meta.com/policies/ad-standards/SIEP-advertising/SIEP/)),
+and SIEP ads require the advertiser to complete **SIEP authorization** (identity + government-ID
+verification) and carry a verified **"Paid for by" disclaimer**. **This flow sets up neither.**
+An ad detected as SIEP without them is **disapproved at review** (and repeat hits risk the ad
+account), and **SIEP ads cannot run in the EU at all**.
+
+**The way through is the product exemption, not authorization.** Meta exempts an ad from SIEP
+authorization + disclaimer when the **product/service is prominently named or shown and the ad's
+primary purpose is to sell/promote it — even if it references a social issue.** Our lead-magnet
+ads already qualify by design; the job here is to *keep* them qualifying. Before `draft --go`,
+check the creative (`ad.json` + the rendered image/reel) against these rules:
+
+- **Product-first, never advocacy.** The briefing / the screener must be the visible subject and
+  the CTA, and the ad's purpose must be *get the signup*. Report the topic as **market/trading
+  news the product tracks** ("inflation cooled — follow it here"); never argue a **position** on a
+  policy, party, candidate, election, or legislation ("tell the Fed to cut rates" would be SIEP).
+- **No elections/candidates/legislation, ever, through this flow.** If a week's trend is a vote, a
+  candidate, a ballot measure, or a named bill, **stop** — that's core SIEP, not exemptible; it
+  needs full authorization + a disclaimer this flow doesn't create. Pick a different angle or skip.
+- **Don't take the issue's side in copy or art.** Headline, `primary_text`, bullets, and the reel
+  scene must stay neutral-informational (the *market* read), not persuasive on the issue itself.
+- **Never target the EU with a social-issue hook.** SIEP ads are banned in the EU — keep
+  `META_TARGET_COUNTRIES` on the `US,GB,CA,AU` default (no EU) for topic-driven campaigns. (The
+  DKK ad **account** is fine; only the **audience geo** triggers the EU ban.)
+- **If you're unsure it clears the exemption, treat it as SIEP:** either reframe the creative to be
+  unambiguously product-first, or get the business SIEP-authorized with a "Paid for by" disclaimer
+  first. Don't gamble a disapproval or an account flag on a borderline hook.
+
+`preflight` can't detect SIEP (Meta decides at review) — it's a **human check on the creative**
+before `--go`, same as the App-Live / DSA reminders.
+
+---
+
 ## Notes & guardrails
 
 - **PAUSED is the contract.** Campaign, ad sets, and ads are all created PAUSED. This skill
   never sets anything Active — launching is always a deliberate human click in Ads Manager.
+- **SIEP check before `--go`.** Trend hooks (geopolitics, the economy, energy, immigration) can
+  trip Meta's social-issues policy — verify the creative stays product-first and EU is out of the
+  geo. See the **SIEP** section above; it's a mandatory human review, not an API gate.
 - **One campaign, two ad sets = the A/B.** Don't collapse the features into one ad set; the
   isolated-budget split is the whole point of the test.
 - **Creative is upstream.** This skill assumes `nis-ad-image` already wrote each
-  `output/ads/<date>-<short-name>/<lead-magnet>/1x1/ad.png` + `ad.json`. If they're missing,
-  render them first — don't invent creative here.
+  `output/ads/<date>-<short-name>/<lead-magnet>/1x1/ad.png` + `ad.json` (or `build_ad_reel`
+  wrote `9x16/ad_reel.mp4` + poster). If they're missing, render them first.
+- **Reels launch automatically.** If `9x16/ad_reel.mp4` exists it's launched as a **video
+  ad** (preferred over the static image): the reel is uploaded to Meta (`/advideos`,
+  Meta-hosted — no manual upload, no Supabase), processing is awaited, the poster becomes the
+  thumbnail, and a `video_data` creative is built — all inside `draft --go`. Force the static
+  with `"launch_as": "image"` in `ad.json`. The design/manifest traceability is identical
+  (the reel writes its own `design.json` with `format: reel`).
 - **Saving convention.** A campaign is the `<date>-<short-name>` folder; its `briefing/` and
   `market-screening/` subfolders are the ad sets. Add a magnet by adding a subfolder with an
   `ad.json` + `1x1/ad.png`. (The legacy flat product A/B still runs via `campaigns.FEATURES`

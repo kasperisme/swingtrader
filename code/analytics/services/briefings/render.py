@@ -261,16 +261,31 @@ def render_briefing_email_html(
         else f"A quiet 24 hours for {_esc(watchlist)} — no scored coverage yet today."
     )
 
+    # CTA priority: cross-sell (primary) → upgrade (secondary) → edit (tertiary).
+    from shared.email import app_url, cta_stack
+    _base = app_url()
+    _screen_url = (
+        f"{_base}/marketscreenings"
+        "?utm_source=email&utm_medium=briefing&utm_content=briefing_email"
+    )
+    _upgrade_url = (
+        f"{_base}/pricing"
+        "?utm_source=email&utm_medium=briefing&utm_content=briefing_email"
+    )
+    ctas = cta_stack(
+        primary=("See what the screens flagged", _screen_url),
+        secondary=("Get real-time alerts + AI summaries", _upgrade_url),
+        tertiary=("Or edit your briefing", manage_url),
+    )
+
     html_body = f"""<!doctype html><html><body style="margin:0;background:#0b0f17;padding:28px;font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;">
   <div style="max-width:520px;margin:0 auto;background:#111620;border:1px solid #1e2533;border-radius:14px;padding:28px;color:#e6e9ef;">
     <p style="font:700 11px ui-monospace,Menlo,monospace;letter-spacing:.2em;text-transform:uppercase;color:{_AMBER};margin:0 0 14px;">News Impact Screener</p>
     <h1 style="font:700 20px system-ui;margin:0 0 8px;color:#fff;">{intro}</h1>
-    <p style="font:400 14px/1.6 system-ui;color:#8b93a7;margin:0 0 18px;">{lead} The full report — headlines, sentiment and impact — is attached as a PDF.</p>
-    <p style="font:400 13px/1.6 system-ui;color:#8b93a7;margin:0 0 20px;">Watching: <span style="color:#e6e9ef;font-weight:600;">{_esc(watchlist)}</span></p>
-    <a href="{_esc(manage_url)}" style="display:inline-block;font:600 14px system-ui;color:{_INK};background:{_AMBER};padding:10px 18px;border-radius:8px;text-decoration:none;">Edit my briefing →</a>
-    <p style="font:400 12px/1.6 system-ui;color:#5b6478;margin:22px 0 0;">
+    <p style="font:400 14px/1.6 system-ui;color:#8b93a7;margin:0 0 18px;">{lead} The full report — headlines, sentiment and impact — is attached as a PDF. Watching <span style="color:#e6e9ef;font-weight:600;">{_esc(watchlist)}</span>.</p>
+    {ctas}
+    <p style="font:400 12px/1.6 system-ui;color:#5b6478;margin:24px 0 0;padding:16px 0 0;border-top:1px solid #1e2533;">
       You get this because you signed up at newsimpactscreener.com/briefings.
-      <a href="{_esc(manage_url)}" style="color:#8b93a7;">Edit tickers &amp; tags</a> ·
       <a href="{_esc(unsubscribe_url)}" style="color:#8b93a7;">Unsubscribe</a>
     </p>
   </div>
@@ -279,6 +294,9 @@ def render_briefing_email_html(
     text_body = (
         f"{'Welcome aboard — your first briefing.' if is_welcome else 'Your daily briefing.'}\n\n"
         f"{total} scored stories for {watchlist} in the last 24 hours. Full report attached as PDF.\n\n"
-        f"Edit your briefing: {manage_url}\nUnsubscribe: {unsubscribe_url}\n"
+        f"See what the screens flagged: {_screen_url}\n"
+        f"Get real-time alerts + AI summaries: {_upgrade_url}\n"
+        f"Or edit your briefing: {manage_url}\n\n"
+        f"Unsubscribe: {unsubscribe_url}\n"
     )
     return html_body, text_body

@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 import os
+import time
 from pathlib import Path
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
@@ -70,6 +71,32 @@ def upload_image(path: Path) -> str:
     return next(iter(imgs.values()))["hash"]
 
 
+def upload_video(path: Path) -> str:
+    """Upload the reel straight to Meta (/advideos) — Meta hosts it, so no public
+    URL / Supabase staging is needed. Returns the video_id."""
+    with open(path, "rb") as f:
+        r = requests.post(
+            f"{client.BASE}/{client.account()}/advideos",
+            data={"access_token": client.TOKEN},
+            files={"source": (path.name, f, "video/mp4")}, timeout=600)
+    return client._check(r)["id"]
+
+
+def _wait_video(video_id: str, timeout: int = 300) -> None:
+    """Block until Meta finishes processing the video (a creative can't use it
+    until it's ready). Polls status; raises on error or timeout."""
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        st = client.get(video_id, {"fields": "status"}).get("status", {})
+        vs = st.get("video_status")
+        if vs == "ready":
+            return
+        if vs == "error":
+            raise MetaError(f"video {video_id} failed to process: {st}")
+        time.sleep(5)
+    raise MetaError(f"video {video_id} still processing after {timeout}s")
+
+
 def _delete(node_id: str) -> None:
     requests.delete(f"{client.BASE}/{node_id}",
                     params={"access_token": client.TOKEN}, timeout=30)
@@ -123,6 +150,43 @@ def create_creative(name, page_id, ig_id, dest, message, cta_type, image_hashes,
                       or "advertiser" in msg or "3858412" in msg):
             print("    (IG identity rejected — creating Page-only; set an IG account "
                   "on the ad in Ads Manager if you want a specific handle)")
+            return _post(f"{client.account()}/adcreatives", body(False))["id"]
+        raise
+
+
+def create_video_creative(name, page_id, ig_id, dest, message, cta_type, video_id,
+                          thumb_hash, headline=None, description=None, url_tags=None) -> str:
+    """Video (reel) creative — object_story_spec.video_data with the uploaded video +
+    a thumbnail image_hash. Same IG-fallback + url_tags handling as the image path."""
+    def spec(with_ig: bool) -> dict:
+        vd = {
+            "video_id": video_id,
+            "image_hash": thumb_hash,
+            "message": message,
+            "call_to_action": {"type": cta_type, "value": {"link": dest}},
+        }
+        if headline:
+            vd["title"] = headline
+        if description:
+            vd["link_description"] = description
+        s = {"page_id": page_id, "video_data": vd}
+        if with_ig and ig_id:
+            s["instagram_user_id"] = ig_id
+        return s
+
+    def body(with_ig: bool) -> dict:
+        b = {"name": name, "object_story_spec": json.dumps(spec(with_ig))}
+        if url_tags:
+            b["url_tags"] = url_tags
+        return b
+
+    try:
+        return _post(f"{client.account()}/adcreatives", body(True))["id"]
+    except MetaError as e:
+        msg = str(e).lower()
+        if ig_id and ("instagram" in msg or "personalized" in msg
+                      or "advertiser" in msg or "3858412" in msg):
+            print("    (IG identity rejected — creating Page-only)")
             return _post(f"{client.account()}/adcreatives", body(False))["id"]
         raise
 
@@ -266,17 +330,28 @@ def preflight() -> int:
     return fails
 
 
-def _load(slug: str):
+def _load(slug: str) -> tuple[dict, dict]:
+    """Return (spec, media). media is one of:
+      {"kind": "video",    "video": mp4,   "poster": png}   — a reel (auto-preferred)
+      {"kind": "single",   "images": [png]}                 — single-image ad
+      {"kind": "carousel", "images": [png, …]}              — legacy swipe deck
+    A rendered reel (9x16/ad_reel.mp4) launches automatically unless the spec sets
+    "launch_as": "image"."""
     d = client._ANALYTICS / "output" / "ads" / slug
     spec = json.loads((d / "ad.json").read_text())
+    reel, poster = d / "9x16" / "ad_reel.mp4", d / "9x16" / "ad_reel_poster.png"
+    if reel.exists() and (spec.get("launch_as") or "").lower() != "image":
+        if not poster.exists():
+            raise MetaError(f"{slug}: reel present but no 9x16/ad_reel_poster.png thumbnail — re-render the reel")
+        return spec, {"kind": "video", "video": reel, "poster": poster}
     single = d / "1x1" / "ad.png"
-    if single.exists():                              # single-image ad (default)
-        return spec, [single]
+    if single.exists():                              # single-image ad
+        return spec, {"kind": "single", "images": [single]}
     cards = sorted((d / "1x1").glob("slide-*.png"))  # carousel (legacy)
     if len(cards) < 2:
-        raise MetaError(f"{slug}: need a 1x1/ad.png (single image) or ≥2 1x1/slide-*.png "
-                        "(carousel) — render with nis-ad-image first")
-    return spec, cards
+        raise MetaError(f"{slug}: need a reel (9x16/ad_reel.mp4), a 1x1/ad.png, or ≥2 "
+                        "1x1/slide-*.png — render with nis-ad-image / build_ad_reel first")
+    return spec, {"kind": "carousel", "images": cards}
 
 
 # Saved-content convention: output/ads/<date>-<short-name>/<lead-magnet>/<format>/…
@@ -338,16 +413,19 @@ def build_drafts(slugs: list[str], budget_dkk: float, dry_run: bool,
     # label = the last path segment (the lead magnet), for readable ad-set/ad names
     specs = [(slug, slug.split("/")[-1], *_load(slug)) for slug in slugs]
 
+    def _kind_label(media: dict) -> str:
+        return {"video": "video reel", "single": "single image"}.get(
+            media["kind"], f"carousel · {len(media.get('images', []))} cards")
+
     geo_str = ",".join(countries)
     print(f"\nCAMPAIGN  “{campaign_name}”  ·  {objective}  ·  special={special or 'none'}  ·  PAUSED")
-    for slug, label, spec, cards in specs:
+    for slug, label, spec, media in specs:
         ad = spec.get("ad", {})
-        kind = "single image" if len(cards) == 1 else f"carousel · {len(cards)} cards"
         goal_str = (f"optimize {conv_event} conversions (pixel {pixel})"
                     if promoted_object else f"optimize {opt_goal}")
         print(f"  AD SET  {label}  ·  {budget_dkk:.0f} DKK/day  ·  {geo_str} {age_min}–{age_max}  ·  "
               f"{goal_str}  ·  PAUSED")
-        print(f"    AD    {kind}  ·  cta={ad.get('cta_label')}")
+        print(f"    AD    {_kind_label(media)}  ·  cta={ad.get('cta_label')}")
         print(f"          → {ad.get('destination', '')[:78]}")
 
     if dry_run:
@@ -361,15 +439,25 @@ def build_drafts(slugs: list[str], budget_dkk: float, dry_run: bool,
     print(f"\n✓ campaign {campaign_id} (PAUSED)")
     manifest = []
     try:
-        for slug, label, spec, cards in specs:
+        for slug, label, spec, media in specs:
             ad = spec["ad"]
-            hashes = [upload_image(c) for c in cards]
             cta = CTA_MAP.get((ad.get("cta_label") or "learn more").lower(), "LEARN_MORE")
             clean_link, url_tags = _split_utm(ad["destination"])
-            creative = create_creative(f"{label}-creative", page, ig, clean_link,
-                                       ad.get("primary_text", ""), cta, hashes,
-                                       headline=ad.get("headline"), description=ad.get("description"),
-                                       url_tags=url_tags)
+            if media["kind"] == "video":
+                print(f"    {label}: uploading reel to Meta + waiting for processing (~1 min)…")
+                vid = upload_video(media["video"])
+                _wait_video(vid)
+                thumb = upload_image(media["poster"])
+                creative = create_video_creative(f"{label}-creative", page, ig, clean_link,
+                                                 ad.get("primary_text", ""), cta, vid, thumb,
+                                                 headline=ad.get("headline"), description=ad.get("description"),
+                                                 url_tags=url_tags)
+            else:
+                hashes = [upload_image(c) for c in media["images"]]
+                creative = create_creative(f"{label}-creative", page, ig, clean_link,
+                                           ad.get("primary_text", ""), cta, hashes,
+                                           headline=ad.get("headline"), description=ad.get("description"),
+                                           url_tags=url_tags)
             adset = create_adset(label, campaign_id, budget_minor, targeting, dsa_eff,
                                  opt_goal, promoted_object)
             ad_id = create_ad(f"{label}-ad", adset, creative)

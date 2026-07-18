@@ -52,8 +52,10 @@ cd code/analytics
 
 Content is saved as `output/ads/<date>-<short-name>/<lead-magnet>/` (`<lead-magnet>` ∈
 `briefing` | `market-screening`), each holding an `ad.json` + `1x1/ad.png` (from
-`nis-ad-image`). `--campaign` makes that folder **1 campaign → 1 ad set per lead-magnet →
-1 single-image ad per magnet**. Everything is created **PAUSED** — reviewable in Ads Manager,
+`nis-ad-image`) and/or `9x16/ad_reel.mp4` (+poster, from `build_ad_reel`). `--campaign` makes
+that folder **1 campaign → 1 ad set per lead-magnet → 1 ad each**. A rendered **reel launches
+as a video ad automatically** (uploaded to Meta `/advideos`, no manual upload); otherwise a
+single-image ad. Everything is created **PAUSED** — reviewable in Ads Manager,
 **cannot spend until you set it Active**. Default objective **`OUTCOME_LEADS`**, ad sets
 optimize the **LEAD pixel conversion** (sign-ups, not just clicks), audience **US/GB/CA/AU
 18–65 broad**, `--budget` DKK/day per ad set (default 70). All audience/objective knobs are

@@ -101,6 +101,13 @@ formats next to the spec). For example `output/ads/2026-07-14-geopolitics/briefi
   "destination": "https://www.newsimpactscreener.com/briefings?tags=geopolitics,oil,iran&tickers=XOM,COIN,AAPL",
   "disclaimer": "Not financial advice. For education only.",
   "background_image": "hero.jpg",  // optional — a real photo in the slug dir (cover-fit + scrim). Omit → generated motif.
+  "background": {                   // REEL only — the drifting, topic-linked backdrop (see below)
+    "motif": "chart",               // chart | grid | none
+    "scene": "tanker",              // optional topic ANIMATION (see the scene table below)
+    "rising": true,                 // a "stock price" line that draws itself upward across the screen
+    "tickers": ["XOM", "CVX", "XLE", "FRO"],   // the ad's topic tickers → scrolling ticker-tape
+    "speed": 1.0
+  },
   "ad": {
     "primary_text": "the in-feed caption above the image (pain → the tool → the proof → CTA)",
     "headline": "The news that moved your stocks — before the open",  // shows under the image
@@ -172,9 +179,10 @@ actually in the creative — the derived facts are cross-checked against it.
 ## Reel variant (video) — same ad, animated
 
 Meta favours Reels/video, and motion usually lifts CTR. `build_ad_reel.py` renders a
-~15s vertical (9:16) reel from the **same `ad.json`** — the text elements transition in
-one at a time (fade + slide-up), paced across the clip, finishing on the CTA. It reuses
-the exact static layout, so the reel is visually identical to the image, just animated.
+~15s vertical (9:16) reel from the **same `ad.json`** — the **brand stays on screen the
+whole time** while the text elements **fly in from the left** one at a time (fast, with an
+ease-back overshoot), paced across the clip and finishing on the **CTA, which breathes
+with a soft glow**. It reuses the exact static layout, so the reel matches the image.
 
 ```bash
 cd code/analytics
@@ -189,10 +197,84 @@ few `ad_reel_preview_*.png` stills for quick review (deletable). Tune with `--se
 - **Music — do NOT bundle copyrighted audio.** Leave it silent and add **Meta's licensed
   music** in the Reels ad editor (rights-cleared, and what Meta's own tip recommends), or
   pass `--music` with a royalty-free file you own.
-- **Launching a video ad** needs a video-creative path in `nis-ad-launch` (upload to
-  `/advideos` + a `video_data` `object_story_spec` with a thumbnail) — not yet wired; the
-  current launch handles single-image link ads. For now upload the reel by hand, or ask to
-  have the video path added.
+- **Launching is automatic.** Once `9x16/ad_reel.mp4` exists, `nis-ad-launch` auto-detects it
+  and launches it as a **video ad** — it uploads the reel straight to Meta (`/advideos`,
+  Meta-hosted, no Supabase), waits for processing, uploads the poster as the thumbnail, and
+  builds a `video_data` creative — all in `draft --go`, no manual upload. The reel is
+  preferred over the static image whenever present; set `"launch_as": "image"` in `ad.json`
+  to force the static instead.
+
+### The reel background — what it should be (generic, topic-linked)
+
+The reel's backdrop is **atmosphere, never the message**. It is a subtle, brand-tinted
+"living dashboard" that **drifts slowly leftward** behind the text — so it feels alive without
+ever competing with the foreground. It is **generic by construction**: the *motif is fixed*,
+only its *content* changes per topic, so one definition serves every ad.
+
+**What it contains** (all dim, low-contrast, bottom-weighted):
+- a faint **grid** (the terminal/dashboard feel),
+- a drifting **chart line** tinted by the ad's `accent` (green = opportunity, amber = neutral —
+  it inherits the ad's framing), and
+- an optional scrolling **ticker-tape of the topic's own tickers** — this is the topic link.
+
+**How it's topic-linked (the generic trick):** don't design a bespoke background per topic —
+just set `background.tickers` to the ad's tickers. A geopolitics ad drifts `XOM CVX XLE FRO`;
+an AI ad drifts `NVDA AMD AVGO`. Same motif, same code, topic-specific names. Pull them from
+the trend brief's `top_topic.tickers_in_play` (or `lead_story.most_affected`).
+
+**Spec (`background` block, REEL only):**
+- `motif`: `chart` (grid + drifting line + tape) · `grid` (grid + tape, no line) · `none` (static).
+- `rising`: `true` draws a central **rising "stock price" chart** — a jagged uptrend that draws
+  itself left→right (with a leading price dot + soft fill) across the clip, behind the text. Great
+  for "winners"/opportunity ads; it sits under the copy so keep the copy short-ish on the right.
+- `tickers`: the topic symbols for the tape (4–8 works best). Omit → no tape.
+- `speed`: drift multiplier (default `1.0`; lower = calmer).
+- A `background_image` photo overrides the motif and stays static (no drift).
+
+**Guardrails:** keep it quiet — no flashing, no high-contrast motion, nothing that pulls the
+eye off the headline/CTA. The text is the pitch; the background is mood. If in doubt, dim it.
+
+#### Topic icons — a custom animation per topic, from ONE icon library
+
+The topic visual comes from an **icon font** (Font Awesome 6 Free Solid, bundled at
+`scripts/assets/fa-solid-900.ttf`, SIL OFL — free to redistribute). One font = a consistent,
+professional look across every ad — you **name icons, you don't draw them**. A glyph drifts
+across a band behind the text; icons that face a fixed way are flipped to their travel
+direction. This replaces the generic chart line so it stays uncluttered.
+
+Two ways to set it:
+- **`background.scene`** — a named **preset** of layers (quickest):
+
+| `scene` | Icons (drift directions) | Fits topics like |
+|---|---|---|
+| `tanker` | cargo-ship ◄ + fighter-jet ► (with contrail) | geopolitics · oil · Hormuz · shipping · defense |
+| `ai` | microchip ◄ + satellite ► | AI · semiconductors · tech · data |
+| `energy` | oil-can ◄ + bolt ► | energy · power · commodities |
+| `crypto` | coins ◄ + rocket ► | crypto · risk-on |
+
+- **`background.icons`** — an explicit list of **layers** for full control:
+```json
+"background": { "tickers": ["XOM","CVX"], "icons": [
+  { "icon": "ship", "dir": "left",  "band": 0.74, "count": 2, "size": 150, "alpha": 90 },
+  { "icon": "jet",  "dir": "right", "band": 0.16, "count": 2, "size": 96, "speed": 2.3, "trail": true }
+] }
+```
+Layer fields: `icon` (a name in `ICON_MAP`), `dir` (`left`/`right`), `band` (0–1 vertical),
+`count`, `size`, `speed`, `alpha`, `color` (`mut` dim | `accent`), `trail` (contrail behind it).
+**Orientation is automatic** — directional glyphs (jet, plane, …) are flipped so the nose
+matches `dir` (via `_ICON_FACES`); only set `flip` to override.
+
+**To theme a new topic:** pick icons that fit (e.g. `chip`+`satellite`, `oil`+`bolt`,
+`coins`+`rocket`, `truck`, `industry`, `globe`, `shield`) — either add a `SCENE_PRESETS` entry
+or just list `background.icons`. To add a **font icon** that isn't mapped yet, drop its Font
+Awesome codepoint into `ICON_MAP` (one line). For **richer/thematic art** the font lacks (e.g.
+`cargo-ship`, from Game Icons), drop a mono PNG into `scripts/assets/` and register it in
+`ICON_ASSETS` — it's recolored + animated exactly like a glyph. Bundled art must be
+attribution-friendly (see `scripts/assets/ATTRIBUTION.txt`; Game Icons = CC BY, FA = OFL). No
+drawing, ever.
+
+**Guardrails still apply:** keep it dim and banded top/bottom; the icons are mood, the text is
+the message.
 
 ## Trend-driven lead-magnet ads (the main use)
 

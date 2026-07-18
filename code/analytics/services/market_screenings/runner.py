@@ -853,10 +853,28 @@ def _build_results_csv(symbols: list[dict[str, Any]]) -> str:
     return buf.getvalue()
 
 
-def _results_email_html(*, name: str, slug: str, count: int, unsubscribe_url: str) -> str:
-    from shared.email import _app_url  # local import to avoid cycle at module load
+def _results_email_html(
+    *, name: str, slug: str, count: int, tickers: list[str], unsubscribe_url: str
+) -> str:
+    from shared.email import _app_url, cta_stack  # local import to avoid cycle
 
     base = _app_url()
+    # CTA priority: personalized cross-sell (primary) → upgrade (secondary) →
+    # view-on-web (tertiary). The deep-link pre-fills this run's tickers.
+    _brief_tickers = ",".join(tickers[:8])
+    _brief_url = (
+        f"{base}/briefings?tickers={_brief_tickers}"
+        "&utm_source=email&utm_medium=screening&utm_content=screening_email"
+    )
+    _upgrade_url = (
+        f"{base}/pricing"
+        "?utm_source=email&utm_medium=screening&utm_content=screening_email"
+    )
+    ctas = cta_stack(
+        primary=("Track these in a free daily briefing", _brief_url),
+        secondary=("Get every screen in real time + alerts", _upgrade_url),
+        tertiary=("Or view the full results on the web", f"{base}/marketscreenings/{slug}"),
+    )
     bg, card, text, muted, border, accent = (
         "#0b0f17", "#111620", "#e6e9ef", "#8b93a7", "#1e2533", "#f5a623",
     )
@@ -874,8 +892,8 @@ def _results_email_html(*, name: str, slug: str, count: int, unsubscribe_url: st
 Fresh results: <span style="font-family:{mono};">{name}</span></h1>
 <p style="font-family:{sans};font-size:14px;line-height:1.6;color:{muted};margin:10px 0 18px 0;">
 A new run just concluded with {count} ticker{'' if count == 1 else 's'}. The full results are attached as a CSV.</p>
-<a href="{base}/marketscreenings/{slug}" style="display:inline-block;font-family:{sans};font-size:14px;font-weight:600;color:{bg};background:{accent};padding:11px 20px;border-radius:8px;text-decoration:none;">View on the web</a>
-<p style="font-family:{sans};font-size:11px;line-height:1.6;color:{muted};margin:22px 0 0 0;border-top:1px solid {border};padding-top:16px;">
+{ctas}
+<p style="font-family:{sans};font-size:11px;line-height:1.6;color:{muted};margin:24px 0 0 0;border-top:1px solid {border};padding-top:16px;">
 You're getting this because you subscribed to {name} results.
 <a href="{unsubscribe_url}" style="color:{muted};text-decoration:underline;">Unsubscribe</a>.</p>
 </td></tr></table></td></tr></table></body></html>"""
@@ -934,11 +952,20 @@ def fan_out_email_to_subscribers(result: dict[str, Any]) -> None:
     attachment = {"filename": f"{slug}-latest.csv", "content": csv_text}
     subject = f"{name}: {len(symbols)} new result{'' if len(symbols) == 1 else 's'}"
 
+    # Result tickers (order preserved, de-duped) power the personalized
+    # /briefings deep-link in the cross-sell block.
+    tickers = list(dict.fromkeys(
+        str(s.get("symbol")).strip().upper()
+        for s in symbols
+        if s.get("symbol")
+    ))
+
     delivered = failed = 0
     for email in emails:
         unsubscribe_url = build_unsubscribe_url(email, [slug])
         html = _results_email_html(
-            name=name, slug=slug, count=len(symbols), unsubscribe_url=unsubscribe_url
+            name=name, slug=slug, count=len(symbols),
+            tickers=tickers, unsubscribe_url=unsubscribe_url,
         )
         ok, info = send_email(
             to=email,
