@@ -66,12 +66,46 @@ On `--go` it also writes `output/ads/<campaign>/launch_manifest.json` — one ro
 the Meta `ad_id` to that ad's `design.json` (the creative genome from `nis-ad-image`). Join it
 to `insights` (per-ad, keyed by `ad_id`) to see **which design choices drive engagement**.
 
+## Push leads to Meta — Conversions API / CRM (`capi.py`)
+
+Forwards **`early_access_signups`** leads to Meta's dataset as CRM `Lead` events
+(Meta's "Qualified Leads" integration — the server-side complement to the browser
+pixel). This feeds Meta real, first-party sign-ups for match + optimization; it's the
+push side of the loop `reconcile` measures.
+
+```bash
+cd code/analytics
+.venv/bin/python -m services.meta_ads.cli capi-sync --dry-run      # show a sample HASHED event, send nothing
+.venv/bin/python -m services.meta_ads.cli capi-test --test TEST12345   # one synthetic event → Events Manager Test Events
+.venv/bin/python -m services.meta_ads.cli capi-sync                # PRODUCTION: upload all pending leads, mark them sent
+.venv/bin/python -m services.meta_ads.cli capi-sync --since 2026-07-01 --limit 200
+```
+
+Each event is the exact CRM shape Meta specifies: `action_source: system_generated`,
+`custom_data.event_source: crm` + `lead_event_source`, `event_name: Lead`,
+`event_time` = the signup time, `event_id` = the signup id (**dedup key**). Contact info
+is **SHA-256 hashed before it leaves the server** — email (`em`, primary match) plus, when
+captured, city/region/country (`ct`/`st`/`country`); user-agent / click-ids ride raw as
+Meta requires. These are our own web signups, so there's no Meta `lead_id` (optional).
+
+**Idempotent:** the sync selects `WHERE meta_capi_sent_at IS NULL`, stamps each row on a
+successful upload, and Meta dedups on `event_id` — so a re-run only sends new leads.
+`--test <code>` routes to Events Manager **Test Events** and does **not** mark rows sent.
+
+**Run it at least daily** (Meta expects ≥1 upload/day; events show in Events Manager within
+~1h). Schedule `capi-sync` on the same OpenClaw cron cadence as the other analytics ticks.
+
+To improve match quality later, capture `fbclid`→`fbc` on the signup form into
+`metadata` — `build_user_data` already forwards `metadata.fbc`/`fbp` automatically.
+
 ## Setup (`code/analytics/.env`)
 ```
 META_ADS_TOKEN=<System User token — ads_read to read, ads_management to create drafts>
 META_AD_ACCOUNT_ID=2046577425934056        # act_ prefix optional
 META_PAGE_ID=<Facebook Page id ads run from> # required for `draft --go`
-META_PIXEL_ID=891355590685260              # required for lead optimization (the default)
+META_PIXEL_ID=891355590685260              # pixel/dataset id — lead optimization + Conversions API target
+META_CAPI_TOKEN=<dataset access token>       # Conversions API (capi-sync); falls back to META_ADS_TOKEN
+META_CAPI_LEAD_SOURCE=News Impact Screener   # optional — the CRM name reported as lead_event_source
 META_IG_ACCOUNT_ID=                          # optional — Instagram placements
 META_SPECIAL_AD_CATEGORY=                    # optional — e.g. FINANCIAL_PRODUCTS_SERVICES if Meta requires it
 META_API_VERSION=v21.0                        # optional; bump if a call reports a version error

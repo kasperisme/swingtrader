@@ -171,7 +171,17 @@ def _load_manifests() -> dict[str, dict]:
 
 # The design levers a new ad can be biased on. Kept small + stable so history aggregates.
 _LEVERS = ["hook_type", "angle", "primary_emotion", "accent", "theme",
-           "background_type", "has_proof", "bullet_count", "cta_label"]
+           "background_type", "has_proof", "bullet_count", "cta_label",
+           "curiosity_type", "curiosity_strength", "impact_list_reveal"]
+
+
+def _quantile(vals: list[float], q: float):
+    """Nearest-rank quantile (no numpy). None if empty."""
+    xs = sorted(v for v in vals if v is not None)
+    if not xs:
+        return None
+    i = min(len(xs) - 1, max(0, int(round(q * (len(xs) - 1)))))
+    return xs[i]
 
 
 def _rollup(per: list[dict], field: str, min_impr: float) -> list[dict]:
@@ -227,10 +237,29 @@ def cmd_design(args) -> int:
                     "cvr": (leads / clicks * 100) if clicks else 0.0})
     live = sum(1 for p in per if p["delivered"])
 
+    # Clickbait guard: a strong curiosity gap that DOESN'T convert = high CTR + low CVR.
+    # Flag ads/levers whose CTR is top-quartile while CVR is bottom-quartile (needs ≥4
+    # delivered ads with clicks for the quartiles to carry any signal).
+    _clk = [p for p in per if p["delivered"] and p["clicks"] >= 1 and p["impr"] >= args.min_impr]
+    _ctr_hi = _quantile([p["ctr"] for p in _clk], 0.75) if len(_clk) >= 4 else None
+    _cvr_lo = _quantile([p["cvr"] for p in _clk], 0.25) if len(_clk) >= 4 else None
+
+    def _clickbait(ctr, cvr, clicks) -> bool:
+        return bool(_ctr_hi and _cvr_lo is not None and clicks >= 1
+                    and ctr >= _ctr_hi and cvr <= _cvr_lo)
+
+    for p in per:
+        p["clickbait"] = _clickbait(p["ctr"], p["cvr"], p["clicks"])
+
     if args.json:
         levers = {f: _rollup(per, f, args.min_impr) for f in _LEVERS}
+        for rows in levers.values():
+            for g in rows:
+                g["clickbait"] = _clickbait(g["ctr"], g["cvr"], g["clicks"])
         print(json.dumps({"ads_total": len(per), "ads_delivered": live,
-                          "min_impr": args.min_impr, "per_ad": per, "levers": levers}, indent=2))
+                          "min_impr": args.min_impr,
+                          "clickbait_thresholds": {"ctr_p75": _ctr_hi, "cvr_p25": _cvr_lo},
+                          "per_ad": per, "levers": levers}, indent=2))
         return 0
 
     print(f"\nTraceability — {len(per)} created ad(s) joined to design; {live} with delivery"
@@ -243,7 +272,8 @@ def cmd_design(args) -> int:
               f"{str(d.get('hook_type') or '—')[:10]:<12}"
               f"{('yes' if d.get('has_proof') else 'no'):<6}"
               f"{p['spend']:>8.2f}{int(p['impr']):>8}{p['freq']:>6.1f}{p['cpm']:>7.2f}"
-              f"{p['ctr']:>7.2f}{int(p['leads']):>6}{p['cvr']:>7.1f}")
+              f"{p['ctr']:>7.2f}{int(p['leads']):>6}{p['cvr']:>7.1f}"
+              f"{'  ⚠clickbait' if p['clickbait'] else ''}")
 
     fields = _LEVERS if args.leaderboard else ([args.by] if args.by else [])
     for f in fields:
@@ -258,6 +288,8 @@ def cmd_design(args) -> int:
                 flags += "  ⚠low-n"
             if g["freq"] >= 3.0:
                 flags += "  ⚠fatigue"          # high frequency depresses CTR — not a design loss
+            if _clickbait(g["ctr"], g["cvr"], g["clicks"]):
+                flags += "  ⚠clickbait"        # magnetic but doesn't convert (CTR↑ CVR↓)
             cpl = g["cpl"] if g["cpl"] is not None else 0
             print(f"  {g['value'][:18]:<20}{g['n']:>5}{int(g['impr']):>9}{g['freq']:>6.1f}"
                   f"{g['cpm']:>7.2f}{g['ctr']:>7.2f}{g['cvr']:>7.1f}{cpl:>9.2f}{flags}")
@@ -267,6 +299,27 @@ def cmd_design(args) -> int:
         print("  Compare like-for-like: watch ⚠fatigue (high frequency deflates CTR) and CPM gaps")
         print("  (budget/audience differences), treat a lever as a winner only above min_impr, and")
         print("  keep varying ONE lever per new ad.")
+        print("  ⚠clickbait = top-quartile CTR but bottom-quartile CVR — a gap that pulls the click")
+        print("  but not the lead. Judge curiosity levers on CVR / $-per-lead, never CTR alone.")
+    return 0
+
+
+def cmd_capi_sync(args) -> int:
+    from . import capi
+    since = None
+    if args.since:
+        since = _time_range(args.since)["since"]
+    return capi.sync(since=since, limit=args.limit, dry_run=args.dry_run,
+                     test_event_code=args.test_code)
+
+
+def cmd_capi_test(args) -> int:
+    from . import capi
+    resp = capi.send_test(args.test_code)
+    print(f"events_received={resp.get('events_received')} · fbtrace_id={resp.get('fbtrace_id')}")
+    for m in resp.get("messages") or []:
+        print(f"  ⚠ {m}")
+    print("→ check Events Manager → Test Events for the code you passed.")
     return 0
 
 
@@ -291,6 +344,15 @@ def main(argv=None) -> int:
     pd.add_argument("--budget", type=float, default=70.0, help="DKK/day per ad set (default 70)")
     pd.add_argument("--go", action="store_true", help="actually create (default is dry-run)")
     pd.set_defaults(func=cmd_draft)
+    ps = sub.add_parser("capi-sync", help="forward early_access_signups leads to Meta (Conversions API)")
+    ps.add_argument("--since", help="only leads on/after YYYY-MM-DD (default: all unsent)")
+    ps.add_argument("--limit", type=int, default=500, help="max leads per run (default 500)")
+    ps.add_argument("--dry-run", action="store_true", help="show a sample hashed event; send nothing")
+    ps.add_argument("--test", dest="test_code", help="Events Manager test_event_code — routes to Test Events; rows NOT marked sent")
+    ps.set_defaults(func=cmd_capi_sync)
+    pt = sub.add_parser("capi-test", help="send ONE synthetic Lead event to verify the connection")
+    pt.add_argument("--test", dest="test_code", required=True, help="Events Manager test_event_code")
+    pt.set_defaults(func=cmd_capi_test)
     args = ap.parse_args(argv)
     try:
         return args.func(args)

@@ -1,0 +1,196 @@
+<!doctype html>
+<html lang="da">
+<head>
+<meta charset="utf-8">
+<title>Annonce-flow — ét samlet overblik</title>
+<style>
+  :root{
+    --bg:#0b0f17; --card:#141a26; --card2:#0f141d; --border:#243049; --border2:#2c3a56;
+    --ink:#eef1f7; --mut:#93a0ba; --dim:#6f7d99;
+    --amber:#f5a623; --pos:#3ecf8e; --blue:#6fa8ff;
+    --mono:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace;
+    --sans:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{background:#05070c;font-family:var(--sans);display:flex;flex-direction:column;
+    align-items:center;gap:12px;padding:28px}
+  .hint{font-family:var(--mono);font-size:12px;color:#54607a}
+  .board{position:relative;width:1680px;height:940px;background:
+      radial-gradient(1200px 600px at 20% -10%, #101726 0%, transparent 60%),
+      radial-gradient(1000px 700px at 100% 120%, #10151f 0%, transparent 55%), var(--bg);
+    border:1px solid var(--border);border-radius:20px;overflow:hidden;color:var(--ink)}
+  svg{position:absolute;inset:0;width:100%;height:100%;pointer-events:none}
+
+  /* header */
+  .title{position:absolute;left:40px;top:34px}
+  .title .ey{font-family:var(--mono);font-size:12px;letter-spacing:.24em;text-transform:uppercase;color:var(--amber)}
+  .title h1{font-size:26px;font-weight:800;letter-spacing:-.01em;margin-top:7px}
+  .title h1 .a{color:var(--amber)}
+  .chips{position:absolute;right:40px;top:40px;display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end;max-width:660px}
+  .chip{font-family:var(--mono);font-size:11px;color:var(--mut);background:var(--card2);
+    border:1px solid var(--border);border-radius:999px;padding:6px 12px;white-space:nowrap}
+  .chip b{color:var(--ink)}
+
+  /* trin-kort */
+  .stage{position:absolute;width:300px;height:252px;background:var(--card);
+    border:1px solid var(--border);border-radius:16px;padding:20px 18px;
+    box-shadow:0 18px 40px -24px #000}
+  .stage .num{position:absolute;top:-15px;left:18px;width:32px;height:32px;border-radius:50%;
+    background:var(--amber);color:#0b0f17;font-weight:800;font-size:15px;display:grid;place-items:center;
+    box-shadow:0 0 0 5px var(--bg)}
+  .stage h3{font-size:18px;font-weight:750;margin-top:4px}
+  .stage .who{font-family:var(--mono);font-size:11.5px;color:var(--amber);margin-top:5px}
+  .stage ul{list-style:none;margin-top:14px;display:flex;flex-direction:column;gap:9px}
+  .stage li{font-size:13px;color:var(--mut);padding-left:15px;position:relative;line-height:1.35}
+  .stage li::before{content:"";position:absolute;left:0;top:7px;width:6px;height:6px;border-radius:50%;
+    background:var(--dim)}
+  .stage li b{color:var(--ink);font-weight:600}
+  .stage li .out{color:var(--amber);font-family:var(--mono);font-size:12px}
+
+  /* artefakt-labels på pilene */
+  .art{position:absolute;width:150px;text-align:center;font-family:var(--mono);font-size:10.5px;
+    color:var(--mut);line-height:1.4;transform:translateX(-50%)}
+  .art b{color:var(--amber);font-weight:600}
+
+  /* sløjfe-labels */
+  .loop{position:absolute;transform:translate(-50%,-50%);text-align:center;font-family:var(--mono);
+    white-space:nowrap}
+  .loop .tag{font-size:12px;font-weight:700;letter-spacing:.08em}
+  .loop .desc{font-size:11px;color:var(--mut);margin-top:3px}
+  .loop.a .tag{color:var(--amber)}
+  .loop.b .tag{color:var(--pos)}
+  .loop.c .tag{color:var(--blue)}
+
+  /* rød tråd */
+  .chain{position:absolute;left:50%;transform:translateX(-50%);bottom:30px;display:flex;
+    align-items:center;gap:9px;font-family:var(--mono);font-size:12px}
+  .chain .lbl{color:var(--dim);font-size:10.5px;letter-spacing:.14em;text-transform:uppercase;margin-right:6px}
+  .chain .node{background:#080b12;border:1px solid var(--border2);border-radius:8px;padding:8px 12px;color:var(--ink)}
+  .chain .node .k{color:var(--amber)}
+  .chain .sep{color:var(--dim)}
+</style>
+</head>
+<body>
+  <div class="hint">Ét samlet overblik · screenshot feltet nedenfor (1680 × 940)</div>
+  <div class="board">
+
+    <svg viewBox="0 0 1680 940">
+      <defs>
+        <marker id="mg" markerWidth="10" markerHeight="10" refX="7" refY="4" orient="auto">
+          <path d="M0,0 L8,4 L0,8 Z" fill="#5b678a"/></marker>
+        <marker id="ma" markerWidth="11" markerHeight="11" refX="7.5" refY="4.2" orient="auto">
+          <path d="M0,0 L9,4.2 L0,8.4 Z" fill="#f5a623"/></marker>
+        <marker id="mb" markerWidth="11" markerHeight="11" refX="7.5" refY="4.2" orient="auto">
+          <path d="M0,0 L9,4.2 L0,8.4 Z" fill="#3ecf8e"/></marker>
+        <marker id="mc" markerWidth="11" markerHeight="11" refX="7.5" refY="4.2" orient="auto">
+          <path d="M0,0 L9,4.2 L0,8.4 Z" fill="#6fa8ff"/></marker>
+      </defs>
+
+      <!-- pile mellem trin (y = kortets midte = 356) -->
+      <line x1="340" y1="356" x2="470" y2="356" stroke="#5b678a" stroke-width="2" marker-end="url(#mg)"/>
+      <line x1="773" y1="356" x2="903" y2="356" stroke="#5b678a" stroke-width="2" marker-end="url(#mg)"/>
+      <line x1="1206" y1="356" x2="1336" y2="356" stroke="#5b678a" stroke-width="2" marker-end="url(#mg)"/>
+
+      <!-- SLØJFE A : performance -> creative (bund, gul, fuldt optrukket) -->
+      <path d="M1489,482 L1489,690 Q1489,700 1479,700 L633,700 Q623,700 623,690 L623,490"
+            fill="none" stroke="#f5a623" stroke-width="2.5" marker-end="url(#ma)"/>
+
+      <!-- SLØJFE B : trend -> nyt værktøj -> creative (øverst tv, grøn, stiplet) -->
+      <path d="M190,230 L190,168 Q190,158 200,158 L613,158 Q623,158 623,168 L623,224"
+            fill="none" stroke="#3ecf8e" stroke-width="2" stroke-dasharray="6 5" marker-end="url(#mb)"/>
+
+      <!-- SLØJFE C : træthed -> ny variant (øverst th, blå, stiplet) -->
+      <path d="M1489,230 L1489,168 Q1489,158 1479,158 L1066,158 Q1056,158 1056,168 L1056,224"
+            fill="none" stroke="#6fa8ff" stroke-width="2" stroke-dasharray="6 5" marker-end="url(#mc)"/>
+    </svg>
+
+    <!-- header -->
+    <div class="title">
+      <div class="ey">AI-styret Meta ads</div>
+      <h1>Annonce-flow — <span class="a">nyhed → creative → læring</span></h1>
+    </div>
+    <div class="chips">
+      <span class="chip">Nu: <b>1 kampagne → 1 ad set/magnet → 1 annonce</b></span>
+      <span class="chip">mål: <b>leads</b> · pixel <b>LEAD</b></span>
+      <span class="chip"><b>US/GB/CA/AU · 18–65</b></span>
+      <span class="chip">alt oprettes <b>på pause</b></span>
+    </div>
+
+    <!-- trin-kort -->
+    <div class="stage" style="left:40px;top:230px">
+      <div class="num">1</div>
+      <h3>Nyhed → Trend</h3>
+      <div class="who">trend-modul</div>
+      <ul>
+        <li>Læser ugens <b>nyheds-trends</b></li>
+        <li>Rangerer på <b>heat = volumen × acceleration</b></li>
+        <li><span class="out">→ trend_brief.json</span></li>
+      </ul>
+    </div>
+
+    <div class="stage" style="left:473px;top:230px">
+      <div class="num">2</div>
+      <h3>Trend → Creative</h3>
+      <div class="who">creative-modul</div>
+      <ul>
+        <li>Bygger <b>ad.json</b> (tekst + design-genom)</li>
+        <li>Renderer <b>1x1/4x5/9x16</b> PNG + reel</li>
+        <li><span class="out">→ design.json</span></li>
+      </ul>
+    </div>
+
+    <div class="stage" style="left:906px;top:230px">
+      <div class="num">3</div>
+      <h3>Creative → Opsætning</h3>
+      <div class="who">launch-modul · Meta API</div>
+      <ul>
+        <li>1 kampagne → 1 ad set/magnet → <b>1 annonce</b></li>
+        <li>UTM'er → creative <b>url_tags</b> · på pause</li>
+        <li><span class="out">→ launch_manifest.json</span></li>
+      </ul>
+    </div>
+
+    <div class="stage" style="left:1339px;top:230px">
+      <div class="num">4</div>
+      <h3>Performance → Læring</h3>
+      <div class="who">indsigt · afstemning · design</div>
+      <ul>
+        <li>Meta-tal × <b>rigtige leads i databasen</b></li>
+        <li><b>ad_id ↔ genom</b> → hvilke greb vinder</li>
+        <li><span class="out">→ design --json</span></li>
+      </ul>
+    </div>
+
+    <!-- artefakt-labels på pilene (centreret i hvert mellemrum, over pilen) -->
+    <div class="art" style="left:406px;top:286px"><b>lead_story</b> · tickers ·<br><b>magnet-URL</b></div>
+    <div class="art" style="left:840px;top:286px"><b>ad.png</b> / reel ·<br><b>ad.json</b> · <b>design.json</b></div>
+    <div class="art" style="left:1272px;top:286px"><b>launch_manifest</b><br>{ ad_id ↔ design }</div>
+
+    <!-- sløjfe-labels -->
+    <div class="loop a" style="left:1056px;top:700px">
+      <div class="tag">SLØJFE A · PERFORMANCE → CREATIVE</div>
+      <div class="desc">performance rangerer grebene → styrer næste annonces design (skift ét greb ad gangen)</div>
+    </div>
+    <div class="loop b" style="left:406px;top:122px">
+      <div class="tag">SLØJFE B · TREND → PRODUKT</div>
+      <div class="desc">mangler et lead-magnet til historien → byg det → ny CTA</div>
+    </div>
+    <div class="loop c" style="left:1272px;top:122px">
+      <div class="tag">SLØJFE C · TRÆTHED → FORNYELSE</div>
+      <div class="desc">frekvens ⚠ → ny variant i det vindende ad set</div>
+    </div>
+
+    <!-- rød tråd -->
+    <div class="chain">
+      <span class="lbl">én nøgle binder alt ·</span>
+      <span class="node">trend_brief<span class="k">.json</span></span><span class="sep">→</span>
+      <span class="node">ad<span class="k">.json</span></span><span class="sep">→</span>
+      <span class="node">design<span class="k">.json</span></span><span class="sep">→</span>
+      <span class="node">launch_manifest<span class="k">(ad_id)</span></span><span class="sep">→</span>
+      <span class="node">insights<span class="k">(ad_id)</span></span><span class="sep">→</span>
+      <span class="node">design<span class="k"> --json</span></span><span class="sep">↩</span>
+    </div>
+
+  </div>
+</body>
+</html>

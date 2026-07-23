@@ -1,0 +1,300 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NIS Ad Pipeline — News → Creative → Feedback</title>
+<style>
+  :root{
+    --bg:#0b0f17; --card:#111620; --card2:#0f141d; --border:#1e2533; --border2:#232c3d;
+    --ink:#e6e9ef; --mut:#8b93a7; --dim:#6f7a90; --amber:#f5a623; --pos:#3ecf8e; --neg:#ff5c5c;
+    --mono:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace;
+    --sans:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--sans);
+    -webkit-font-smoothing:antialiased;line-height:1.55}
+  a{color:var(--amber);text-decoration:none}
+  .wrap{max-width:1000px;margin:0 auto;padding:48px 24px 96px}
+  header{border-bottom:1px solid var(--border);padding-bottom:28px;margin-bottom:36px}
+  .eyebrow{font-family:var(--mono);font-size:11px;letter-spacing:.22em;text-transform:uppercase;
+    color:var(--amber);margin:0 0 12px}
+  h1{font-size:30px;line-height:1.2;margin:0 0 10px;font-weight:800;letter-spacing:-.01em}
+  h1 .accent{color:var(--amber)}
+  .sub{color:var(--mut);font-size:15px;max-width:70ch;margin:0}
+  .meta-row{display:flex;flex-wrap:wrap;gap:8px;margin-top:18px}
+  .pill{font-family:var(--mono);font-size:11px;color:var(--mut);background:var(--card2);
+    border:1px solid var(--border);border-radius:999px;padding:5px 11px}
+  .pill b{color:var(--ink);font-weight:600}
+  h2{font-size:13px;font-family:var(--mono);letter-spacing:.16em;text-transform:uppercase;
+    color:var(--dim);margin:56px 0 20px;padding-top:8px;border-top:1px solid var(--border)}
+
+  /* spine */
+  .spine{display:flex;flex-direction:column;align-items:center;gap:0}
+  .stage{width:100%;background:var(--card);border:1px solid var(--border);border-radius:14px;
+    padding:20px 22px;position:relative}
+  .stage .num{position:absolute;top:-14px;left:20px;width:30px;height:30px;border-radius:50%;
+    background:var(--amber);color:var(--bg);font-weight:800;font-size:14px;display:grid;
+    place-items:center;box-shadow:0 0 0 4px var(--bg)}
+  .stage .st-head{display:flex;align-items:baseline;gap:12px;flex-wrap:wrap;margin:6px 0 8px}
+  .stage h3{font-size:17px;margin:0;font-weight:700}
+  .stage .who{font-family:var(--mono);font-size:12px;color:var(--amber)}
+  .stage .flow{font-family:var(--mono);font-size:12.5px;color:var(--ink);
+    background:var(--card2);border:1px solid var(--border2);border-radius:8px;padding:9px 12px;
+    margin:2px 0 0;overflow-x:auto;white-space:nowrap}
+  .stage .flow .op{color:var(--dim)}
+  .stage .note{color:var(--mut);font-size:13px;margin:10px 0 0}
+  .handoff{display:flex;flex-direction:column;align-items:center;padding:6px 0;color:var(--dim)}
+  .handoff .arrow{font-size:20px;line-height:1}
+  .handoff .art{font-family:var(--mono);font-size:11.5px;color:var(--mut);text-align:center;
+    max-width:80ch;padding:2px 8px}
+  .handoff .art b{color:var(--amber);font-weight:600}
+
+  /* detail cards */
+  .cards{display:grid;gap:16px}
+  .card{background:var(--card);border:1px solid var(--border);border-radius:14px;padding:20px 22px}
+  .card .ch{display:flex;align-items:center;gap:10px;margin:0 0 4px}
+  .card .badge{font-family:var(--mono);font-size:12px;font-weight:700;color:var(--bg);
+    background:var(--amber);border-radius:6px;padding:2px 8px}
+  .card h3{font-size:16px;margin:0;font-weight:700}
+  .card .who{font-family:var(--mono);font-size:12px;color:var(--amber);margin:2px 0 14px}
+  .card p{margin:10px 0;color:var(--mut);font-size:14px}
+  .card p strong{color:var(--ink);font-weight:600}
+  code{font-family:var(--mono);font-size:12.5px;background:var(--card2);border:1px solid var(--border);
+    border-radius:5px;padding:1px 6px;color:var(--ink)}
+  .cmd{font-family:var(--mono);font-size:12.5px;background:#080b12;border:1px solid var(--border2);
+    border-left:3px solid var(--amber);border-radius:8px;padding:11px 14px;margin:12px 0;
+    color:var(--ink);overflow-x:auto;white-space:pre-wrap}
+  table{width:100%;border-collapse:collapse;margin:12px 0 2px;font-size:13px}
+  th,td{text-align:left;padding:8px 10px;border-bottom:1px solid var(--border);vertical-align:top}
+  th{font-family:var(--mono);font-size:11px;letter-spacing:.08em;text-transform:uppercase;
+    color:var(--dim);font-weight:600}
+  td:first-child{white-space:nowrap}
+  td code{background:transparent;border:0;padding:0;color:var(--amber)}
+
+  /* loops */
+  .loops{display:grid;gap:14px;grid-template-columns:1fr 1fr}
+  .loop{background:var(--card);border:1px solid var(--border);border-radius:14px;padding:18px 20px}
+  .loop .lh{font-family:var(--mono);font-size:12px;letter-spacing:.1em;text-transform:uppercase;
+    color:var(--amber);margin:0 0 8px;font-weight:700}
+  .loop h4{margin:0 0 8px;font-size:15px}
+  .loop p{margin:0;color:var(--mut);font-size:13.5px}
+  .loop.b .lh{color:var(--pos)}
+  .loop.c .lh{color:#7aa7ff}
+
+  .seams{background:var(--card2);border:1px solid var(--border2);border-radius:14px;padding:20px 24px}
+  .seams ol{margin:8px 0 0;padding-left:20px;color:var(--mut);font-size:14px}
+  .seams li{margin:8px 0}
+  .seams li strong{color:var(--ink)}
+
+  .throughline{margin-top:32px;background:linear-gradient(180deg,var(--card),var(--card2));
+    border:1px solid var(--border2);border-radius:14px;padding:22px 24px}
+  .throughline .lh{font-family:var(--mono);font-size:11px;letter-spacing:.16em;text-transform:uppercase;
+    color:var(--dim);margin:0 0 12px}
+  .chain{display:flex;flex-wrap:wrap;align-items:center;gap:8px;font-family:var(--mono);font-size:12.5px}
+  .chain .node{background:#080b12;border:1px solid var(--border2);border-radius:7px;padding:7px 11px;color:var(--ink)}
+  .chain .node .k{color:var(--amber)}
+  .chain .sep{color:var(--dim)}
+
+  footer{margin-top:56px;padding-top:20px;border-top:1px solid var(--border);color:var(--dim);
+    font-size:12px;font-family:var(--mono)}
+  @media(max-width:720px){.loops{grid-template-columns:1fr}h1{font-size:24px}}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header>
+    <p class="eyebrow">News Impact Screener · Growth</p>
+    <h1>The Ad Pipeline: <span class="accent">news → creative → performance feedback</span></h1>
+    <p class="sub">How a week's dominant news story becomes a paid creative, gets launched as PAUSED Meta drafts,
+      and how performance flows back to shape the next ad. One join key survives all four stages.</p>
+    <div class="meta-row">
+      <span class="pill">Current state: <b>1 campaign → 1 ad set / lead-magnet → 1 ad</b></span>
+      <span class="pill">Objective <b>OUTCOME_LEADS</b> · pixel <b>LEAD</b></span>
+      <span class="pill">Audience <b>US/GB/CA/AU · 18–65</b></span>
+      <span class="pill">All drafts <b>PAUSED</b></span>
+    </div>
+  </header>
+
+  <h2>The spine</h2>
+  <div class="spine">
+
+    <div class="stage">
+      <div class="num">1</div>
+      <div class="st-head"><h3>News → Trend</h3><span class="who">nis-trend-radar · find_weekly_trend.py</span></div>
+      <div class="flow">Supabase trend views <span class="op">──▶</span> pick dominant weekly topic (volume × acceleration) <span class="op">──▶</span> trend_brief.json</div>
+      <p class="note">Reads the <em>same</em> views the <code>/articles</code> page uses, so the brief is consistency-guaranteed with the site.</p>
+    </div>
+
+    <div class="handoff">
+      <span class="arrow">↓</span>
+      <span class="art"><b>lead_story</b> · <b>tickers_in_play</b> · <b>lead_magnets.{news_briefing│market_screening}.url</b></span>
+      <span class="arrow">↓</span>
+    </div>
+
+    <div class="stage">
+      <div class="num">2</div>
+      <div class="st-head"><h3>Trend → Creative</h3><span class="who">nis-ad-image · build_ad_image.py / build_ad_reel.py</span></div>
+      <div class="flow">author ad.json <span class="op">──▶</span> render 1x1 / 4x5 / 9x16 PNG (+ 9x16 reel) <span class="op">──▶</span> design.json</div>
+      <p class="note">↩ <strong style="color:var(--amber)">Step 0</strong> reads last cycle's <code>design --json</code> to bias the genome toward proven winners.</p>
+    </div>
+
+    <div class="handoff">
+      <span class="arrow">↓</span>
+      <span class="art"><b>1x1/ad.png</b> (or <b>9x16/ad_reel.mp4</b>+poster) · <b>ad.json</b> (Meta copy + destination) · <b>design.json</b></span>
+      <span class="arrow">↓</span>
+    </div>
+
+    <div class="stage">
+      <div class="num">3</div>
+      <div class="st-head"><h3>Creative → Launch</h3><span class="who">nis-ad-launch · meta_ads (preflight → draft --go)</span></div>
+      <div class="flow">1 campaign → 1 ad set / lead-magnet → 1 ad, all PAUSED <span class="op">──▶</span> launch_manifest.json</div>
+      <p class="note">UTMs split onto the creative's <code>url_tags</code>; ad sets optimize the pixel <code>LEAD</code> event. You flip Active by hand.</p>
+    </div>
+
+    <div class="handoff">
+      <span class="arrow">↓</span>
+      <span class="art"><b>launch_manifest.json</b> &nbsp;{ ad_id ↔ design }&nbsp; — the join key that binds spend back to the creative genome</span>
+      <span class="arrow">↓</span>
+    </div>
+
+    <div class="stage">
+      <div class="num">4</div>
+      <div class="st-head"><h3>Performance → Feedback</h3><span class="who">meta_ads: insights · reconcile · design</span></div>
+      <div class="flow">Meta insights (by ad_id, by utm_content) + Supabase real leads <span class="op">──▶</span> which levers win on CTR / CVR / CPL</div>
+      <p class="note"><code>design --json</code> ranks levers best-first → feeds back into ② Step 0 <strong style="color:var(--amber)">(Loop A)</strong>.</p>
+    </div>
+
+  </div>
+
+  <h2>Stage detail</h2>
+  <div class="cards">
+
+    <div class="card">
+      <div class="ch"><span class="badge">1</span><h3>News → Trend</h3></div>
+      <div class="who">nis-trend-radar</div>
+      <p><strong>Reads:</strong> <code>news_trends_tag_daily_v</code> (themes/day) + <code>news_trends_ticker_daily_v</code> (ticker mentions/day),
+        enriched by <code>news_impact_heads</code> (<code>cluster='STORY_KEY_POINTS'</code> → <em>why</em> it's trending),
+        <code>ticker_sentiment_heads_v</code> (topic-scoped sentiment) and <code>market_screenings</code> (CTA matching).</p>
+      <p><strong>Logic:</strong> current vs prior 7-day windows → <code>heat = current × (1 + 2·growth)</code> (tilts toward acceleration)
+        → excludes ~40 generic process tags (earnings, guidance, lawsuit…) → volume floor (topic ≥ 8 articles).</p>
+      <p><strong>Writes</strong> <code>output/trends/&lt;date&gt;/trend_brief.{json,md}</code>. Fields that travel downstream:</p>
+      <table>
+        <tr><th>Field</th><th>Feeds</th></tr>
+        <tr><td><code>lead_story.narrative / .framing / .week_articles / .delta_pct</code></td><td>ad headline, subhead, emotion / angle, proof stat</td></tr>
+        <tr><td><code>lead_story.most_affected[]</code></td><td>the real proof ticker</td></tr>
+        <tr><td><code>top_topic.tickers_in_play[]</code> (over-index ranked)</td><td>reel ticker-tape background</td></tr>
+        <tr><td><code>top_topic.why_its_trending[]</code></td><td>ad explainer body</td></tr>
+        <tr><td><code>lead_magnets.{news_briefing│market_screening}.url</code></td><td>verbatim ad CTA destination (UTMs pre-baked)</td></tr>
+        <tr><td><code>…market_screening.needs_new_screening + suggested_screening</code></td><td>Loop B (product gap → new screen)</td></tr>
+      </table>
+    </div>
+
+    <div class="card">
+      <div class="ch"><span class="badge">2</span><h3>Trend → Creative</h3></div>
+      <div class="who">nis-ad-image</div>
+      <p><strong>Step 0 (closes Loop A):</strong> before authoring, read the performance leaderboard and bias the genome toward winners
+        — on <em>rates</em>, one lever at a time, ignoring low-sample / fatigued rows.</p>
+      <div class="cmd">.venv/bin/python -m services.meta_ads.cli design --leaderboard --min-impr 500   # human read
+.venv/bin/python -m services.meta_ads.cli design --json        --min-impr 500   # machine-readable → next spec</div>
+      <p><strong>Author <code>ad.json</code></strong> — three blocks:</p>
+      <table>
+        <tr><th>Block</th><th>Keys</th></tr>
+        <tr><td>visual</td><td><code>theme, accent, headline, headline_accent, subhead, bullets, proof, cta_label</code> + reel <code>background{motif,scene,rising,tickers,speed}</code></td></tr>
+        <tr><td><code>ad</code> (Meta copy)</td><td><code>primary_text, headline, description, cta_label, destination</code></td></tr>
+        <tr><td><code>design</code> genome</td><td><code>hook_type, angle, primary_emotion, visual_style, persona, offer, variant</code> (controlled vocab)</td></tr>
+      </table>
+      <p><strong>Renders</strong> to <code>output/ads/&lt;date&gt;-&lt;short-name&gt;/&lt;lead-magnet&gt;/</code>:
+        <code>1x1/ad.png</code> (the one launch uploads), <code>4x5/</code>, <code>9x16/</code> PNGs, <code>ad_copy.txt</code>,
+        optional <code>9x16/ad_reel.mp4</code>+poster, and <strong>design.json</strong> = authored genome <em>plus</em> auto-derived facts
+        (<code>headline_words, has_proof, bullet_count, formats, utm_content…</code>) — the objective record that survives to feedback.</p>
+    </div>
+
+    <div class="card">
+      <div class="ch"><span class="badge">3</span><h3>Creative → Launch</h3></div>
+      <div class="who">nis-ad-launch / meta_ads</div>
+      <p><code>preflight</code> gates every permission, then <code>draft --campaign &lt;dir&gt; --go</code> builds
+        <strong>1 campaign → 1 ad set per lead-magnet subfolder → 1 ad each</strong> — isolated budgets, <code>OUTCOME_LEADS</code>,
+        ad sets optimize the pixel <code>LEAD</code> event, US/GB/CA/AU 18–65, <strong>all PAUSED</strong>
+        (rollback if any step fails; you flip Active by hand).</p>
+      <div class="cmd">.venv/bin/python -m services.meta_ads.cli preflight
+.venv/bin/python -m services.meta_ads.cli draft --campaign 2026-07-14-geopolitics --go</div>
+      <p><strong>UTMs:</strong> <code>_split_utm()</code> strips <code>utm_*</code> off the destination and puts them on the creative's top-level
+        <code>url_tags</code> → every click carries <code>utm_content=news_briefing │ market_screening</code>.</p>
+      <p><strong>Writes <code>launch_manifest.json</code></strong> — one row per ad:
+        <code>{ ad_id, ad_set_id, campaign_id, creative_id, lead_magnet, slug, design }</code>.
+        <code>ad_id</code> is the join key that binds spend back to the genome.</p>
+    </div>
+
+    <div class="card">
+      <div class="ch"><span class="badge">4</span><h3>Performance → Feedback</h3></div>
+      <div class="who">meta_ads · insights / reconcile / design</div>
+      <table>
+        <tr><th>Command</th><th>Joins</th><th>Answers</th></tr>
+        <tr><td><code>insights</code></td><td>Graph <code>/insights</code> (ad-level) × creative <code>url_tags</code></td><td>per-ad CTR/CPC/CPL + rollup by feature (<code>utm_content</code>)</td></tr>
+        <tr><td><code>reconcile</code></td><td>Meta spend/clicks × Supabase real email leads (<code>*_subscriptions.metadata.utm</code>)</td><td>cost per <em>actual</em> lead (pixel-independent truth)</td></tr>
+        <tr><td><code>design</code></td><td><code>launch_manifest</code> (ad_id→genome) × insights</td><td>which levers drive engagement — rollup by <code>hook_type/angle/accent/has_proof/…</code> on normalized CTR/CPM/CVR/CPL, <code>⚠low-n</code>/<code>⚠fatigue</code> flagged</td></tr>
+      </table>
+      <p><code>design --json</code> emits <code>{ per_ad[], levers{ field: [ranked best-first by CPL] } }</code> — the machine-readable input to ②'s Step 0.</p>
+    </div>
+
+  </div>
+
+  <h2>The feedback loops</h2>
+  <div class="loops">
+    <div class="loop a">
+      <p class="lh">Loop A · performance → creative</p>
+      <h4>Winning levers bias the next genome</h4>
+      <p><code>design --json</code> → next ad's <code>design</code> block. Closed by the <code>ad_id ↔ design.json</code> join.
+        Automated read, manual apply — vary <strong>one lever per <code>variant</code></strong> so attribution stays clean.</p>
+    </div>
+    <div class="loop b">
+      <p class="lh">Loop B · trend → product</p>
+      <h4>Story with no screen → new screen</h4>
+      <p>When the winning topic has no matching screener, <code>trend_brief</code> sets <code>needs_new_screening</code> + a ready-to-build
+        <code>suggested_screening</code> spec → you create it → it becomes a new lead-magnet destination for future ads.</p>
+    </div>
+    <div class="loop c">
+      <p class="lh">Loop C · fatigue → refresh</p>
+      <h4>Worn creative → fresh variant</h4>
+      <p><code>design</code>'s <code>frequency</code> / <code>⚠fatigue</code> signal tells you when a creative is spent and needs a fresh
+        variant appended to the winning ad set (preserves learning) rather than a brand-new ad set.</p>
+    </div>
+    <div class="loop">
+      <p class="lh">The through-key</p>
+      <h4>One id, four stages</h4>
+      <p>The whole loop hangs on <code>ad_id</code> in <code>launch_manifest.json</code> linking Meta spend back to the exact
+        creative genome that produced it. No id, no feedback.</p>
+    </div>
+  </div>
+
+  <h2>Manual seams (not automated)</h2>
+  <div class="seams">
+    <ol>
+      <li><strong>Director picks the story &amp; authors <code>ad.json</code>.</strong> The trend brief is ready-to-use, but the creative call is human.</li>
+      <li><strong>You flip ads Active in Ads Manager.</strong> Nothing in the pipeline can spend — everything is created PAUSED.</li>
+      <li><strong>Step 0 is a read, not an auto-apply.</strong> The next genome is chosen from the leaderboard by you, not written automatically.</li>
+    </ol>
+  </div>
+
+  <div class="throughline">
+    <p class="lh">The through-line — one join key survives all four stages</p>
+    <div class="chain">
+      <span class="node">trend_brief<span class="k">.json</span></span><span class="sep">→</span>
+      <span class="node">ad<span class="k">.json</span></span><span class="sep">→</span>
+      <span class="node">design<span class="k">.json</span></span><span class="sep">→</span>
+      <span class="node">launch_manifest<span class="k"> (ad_id)</span></span><span class="sep">→</span>
+      <span class="node">insights<span class="k"> (ad_id)</span></span><span class="sep">→</span>
+      <span class="node">design<span class="k"> --json</span></span><span class="sep">↩ back to ②</span>
+    </div>
+  </div>
+
+  <footer>
+    NIS ad pipeline overview · current state: 1 ad per ad set · generated 2026-07-21 ·
+    sources: nis-trend-radar, nis-ad-image, nis-ad-launch skills + services/meta_ads
+  </footer>
+
+</div>
+</body>
+</html>

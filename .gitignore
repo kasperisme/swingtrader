@@ -174,3 +174,5 @@ news_impact/cache/*
 content/
 
 .DS_Store
+
+secrets/

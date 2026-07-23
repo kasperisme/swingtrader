@@ -28,6 +28,7 @@ import {
   type AssistantChatMessage,
 } from "@/components/ai-chat-bits";
 import { markAiOnboardingSeen } from "@/app/actions/onboarding";
+import { track } from "@/lib/analytics/events";
 import {
   Dialog,
   DialogContent,
@@ -156,7 +157,7 @@ export function SetupAssistantRoot() {
             screenings, Telegram, and first agent.
           </DialogDescription>
         </DialogHeader>
-        {open && <SetupAssistantChat className="min-h-0 flex-1" />}
+        {open && <SetupAssistantChat className="min-h-0 flex-1" surface="profile" />}
       </DialogContent>
     </Dialog>
   );
@@ -167,10 +168,23 @@ export function SetupAssistantRoot() {
  * its own message state, auto-kicks off the interview on mount, and renders the
  * progress strip + transcript + composer.
  */
-export function SetupAssistantChat({ className = "" }: { className?: string }) {
+export function SetupAssistantChat({
+  className = "",
+  surface = "welcome",
+}: {
+  className?: string;
+  /** Where the assistant was opened — "welcome" (first-join) | "profile" (re-entry). */
+  surface?: string;
+}) {
   const [messages, setMessages] = useState<AssistantChatMessage[]>([]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
+  // Analytics refs (don't trigger renders): fire `opened` once, count user
+  // messages, remember which of the 5 tasks are already done, and emit a
+  // `finished` summary on unmount.
+  const openedRef = useRef(false);
+  const messagesSentRef = useRef(0);
+  const doneRef = useRef<Record<string, boolean>>({});
   // When the latest question offers tap-able options, the free-text box stays
   // hidden until the user taps "Add note / comment".
   const [showComposer, setShowComposer] = useState(false);
@@ -183,6 +197,35 @@ export function SetupAssistantChat({ className = "" }: { className?: string }) {
     // Remember the user has now seen AI onboarding so it doesn't auto-open again.
     void markAiOnboardingSeen();
   }, []);
+
+  useEffect(() => {
+    if (!openedRef.current) {
+      openedRef.current = true;
+      track("setup_assistant_opened", { surface });
+    }
+    // On unmount (dialog closed / step advanced), emit a summary of how far the
+    // agent got this user — the funnel's terminal event.
+    return () => {
+      track("setup_assistant_finished", {
+        surface,
+        tasks_completed: Object.values(doneRef.current).filter(Boolean).length,
+        messages_sent: messagesSentRef.current,
+      });
+    };
+  }, [surface]);
+
+  // Fire a task_completed event the first time each of the 5 setup tasks flips
+  // done (derived from the agent's status chips) — this is the utilization gold:
+  // what the agent actually accomplished per user.
+  useEffect(() => {
+    const d = deriveDone(messages);
+    for (const s of SETUP_STEPS) {
+      if (d[s.key] && !doneRef.current[s.key]) {
+        track("setup_assistant_task_completed", { surface, task: s.key });
+      }
+    }
+    doneRef.current = d;
+  }, [messages, surface]);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
@@ -323,6 +366,10 @@ export function SetupAssistantChat({ className = "" }: { className?: string }) {
 
   function onSubmit(e: FormEvent) {
     e.preventDefault();
+    if (input.trim()) {
+      messagesSentRef.current += 1;
+      track("setup_assistant_message_sent", { surface, via: "typed" });
+    }
     void runTurn(input);
   }
 
@@ -419,7 +466,11 @@ export function SetupAssistantChat({ className = "" }: { className?: string }) {
               <button
                 key={opt}
                 type="button"
-                onClick={() => void runTurn(opt)}
+                onClick={() => {
+                  messagesSentRef.current += 1;
+                  track("setup_assistant_message_sent", { surface, via: "quick_reply" });
+                  void runTurn(opt);
+                }}
                 className="rounded-full border border-border bg-background px-3.5 py-1.5 text-sm font-medium text-foreground transition-colors hover:border-foreground/30 hover:bg-muted active:scale-[0.98]"
               >
                 {opt}

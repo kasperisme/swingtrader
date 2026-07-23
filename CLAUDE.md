@@ -76,6 +76,7 @@ The caveman/businessman toggle is global (localStorage-backed via `lib/caveman-m
 | `nis-ad-launch` | The paid last mile: pushes a rendered `nis-ad-image` (its `1x1/ad.png` + `ad.json`) into Meta Ads Manager as **PAUSED** campaign drafts via the `meta_ads` module. `preflight` checks every account/permission gate; `draft --go` builds the feature A/B (1 campaign → 1 ad set/feature → 1 single-image ad/feature, isolated budgets), all PAUSED until you flip Active by hand. Also the measurement side (`insights`/`reconcile` → cost per REAL lead) |
 | `nis-trend-radar` | Find the single most talked-about news **topic/trend of the last week** — a data-backed "trend brief" for downstream ad generation. Reuses the `/articles` trend views (tag + ticker daily aggregates), buckets current-vs-prior 7-day windows, excludes generic process tags, and picks the dominant thematic story by volume × acceleration; pulls real evidence headlines + tickers in play, a distilled `lead_story`, and preset `lead_magnets` deep-links. Writes `output/trends/<date>/trend_brief.{json,md}`; feeds the headline of `nis-ad-image` |
 | `ticker-pair-divergence` | Making a viral reel about a ticker PAIR — the non-obvious relationship (from `ticker_pair_stats` + the relationship graph), normalized line charts with company logos riding each line, the divergence flagged, and the mean-reversion (pairs) trade voiced |
+| `nis-performance` | The whole-funnel performance foundation — wires GA4 + Search Console + Meta Ads + Supabase leads + PostHog into ONE snapshot joined on `utm_content`/feature (Supabase leads = conversion truth), computes cost-per-real-lead, and derives deterministic **routed** action flags. Writes `output/performance/<date>/snapshot.{json,md}`; the JSON is the data foundation the action skills consume (feeds `nis-ad-image` Step 0, SEO, CRO, conversion instrumentation). Read-only. Run before an ad/content push or weekly |
 
 ## Scheduled Screenings (Agent)
 
@@ -186,6 +187,46 @@ Needs `META_ADS_TOKEN` (System User) + `META_AD_ACCOUNT_ID` in `code/analytics/.
 (+ `META_PAGE_ID`, optional `META_IG_ACCOUNT_ID` / `META_DSA_BENEFICIARY` for creation).
 Pairs with the UTM capture (`metadata.utm`) + pixel `Lead` events on the subscribe forms
 and the `/protected/attribution` UI view.
+
+## Google Analytics + Search Console (read-only insight)
+
+See `code/analytics/services/google_analytics/`. Service-account access to the **GA4 Data
+API** (acquisition channels, landing pages, key events) + the **Search Console API**
+(organic queries, CTR/position, striking-distance SEO opportunities). GA4 is already
+installed site-side (gtag `G-FQ87KHKLS5` in `app/layout.tsx`).
+
+```bash
+cd code/analytics
+.venv/bin/python -m services.google_analytics.cli verify        # green/red creds + both APIs
+.venv/bin/python -m services.google_analytics.cli discover      # list accessible GA4 props + GSC sites
+.venv/bin/python -m services.google_analytics.cli summary|channels|landing|conversions|queries|sc-pages|opportunities
+```
+
+Needs `GA4_PROPERTY_ID`, `GSC_SITE_URL`, and `GOOGLE_APPLICATION_CREDENTIALS` (path to the
+service-account JSON in the gitignored `secrets/`) or inline `GOOGLE_SERVICE_ACCOUNT_JSON`
+in `code/analytics/.env`. The SA needs Viewer on the GA4 property + a user in Search Console,
+and the Data / Admin / Search Console APIs enabled in the Cloud project.
+
+## Performance Foundation (whole-funnel insight)
+
+See `code/analytics/services/performance/README.md` and the `nis-performance` skill.
+
+The **unified** layer over every wired platform (GA4, Search Console, Meta Ads, Supabase
+leads, PostHog). Joins them along the funnel keyed on **`utm_content`/feature** (Supabase
+leads = the conversion truth), computes **cost-per-real-lead** per feature, and derives
+deterministic **routed** action flags (`{severity, area, finding, action, route_to}`). Each
+source is a fault-tolerant adapter, so a dead platform degrades gracefully.
+
+```bash
+cd code/analytics
+.venv/bin/python -m services.performance.cli status               # which platforms are reachable
+.venv/bin/python -m services.performance.cli snapshot --days 28   # build → output/performance/<date>/snapshot.{json,md}
+```
+
+The **JSON is the data foundation** the action skills consume (`nis-ad-image` Step 0, SEO,
+CRO, conversion instrumentation); the **MD** is the analyst digest. Read-only — it never
+changes campaigns/spend/content. Add a platform by adding a `<name>_block()` adapter to
+`services/performance/sources.py` + (optionally) a `_flags()` rule with a `route_to`.
 
 ## Sanity Studio
 

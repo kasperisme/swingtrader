@@ -90,14 +90,31 @@ formats next to the spec). For example `output/ads/2026-07-14-geopolitics/briefi
   "accent": "amber",               // amber (default) | pos (green)
   "brand": "newsimpactscreener.com",
   "mark": "NIS",
-  "kicker": "This week in the market",
+  "category": "Thematic",           // eyebrow tag — from the screening's category (Thematic|Insider|IPO|…)
+  "cadence": "Updated weekdays",     // eyebrow cadence — derived from the screening's schedule (see below)
+  "kicker": null,                    // optional override; when null the eyebrow = "CATEGORY · CADENCE"
   "headline": "Iran moved the whole market. Did your inbox?",
   "headline_accent": "the whole market",   // the exact words to paint in the accent colour
   "subhead": "261 stories in 7 days — oil, COIN and energy all reacting.",
   "bullets": ["A daily brief on #geopolitics + XOM, COIN, AAPL",
               "In your inbox before the open — free"],
   "proof": {"ticker": "COIN", "ret": 30, "spy": 4},   // optional — REAL returns only
+  "impact_list": {                    // optional — a ranked "impact board" (the curiosity-gap vehicle)
+    "title": "Reacting to the Iran news",   // small label above the rows
+    "reveal": "partial",              // full (proof) | partial (opens a gap — hides the tail)
+    "shown": 3,                       // partial only: rows shown before the "+N more · see them free →" tease (default 3)
+    "more_label": "see them free →",  // optional — the tease microcopy (default; never "unlock", it's free)
+    "items": [                        // REAL, dated moves only — never invent
+      {"ticker": "FRO", "move": "+21%", "dir": "up"},
+      {"ticker": "XOM", "move": "+12%", "dir": "up"},
+      {"ticker": "CVX", "move": "+8%",  "dir": "up"},
+      {"ticker": "LMT", "move": "+5%",  "dir": "up"},
+      {"ticker": "CCJ", "move": "+9%",  "dir": "up"},
+      {"ticker": "XLE", "move": "+7%",  "dir": "up"}
+    ]
+  },
   "cta_label": "Get my briefing",
+  "cta_note": "Free · weekdays 7am ET",   // trust/cadence line under the button — from the screening schedule
   "destination": "https://www.newsimpactscreener.com/briefings?tags=geopolitics,oil,iran&tickers=XOM,COIN,AAPL",
   "disclaimer": "Not financial advice. For education only.",
   "background_image": "hero.jpg",  // optional — a real photo in the slug dir (cover-fit + scrim). Omit → generated motif.
@@ -122,6 +139,8 @@ formats next to the spec). For example `output/ads/2026-07-14-geopolitics/briefi
     "visual_style": "data",          // data|editorial|photo
     "persona": "busy_swing_trader",  // who it targets
     "offer": "free_daily_briefing",  // the promise
+    "curiosity_type": "partial_list",// none|partial_list|withheld_tickers|withheld_winner|withheld_mechanism|number_tease|pattern_interrupt
+    "curiosity_strength": 2,          // 0 none · 1 implied · 2 explicit gap  (auto-inferred from impact_list if omitted)
     "variant": "v1"                  // label to tell A/B variants of the same concept apart
   }
 }
@@ -131,6 +150,27 @@ formats next to the spec). For example `output/ads/2026-07-14-geopolitics/briefi
   the single number/idea that stops the scroll. One accent only.
 - **`proof`** is optional but strong — a real `$TICKER +NN%` vs the S&P. Never invent it; pull
   from a `setup.json` `benchmarks` or a trend brief's `most_affected`.
+- **`impact_list`** is the newer, higher-leverage version of `proof`: a ranked board of the
+  tickers moving on the story (source it verbatim from the trend brief's `most_affected` /
+  `tickers_in_play`). `reveal: "full"` shows every row (a proof play); `reveal: "partial"`
+  shows the top `shown` (default 3) and hides the rest behind a **`+N more · see them free →`**
+  tease — that withheld tail is the curiosity gap. The tease says *free* (never "unlock"),
+  since every screening is a free email/Telegram sub; override with `impact_list.more_label`.
+  See the section below.
+
+**Templated legitimacy fields — drive these from the screening row, not hand-copy.** They cost
+nothing to fill and add a per-theme trust signal so each ad reads as a real, scheduled product:
+- **`category`** — the screening's category tag (`Thematic`/`Insider`/`IPO`/…) → the eyebrow.
+- **`cadence`** + **`cta_note`** — derived from the screening's `schedule` (cron) + `timezone`
+  via a helper, so the wording is consistent:
+  ```python
+  from build_ad_image import cadence_from_schedule
+  cadence_from_schedule("0 7 * * 1-5", "America/New_York")
+  # → {"cadence": "Updated weekdays", "cta_note": "Free · weekdays 7am ET"}
+  ```
+  Pull `category`, `schedule`, `timezone` off the `market_screenings` row for the destination
+  screening: the eyebrow becomes `CATEGORY · CADENCE` and a trust line sits under the CTA —
+  closing the "what am I actually signing up for" gap before the click.
 - **`ad.*`** feeds `ad_copy.txt` AND the single-image creative (its `headline`→`name`,
   `description`→`description` under the image). `ad.destination` is the real click target.
 
@@ -175,6 +215,48 @@ choices drive engagement* — dark vs light, proof vs no proof, `hook_type=quest
 ads — free text won't aggregate). The point is to vary *one lever at a time* across variants
 (`variant: "v1"`, `"v2"`, …) so the analysis can attribute the lift. Only describe what's
 actually in the creative — the derived facts are cross-checked against it.
+
+## Curiosity gaps — the lever to leverage
+
+A curiosity gap = reveal enough to open a question, withhold the answer, make the click the
+only way to close it. It reliably lifts **CTR** — but a strong gap with a weak payoff is just
+**clickbait**: CTR up, CVR down, spend wasted. So the thing you optimise is **curiosity scored
+on CVR / cost-per-lead**, never CTR alone. `meta_ads design` now carries the levers
+(`curiosity_type`, `curiosity_strength`, `impact_list_reveal`) and auto-flags **`⚠clickbait`**
+(top-quartile CTR + bottom-quartile CVR) so a magnetic-but-hollow gap can't hide.
+
+**Gap mechanisms** (each a distinct, testable `curiosity_type` — same trend, different thing withheld):
+
+| `curiosity_type` | Withholds | Example (Hormuz week) |
+|---|---|---|
+| `withheld_tickers` | the names | "3 S&P names are quietly ripping on the Iran news. Is one yours?" |
+| `partial_list` | the rest of the list | impact_list `reveal:"partial"` — `FRO +21 · XOM +12 · … +2 more →` |
+| `withheld_winner` | which is #1 | "The biggest winner of the Hormuz shock isn't an oil stock." |
+| `withheld_mechanism` | the *why* | "Why is a shipping stock beating every energy name this week?" |
+| `number_tease` | the payoff size | "One name is up 21% since Monday. Most people missed it." |
+| `pattern_interrupt` | the expected frame | "Everyone's watching oil. The real move is two sectors over." |
+
+**Pace the gap across the funnel** — this is what stops a strong gap from backfiring. The gap
+is a three-beat sequence: **ad opens it → landing page narrows it → email closes it.**
+- Reveal *everything* on the landing page → no reason to submit the email → clicks, no leads.
+- Reveal *nothing* → they bounce → no leads.
+- With `partial_list`: ad shows the top 3 → landing shows those 3 + "unlock the full ranked list"
+  → email delivers the rest. Curiosity **and** a reason to convert, message-matched the whole way.
+
+**First built-in A/B — full vs partial impact list.** Author two variants that differ on
+*only* the reveal (hold trend, headline, visual, CTA constant):
+- `variant: "impact_full"` → `impact_list.reveal: "full"` (proof play; `curiosity_strength` 1)
+- `variant: "impact_partial"` → `impact_list.reveal: "partial"`, `shown: 3` (gap; `curiosity_strength` 2)
+
+Launch both, then read the winner on **CVR / $-per-lead** (watch `⚠clickbait`):
+
+```bash
+.venv/bin/python -m services.meta_ads.cli design --by impact_list_reveal --min-impr 500
+.venv/bin/python -m services.meta_ads.cli design --by curiosity_type     --min-impr 500
+```
+
+That result feeds the next ad's genome (Loop A) — bias toward the gap that pulled *leads*, not
+just clicks.
 
 ## Reel variant (video) — same ad, animated
 

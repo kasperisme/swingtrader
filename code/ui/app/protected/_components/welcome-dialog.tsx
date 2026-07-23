@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useEffect, useState, useTransition } from "react";
 import { AlertTriangle, ArrowRight, PlayCircle, Sparkles } from "lucide-react";
 
 import { markWelcomed } from "@/app/actions/onboarding";
@@ -36,6 +36,9 @@ type Props = {
   displayName: string | null;
 };
 
+// The ordered welcome-dialog steps — drives the funnel's step_index.
+const STEP_ORDER = ["video", "setup", "plan"] as const;
+
 export function WelcomeDialog({ displayName }: Props) {
   const [open, setOpen] = useState(true);
   const [step, setStep] = useState<"video" | "setup" | "plan">("video");
@@ -43,6 +46,19 @@ export function WelcomeDialog({ displayName }: Props) {
   const [isPending, startTransition] = useTransition();
 
   const greetingName = displayName?.trim() || "trader";
+
+  // First-join funnel: emit a step-view each time a step becomes visible, so
+  // PostHog can chart where new users drop off (video → setup → plan). Fires on
+  // mount (video) and on every step change; guarded by `open` so closing the
+  // dialog doesn't emit.
+  useEffect(() => {
+    if (!open) return;
+    track("onboarding_step_viewed", {
+      step,
+      step_index: STEP_ORDER.indexOf(step) + 1,
+      step_count: STEP_ORDER.length,
+    });
+  }, [step, open]);
 
   // Persist "welcomed" so the dialog doesn't reappear. Idempotent.
   function persistWelcomed() {
@@ -169,7 +185,7 @@ export function WelcomeDialog({ displayName }: Props) {
               </DialogDescription>
             </DialogHeader>
 
-            <SetupAssistantChat className="min-h-0 flex-1" />
+            <SetupAssistantChat className="min-h-0 flex-1" surface="welcome" />
 
             <DialogFooter className="shrink-0">
               <Button onClick={() => setStep("plan")}>

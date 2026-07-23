@@ -29,6 +29,10 @@ from PIL import Image, ImageDraw, ImageFont, ImageFilter
 # ---- themes ---------------------------------------------------------------
 AMBER = "#F59E0B"; POS = "#22C55E"; NEG = "#EF4444"
 _ACCENT = {"amber": AMBER, "pos": POS, "green": POS, "neg": NEG}
+
+# Reusable microcopy — accurate for EVERY screening (all are free email/Telegram subs).
+# The withheld-tail tease must never read paywalled; override per-ad via impact_list.more_label.
+IMPACT_MORE_CTA = "see them free →"
 THEMES = {
     # dark: eToro-style punch (default for ads)
     "dark": {"bg_top": "#0A0F1C", "bg_bot": "#141E33", "ink": "#F4F7FB",
@@ -73,6 +77,53 @@ def _wrap(d, text, font, maxw):
     if cur:
         lines.append(cur)
     return lines
+
+
+_TZ_ABBR = {"America/New_York": "ET", "America/Chicago": "CT", "America/Denver": "MT",
+            "America/Los_Angeles": "PT", "Europe/London": "GMT",
+            "Europe/Copenhagen": "CET", "UTC": "UTC"}
+
+
+def cadence_from_schedule(cron: str, tz: str = "") -> dict:
+    """Turn a screening's cron schedule + timezone into reusable microcopy, so the
+    eyebrow cadence + CTA trust-line are driven by REAL platform data, not hand-copy:
+        cadence_from_schedule("0 7 * * 1-5", "America/New_York")
+        → {"cadence": "Updated weekdays", "cta_note": "Free · weekdays 7am ET"}
+    Author pulls (category, schedule, timezone) off the market_screenings row and
+    passes the resolved strings into ad.json."""
+    out = {"cadence": "", "cta_note": ""}
+    try:
+        mn, hr, _dom, _mon, dow = str(cron).split()
+    except ValueError:
+        return out
+    tzab = _TZ_ABBR.get(tz, (tz.split("/")[-1][:3].upper() if tz else ""))
+    if dow in ("1-5",):
+        freq = "weekdays"
+    elif dow in ("0,6", "6,0", "6", "0"):
+        freq = "weekends" if "," in dow else "weekly"
+    elif dow in ("*", "?"):
+        freq = "daily"
+    elif dow.isdigit():
+        freq = "weekly"
+    else:
+        freq = "daily"
+    tstr = ""
+    if hr.isdigit():
+        h = int(hr); ap = "am" if h < 12 else "pm"; h12 = h % 12 or 12
+        mns = f":{int(mn):02d}" if (mn.isdigit() and int(mn)) else ""
+        tstr = f"{h12}{mns}{ap}"
+    out["cadence"] = f"Updated {freq}"
+    out["cta_note"] = "Free · " + freq + (f" {tstr}" if tstr else "") + (f" {tzab}" if tstr and tzab else "")
+    return out
+
+
+def _kicker_text(spec):
+    """The eyebrow: explicit `kicker` wins; else compose from the screening's
+    category tag + cadence (e.g. 'Thematic · Updated weekdays')."""
+    if spec.get("kicker"):
+        return spec["kicker"]
+    parts = [p for p in (spec.get("category"), spec.get("cadence")) if p]
+    return " · ".join(parts) if parts else None
 
 
 # ---- background: real photo (cover + scrim) or generated financial motif ---
@@ -180,6 +231,56 @@ def _proof(d, x, y, W, T, accent, ticker, ret, spy):
     return ph
 
 
+def _impact_rows(il):
+    """Resolve an impact_list spec into (items, shown, hidden). `reveal:"partial"`
+    shows `shown` rows and hides the rest behind a tease (the curiosity gap);
+    `reveal:"full"` shows everything (the proof play)."""
+    items = il.get("items", []) or []
+    reveal = (il.get("reveal") or "full").lower()
+    shown = il.get("shown", 3) if reveal == "partial" else len(items)
+    shown = max(0, min(int(shown), len(items)))
+    hidden = (len(items) - shown) if reveal == "partial" else 0
+    return items, shown, hidden
+
+
+def _impact_height(il):
+    items, shown, hidden = _impact_rows(il)
+    rows = shown + (1 if hidden > 0 else 0)
+    head = 54 if il.get("title") else 0
+    return 28 + head + rows * 58 + 20
+
+
+def _impact_list(d, x, y, W, T, accent, il):
+    """A compact 'impact board': ranked $TICKER → move rows. When partial, a final
+    '+N more · unlock →' row opens the curiosity gap (the rest lives behind the click
+    + email). Every number must be real — the renderer only lays out."""
+    items, shown, hidden = _impact_rows(il)
+    pw = W - 2 * MARGIN
+    ph = _impact_height(il)
+    d.rounded_rectangle([x, y, x + pw, y + ph], radius=24,
+                        fill=(*_mix(T["panel"], "#FFFFFF", 0.02 if T is THEMES["dark"] else 0), 235),
+                        outline=(*_hex(T["grid"]), 255), width=2)
+    yy = y + 28
+    if il.get("title"):
+        d.text((x + 30, yy + 8), il["title"].upper(), font=_f(22, "mono"),
+               fill=(*_hex(T["mut"]), 255), anchor="lm")
+        yy += 54
+    tick_f, move_f = _f(40, "bold"), _f(40, "mono")
+    for it in items[:shown]:
+        col = NEG if str(it.get("dir", "up")).lower() == "down" else POS
+        d.text((x + 30, yy + 29), f"${it.get('ticker', '')}", font=tick_f,
+               fill=(*_hex(T["ink"]), 255), anchor="lm")
+        d.text((x + pw - 30, yy + 29), str(it.get("move", "")), font=move_f,
+               fill=(*_hex(col), 255), anchor="rm")
+        yy += 58
+    if hidden > 0:
+        d.text((x + 30, yy + 29), f"+ {hidden} more", font=_f(36, "bold"),
+               fill=(*_hex(accent), 255), anchor="lm")
+        d.text((x + pw - 30, yy + 29), il.get("more_label") or IMPACT_MORE_CTA,
+               font=_f(30, "mono"), fill=(*_hex(accent), 255), anchor="rm")
+    return ph
+
+
 def _cta(d, x, y, T, accent, label):
     f = _f(38, "bold")
     tw = d.textlength(label, font=f)
@@ -216,13 +317,15 @@ def render(spec, ratio, out_dir):
     sub_lh = int(38 * 1.34)
     bullets = spec.get("bullets", [])
     proof = spec.get("proof")
+    impact = spec.get("impact_list")
 
     blocks = []  # (height, drawfn)
     blocks.append((60, lambda yy: _logo(d, x, yy, T, accent, brand, spec.get("mark", "NIS"))))
-    if spec.get("kicker"):
+    kicker = _kicker_text(spec)
+    if kicker:
         kf = _f(26, "mono")
-        blocks.append((40, lambda yy, kf=kf: d.text((x, yy + 20), spec["kicker"].upper(), font=kf,
-                                                     fill=(*_hex(accent), 255), anchor="lm")))
+        blocks.append((40, lambda yy, kf=kf, kt=kicker: d.text((x, yy + 20), kt.upper(), font=kf,
+                                                               fill=(*_hex(accent), 255), anchor="lm")))
     blocks.append((hl_lh * len(hl_lines),
                    lambda yy: _headline_accent(d, x, yy + hl_lh // 2, hl_lines, hl_font, T["ink"],
                                                accent, spec.get("headline_accent", ""), hl_lh)))
@@ -231,12 +334,22 @@ def render(spec, ratio, out_dir):
                        lambda yy: [d.text((x, yy + i * sub_lh + sub_lh // 2), ln, font=_f(38, "reg"),
                                           fill=(*_hex(T["mut"]), 255), anchor="lm")
                                    for i, ln in enumerate(sub_lines)]))
+    if impact and impact.get("items"):
+        blocks.append((_impact_height(impact),
+                       lambda yy: _impact_list(d, x, yy, W, T, accent, impact)))
     for b in bullets:
         blocks.append((54, lambda yy, b=b: _check(d, x, yy + 22, T, accent, b)))
     if proof:
         blocks.append((200, lambda yy: _proof(d, x, yy, W, T, accent, proof["ticker"],
                                               float(proof["ret"]), float(proof["spy"]))))
-    blocks.append((92, lambda yy: _cta(d, x, yy, T, accent, spec.get("cta_label", "Learn more"))))
+    cta_note = spec.get("cta_note")
+
+    def _cta_block(yy):
+        _cta(d, x, yy, T, accent, spec.get("cta_label", "Learn more"))
+        if cta_note:                              # trust/cadence line under the button
+            d.text((x, yy + 92 + 20), cta_note, font=_f(24, "reg"),
+                   fill=(*_hex(T["mut"]), 255), anchor="lm")
+    blocks.append((92 + (34 if cta_note else 0), _cta_block))
 
     gaps = {0: 46, 1: 30}  # after logo / kicker; default below
     total = sum(h for h, _ in blocks) + sum(28 for _ in blocks[:-1]) + 40
@@ -265,6 +378,11 @@ def _derive_design(spec: dict, out_dir: pathlib.Path, ratios: list[str]) -> dict
     hl = spec.get("headline", "") or ""
     sub = spec.get("subhead", "") or ""
     bullets = spec.get("bullets", []) or []
+    il = spec.get("impact_list") or {}
+    il_items = il.get("items") or []
+    il_reveal = (il.get("reveal") or "full").lower() if il_items else "none"
+    il_shown = (min(int(il.get("shown", 3)), len(il_items))
+                if il_reveal == "partial" else len(il_items)) if il_items else 0
     # provenance from the saved-content convention: …/<campaign>/<lead-magnet>/
     lead_magnet = out_dir.name
     campaign = out_dir.parent.name
@@ -283,8 +401,16 @@ def _derive_design(spec: dict, out_dir: pathlib.Path, ratios: list[str]) -> dict
         "bullet_count": len(bullets),
         "has_proof": bool(spec.get("proof")),
         "proof_type": "ticker_vs_spy" if spec.get("proof") else "none",
+        # curiosity-gap levers: the impact board + how much it reveals
+        "has_impact_list": bool(il_items),
+        "impact_list_reveal": il_reveal,          # full | partial | none
+        "impact_list_shown": il_shown,
+        "impact_list_total": len(il_items),
         "cta_label": spec.get("cta_label"),
         "cta_words": len((spec.get("cta_label") or "").split()),
+        "has_cta_note": bool(spec.get("cta_note")),
+        "category": spec.get("category"),
+        "cadence": spec.get("cadence"),
         "primary_text_chars": len(ad.get("primary_text") or ""),
         "formats": ratios,
         # provenance / join keys
@@ -298,7 +424,14 @@ def _derive_design(spec: dict, out_dir: pathlib.Path, ratios: list[str]) -> dict
         "rendered_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
     }
     # authored intent (controlled vocab) wins for its own keys; derived facts win on overlap
-    return {**(spec.get("design") or {}), **derived}
+    merged = {**(spec.get("design") or {}), **derived}
+    # curiosity genome — authored value wins; otherwise infer from the impact board so
+    # every ad carries a comparable value (a partial list IS a curiosity mechanism).
+    merged.setdefault("curiosity_type",
+                      "partial_list" if il_reveal == "partial" else "none")
+    merged.setdefault("curiosity_strength",
+                      2 if il_reveal == "partial" else (1 if il_items else 0))
+    return merged
 
 
 def main():

@@ -1,5 +1,6 @@
 "use client";
 
+import { gaEvent } from "./ga";
 import { getPosthog } from "./posthog";
 
 type EventMap = {
@@ -65,12 +66,34 @@ type EventMap = {
   api_key_created: { scopes: string[] };
   api_key_revoked: Record<string, never>;
   onboarding_completed: { skipped: boolean };
+  // First-join onboarding funnel — one event each time a welcome-dialog step is
+  // shown (video → setup → plan). Build a PostHog funnel on `step` to see where
+  // new users drop off. `step_index` is 1-based; `step_count` is the total.
+  onboarding_step_viewed: {
+    step: "video" | "setup" | "plan";
+    step_index: number;
+    step_count: number;
+  };
   onboarding_step_clicked: { step: string };
   onboarding_dismissed: { completed_steps: number; total_steps: number };
   onboarding_collapsed_toggled: { collapsed: boolean };
   onboarding_restarted: { completed_steps: number; total_steps: number };
   ask_ai_reminder_clicked: Record<string, never>;
+  // AI setup-agent utilization. `surface` = where it was opened ("welcome" =
+  // first-join dialog, "profile" = re-entry). Together these show how far the
+  // agent gets a new user: opened → messages_sent (engagement) → which of the 5
+  // tasks it completed → finished (summary).
   setup_assistant_opened: { surface: string };
+  setup_assistant_message_sent: { surface: string; via: "typed" | "quick_reply" };
+  setup_assistant_task_completed: {
+    surface: string;
+    task: "strategy" | "holdings" | "screenings" | "telegram" | "agent";
+  };
+  setup_assistant_finished: {
+    surface: string;
+    tasks_completed: number;
+    messages_sent: number;
+  };
   onboarding_exit_without_billing: Record<string, never>;
 
   paywall_viewed: {
@@ -137,4 +160,17 @@ export function track<K extends keyof EventMap>(
 ) {
   const ph = getPosthog();
   ph?.capture(event, properties);
+
+  // Forward the confirmed lead-magnet conversion to GA4 as `sign_up`, so GA4 stops
+  // showing 0 conversions against real leads. Mark `sign_up` a Key event in GA4
+  // (Admin → Events) once it starts flowing. `magnet`/`utm_content` ride along so
+  // GA4 can segment by lead magnet + ad feature, mirroring the PostHog funnel.
+  if (event === "lead_subscribed") {
+    const p = (properties ?? {}) as EventMap["lead_subscribed"];
+    gaEvent("sign_up", {
+      method: "email",
+      magnet: p.magnet,
+      utm_content: p.utm_content,
+    });
+  }
 }

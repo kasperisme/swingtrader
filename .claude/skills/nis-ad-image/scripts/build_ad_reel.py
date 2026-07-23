@@ -62,9 +62,10 @@ def _blocks(spec, W, H):
 
     b: list[tuple[str, int, object]] = []
     b.append(("logo", 60, lambda d, x, y: ai._logo(d, x, y, T, accent, brand, spec.get("mark", "NIS"))))
-    if spec.get("kicker"):
+    kicker = ai._kicker_text(spec)
+    if kicker:
         kf = ai._f(26, "mono")
-        b.append(("kicker", 40, lambda d, x, y, kf=kf: d.text((x, y + 20), spec["kicker"].upper(),
+        b.append(("kicker", 40, lambda d, x, y, kf=kf, kt=kicker: d.text((x, y + 20), kt.upper(),
                                                               font=kf, fill=(*ai._hex(accent), 255), anchor="lm")))
     b.append(("headline", hl_lh * len(hl_lines),
               lambda d, x, y: ai._headline_accent(d, x, y + hl_lh // 2, hl_lines, hl_font, T["ink"],
@@ -74,12 +75,23 @@ def _blocks(spec, W, H):
                   lambda d, x, y: [d.text((x, y + i * sub_lh + sub_lh // 2), ln, font=ai._f(38, "reg"),
                                           fill=(*ai._hex(T["mut"]), 255), anchor="lm")
                                    for i, ln in enumerate(sub_lines)]))
+    impact = spec.get("impact_list")
+    if impact and impact.get("items"):
+        b.append(("impact", ai._impact_height(impact),
+                  lambda d, x, y: ai._impact_list(d, x, y, W, T, accent, impact)))
     for bl in spec.get("bullets", []):
         b.append(("bullet", 54, lambda d, x, y, bl=bl: ai._check(d, x, y + 22, T, accent, bl)))
     if proof:
         b.append(("proof", 200, lambda d, x, y: ai._proof(d, x, y, W, T, accent, proof["ticker"],
                                                           float(proof["ret"]), float(proof["spy"]))))
-    b.append(("cta", 92, lambda d, x, y: ai._cta(d, x, y, T, accent, spec.get("cta_label", "Learn more"))))
+    cta_note = spec.get("cta_note")
+
+    def _cta_draw(d, x, y):
+        ai._cta(d, x, y, T, accent, spec.get("cta_label", "Learn more"))
+        if cta_note:
+            d.text((x, y + 92 + 20), cta_note, font=ai._f(24, "reg"),
+                   fill=(*ai._hex(T["mut"]), 255), anchor="lm")
+    b.append(("cta", 92 + (34 if cta_note else 0), _cta_draw))
 
     safe_top, safe_bot, gap = int(H * 0.10), int(H * 0.82), 40
     total = sum(h for _, h, _ in b) + gap * (len(b) - 1)
