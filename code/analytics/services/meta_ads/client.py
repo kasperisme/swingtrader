@@ -7,6 +7,7 @@ your app supports (the error message names the valid range).
 from __future__ import annotations
 
 import os
+from functools import lru_cache
 from pathlib import Path
 from urllib.parse import parse_qs
 
@@ -32,6 +33,16 @@ def account() -> str:
     return _ACCOUNT if _ACCOUNT.startswith("act_") else f"act_{_ACCOUNT}"
 
 
+@lru_cache(maxsize=1)
+def account_currency() -> str:
+    """The ad account's billing currency ISO code (e.g. 'DKK'). All spend/CPL figures
+    are in this — never assume USD. Empty string if it can't be fetched."""
+    try:
+        return get(account(), {"fields": "currency"}).get("currency", "") or ""
+    except Exception:
+        return ""
+
+
 def _check(r: requests.Response) -> dict:
     body = r.json() if r.content else {}
     if r.status_code >= 400 or (isinstance(body, dict) and "error" in body):
@@ -53,6 +64,14 @@ def get(path: str, params: dict | None = None) -> dict:
         raise MetaError("META_ADS_TOKEN not set in .env")
     p = {"access_token": TOKEN, **(params or {})}
     return _check(requests.get(f"{BASE}/{path.lstrip('/')}", params=p, timeout=45))
+
+
+def post(path: str, params: dict | None = None) -> dict:
+    """Write call (needs ads_management). Used to pause ads/ad sets/campaigns."""
+    if not TOKEN:
+        raise MetaError("META_ADS_TOKEN not set in .env")
+    p = {"access_token": TOKEN, **(params or {})}
+    return _check(requests.post(f"{BASE}/{path.lstrip('/')}", data=p, timeout=45))
 
 
 def paginate(first: dict) -> list[dict]:

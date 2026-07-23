@@ -36,7 +36,7 @@ def build_snapshot(days: int = 28) -> dict[str, Any]:
         "search_console": sources.gsc_block(days),
         "meta_ads": sources.meta_block(since),
         "leads": sources.leads_block(since),
-        "posthog": sources.posthog_block(),
+        "onsite": sources.onsite_block(days),
     }
     snap: dict[str, Any] = {
         "generated_at": _dt.datetime.now(_dt.timezone.utc).isoformat(timespec="seconds"),
@@ -106,6 +106,7 @@ def _flags(snap: dict) -> list[dict]:
     'data foundation for actions' — plain rules over the joined snapshot."""
     flags: list[dict] = []
     ga, gsc, meta, leads = (snap["ga4"], snap["search_console"], snap["meta_ads"], snap["leads"])
+    cur = (meta.get("currency") or "") if meta.get("available") else ""
 
     def add(sev, area, finding, action, route):
         flags.append({"severity": sev, "area": area, "finding": finding,
@@ -137,10 +138,57 @@ def _flags(snap: dict) -> list[dict]:
             continue
         if r["clicks"] >= 50 and r["real_leads"] == 0:
             add("high", "conversion",
-                f"Paid feature '{r['feature']}' spent ${r['spend']} over {r['clicks']} clicks "
+                f"Paid feature '{r['feature']}' spent {r['spend']} {cur} over {r['clicks']} clicks "
                 f"with 0 real leads — the leak is entirely post-click (landing/message-match/form).",
                 "Tighten ad→landing message-match + reduce form friction; re-check the impact_list/curiosity gap pacing.",
                 "nis-ad-image / CRO")
+    # 3b) Meta ads with delivery issues (disapproved / limited)
+    if meta.get("available") and meta.get("with_issues"):
+        mi = meta["with_issues"]
+        names = ", ".join(f"{x['ad_name']} ({x['feature']})" for x in mi[:3])
+        add("high", "delivery",
+            f"{len(mi)} live Meta ad(s) flagged WITH_ISSUES/disapproved — limited or halted delivery: {names}.",
+            "Open Ads Manager → the flagged ad → fix the policy/asset issue or replace the creative to restore delivery.",
+            "meta_ads")
+    # 3c) transparency: the window blends paused/retired spend (efficiency is ACTIVE-only)
+    if meta.get("available"):
+        ps = meta.get("paused_spend", 0.0)
+        window_total = ps + meta["totals"]["spend"]
+        if ps and window_total and ps / window_total > 0.15:
+            add("info", "data-health",
+                f"{ps:.0f} {cur} of the window's paid spend is paused/retired ads — the efficiency "
+                f"below is ACTIVE-only (live), not the raw all-ads window blend.",
+                "None needed — this is the correct live view; don't compare it against a raw window total.",
+                "none")
+    # 3d) on-site funnel measurability + friction
+    o = snap.get("onsite", {})
+    if o.get("available"):
+        ff = o.get("form_funnel", {})
+        if not o.get("client_funnel_instrumented") and o.get("confirmed_subscribes", 0) > 0:
+            add("high", "measurement",
+                f"On-site form funnel isn't capturing (lead_form_viewed/submitted = 0) though "
+                f"{o['confirmed_subscribes']} subscribes confirmed server-side — you can't see WHERE "
+                f"visitors drop between landing and the form.",
+                "Verify the just-deployed lead_form_* client events actually fire (or fix them); "
+                "until then every CRO change is blind.",
+                "instrument-funnel")
+        elif ff.get("form_viewed", 0) >= 30:
+            vs = ff["form_submitted"] / ff["form_viewed"] * 100 if ff["form_viewed"] else 0
+            if vs < 30:
+                add("high", "conversion",
+                    f"Form view→submit is {vs:.0f}% ({ff['form_submitted']}/{ff['form_viewed']}) — "
+                    f"heavy abandonment at the form itself.",
+                    "Cut fields, restate the offer/value at the form, reduce required inputs; "
+                    "read the top abandonment reasons.",
+                    "CRO")
+        ga = snap.get("ga4", {})
+        g = ga.get("form_funnel", {}) if ga.get("available") else {}
+        if g.get("form_start", 0) >= 20 and g.get("form_submit", 0) <= 1:
+            add("info", "measurement",
+                f"GA4 form_start={g['form_start']} but form_submit={g.get('form_submit', 0)} — GA4 "
+                f"isn't detecting the React form submit (not real abandonment).",
+                "Rely on the sign_up event + PostHog funnel + Supabase leads, not GA4 auto form_submit.",
+                "none")
     # 4) organic impressions not earning clicks (SEO title/meta)
     if gsc.get("available"):
         s = gsc["summary"]
@@ -157,8 +205,8 @@ def _flags(snap: dict) -> list[dict]:
         worst = max(priced, key=lambda r: r["cost_per_lead"])
         if worst["cost_per_lead"] > best["cost_per_lead"] * 1.5:
             add("medium", "budget",
-                f"Cost/lead spread: '{best['feature']}' ${best['cost_per_lead']} vs "
-                f"'{worst['feature']}' ${worst['cost_per_lead']}.",
+                f"Cost/lead spread: '{best['feature']}' {best['cost_per_lead']} {cur} vs "
+                f"'{worst['feature']}' {worst['cost_per_lead']} {cur}.",
                 "Shift budget toward the cheaper-per-lead feature; test a new creative variant on the worse one.",
                 "meta_ads / nis-ad-image")
     return flags
@@ -166,6 +214,7 @@ def _flags(snap: dict) -> list[dict]:
 
 # ---- render + write -------------------------------------------------------
 def to_markdown(s: dict) -> str:
+    cur = (s.get("meta_ads") or {}).get("currency") or ""      # e.g. DKK — never assume USD
     L = [f"# Performance snapshot — {s['since']} → today ({s['window_days']}d)",
          f"_generated {s['generated_at']}_", ""]
     plats = ", ".join(f"{k}{'' if v['available'] else ' ✗'}" for k, v in s["platforms"].items())
@@ -175,7 +224,7 @@ def to_markdown(s: dict) -> str:
     L += ["## Funnel"]
     if "paid" in f:
         L.append(f"- **Paid:** {f['paid']['impressions']:,} impr → {f['paid']['clicks']:,} clicks "
-                 f"({f['paid']['ctr']}% CTR) · ${f['paid']['spend']:,} spend")
+                 f"({f['paid']['ctr']}% CTR) · {f['paid']['spend']:,.2f} {cur} spend")
     if "organic_search" in f:
         L.append(f"- **Organic search:** {f['organic_search']['impressions']:,} impr → "
                  f"{f['organic_search']['clicks']:,} clicks ({f['organic_search']['ctr']}% CTR)")
@@ -184,12 +233,45 @@ def to_markdown(s: dict) -> str:
     if "real_leads" in f:
         cpl = f.get("blended_cost_per_lead")
         L.append(f"- **Real leads (Supabase truth):** {f['real_leads']}"
-                 + (f" · blended ${cpl}/lead" if cpl else " · no paid leads yet"))
+                 + (f" · blended {cpl:,.2f} {cur}/lead" if cpl else " · no paid leads yet"))
+    m = s.get("meta_ads", {})
+    if m.get("available"):
+        L.append(f"- _Meta scope: ACTIVE-only — {m.get('active_ad_count', 0)} live ad(s); "
+                 f"{m.get('paused_spend', 0):.0f} {cur} paused/retired spend in the window (excluded above)._")
+        if m.get("with_issues"):
+            L.append(f"- ⚠ **{len(m['with_issues'])} ad(s) WITH_ISSUES:** "
+                     + ", ".join(x["ad_name"] for x in m["with_issues"][:3]))
     L.append("")
+
+    o = s.get("onsite", {})
+    if o.get("available"):
+        L += ["## On-site funnel (CRO)"]
+        L.append(f"- PostHog pageviews **{o['pageviews']:,}** · confirmed subscribes (server truth) "
+                 f"**{o['confirmed_subscribes']}** · early-access {o['early_access_signups']}")
+        ff = o["form_funnel"]
+        if o["client_funnel_instrumented"]:
+            fv, fsu, fsb = ff["form_viewed"], ff["form_submitted"], ff["subscribed_client"]
+            rate = f" (view→submit {fsu / fv * 100:.0f}%)" if fv else ""
+            L.append(f"- Form funnel: viewed **{fv}** → submitted **{fsu}** → subscribed **{fsb}**{rate}")
+            if o["form_errors"]:
+                L.append("- Abandonment reasons: "
+                         + ", ".join(f"{e['reason']} ({e['count']})" for e in o["form_errors"][:5]))
+        else:
+            L.append("- ⚠ **Client form-funnel not capturing yet** (`lead_form_*` = 0) — "
+                     "on-site drop-off is invisible until these events flow.")
+        dl = o["downloads"]
+        L.append(f"- Screening downloads: {dl['events']} by {dl['people']} people")
+        ga = s.get("ga4", {})
+        if ga.get("available") and ga.get("form_funnel"):
+            g = ga["form_funnel"]
+            L.append(f"- GA4 form events: form_start {g.get('form_start', 0)} · "
+                     f"form_submit {g.get('form_submit', 0)} · sign_up {g.get('sign_up', 0)} "
+                     f"_(GA4 misses React submits — trust sign_up + server truth)_")
+        L.append("")
 
     if s.get("efficiency"):
         L += ["## Cost per real lead — by feature", "",
-              "| feature | spend | clicks | CTR% | real leads | $/lead | land CVR% |",
+              f"| feature | spend ({cur}) | clicks | CTR% | real leads | {cur}/lead | land CVR% |",
               "|---|--:|--:|--:|--:|--:|--:|"]
         for r in s["efficiency"]:
             L.append(f"| {r['feature']} | {r['spend']} | {r['clicks']} | {r['ctr']} | "

@@ -128,9 +128,10 @@ def cmd_reconcile(args) -> int:
         spend[f] = spend.get(f, 0) + _num(r.get("spend"))
         clicks[f] = clicks.get(f, 0) + _num(r.get("clicks"))
     db = _db_leads_by_utm(since)
+    cur = client.account_currency() or ""
     feats = sorted(set(spend) | set(db), key=lambda f: -(spend.get(f, 0)))
-    print(f"\nMeta spend/clicks vs REAL email leads — since {since}:\n")
-    print(f"  {'feature':<22}{'spend':>10}{'meta clicks':>12}{'db leads':>10}{'$/lead':>9}")
+    print(f"\nMeta spend/clicks vs REAL email leads — since {since}  (spend in {cur or 'account currency'}):\n")
+    print(f"  {'feature':<22}{'spend':>10}{'meta clicks':>12}{'db leads':>10}{f'{cur}/lead':>9}")
     for f in feats:
         s, cl, lg = spend.get(f, 0), clicks.get(f, 0), db.get(f, 0)
         cpl = s / lg if lg else 0
@@ -323,6 +324,45 @@ def cmd_capi_test(args) -> int:
     return 0
 
 
+def cmd_pause(args) -> int:
+    """Pause ads by id, or all ACTIVE untagged ads (no utm_content — the stale,
+    unattributable leak). Dry-run by default; --go actually pauses. Needs ads_management."""
+    ads = client.paginate(client.get(
+        f"{client.account()}/ads",
+        {"fields": "id,name,effective_status,campaign{name},adset{name},creative{url_tags}", "limit": 200}))
+    ids = set(args.ad or [])
+    targets = []
+    for a in ads:
+        uc = client.utm_from_url_tags((a.get("creative") or {}).get("url_tags")).get("utm_content")
+        active = a.get("effective_status") == "ACTIVE"
+        if a["id"] in ids or (args.untagged and active and not uc):
+            targets.append(a)
+    if not ids and not args.untagged:
+        print("Nothing selected. Use --ad <id> (repeatable) and/or --untagged.")
+        return 1
+    if not targets:
+        print("No matching ads to pause "
+              f"({'no ACTIVE untagged ads — good' if args.untagged else 'ids not found'}).")
+        return 0
+    verb = "Pausing" if args.go else "[dry-run] would pause"
+    print(f"{verb} {len(targets)} ad(s):")
+    for a in targets:
+        print(f"  {a['name']:<24} [{a.get('effective_status')}]  ad_id={a['id']}  · "
+              f"{(a.get('campaign') or {}).get('name')} / {(a.get('adset') or {}).get('name')}")
+    if not args.go:
+        print("\nRe-run with --go to pause them.")
+        return 0
+    ok = 0
+    for a in targets:
+        try:
+            client.post(a["id"], {"status": "PAUSED"}); ok += 1
+            print(f"  ✓ paused {a['id']}")
+        except MetaError as e:
+            print(f"  ✗ {a['id']}: {e}")
+    print(f"\nPaused {ok}/{len(targets)}.")
+    return 0
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(prog="meta_ads")
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -353,6 +393,12 @@ def main(argv=None) -> int:
     pt = sub.add_parser("capi-test", help="send ONE synthetic Lead event to verify the connection")
     pt.add_argument("--test", dest="test_code", required=True, help="Events Manager test_event_code")
     pt.set_defaults(func=cmd_capi_test)
+    pp = sub.add_parser("pause", help="pause stale ads (by id, or all ACTIVE untagged)")
+    pp.add_argument("--ad", action="append", help="ad_id to pause (repeatable)")
+    pp.add_argument("--untagged", action="store_true",
+                    help="pause every ACTIVE ad with no utm_content (the unattributable leak)")
+    pp.add_argument("--go", action="store_true", help="actually pause (default is dry-run)")
+    pp.set_defaults(func=cmd_pause)
     args = ap.parse_args(argv)
     try:
         return args.func(args)

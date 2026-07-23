@@ -77,3 +77,18 @@ def conversions(days: int = 28, limit: int = 25) -> list[dict[str, Any]]:
 def geo(days: int = 28, limit: int = 15) -> list[dict[str, Any]]:
     return _run(["country"], ["sessions", "conversions", "engagementRate"],
                 days, order_by_metric="sessions", limit=limit)
+
+
+def form_funnel(days: int = 28) -> dict[str, int]:
+    """GA4's view of the form step: `form_start` / `form_submit` (auto-tracked) +
+    our `sign_up` (custom). NB: GA4's auto `form_submit` often misses React/SPA
+    submits — cross-check `sign_up` and the Supabase leads truth."""
+    from google.analytics.data_v1beta.types import Filter, FilterExpression
+    names = ["form_start", "form_submit", "sign_up", "generate_lead"]
+    flt = FilterExpression(filter=Filter(
+        field_name="eventName", in_list_filter=Filter.InListFilter(values=names)))
+    rows = _run(["eventName"], ["eventCount"], days, dimension_filter=flt, limit=25)
+    out = {n: 0 for n in names}
+    for r in rows:
+        out[r["eventName"]] = int(r.get("eventCount", 0))
+    return out

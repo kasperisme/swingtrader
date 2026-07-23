@@ -24,7 +24,7 @@ Sources (each degrades gracefully — a dead platform doesn't sink the snapshot)
 | Search Console | `services/google_analytics` | organic queries, CTR/position, SEO opportunities |
 | Meta Ads | `services/meta_ads` | paid spend/clicks/impressions by feature |
 | Supabase leads | `shared/db` | real sign-ups — the conversion truth |
-| PostHog | `services/posthog_analytics` | behavioural funnel + heatmaps (dashboard link) |
+| PostHog (on-site) | `services/posthog_analytics` | CRO funnel: pageviews → form viewed → submitted → subscribed, abandonment reasons, downloads |
 
 Join spine = the funnel keyed on `utm_content` / feature, with Supabase leads as truth.
 

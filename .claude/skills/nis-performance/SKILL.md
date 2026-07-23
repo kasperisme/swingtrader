@@ -29,7 +29,7 @@ that fixes it. It does **no creative work** and takes **no actions** — it buil
 | **Search Console** | `services/google_analytics` | organic queries, CTR/position, striking-distance SEO wins |
 | **Meta Ads** | `services/meta_ads` | paid spend / clicks / impressions per feature (utm_content) |
 | **Supabase leads** | `shared/db` | the **conversion truth** — real email/Telegram sign-ups |
-| **PostHog** | `services/posthog_analytics` | behavioural funnel + heatmaps (dashboard link in v1) |
+| **PostHog** (on-site) | `services/posthog_analytics` | **on-site/CRO funnel** — pageviews → form viewed → submitted → subscribed, abandonment reasons, confirmed subscribes (server truth), download signal |
 | *Vercel Analytics* | — | dashboard-only (no pull API); read it in the Vercel UI |
 
 The join spine is the **funnel keyed on `utm_content` / feature**:
@@ -55,7 +55,11 @@ The JSON is the machine-readable contract. Top-level keys:
   `blended_cost_per_lead`.
 - `efficiency[]` — per feature: `spend, clicks, ctr, real_leads, cost_per_lead, landing_cvr`
   (Meta ⋈ Supabase — the real cost per actual lead).
-- `ga4` / `search_console` / `meta_ads` / `leads` / `posthog` — the raw normalized blocks.
+- `onsite` — the CRO funnel: `pageviews`, `form_funnel` (viewed→submitted→subscribed),
+  `form_errors`, `confirmed_subscribes` (server truth), `downloads`,
+  `client_funnel_instrumented` (false = you're blind on drop-off).
+- `ga4` / `search_console` / `meta_ads` / `leads` / `onsite` — the raw normalized blocks
+  (`ga4.form_funnel` = GA4's form_start/form_submit/sign_up).
 - **`health_flags[]`** — the routed findings: `{severity, area, finding, action, route_to}`.
 
 ## Step 3 — Interpret as the growth analyst
@@ -72,6 +76,8 @@ Read the snapshot and produce a **short, ranked action list**. The discipline:
 | `route_to` | Hand off to |
 |---|---|
 | `instrument-conversion` | Wire a `sign_up` event on the forms + mark it a GA4 Key event |
+| `instrument-funnel` | Fix the client `lead_form_viewed/submitted/error` events so on-site drop-off is visible |
+| `CRO` | Reduce form friction / message-match / earlier lead capture on high-traffic pages |
 | `ga4-config` | Add a GA4 bot/data filter; identify the invalid-traffic source |
 | `nis-ad-image` / CRO | Creative levers (curiosity gap, impact_list) + ad→landing message-match |
 | `seo-content` | Title/meta rewrites on original-angle pages ranking p1-2 (`gsc.opportunities`) |
@@ -100,4 +106,8 @@ Coverage grows by adding one adapter — no rearchitecting:
 - **Supabase leads are the conversion truth** — pixel/GA4 conversions can be missing or
   inflated; reconcile against real sign-ups.
 - **Never quote a bot-inflated GA4 aggregate** without the caveat (the flag will tell you).
+- **Meta figures are ACTIVE-only (live).** Paused/retired campaigns in the window are excluded
+  from `efficiency`/`funnel` and reported separately (`meta_ads.paused_spend`), so a retired
+  underperformer can't drag cost-per-lead (it once did — and misled the analysis). A
+  `WITH_ISSUES` flag surfaces live disapproved/limited ads.
 - The snapshot **reads only** — it never changes campaigns, spend, or content.
