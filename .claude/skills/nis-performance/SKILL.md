@@ -30,6 +30,7 @@ that fixes it. It does **no creative work** and takes **no actions** — it buil
 | **Meta Ads** | `services/meta_ads` | paid spend / clicks / impressions per feature (utm_content) |
 | **Supabase leads** | `shared/db` | the **conversion truth** — real email/Telegram sign-ups |
 | **PostHog** (on-site) | `services/posthog_analytics` | **on-site/CRO funnel** — pageviews → form viewed → submitted → subscribed, abandonment reasons, confirmed subscribes (server truth), download signal |
+| **Resend** (email) | `GET /emails` | **email effectiveness** by lead magnet — delivered / bounce (always) + open / click (once tracking is on), inferred from `last_event` |
 | *Vercel Analytics* | — | dashboard-only (no pull API); read it in the Vercel UI |
 
 The join spine is the **funnel keyed on `utm_content` / feature**:
@@ -58,6 +59,8 @@ The JSON is the machine-readable contract. Top-level keys:
 - `onsite` — the CRO funnel: `pageviews`, `form_funnel` (viewed→submitted→subscribed),
   `form_errors`, `confirmed_subscribes` (server truth), `downloads`,
   `client_funnel_instrumented` (false = you're blind on drop-off).
+- `email` — Resend effectiveness: `totals` + `by_magnet` (delivery/bounce/open/click rates),
+  `tracking_on` (false = open/click unmeasured, deliverability only).
 - `ga4` / `search_console` / `meta_ads` / `leads` / `onsite` — the raw normalized blocks
   (`ga4.form_funnel` = GA4's form_start/form_submit/sign_up).
 - **`health_flags[]`** — the routed findings: `{severity, area, finding, action, route_to}`.
@@ -82,6 +85,7 @@ Read the snapshot and produce a **short, ranked action list**. The discipline:
 | `nis-ad-image` / CRO | Creative levers (curiosity gap, impact_list) + ad→landing message-match |
 | `seo-content` | Title/meta rewrites on original-angle pages ranking p1-2 (`gsc.opportunities`) |
 | `meta_ads` | Shift budget toward the cheaper cost-per-lead feature; new variant on the worse one |
+| `email` / `email-config` / `email-content` | Fix deliverability (bounces), enable/verify Resend tracking, or lift email CTR (subject/CTA) |
 
 Keep it to the few actions that matter; name the expected effect and the metric that proves it.
 

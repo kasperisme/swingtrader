@@ -25,6 +25,7 @@ Sources (each degrades gracefully — a dead platform doesn't sink the snapshot)
 | Meta Ads | `services/meta_ads` | paid spend/clicks/impressions by feature |
 | Supabase leads | `shared/db` | real sign-ups — the conversion truth |
 | PostHog (on-site) | `services/posthog_analytics` | CRO funnel: pageviews → form viewed → submitted → subscribed, abandonment reasons, downloads |
+| Resend (email) | `GET /emails` | email effectiveness by lead magnet: delivered/bounce + open/click (once tracking on) |
 
 Join spine = the funnel keyed on `utm_content` / feature, with Supabase leads as truth.
 

@@ -264,13 +264,14 @@ def render_briefing_email_html(
     # CTA priority: cross-sell (primary) → upgrade (secondary) → edit (tertiary).
     from shared.email import app_url, cta_stack
     _base = app_url()
+    # utm_medium=email → GA4 buckets these as the Email channel; campaign splits the magnet.
     _screen_url = (
         f"{_base}/marketscreenings"
-        "?utm_source=email&utm_medium=briefing&utm_content=briefing_email"
+        "?utm_source=newsimpactscreener&utm_medium=email&utm_campaign=briefing&utm_content=briefing_email"
     )
     _upgrade_url = (
         f"{_base}/pricing"
-        "?utm_source=email&utm_medium=briefing&utm_content=briefing_email"
+        "?utm_source=newsimpactscreener&utm_medium=email&utm_campaign=briefing&utm_content=briefing_email"
     )
     ctas = cta_stack(
         primary=("See what the screens flagged", _screen_url),

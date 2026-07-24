@@ -26,6 +26,7 @@ def cmd_status(_args) -> int:
         "Meta Ads": lambda: sources.meta_block(snap._since(1)),
         "Supabase leads": lambda: sources.leads_block(snap._since(1)),
         "PostHog": sources.posthog_block,
+        "Resend email": lambda: sources.email_block(7),
     }
     all_ok = True
     for name, fn in checks.items():

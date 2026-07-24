@@ -862,13 +862,14 @@ def _results_email_html(
     # CTA priority: personalized cross-sell (primary) → upgrade (secondary) →
     # view-on-web (tertiary). The deep-link pre-fills this run's tickers.
     _brief_tickers = ",".join(tickers[:8])
+    # utm_medium=email → GA4 buckets these as the Email channel; campaign splits the magnet.
     _brief_url = (
         f"{base}/briefings?tickers={_brief_tickers}"
-        "&utm_source=email&utm_medium=screening&utm_content=screening_email"
+        "&utm_source=newsimpactscreener&utm_medium=email&utm_campaign=screening&utm_content=screening_email"
     )
     _upgrade_url = (
         f"{base}/pricing"
-        "?utm_source=email&utm_medium=screening&utm_content=screening_email"
+        "?utm_source=newsimpactscreener&utm_medium=email&utm_campaign=screening&utm_content=screening_email"
     )
     ctas = cta_stack(
         primary=("Track these in a free daily briefing", _brief_url),

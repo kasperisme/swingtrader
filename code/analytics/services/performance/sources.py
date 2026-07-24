@@ -180,6 +180,95 @@ def leads_block(since: str) -> dict[str, Any]:
     return _safe(go)
 
 
+def email_block(days: int) -> dict[str, Any]:
+    """Email effectiveness from Resend (`GET /emails`, `last_event` per email).
+
+    Aggregates delivery / bounce (always) + open / click (once tracking is on) by
+    lead-magnet **tag** (`type`). last_event is the LATEST event, so we treat the
+    funnel as nested: delivered ⊇ opened ⊇ clicked. `tracking_on` is inferred from
+    whether any open/click events exist yet."""
+    def go():
+        import datetime as _d
+        import os
+        import pathlib
+        from collections import defaultdict
+
+        import requests
+        from dotenv import load_dotenv
+        for p in pathlib.Path(__file__).resolve().parents:
+            if (p / ".env").exists():
+                load_dotenv(p / ".env"); break
+        key = os.environ.get("RESEND_API_KEY", "")
+        if not key:
+            raise RuntimeError("RESEND_API_KEY not set")
+        H = {"Authorization": f"Bearer {key}"}
+        since = (_d.date.today() - _d.timedelta(days=days)).isoformat()
+
+        rows, after, pages = [], None, 0
+        while pages < 20:                                  # ≤2000 emails, newest-first
+            params = {"limit": 100, **({"after": after} if after else {})}
+            r = requests.get("https://api.resend.com/emails", headers=H, params=params, timeout=30)
+            r.raise_for_status()
+            body = r.json(); data = body.get("data", [])
+            rows += data; pages += 1
+            if not body.get("has_more") or not data:
+                break
+            if (data[-1].get("created_at", "")[:10] or "9") < since:   # paged past window
+                break
+            after = data[-1].get("id")
+
+        def frm(e):
+            f = e.get("from", "")
+            return ",".join(f) if isinstance(f, list) else str(f)
+
+        ours = [e for e in rows
+                if "newsimpactscreener.com" in frm(e) and e.get("created_at", "")[:10] >= since]
+
+        def magnet_of(e):
+            # tags first (only on the detail endpoint); the LIST endpoint omits tags,
+            # so fall back to the subject — which is unambiguous per lead magnet.
+            for t in (e.get("tags") or []):
+                if t.get("name") == "type":
+                    return t.get("value")
+            s = (e.get("subject") or "").lower()
+            if "briefing" in s:
+                return "news_briefing"
+            if "new result" in s:
+                return "market_screening_results"
+            if "coming your way" in s or "you're in" in s:
+                return "screening_confirmation"
+            if "welcome" in s:
+                return "signup_welcome"
+            return "untagged"
+
+        DELIV, OPEN = {"delivered", "opened", "clicked"}, {"opened", "clicked"}
+        agg = defaultdict(lambda: dict(sent=0, delivered=0, opened=0, clicked=0, bounced=0))
+        for e in ours:
+            le = e.get("last_event"); g = agg[magnet_of(e)]; g["sent"] += 1
+            g["delivered"] += le in DELIV
+            g["opened"] += le in OPEN
+            g["clicked"] += le == "clicked"
+            g["bounced"] += le == "bounced"
+
+        def rates(g):
+            s, d = g["sent"], g["delivered"]
+            return {**g,
+                    "delivery_rate": round(d / s * 100, 1) if s else 0.0,
+                    "bounce_rate": round(g["bounced"] / s * 100, 1) if s else 0.0,
+                    "open_rate": round(g["opened"] / d * 100, 1) if d else 0.0,
+                    "click_rate": round(g["clicked"] / d * 100, 1) if d else 0.0}
+
+        tot = dict(sent=len(ours),
+                   delivered=sum(v["delivered"] for v in agg.values()),
+                   opened=sum(v["opened"] for v in agg.values()),
+                   clicked=sum(v["clicked"] for v in agg.values()),
+                   bounced=sum(v["bounced"] for v in agg.values()))
+        return {"window_days": days, "totals": rates(tot),
+                "by_magnet": {k: rates(v) for k, v in sorted(agg.items(), key=lambda x: -x[1]["sent"])},
+                "tracking_on": (tot["opened"] > 0 or tot["clicked"] > 0)}
+    return _safe(go)
+
+
 def posthog_block() -> dict[str, Any]:
     """PostHog: connectivity + the lead-magnet funnel dashboard (behavioural layer).
     Funnel/heatmap *values* live in the PostHog UI; v1 confirms the wiring + links it."""

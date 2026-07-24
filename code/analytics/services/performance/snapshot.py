@@ -37,6 +37,7 @@ def build_snapshot(days: int = 28) -> dict[str, Any]:
         "meta_ads": sources.meta_block(since),
         "leads": sources.leads_block(since),
         "onsite": sources.onsite_block(days),
+        "email": sources.email_block(days),
     }
     snap: dict[str, Any] = {
         "generated_at": _dt.datetime.now(_dt.timezone.utc).isoformat(timespec="seconds"),
@@ -189,6 +190,26 @@ def _flags(snap: dict) -> list[dict]:
                 f"isn't detecting the React form submit (not real abandonment).",
                 "Rely on the sign_up event + PostHog funnel + Supabase leads, not GA4 auto form_submit.",
                 "none")
+    # 3e) email deliverability + engagement
+    em = snap.get("email", {})
+    if em.get("available"):
+        t = em["totals"]
+        if t["sent"] >= 20 and t["bounce_rate"] > 3.0:
+            add("high", "deliverability",
+                f"Email bounce rate {t['bounce_rate']}% ({t['bounced']}/{t['sent']}) — hurts sender reputation.",
+                "Remove hard-bounced addresses, verify SPF/DKIM/DMARC, and validate emails at capture.",
+                "email")
+        if not em["tracking_on"] and t["sent"] >= 10:
+            add("info", "measurement",
+                "Resend open/click tracking has no events yet — engagement (open/click) is unmeasured; "
+                "only deliverability is available.",
+                "Confirm click+open tracking is enabled on the domain; it populates on the next sends.",
+                "email-config")
+        elif em["tracking_on"] and t["delivered"] >= 30 and t["click_rate"] < 1.5:
+            add("medium", "email",
+                f"Email click rate {t['click_rate']}% on {t['delivered']} delivered — low engagement with the CTAs.",
+                "Test subject lines + a single clear CTA; the cross-sell/upgrade blocks may be too buried.",
+                "email-content")
     # 4) organic impressions not earning clicks (SEO title/meta)
     if gsc.get("available"):
         s = gsc["summary"]
@@ -267,6 +288,20 @@ def to_markdown(s: dict) -> str:
             L.append(f"- GA4 form events: form_start {g.get('form_start', 0)} · "
                      f"form_submit {g.get('form_submit', 0)} · sign_up {g.get('sign_up', 0)} "
                      f"_(GA4 misses React submits — trust sign_up + server truth)_")
+        L.append("")
+
+    em = s.get("email", {})
+    if em.get("available"):
+        t = em["totals"]
+        track = "open/click ON" if em["tracking_on"] else "open/click OFF (deliverability only)"
+        L += ["## Email (Resend)"]
+        L.append(f"- {t['sent']} sent · **{t['delivery_rate']}% delivered** · {t['bounce_rate']}% bounced"
+                 + (f" · **{t['open_rate']}% open** · **{t['click_rate']}% click**" if em["tracking_on"] else "")
+                 + f"  _({track})_")
+        for mag, g in list(em["by_magnet"].items())[:5]:
+            eng = (f" · open {g['open_rate']}% · click {g['click_rate']}%") if em["tracking_on"] else ""
+            L.append(f"  - `{mag}`: {g['sent']} sent · {g['delivery_rate']}% delivered · "
+                     f"{g['bounce_rate']}% bounce{eng}")
         L.append("")
 
     if s.get("efficiency"):
