@@ -50,6 +50,10 @@ def cmd_snapshot(args) -> int:
     print(snap.to_markdown(s))
     print(f"\n→ wrote {out / 'snapshot.json'}")
     print(f"→ wrote {out / 'snapshot.md'}")
+    print(f"→ wrote {out / 'report.html'}   (open for the shareable report)")
+    if args.open:
+        import subprocess
+        subprocess.run(["open", str(out / "report.html")], check=False)
     return 0
 
 
@@ -60,6 +64,7 @@ def main() -> int:
     p = sub.add_parser("snapshot")
     p.add_argument("--days", type=int, default=28)
     p.add_argument("--json", action="store_true")
+    p.add_argument("--open", action="store_true", help="open the HTML report after writing")
     p.set_defaults(func=cmd_snapshot)
     args = ap.parse_args()
     return args.func(args)

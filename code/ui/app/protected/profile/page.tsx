@@ -2,10 +2,11 @@ import { Suspense } from "react";
 import { createClient } from "@/lib/supabase/server";
 import { redirect } from "next/navigation";
 import Link from "next/link";
-import { KeyRound, Lock, LogOut, CreditCard, Sparkles, Mail } from "lucide-react";
+import { KeyRound, Lock, LogOut, Sparkles, Mail } from "lucide-react";
 import { LogoutButton } from "@/components/logout-button";
 import { TelegramConnect } from "@/components/telegram-connect";
 import { ManageBillingButton } from "@/components/manage-billing-button";
+import { UpgradeButton } from "@/components/upgrade-button";
 import { Badge } from "@/components/ui/badge";
 import { TradingStrategyForm } from "@/components/trading-strategy-form";
 import { getTradingStrategy } from "@/app/actions/trading-strategy";
@@ -168,13 +169,7 @@ async function ProfileContent() {
           )}
           {!subscription && (
             <div className="px-5 py-4">
-              <Link
-                href="/pricing"
-                className="inline-flex items-center gap-2 text-sm font-medium text-amber-500 hover:text-amber-400 transition-colors"
-              >
-                <CreditCard className="h-4 w-4" />
-                Upgrade plan
-              </Link>
+              <UpgradeButton />
             </div>
           )}
         </dl>

@@ -205,6 +205,14 @@ def _flags(snap: dict) -> list[dict]:
                 "only deliverability is available.",
                 "Confirm click+open tracking is enabled on the domain; it populates on the next sends.",
                 "email-config")
+        elif em["tracking_on"] and t["open_rate"] < 3.0 and t["delivered"] >= 20:
+            # tracking just came online → most of the window predates it; don't cry "low CTR"
+            add("info", "measurement",
+                f"Email open/click tracking recently enabled — current rates (open {t['open_rate']}%, "
+                f"click {t['click_rate']}%) are understated because most of the {t['delivered']} delivered "
+                f"this window predate tracking.",
+                "Re-read email engagement after a full window of tracked-era sends.",
+                "none")
         elif em["tracking_on"] and t["delivered"] >= 30 and t["click_rate"] < 1.5:
             add("medium", "email",
                 f"Email click rate {t['click_rate']}% on {t['delivered']} delivered — low engagement with the CTAs.",
@@ -324,9 +332,11 @@ def to_markdown(s: dict) -> str:
 
 
 def write(snapshot: dict, when: str | None = None) -> pathlib.Path:
+    from . import report
     day = when or snapshot["generated_at"][:10]
     d = _OUT / day
     d.mkdir(parents=True, exist_ok=True)
     (d / "snapshot.json").write_text(json.dumps(snapshot, indent=2))
     (d / "snapshot.md").write_text(to_markdown(snapshot))
+    (d / "report.html").write_text(report.to_html(snapshot))   # shareable HTML report
     return d

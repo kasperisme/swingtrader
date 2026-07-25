@@ -41,12 +41,18 @@ alongside organic search (GSC) and channel mix + engagement (GA4).
 
 ```bash
 cd code/analytics
-.venv/bin/python -m services.performance.cli status               # which platforms are reachable
-.venv/bin/python -m services.performance.cli snapshot --days 28   # build + write the foundation
+.venv/bin/python -m services.performance.cli status                    # which platforms are reachable
+.venv/bin/python -m services.performance.cli snapshot --days 28        # build + write the foundation
+.venv/bin/python -m services.performance.cli snapshot --days 28 --open # …and open the HTML report
 ```
 
-`snapshot` writes **`output/performance/<date>/snapshot.{json,md}`** and prints the digest.
-`status` shows wiring (the snapshot still runs if a platform is down — it uses what's live).
+`snapshot` writes **`output/performance/<date>/snapshot.{json,md}` + `report.html`** and prints
+the digest. `status` shows wiring (the snapshot still runs if a platform is down — it uses what's live).
+
+**The HTML report** (`report.html`, rendered by `report.to_html()`) is the shareable view: a
+dark, brand-styled page with KPI cards, the funnel, cost-per-lead, on-site CRO, email
+effectiveness, SEO, and the routed action flags (colour-coded by severity). Self-contained (no
+external assets) — open it, print it to PDF, or send it. `--open` launches it after building.
 
 ## Step 2 — Read the foundation (`snapshot.json`)
 
