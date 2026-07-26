@@ -9,6 +9,16 @@ type EventMap = {
   logout: Record<string, never>;
   upgrade_clicked: { from_plan: string; to_plan: string; surface: string };
   upgrade_completed: { plan: string };
+  // Self-service plan switch from the profile page. `timing` is "immediate"
+  // (upgrade, prorated now) or "period_end" (downgrade, applied at renewal).
+  plan_change_requested: {
+    from_plan: string;
+    from_interval: string;
+    to_plan: string;
+    to_interval: string;
+    timing: string;
+  };
+  plan_change_canceled: Record<string, never>;
 
   screening_created: { screening_id: string; trigger_condition?: string };
   screening_run: { screening_id: string; manual: boolean };

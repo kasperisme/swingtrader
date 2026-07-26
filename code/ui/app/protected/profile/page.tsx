@@ -6,7 +6,7 @@ import { KeyRound, Lock, LogOut, Sparkles, Mail } from "lucide-react";
 import { LogoutButton } from "@/components/logout-button";
 import { TelegramConnect } from "@/components/telegram-connect";
 import { ManageBillingButton } from "@/components/manage-billing-button";
-import { UpgradeButton } from "@/components/upgrade-button";
+import { ChangePlan } from "@/components/change-plan";
 import { Badge } from "@/components/ui/badge";
 import { TradingStrategyForm } from "@/components/trading-strategy-form";
 import { getTradingStrategy } from "@/app/actions/trading-strategy";
@@ -167,11 +167,9 @@ async function ProfileContent() {
               )}
             </>
           )}
-          {!subscription && (
-            <div className="px-5 py-4">
-              <UpgradeButton />
-            </div>
-          )}
+          {/* Plan picker — Checkout for free/lapsed accounts, in-place switch
+              for live subscriptions. The API decides which. */}
+          <ChangePlan hasSubscription={Boolean(subscription?.stripe_customer_id)} />
         </dl>
       </section>
 

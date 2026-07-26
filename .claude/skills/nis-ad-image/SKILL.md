@@ -189,13 +189,22 @@ cd code/analytics
 Outputs next to the spec (`output/ads/<date>-<short-name>/<lead-magnet>/`):
 - `4x5/ad.png` — 1080×1350 (Meta feed)
 - `9x16/ad.png` — 1080×1920 (TikTok / Reels / Stories)
-- `1x1/ad.png` — 1080×1080 (square; the one `nis-ad-launch` uploads)
+- `1x1/ad.png` — 1080×1080 (square; the static fallback `nis-ad-launch` uploads)
+- `9x16/ad_reel.mp4` + `ad_reel_poster.png` — **the reel, rendered by default** (see below)
 - `ad_copy.txt` — primary text · headline · description · CTA (paste into Ads Manager)
 - `design.json` — the resolved creative genome (authored `design` + auto-derived facts)
 
-Review every render before shipping. `theme: dark` is the default for stopping power;
-`background_image` swaps the generated chart motif for a real photo (cover-fit + readability
-scrim), if you have one that fits.
+**One command produces the whole deliverable, reel included.** `build_ad_image.py` renders the
+static ratios and then invokes `build_ad_reel.py` on the same spec — because `nis-ad-launch`
+**prefers `9x16/ad_reel.mp4` over the static image**, so an ad without a reel silently ships as
+the weaker creative. Tune with `--reel-seconds` / `--reel-fps` / `--music`, or pass `--no-reel`
+to skip it deliberately (then also set `"launch_as": "image"` in `ad.json` so the intent is
+recorded in the spec, not just in the shell history).
+
+Review **every** render before shipping — the static ratios *and* the reel (check
+`9x16/ad_reel_preview_*.png` or the mp4 itself, since the reel is what actually runs).
+`theme: dark` is the default for stopping power; `background_image` swaps the generated chart
+motif for a real photo (cover-fit + readability scrim), if you have one that fits.
 
 ## Design metadata — what drives engagement
 
@@ -258,7 +267,11 @@ Launch both, then read the winner on **CVR / $-per-lead** (watch `⚠clickbait`)
 That result feeds the next ad's genome (Loop A) — bias toward the gap that pulled *leads*, not
 just clicks.
 
-## Reel variant (video) — same ad, animated
+## The reel (video) — same ad, animated · rendered by default
+
+**Step 2 already produced this** — you only run the command below to re-render it on its own
+(different length/fps, or after tweaking the spec). Skipping the reel means shipping the
+weaker creative, so it is not opt-in.
 
 Meta favours Reels/video, and motion usually lifts CTR. `build_ad_reel.py` renders a
 ~15s vertical (9:16) reel from the **same `ad.json`** — the **brand stays on screen the

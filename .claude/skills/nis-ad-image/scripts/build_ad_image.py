@@ -20,6 +20,8 @@ from __future__ import annotations
 import argparse
 import json
 import pathlib
+import subprocess
+import sys
 from datetime import datetime, timezone
 from urllib.parse import parse_qs, urlparse
 
@@ -203,12 +205,18 @@ def _headline_accent(d, x, y, lines, font, base, accent, accent_words, lh):
             cx += d.textlength(word + " ", font=font)
 
 
-def _check(d, x, y, T, accent, text, size=34):
+def _check(d, x, y, T, accent, text, size=34, maxw=None):
     r = 16
     cy = y
     d.ellipse([x, cy - r, x + 2 * r, cy + r], fill=(*_hex(POS), 255))
     d.line([(x + 9, cy), (x + 15, cy + 7), (x + 24, cy - 8)], fill=(*_hex("#04140A"), 255), width=4, joint="curve")
-    d.text((x + 2 * r + 20, cy), text, font=_f(size, "reg"), fill=(*_hex(T["ink"]), 255), anchor="lm")
+    tx = x + 2 * r + 20
+    f = _f(size, "reg")
+    if maxw:  # a long bullet must shrink rather than run off the canvas
+        while size > 22 and d.textlength(text, font=f) > maxw - (tx - x):
+            size -= 2
+            f = _f(size, "reg")
+    d.text((tx, cy), text, font=f, fill=(*_hex(T["ink"]), 255), anchor="lm")
 
 
 def _proof(d, x, y, W, T, accent, ticker, ret, spy):
@@ -308,55 +316,71 @@ def render(spec, ratio, out_dir):
     safe_bot = int(H * (0.82 if ratio == "9x16" else 0.90))
     maxw = W - 2 * MARGIN
 
-    # measure the stack so we can vertically center it in the safe band
-    hl_size = 82 if ratio != "1x1" else 74
-    hl_font = _f(hl_size, "bold")
-    hl_lines = _wrap(d, spec["headline"], hl_font, maxw)
-    hl_lh = int(hl_size * 1.14)
-    sub_lines = _wrap(d, spec.get("subhead", ""), _f(38, "reg"), maxw) if spec.get("subhead") else []
-    sub_lh = int(38 * 1.34)
     bullets = spec.get("bullets", [])
     proof = spec.get("proof")
     impact = spec.get("impact_list")
-
-    blocks = []  # (height, drawfn)
-    blocks.append((60, lambda yy: _logo(d, x, yy, T, accent, brand, spec.get("mark", "NIS"))))
     kicker = _kicker_text(spec)
-    if kicker:
-        kf = _f(26, "mono")
-        blocks.append((40, lambda yy, kf=kf, kt=kicker: d.text((x, yy + 20), kt.upper(), font=kf,
-                                                               fill=(*_hex(accent), 255), anchor="lm")))
-    blocks.append((hl_lh * len(hl_lines),
-                   lambda yy: _headline_accent(d, x, yy + hl_lh // 2, hl_lines, hl_font, T["ink"],
-                                               accent, spec.get("headline_accent", ""), hl_lh)))
-    if sub_lines:
-        blocks.append((sub_lh * len(sub_lines),
-                       lambda yy: [d.text((x, yy + i * sub_lh + sub_lh // 2), ln, font=_f(38, "reg"),
-                                          fill=(*_hex(T["mut"]), 255), anchor="lm")
-                                   for i, ln in enumerate(sub_lines)]))
-    if impact and impact.get("items"):
-        blocks.append((_impact_height(impact),
-                       lambda yy: _impact_list(d, x, yy, W, T, accent, impact)))
-    for b in bullets:
-        blocks.append((54, lambda yy, b=b: _check(d, x, yy + 22, T, accent, b)))
-    if proof:
-        blocks.append((200, lambda yy: _proof(d, x, yy, W, T, accent, proof["ticker"],
-                                              float(proof["ret"]), float(proof["spy"]))))
     cta_note = spec.get("cta_note")
 
-    def _cta_block(yy):
-        _cta(d, x, yy, T, accent, spec.get("cta_label", "Learn more"))
-        if cta_note:                              # trust/cadence line under the button
-            d.text((x, yy + 92 + 20), cta_note, font=_f(24, "reg"),
-                   fill=(*_hex(T["mut"]), 255), anchor="lm")
-    blocks.append((92 + (34 if cta_note else 0), _cta_block))
+    def _build(hl_size, sub_size):
+        """Measure + lay out the whole stack at a given type scale."""
+        hl_font = _f(hl_size, "bold")
+        hl_lines = _wrap(d, spec["headline"], hl_font, maxw)
+        hl_lh = int(hl_size * 1.14)
+        sub_font = _f(sub_size, "reg")
+        sub_lines = _wrap(d, spec.get("subhead", ""), sub_font, maxw) if spec.get("subhead") else []
+        sub_lh = int(sub_size * 1.34)
 
-    gaps = {0: 46, 1: 30}  # after logo / kicker; default below
-    total = sum(h for h, _ in blocks) + sum(28 for _ in blocks[:-1]) + 40
-    y = safe_top + max(0, (safe_bot - safe_top - total) // 2)
-    for i, (h, fn) in enumerate(blocks):
+        blocks = []  # (height, drawfn)
+        blocks.append((60, lambda yy: _logo(d, x, yy, T, accent, brand, spec.get("mark", "NIS"))))
+        if kicker:
+            kf = _f(26, "mono")
+            blocks.append((40, lambda yy, kf=kf, kt=kicker: d.text((x, yy + 20), kt.upper(), font=kf,
+                                                                   fill=(*_hex(accent), 255), anchor="lm")))
+        blocks.append((hl_lh * len(hl_lines),
+                       lambda yy, f=hl_font, ls=hl_lines, lh=hl_lh:
+                       _headline_accent(d, x, yy + lh // 2, ls, f, T["ink"],
+                                        accent, spec.get("headline_accent", ""), lh)))
+        if sub_lines:
+            blocks.append((sub_lh * len(sub_lines),
+                           lambda yy, f=sub_font, ls=sub_lines, lh=sub_lh:
+                           [d.text((x, yy + i * lh + lh // 2), ln, font=f,
+                                   fill=(*_hex(T["mut"]), 255), anchor="lm")
+                            for i, ln in enumerate(ls)]))
+        if impact and impact.get("items"):
+            blocks.append((_impact_height(impact),
+                           lambda yy: _impact_list(d, x, yy, W, T, accent, impact)))
+        for b in bullets:
+            blocks.append((54, lambda yy, b=b: _check(d, x, yy + 22, T, accent, b, maxw=maxw)))
+        if proof:
+            blocks.append((200, lambda yy: _proof(d, x, yy, W, T, accent, proof["ticker"],
+                                                  float(proof["ret"]), float(proof["spy"]))))
+
+        def _cta_block(yy):
+            _cta(d, x, yy, T, accent, spec.get("cta_label", "Learn more"))
+            if cta_note:                          # trust/cadence line under the button
+                d.text((x, yy + 92 + 20), cta_note, font=_f(24, "reg"),
+                       fill=(*_hex(T["mut"]), 255), anchor="lm")
+        blocks.append((92 + (34 if cta_note else 0), _cta_block))
+        return blocks
+
+    # Fit the stack to the safe band: a heavy block (an impact_list, extra bullets)
+    # can overflow at the base scale, so step the type + rhythm down until it fits.
+    band = safe_bot - safe_top - 28   # clearance so the CTA never touches the footer
+    base_hl = 82 if ratio != "1x1" else 74
+    for step in range(9):
+        hl_size = max(46, base_hl - 4 * step)
+        sub_size = max(28, 38 - 2 * step)
+        gap = max(16, 40 - 3 * step)
+        blocks = _build(hl_size, sub_size)
+        total = sum(h for h, _ in blocks) + gap * (len(blocks) - 1)
+        if total <= band:
+            break
+
+    y = safe_top + max(0, (band - total) // 2)
+    for h, fn in blocks:
         fn(y)
-        y += h + 40  # comfortable rhythm
+        y += h + gap
 
     # footer: brand + disclaimer
     d.text((x, H - int(H * 0.05)), brand, font=_f(24, "bold"), fill=(*_hex(T["mut2"]), 255), anchor="lm")
@@ -438,6 +462,12 @@ def main():
     ap = argparse.ArgumentParser(description="Render a single-image Meta/TikTok ad from a Claude spec.")
     ap.add_argument("--spec", required=True)
     ap.add_argument("--ratios", default="4x5,9x16,1x1")
+    ap.add_argument("--no-reel", action="store_true",
+                    help="skip the 9:16 reel (by default it is rendered too, and it is what "
+                         "nis-ad-launch prefers as the creative)")
+    ap.add_argument("--reel-seconds", type=float, default=15.0)
+    ap.add_argument("--reel-fps", type=int, default=30)
+    ap.add_argument("--music", help="optional royalty-free audio to mux into the reel (else silent)")
     args = ap.parse_args()
 
     spec = json.loads(pathlib.Path(args.spec).read_text())
@@ -464,6 +494,21 @@ def main():
             f"   →   {ad.get('destination', spec.get('destination', 'newsimpactscreener.com'))}", ""]
     (out / "ad_copy.txt").write_text("\n".join(copy))
     print(f"ad copy → {out / 'ad_copy.txt'}")
+
+    # The reel is part of the deliverable, not an afterthought: nis-ad-launch prefers
+    # 9x16/ad_reel.mp4 over the static image, so render it by default.
+    if not args.no_reel:
+        sys.stdout.flush()   # keep our lines ahead of the child's when piped
+        cmd = [sys.executable, str(pathlib.Path(__file__).resolve().parent / "build_ad_reel.py"),
+               "--spec", str(pathlib.Path(args.spec).resolve()),
+               "--seconds", str(args.reel_seconds), "--fps", str(args.reel_fps)]
+        if args.music:
+            cmd += ["--music", args.music]
+        rc = subprocess.call(cmd)
+        if rc != 0:
+            print(f"⚠ reel render failed (exit {rc}) — the static ad.png files are still valid. "
+                  f"Re-run build_ad_reel.py, or pass --no-reel to skip it.", file=sys.stderr)
+            raise SystemExit(rc)
 
 
 if __name__ == "__main__":
