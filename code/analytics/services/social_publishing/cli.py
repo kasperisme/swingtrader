@@ -96,7 +96,14 @@ def cmd_publish(args: argparse.Namespace) -> int:
         cap = ""
         if args.caption_file:
             cap = Path(args.caption_file).read_text(encoding="utf-8").strip()
-        plans = [PostPlan(platform=p, caption=cap, kind="video", media=[media],
+        # Infer the kind from the file — ad-hoc mode posts stills (the daily note
+        # screenshot) as well as reels, and typing a PNG as "video" fails upload.
+        kind = "video" if media.suffix.lower() in {".mp4", ".mov", ".m4v"} else "image"
+        if kind == "image" and "tiktok" in platforms:
+            print("error: TikTok is video-only — drop it from --platforms for a still.",
+                  file=sys.stderr)
+            return 1
+        plans = [PostPlan(platform=p, caption=cap, kind=kind, media=[media],
                           caption_source=args.caption_file or "(none)") for p in platforms]
     else:
         try:

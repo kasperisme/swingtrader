@@ -195,12 +195,32 @@ def _logo(d, x, y, T, accent, brand, mark_text="NIS"):
     return s
 
 
+def _norm_word(w: str) -> str:
+    return w.strip(".,!?:;'\"").lower()
+
+
+def _accent_span(lines, accent_words):
+    """Word positions to paint in the accent colour: the FIRST contiguous match of
+    the accent phrase, across the wrapped lines. Matching the phrase (not each word
+    independently) keeps a word that repeats in the headline — "AI chips cracked.
+    AI clouds didn't." — from being accented in both places. One accent only."""
+    want = [_norm_word(w) for w in accent_words.split()] if accent_words else []
+    if not want:
+        return set()
+    flat = [((i, j), _norm_word(w))
+            for i, ln in enumerate(lines) for j, w in enumerate(ln.split())]
+    for s in range(len(flat) - len(want) + 1):
+        if [w for _, w in flat[s:s + len(want)]] == want:
+            return {pos for pos, _ in flat[s:s + len(want)]}
+    return set()
+
+
 def _headline_accent(d, x, y, lines, font, base, accent, accent_words, lh):
-    aset = {w.strip(".,!?'\"").lower() for w in accent_words.split()} if accent_words else set()
+    hit = _accent_span(lines, accent_words)
     for i, ln in enumerate(lines):
         cx, ly = x, y + i * lh
-        for word in ln.split():
-            col = accent if word.strip(".,!?'\"").lower() in aset else base
+        for j, word in enumerate(ln.split()):
+            col = accent if (i, j) in hit else base
             d.text((cx, ly), word, font=font, fill=(*_hex(col), 255), anchor="lm")
             cx += d.textlength(word + " ", font=font)
 

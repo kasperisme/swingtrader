@@ -52,50 +52,67 @@ def _blocks(spec, W, H):
     maxw = W - 2 * ai.MARGIN
     measure = ImageDraw.Draw(Image.new("RGB", (W, H)))
 
-    hl_size = 82
-    hl_font = ai._f(hl_size, "bold")
-    hl_lines = ai._wrap(measure, spec["headline"], hl_font, maxw)
-    hl_lh = int(hl_size * 1.14)
-    sub_lines = ai._wrap(measure, spec.get("subhead", ""), ai._f(38, "reg"), maxw) if spec.get("subhead") else []
-    sub_lh = int(38 * 1.34)
     proof = spec.get("proof")
-
-    b: list[tuple[str, int, object]] = []
-    b.append(("logo", 60, lambda d, x, y: ai._logo(d, x, y, T, accent, brand, spec.get("mark", "NIS"))))
     kicker = ai._kicker_text(spec)
-    if kicker:
-        kf = ai._f(26, "mono")
-        b.append(("kicker", 40, lambda d, x, y, kf=kf, kt=kicker: d.text((x, y + 20), kt.upper(),
-                                                              font=kf, fill=(*ai._hex(accent), 255), anchor="lm")))
-    b.append(("headline", hl_lh * len(hl_lines),
-              lambda d, x, y: ai._headline_accent(d, x, y + hl_lh // 2, hl_lines, hl_font, T["ink"],
-                                                  accent, spec.get("headline_accent", ""), hl_lh)))
-    if sub_lines:
-        b.append(("subhead", sub_lh * len(sub_lines),
-                  lambda d, x, y: [d.text((x, y + i * sub_lh + sub_lh // 2), ln, font=ai._f(38, "reg"),
-                                          fill=(*ai._hex(T["mut"]), 255), anchor="lm")
-                                   for i, ln in enumerate(sub_lines)]))
-    impact = spec.get("impact_list")
-    if impact and impact.get("items"):
-        b.append(("impact", ai._impact_height(impact),
-                  lambda d, x, y: ai._impact_list(d, x, y, W, T, accent, impact)))
-    for bl in spec.get("bullets", []):
-        b.append(("bullet", 54, lambda d, x, y, bl=bl: ai._check(d, x, y + 22, T, accent, bl)))
-    if proof:
-        b.append(("proof", 200, lambda d, x, y: ai._proof(d, x, y, W, T, accent, proof["ticker"],
-                                                          float(proof["ret"]), float(proof["spy"]))))
     cta_note = spec.get("cta_note")
 
-    def _cta_draw(d, x, y):
-        ai._cta(d, x, y, T, accent, spec.get("cta_label", "Learn more"))
-        if cta_note:
-            d.text((x, y + 92 + 20), cta_note, font=ai._f(24, "reg"),
-                   fill=(*ai._hex(T["mut"]), 255), anchor="lm")
-    b.append(("cta", 92 + (34 if cta_note else 0), _cta_draw))
+    def _build(hl_size, sub_size):
+        """Measure + assemble the stack at a given type scale (mirrors
+        build_ad_image._build, but the draw fns take an x so blocks can slide in)."""
+        hl_font = ai._f(hl_size, "bold")
+        hl_lines = ai._wrap(measure, spec["headline"], hl_font, maxw)
+        hl_lh = int(hl_size * 1.14)
+        sub_font = ai._f(sub_size, "reg")
+        sub_lines = ai._wrap(measure, spec.get("subhead", ""), sub_font, maxw) if spec.get("subhead") else []
+        sub_lh = int(sub_size * 1.34)
 
-    safe_top, safe_bot, gap = int(H * 0.10), int(H * 0.82), 40
-    total = sum(h for _, h, _ in b) + gap * (len(b) - 1)
-    y = safe_top + max(0, (safe_bot - safe_top - total) // 2)
+        b: list[tuple[str, int, object]] = []
+        b.append(("logo", 60, lambda d, x, y: ai._logo(d, x, y, T, accent, brand, spec.get("mark", "NIS"))))
+        if kicker:
+            kf = ai._f(26, "mono")
+            b.append(("kicker", 40, lambda d, x, y, kf=kf, kt=kicker: d.text((x, y + 20), kt.upper(),
+                                                                  font=kf, fill=(*ai._hex(accent), 255), anchor="lm")))
+        b.append(("headline", hl_lh * len(hl_lines),
+                  lambda d, x, y, f=hl_font, ls=hl_lines, lh=hl_lh:
+                  ai._headline_accent(d, x, y + lh // 2, ls, f, T["ink"],
+                                      accent, spec.get("headline_accent", ""), lh)))
+        if sub_lines:
+            b.append(("subhead", sub_lh * len(sub_lines),
+                      lambda d, x, y, f=sub_font, ls=sub_lines, lh=sub_lh:
+                      [d.text((x, y + i * lh + lh // 2), ln, font=f,
+                              fill=(*ai._hex(T["mut"]), 255), anchor="lm")
+                       for i, ln in enumerate(ls)]))
+        impact = spec.get("impact_list")
+        if impact and impact.get("items"):
+            b.append(("impact", ai._impact_height(impact),
+                      lambda d, x, y: ai._impact_list(d, x, y, W, T, accent, impact)))
+        for bl in spec.get("bullets", []):
+            b.append(("bullet", 54,
+                      lambda d, x, y, bl=bl: ai._check(d, x, y + 22, T, accent, bl, maxw=maxw)))
+        if proof:
+            b.append(("proof", 200, lambda d, x, y: ai._proof(d, x, y, W, T, accent, proof["ticker"],
+                                                              float(proof["ret"]), float(proof["spy"]))))
+
+        def _cta_draw(d, x, y):
+            ai._cta(d, x, y, T, accent, spec.get("cta_label", "Learn more"))
+            if cta_note:
+                d.text((x, y + 92 + 20), cta_note, font=ai._f(24, "reg"),
+                       fill=(*ai._hex(T["mut"]), 255), anchor="lm")
+        b.append(("cta", 92 + (34 if cta_note else 0), _cta_draw))
+        return b
+
+    # Same shrink-to-fit as the static render: a heavy impact_list must not push
+    # the CTA out of the safe band.
+    safe_top, safe_bot = int(H * 0.10), int(H * 0.82)
+    band = safe_bot - safe_top - 28
+    for step in range(9):
+        gap = max(16, 40 - 3 * step)
+        b = _build(max(46, 82 - 4 * step), max(28, 38 - 2 * step))
+        total = sum(h for _, h, _ in b) + gap * (len(b) - 1)
+        if total <= band:
+            break
+
+    y = safe_top + max(0, (band - total) // 2)
     placed = []
     for kind, h, fn in b:
         placed.append((kind, h, fn, y))

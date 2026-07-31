@@ -815,7 +815,9 @@ def refresh_ticker_relationship_materialization() -> None:
     """
     client = get_supabase_client()
     schema = os.environ.get("SUPABASE_SCHEMA", "swingtrader")
-    client.schema(schema).rpc("exec_ticker_relationship_heads_refresh").execute()
+    # `params` is required positionally on the schema-scoped postgrest client —
+    # only supabase.Client.rpc() defaults it — so pass {} for a no-arg function.
+    client.schema(schema).rpc("exec_ticker_relationship_heads_refresh", {}).execute()
 
 
 def refresh_ticker_sentiment_materialization() -> None:
@@ -829,4 +831,4 @@ def refresh_ticker_sentiment_materialization() -> None:
     """
     client = get_supabase_client()
     schema = os.environ.get("SUPABASE_SCHEMA", "swingtrader")
-    client.schema(schema).rpc("exec_ticker_sentiment_heads_refresh").execute()
+    client.schema(schema).rpc("exec_ticker_sentiment_heads_refresh", {}).execute()
