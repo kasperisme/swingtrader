@@ -832,3 +832,17 @@ def refresh_ticker_sentiment_materialization() -> None:
     client = get_supabase_client()
     schema = os.environ.get("SUPABASE_SCHEMA", "swingtrader")
     client.schema(schema).rpc("exec_ticker_sentiment_heads_refresh", {}).execute()
+
+
+def refresh_topic_claims_materialization() -> None:
+    """
+    Rebuild swingtrader.topic_claim_stats — the ranked STORY_KEY_POINTS arc behind
+    each /topics hub.
+
+    Topic MEMBERSHIP needs no refresh (it's a live view), but the arc does: it
+    scans a topic's full history, which the REST role's 8s statement_timeout
+    can't accommodate. Same deferred-refresh rationale as the two above.
+    """
+    client = get_supabase_client()
+    schema = os.environ.get("SUPABASE_SCHEMA", "swingtrader")
+    client.schema(schema).rpc("exec_topic_claims_refresh", {}).execute()

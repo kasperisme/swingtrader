@@ -11,6 +11,7 @@ import { CLUSTERS, DIMENSION_MAP } from "@/app/protected/vectors/dimensions";
 import { ShareButtons } from "@/app/blog/[slug]/share-buttons";
 import { ClusterScoreCard } from "./_components/cluster-score-card";
 import { BriefingBanner } from "@/components/briefing-banner";
+import { getTopicsForArticle } from "@/app/actions/topics";
 import { ArticleBriefingCTA } from "./_components/article-briefing-cta";
 import { ArticleEngagementTracker } from "./_components/article-engagement-tracker";
 import {
@@ -1089,7 +1090,7 @@ async function ArticleData({ params }: { params: Promise<{ slug?: string }> }) {
   const article = bySlug.data;
   if (!article || bySlug.error) notFound();
 
-  const [vector, headsRes] = await Promise.all([
+  const [vector, headsRes, articleTopics] = await Promise.all([
     dataClient
       .schema("swingtrader")
       .from("news_impact_vectors")
@@ -1101,6 +1102,10 @@ async function ArticleData({ params }: { params: Promise<{ slug?: string }> }) {
       .from("news_impact_heads")
       .select("cluster, scores_json, reasoning_json")
       .eq("article_id", article.id),
+    // Which long-running stories this piece belongs to. Cheap (~37ms) and the
+    // upward half of the hub-and-spoke link structure — without it the topic
+    // hubs are orphaned from the ~5k article pages that should feed them.
+    getTopicsForArticle(article.id).catch(() => []),
   ]);
   const impact = asNumberMap(vector.data?.impact_json ?? {});
   const topDimensions = Object.entries(impact)
@@ -1268,6 +1273,30 @@ async function ArticleData({ params }: { params: Promise<{ slug?: string }> }) {
         <h1 className="text-3xl font-bold leading-[1.05] tracking-tight md:text-5xl">
           {article.title || "Untitled article"}
         </h1>
+
+        {/* Continuing-story context. Placed directly under the headline because
+            it is genuinely useful to a reader landing cold on one dated item —
+            and because a link that only exists in a page footer carries far less
+            weight than one sitting in the lede. */}
+        {articleTopics.length > 0 && (
+          <nav
+            aria-label="Part of these ongoing stories"
+            className="mt-4 flex flex-wrap items-center gap-2"
+          >
+            <span className="font-mono text-[10px] uppercase tracking-[0.2em] text-muted-foreground">
+              Part of
+            </span>
+            {articleTopics.map((t) => (
+              <Link
+                key={t.slug}
+                href={`/topics/${t.slug}`}
+                className="rounded-full border border-amber-500/30 bg-amber-500/5 px-3 py-1 text-[13px] text-amber-600 transition-colors hover:bg-amber-500/10 dark:text-amber-400"
+              >
+                {t.title}
+              </Link>
+            ))}
+          </nav>
+        )}
 
         {/* One-line product explainer above the fold — intentionally quiet
             (13px, secondary color, no bold) so it never competes with the H1. */}

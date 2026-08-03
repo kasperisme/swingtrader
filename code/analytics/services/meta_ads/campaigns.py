@@ -330,28 +330,42 @@ def preflight() -> int:
     return fails
 
 
-def _load(slug: str) -> tuple[dict, dict]:
-    """Return (spec, media). media is one of:
-      {"kind": "video",    "video": mp4,   "poster": png}   — a reel (auto-preferred)
+def _load(slug: str) -> tuple[dict, list[dict]]:
+    """Return (spec, medias) — EVERY creative the render produced, each becoming its
+    own ad inside the magnet's single ad set. A media is one of:
+      {"kind": "video",    "video": mp4,   "poster": png}   — the reel
       {"kind": "single",   "images": [png]}                 — single-image ad
       {"kind": "carousel", "images": [png, …]}              — legacy swipe deck
-    A rendered reel (9x16/ad_reel.mp4) launches automatically unless the spec sets
-    "launch_as": "image"."""
+
+    Shipping both the reel and the still gives Meta two creatives to optimise
+    across within the ad set (more placement/format coverage). Note it does NOT
+    yield a clean video-vs-image read: Meta concentrates ad-set budget on whichever
+    creative leads early, so spend between them is not comparable. For a real format
+    test the variants need separate ad sets with isolated budgets.
+
+    `launch_as` narrows the selection: "image" → still only, "video" → reel only.
+    """
     d = client._ANALYTICS / "output" / "ads" / slug
     spec = json.loads((d / "ad.json").read_text())
+    only = (spec.get("launch_as") or "").lower()
     reel, poster = d / "9x16" / "ad_reel.mp4", d / "9x16" / "ad_reel_poster.png"
-    if reel.exists() and (spec.get("launch_as") or "").lower() != "image":
+    single = d / "1x1" / "ad.png"
+
+    medias: list[dict] = []
+    if reel.exists() and only != "image":
         if not poster.exists():
             raise MetaError(f"{slug}: reel present but no 9x16/ad_reel_poster.png thumbnail — re-render the reel")
-        return spec, {"kind": "video", "video": reel, "poster": poster}
-    single = d / "1x1" / "ad.png"
-    if single.exists():                              # single-image ad
-        return spec, {"kind": "single", "images": [single]}
-    cards = sorted((d / "1x1").glob("slide-*.png"))  # carousel (legacy)
-    if len(cards) < 2:
+        medias.append({"kind": "video", "video": reel, "poster": poster})
+    if single.exists() and only != "video":
+        medias.append({"kind": "single", "images": [single]})
+    if not medias and only != "video":
+        cards = sorted((d / "1x1").glob("slide-*.png"))  # carousel (legacy)
+        if len(cards) >= 2:
+            medias.append({"kind": "carousel", "images": cards})
+    if not medias:
         raise MetaError(f"{slug}: need a reel (9x16/ad_reel.mp4), a 1x1/ad.png, or ≥2 "
                         "1x1/slide-*.png — render with nis-ad-image / build_ad_reel first")
-    return spec, {"kind": "carousel", "images": cards}
+    return spec, medias
 
 
 # Saved-content convention: output/ads/<date>-<short-name>/<lead-magnet>/<format>/…
@@ -419,14 +433,18 @@ def build_drafts(slugs: list[str], budget_dkk: float, dry_run: bool,
 
     geo_str = ",".join(countries)
     print(f"\nCAMPAIGN  “{campaign_name}”  ·  {objective}  ·  special={special or 'none'}  ·  PAUSED")
-    for slug, label, spec, media in specs:
+    for slug, label, spec, medias in specs:
         ad = spec.get("ad", {})
         goal_str = (f"optimize {conv_event} conversions (pixel {pixel})"
                     if promoted_object else f"optimize {opt_goal}")
         print(f"  AD SET  {label}  ·  {budget_dkk:.0f} DKK/day  ·  {geo_str} {age_min}–{age_max}  ·  "
               f"{goal_str}  ·  PAUSED")
-        print(f"    AD    {_kind_label(media)}  ·  cta={ad.get('cta_label')}")
+        for media in medias:
+            print(f"    AD    {_kind_label(media)}  ·  cta={ad.get('cta_label')}")
         print(f"          → {ad.get('destination', '')[:78]}")
+        if len(medias) > 1:
+            print(f"          note: {len(medias)} creatives share this ad set's budget — Meta will "
+                  f"favour one, so their spend is NOT comparable as a format test.")
 
     if dry_run:
         print("\n[dry-run] nothing created. Set META_ADS_TOKEN (ads_management) + "
@@ -439,35 +457,44 @@ def build_drafts(slugs: list[str], budget_dkk: float, dry_run: bool,
     print(f"\n✓ campaign {campaign_id} (PAUSED)")
     manifest = []
     try:
-        for slug, label, spec, media in specs:
+        for slug, label, spec, medias in specs:
             ad = spec["ad"]
             cta = CTA_MAP.get((ad.get("cta_label") or "learn more").lower(), "LEARN_MORE")
             clean_link, url_tags = _split_utm(ad["destination"])
-            if media["kind"] == "video":
-                print(f"    {label}: uploading reel to Meta + waiting for processing (~1 min)…")
-                vid = upload_video(media["video"])
-                _wait_video(vid)
-                thumb = upload_image(media["poster"])
-                creative = create_video_creative(f"{label}-creative", page, ig, clean_link,
-                                                 ad.get("primary_text", ""), cta, vid, thumb,
-                                                 headline=ad.get("headline"), description=ad.get("description"),
-                                                 url_tags=url_tags)
-            else:
-                hashes = [upload_image(c) for c in media["images"]]
-                creative = create_creative(f"{label}-creative", page, ig, clean_link,
-                                           ad.get("primary_text", ""), cta, hashes,
-                                           headline=ad.get("headline"), description=ad.get("description"),
-                                           url_tags=url_tags)
+            # ONE ad set per lead magnet (that's the A/B axis + the isolated budget);
+            # each of its creatives becomes an ad inside it.
             adset = create_adset(label, campaign_id, budget_minor, targeting, dsa_eff,
                                  opt_goal, promoted_object)
-            ad_id = create_ad(f"{label}-ad", adset, creative)
-            print(f"  ✓ {label}: adset {adset} · ad {ad_id} · creative {creative}  (PAUSED)")
-            manifest.append({
-                "campaign_id": campaign_id, "campaign_name": campaign_name,
-                "ad_set_id": adset, "ad_id": ad_id, "creative_id": creative,
-                "lead_magnet": label, "slug": slug,
-                "design": _design_for(slug),   # the creative genome → join engagement on ad_id
-            })
+            for media in medias:
+                kind = media["kind"]
+                suffix = "video" if kind == "video" else "image"
+                if kind == "video":
+                    print(f"    {label}: uploading reel to Meta + waiting for processing (~1 min)…")
+                    vid = upload_video(media["video"])
+                    _wait_video(vid)
+                    thumb = upload_image(media["poster"])
+                    creative = create_video_creative(f"{label}-{suffix}-creative", page, ig, clean_link,
+                                                     ad.get("primary_text", ""), cta, vid, thumb,
+                                                     headline=ad.get("headline"), description=ad.get("description"),
+                                                     url_tags=url_tags)
+                else:
+                    hashes = [upload_image(c) for c in media["images"]]
+                    creative = create_creative(f"{label}-{suffix}-creative", page, ig, clean_link,
+                                               ad.get("primary_text", ""), cta, hashes,
+                                               headline=ad.get("headline"), description=ad.get("description"),
+                                               url_tags=url_tags)
+                ad_id = create_ad(f"{label}-{suffix}-ad", adset, creative)
+                print(f"  ✓ {label} [{suffix}]: adset {adset} · ad {ad_id} · creative {creative}  (PAUSED)")
+                manifest.append({
+                    "campaign_id": campaign_id, "campaign_name": campaign_name,
+                    "ad_set_id": adset, "ad_id": ad_id, "creative_id": creative,
+                    "lead_magnet": label, "slug": slug,
+                    # Which creative actually SHIPPED. `design.formats` only records what
+                    # was rendered, so without this the format an ad ran as is knowable
+                    # only by querying Meta — and `design --by media_kind` is impossible.
+                    "media_kind": kind,
+                    "design": _design_for(slug),   # the creative genome → join engagement on ad_id
+                })
     except Exception:
         _delete(campaign_id)  # rollback — no orphan campaign left behind
         print(f"  ✗ failed — rolled back campaign {campaign_id}")

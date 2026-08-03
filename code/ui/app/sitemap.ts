@@ -25,6 +25,7 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
     { url: baseUrl, lastModified: now, changeFrequency: "weekly", priority: 1 },
     { url: `${baseUrl}/marketscreenings`, lastModified: now, changeFrequency: "daily", priority: 0.9 },
     { url: `${baseUrl}/articles`, lastModified: now, changeFrequency: "hourly", priority: 0.9 },
+    { url: `${baseUrl}/topics`, lastModified: now, changeFrequency: "daily", priority: 0.9 },
     { url: `${baseUrl}/blog`, lastModified: now, changeFrequency: "weekly", priority: 0.8 },
     { url: `${baseUrl}/docs`, lastModified: now, changeFrequency: "weekly", priority: 0.8 },
     { url: `${baseUrl}/pricing`, lastModified: now, changeFrequency: "monthly", priority: 0.7 },
@@ -45,6 +46,41 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
     }));
   } catch (e) {
     console.warn("[sitemap] failed to list market screenings", e);
+  }
+
+  // Topic hubs — the highest-priority indexable pages after the home page. They
+  // consolidate many thin article URLs into one deep, continuously-updated page,
+  // so `lastModified` tracks the newest story IN the topic (not deploy time) —
+  // that is the signal telling crawlers a tracker is worth re-visiting.
+  let topicRoutes: MetadataRoute.Sitemap = [];
+  try {
+    const supabase = createServiceClient();
+    const { data: topics, error } = await supabase
+      .schema("swingtrader")
+      .from("topics")
+      .select("slug")
+      .eq("is_published", true);
+    if (error) throw error;
+    topicRoutes = await Promise.all(
+      (topics ?? []).map(async (t: { slug: string }) => {
+        const { data: latest } = await supabase
+          .schema("swingtrader")
+          .from("topic_claim_stats")
+          .select("article_ts")
+          .eq("topic_slug", t.slug)
+          .order("article_ts", { ascending: false })
+          .limit(1)
+          .maybeSingle();
+        return {
+          url: `${baseUrl}/topics/${t.slug}`,
+          lastModified: latest?.article_ts ? new Date(latest.article_ts as string) : now,
+          changeFrequency: "daily" as const,
+          priority: 0.9,
+        };
+      }),
+    );
+  } catch (e) {
+    console.warn("[sitemap] failed to list topics", e);
   }
 
   // Per-article pages — sourced from the news_articles table, freshest first.
@@ -131,6 +167,7 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
 
   return [
     ...staticRoutes,
+    ...topicRoutes,
     ...screeningRoutes,
     ...articleRoutes,
     ...quoteRoutes,

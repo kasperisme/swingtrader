@@ -120,6 +120,7 @@ from shared.db import (
     is_source_day_dry,
     refresh_ticker_relationship_materialization,
     refresh_ticker_sentiment_materialization,
+    refresh_topic_claims_materialization,
     load_article_tickers,
     mark_source_day_dry,
     patch_news_article_image_if_missing,
@@ -1183,6 +1184,19 @@ def _maybe_refresh_relationship_graph(args: argparse.Namespace) -> None:
         logger.warning("[score_news] ticker sentiment refresh failed: %s", exc)
         console.print(
             f"[yellow]Ticker sentiment refresh failed (ingest OK): {exc}[/yellow]",
+        )
+
+    # Topic hubs (/topics) are only "live" if this runs — new articles join a
+    # topic automatically (membership is a view), but the ranked arc the page
+    # leads with is materialized and would otherwise never see them.
+    console.print("[dim]Refreshing topic claim arcs…[/dim]")
+    try:
+        refresh_topic_claims_materialization()
+        console.print("[dim]Topic claim arcs refreshed.[/dim]")
+    except Exception as exc:
+        logger.warning("[score_news] topic claim refresh failed: %s", exc)
+        console.print(
+            f"[yellow]Topic claim refresh failed (ingest OK): {exc}[/yellow]",
         )
 
 

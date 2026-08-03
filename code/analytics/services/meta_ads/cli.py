@@ -19,7 +19,16 @@ from datetime import date, timedelta
 from . import client
 from .client import MetaError
 
-_LEAD_KEYS = ("lead",)  # any action_type containing this = a Lead conversion
+# Meta reports ONE Lead conversion under several action_types at once — e.g.
+# `lead`, `onsite_web_lead`, `offsite_conversion.fb_pixel_lead` and
+# `offsite_lead_add_20_s_calls` all carry the same value. Summing everything
+# containing "lead" therefore multiplied every count (4x here) and made the
+# pixel look wildly inflated against Supabase. `lead` is the canonical
+# aggregate and is what Ads Manager's "Leads" column shows, so match it exactly
+# and fall back to the largest sibling only when it is absent.
+_LEAD_ACTION = "lead"
+_LEAD_FALLBACK = ("onsite_web_lead", "onsite_conversion.lead_grouped",
+                  "offsite_conversion.fb_pixel_lead")
 
 
 def _num(v, default=0.0):
@@ -30,11 +39,12 @@ def _num(v, default=0.0):
 
 
 def _leads(actions) -> float:
-    total = 0.0
-    for a in actions or []:
-        if any(k in a.get("action_type", "") for k in _LEAD_KEYS):
-            total += _num(a.get("value"))
-    return total
+    by_type = {a.get("action_type", ""): _num(a.get("value")) for a in actions or []}
+    if _LEAD_ACTION in by_type:
+        return by_type[_LEAD_ACTION]
+    # No canonical `lead` row — take the largest equivalent rather than the sum,
+    # since these are alternate labels for the same conversion, not extra ones.
+    return max((by_type[k] for k in _LEAD_FALLBACK if k in by_type), default=0.0)
 
 
 def _time_range(since: str | None) -> dict:
@@ -173,7 +183,10 @@ def _load_manifests() -> dict[str, dict]:
 # The design levers a new ad can be biased on. Kept small + stable so history aggregates.
 _LEVERS = ["hook_type", "angle", "primary_emotion", "accent", "theme",
            "background_type", "has_proof", "bullet_count", "cta_label",
-           "curiosity_type", "curiosity_strength", "impact_list_reveal"]
+           "curiosity_type", "curiosity_strength", "impact_list_reveal",
+           # what the ad actually SHIPPED as (video reel vs still) — comes from the
+           # manifest, not design.json, which only records what was rendered.
+           "media_kind"]
 
 
 def _quantile(vals: list[float], q: float):
@@ -227,7 +240,10 @@ def cmd_design(args) -> int:
     per = []
     for aid, man in manifests.items():
         r = ins.get(aid, {})
-        d = man.get("design", {}) or {}
+        # media_kind lives on the manifest row (it's a launch fact, not a render fact);
+        # fold it into the genome so _rollup can group by it like any other lever.
+        d = dict(man.get("design", {}) or {})
+        d.setdefault("media_kind", man.get("media_kind") or "—")
         spend, clicks = _num(r.get("spend")), _num(r.get("clicks"))
         impr, leads = _num(r.get("impressions")), _leads(r.get("actions"))
         per.append({"ad_id": aid, "campaign": man.get("campaign_name") or man.get("campaign"),

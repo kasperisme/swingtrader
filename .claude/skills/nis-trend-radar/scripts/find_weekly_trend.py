@@ -102,9 +102,10 @@ def span_days(span: int) -> list[str]:
     return [_day(today - timedelta(days=i)) for i in range(span - 1, -1, -1)]
 
 
-# ── paged fetch ───────────────────────────────────────────────────────────────
+# ── bulk fetch ────────────────────────────────────────────────────────────────
 
-def _fetch_all(table: str, cols: str, since: str, order_cols: list[str]) -> list[dict]:
+def _fetch_all_rest(table: str, cols: str, since: str, order_cols: list[str]) -> list[dict]:
+    """Paged read over PostgREST. Kept as the portable fallback."""
     client = get_supabase_client()
     out: list[dict] = []
     for page in range(MAX_PAGES):
@@ -117,6 +118,35 @@ def _fetch_all(table: str, cols: str, since: str, order_cols: list[str]) -> list
         if len(rows) < PAGE_SIZE:
             break
     return out
+
+
+def _fetch_all(table: str, cols: str, since: str, order_cols: list[str]) -> list[dict]:
+    """Read a whole trend view in ONE query, over the direct psycopg2 connection.
+
+    These views aggregate ~600k news_article_tickers rows and join sentiment, so a
+    single evaluation costs ~4s and LIMIT/OFFSET does not make it cheaper — every
+    page re-runs the full aggregate. Paging it over PostgREST therefore paid that
+    cost 8x AND ran into the `authenticator` role's 8s statement_timeout, so the
+    brief could not be generated at all (57014). One direct query pays it once and
+    is not bound by the REST role's budget.
+
+    Falls back to the paged REST path when no direct DB connection is configured.
+    """
+    order = ", ".join(order_cols) or "1"
+    sql = (f"SELECT {cols} FROM {SCHEMA}.{table} "
+           f"WHERE bucket_day >= %s ORDER BY {order}")
+    try:
+        from psycopg2.extras import RealDictCursor
+        from shared.db import get_pg_connection
+        conn = get_pg_connection()
+    except Exception:
+        return _fetch_all_rest(table, cols, since, order_cols)
+    try:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute(sql, (since,))
+            return [dict(r) for r in cur.fetchall()]
+    finally:
+        conn.close()
 
 
 # ── fold + rank (mirror of lib/trends.ts) ─────────────────────────────────────

@@ -388,14 +388,22 @@ def render(spec, ratio, out_dir):
     # can overflow at the base scale, so step the type + rhythm down until it fits.
     band = safe_bot - safe_top - 28   # clearance so the CTA never touches the footer
     base_hl = 82 if ratio != "1x1" else 74
-    for step in range(9):
-        hl_size = max(46, base_hl - 4 * step)
-        sub_size = max(28, 38 - 2 * step)
-        gap = max(16, 40 - 3 * step)
+    for step in range(14):
+        hl_size = max(40, base_hl - 4 * step)
+        sub_size = max(24, 38 - 2 * step)
+        gap = max(8, 40 - 3 * step)
         blocks = _build(hl_size, sub_size)
         total = sum(h for h, _ in blocks) + gap * (len(blocks) - 1)
         if total <= band:
             break
+    if total > band:
+        # Never overflow SILENTLY: past this point the stack runs through the
+        # footer/disclaimer and ships as a creative with overlapping text. The
+        # spec has to lose a block (proof and impact_list compete for the same
+        # space — pick one), so say so loudly instead of drawing the collision.
+        print(f"  ⚠ {ratio}: content overflows the safe band by {total - band}px even at "
+              f"minimum scale — drop `proof` or shorten `impact_list`/`bullets`.",
+              file=sys.stderr)
 
     y = safe_top + max(0, (band - total) // 2)
     for h, fn in blocks:
