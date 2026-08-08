@@ -109,6 +109,21 @@
     animation: signal-pulse 2.4s ease-in-out infinite;
   }
 
+  /* Honour the OS "reduce motion" setting. The row-in reveal must still land on
+     its end state (`both` fill would otherwise leave rows at opacity 0), so it
+     is collapsed to an instant step rather than removed. */
+  @media (prefers-reduced-motion: reduce) {
+    .animate-news-roll,
+    .animate-signal-pulse {
+      animation: none;
+    }
+
+    .animate-screening-row-in {
+      animation-duration: 1ms;
+      animation-delay: 0ms !important;
+    }
+  }
+
   /* Subtle grid backdrop for fintech "terminal" feel. */
   .bg-terminal-grid {
     background-image:

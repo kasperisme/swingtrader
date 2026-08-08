@@ -7,6 +7,7 @@ import { SiteHeaderMobileNav } from "@/components/site-header-mobile-nav";
 import { SiteHeaderDesktopAuthedNav } from "@/components/site-header-desktop-authed-nav";
 import { CavemanToggle } from "@/components/caveman-toggle";
 import { HelpChatTrigger } from "@/components/help-chat";
+import { SiteHeaderPublicNav } from "@/components/site-header-public-nav";
 
 function Logo() {
   return (
@@ -43,9 +44,8 @@ export function SiteHeaderFallback() {
       <div className="flex min-w-0 flex-1 items-center">
         <Logo />
       </div>
-      <div className="flex shrink-0 items-center gap-2">
-        <Link href="/articles" className={`${navLinkClass} hidden md:inline`}>Articles</Link>
-        <Link href="/marketscreenings" className={`${navLinkClass} hidden md:inline`}>Market Screenings</Link>
+      <div className="flex shrink-0 items-center gap-3">
+        <SiteHeaderPublicNav />
         <Link href="/pricing" className={`${navLinkClass} hidden md:inline`}>Pricing</Link>
         <Link href="/docs" className={`${navLinkClass} hidden md:inline`}>Docs</Link>
         <Link href="/blog" className={`${navLinkClass} hidden md:inline`}>Blog</Link>
@@ -82,8 +82,7 @@ export async function SiteHeader() {
       {isAuthed ? (
         <div className="flex shrink-0 items-center gap-3">
           <HelpChatTrigger className={`${navLinkClass} hidden md:inline-flex items-center gap-1.5`} />
-          <Link href="/articles" className={`${navLinkClass} hidden md:inline`}>Articles</Link>
-          <Link href="/marketscreenings" className={`${navLinkClass} hidden md:inline`}>Market Screenings</Link>
+          <SiteHeaderPublicNav />
           <Link href="/pricing" className={`${navLinkClass} hidden md:inline`}>Pricing</Link>
           <Link href="/docs" className={`${navLinkClass} hidden md:inline`}>Docs</Link>
           <Link href="/blog" className={`${navLinkClass} hidden md:inline`}>Blog</Link>
@@ -99,9 +98,8 @@ export async function SiteHeader() {
           <SiteHeaderMobileNav isAuthed={isAuthed} userEmail={userEmail} />
         </div>
       ) : (
-        <div className="flex shrink-0 items-center gap-2">
-          <Link href="/articles" className={`${navLinkClass} hidden md:inline`}>Articles</Link>
-          <Link href="/marketscreenings" className={`${navLinkClass} hidden md:inline`}>Market Screenings</Link>
+        <div className="flex shrink-0 items-center gap-3">
+          <SiteHeaderPublicNav />
           <Link href="/pricing" className={`${navLinkClass} hidden md:inline`}>Pricing</Link>
           <Link href="/docs" className={`${navLinkClass} hidden md:inline`}>Docs</Link>
           <Link href="/blog" className={`${navLinkClass} hidden md:inline`}>Blog</Link>

@@ -846,3 +846,17 @@ def refresh_topic_claims_materialization() -> None:
     client = get_supabase_client()
     schema = os.environ.get("SUPABASE_SCHEMA", "swingtrader")
     client.schema(schema).rpc("exec_topic_claims_refresh", {}).execute()
+
+
+def refresh_ticker_coverage_materialization() -> None:
+    """
+    Rebuild swingtrader.ticker_coverage_daily — the per-ticker/day rollup behind
+    the /quote directory (its ranking, search, and paging).
+
+    Read live off news_trends_ticker_daily_v this cost 4.6s for a page and 7.6s
+    for a search, against the REST role's 8s statement_timeout. Materialized it
+    is ~70ms. Same deferred-refresh rationale as the three above.
+    """
+    client = get_supabase_client()
+    schema = os.environ.get("SUPABASE_SCHEMA", "swingtrader")
+    client.schema(schema).rpc("exec_ticker_coverage_refresh", {}).execute()

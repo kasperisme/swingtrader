@@ -8,13 +8,18 @@ import { createClient } from "@/lib/supabase/client";
 import { cn } from "@/lib/utils";
 import { CavemanToggle } from "@/components/caveman-toggle";
 import { HelpChatTrigger } from "@/components/help-chat";
+import {
+  FREE_SERVICE_LINKS,
+  INSIGHTS_LINKS,
+} from "@/components/site-header-public-nav";
 
 const portfolioLinks = [
   { href: "/protected", label: "Portfolio" },
 ] as const;
 
+// The authed-only research tools. The public research hubs (articles / topics /
+// quotes) live in the shared Insights group so both navs stay in step.
 const researchLinks = [
-  { href: "/articles", label: "Articles" },
   { href: "/protected/news-trends", label: "News Trends" },
   { href: "/protected/charts", label: "Charts" },
   { href: "/protected/relations", label: "Relations" },
@@ -27,15 +32,10 @@ const operationsLinks = [
 ] as const;
 
 const publicLinks = [
-  { href: "/marketscreenings", label: "Market Screenings" },
   { href: "/pricing", label: "Pricing" },
   { href: "/docs", label: "Docs" },
   { href: "/blog", label: "Blog" },
   { href: "/changelog", label: "Changelog" },
-] as const;
-
-const anonResearchLinks = [
-  { href: "/articles", label: "Articles" },
 ] as const;
 
 const linkClass =
@@ -182,6 +182,24 @@ export function SiteHeaderMobileNav({ isAuthed, userEmail }: Props) {
                   </div>
 
                   <div>
+                    <p className={sectionLabelClass}>Insights</p>
+                    <ul className="space-y-0.5">
+                      {INSIGHTS_LINKS.map(({ href, label }) => (
+                        <NavLink key={href} href={href} label={label} onClick={close} />
+                      ))}
+                    </ul>
+                  </div>
+
+                  <div>
+                    <p className={sectionLabelClass}>Free services</p>
+                    <ul className="space-y-0.5">
+                      {FREE_SERVICE_LINKS.map(({ href, label }) => (
+                        <NavLink key={href} href={href} label={label} onClick={close} />
+                      ))}
+                    </ul>
+                  </div>
+
+                  <div>
                     <p className={sectionLabelClass}>Research</p>
                     <ul className="space-y-0.5">
                       {researchLinks.map(({ href, label }) => (
@@ -212,9 +230,17 @@ export function SiteHeaderMobileNav({ isAuthed, userEmail }: Props) {
               ) : (
                 <>
                   <div>
-                    <p className={sectionLabelClass}>Research</p>
+                    <p className={sectionLabelClass}>Insights</p>
                     <ul className="space-y-0.5">
-                      {anonResearchLinks.map(({ href, label }) => (
+                      {INSIGHTS_LINKS.map(({ href, label }) => (
+                        <NavLink key={href} href={href} label={label} onClick={close} />
+                      ))}
+                    </ul>
+                  </div>
+                  <div>
+                    <p className={sectionLabelClass}>Free services</p>
+                    <ul className="space-y-0.5">
+                      {FREE_SERVICE_LINKS.map(({ href, label }) => (
                         <NavLink key={href} href={href} label={label} onClick={close} />
                       ))}
                     </ul>

@@ -250,7 +250,7 @@ export default async function QuotePage({
         "@type": "BreadcrumbList",
         itemListElement: [
           { "@type": "ListItem", position: 1, name: "Home", item: SITE_BASE_URL },
-          { "@type": "ListItem", position: 2, name: "Quotes", item: `${SITE_BASE_URL}/articles` },
+          { "@type": "ListItem", position: 2, name: "Quotes", item: `${SITE_BASE_URL}/quote` },
           { "@type": "ListItem", position: 3, name: `${symbol} — ${companyName}`, item: canonicalUrl },
         ],
       },
@@ -271,7 +271,7 @@ export default async function QuotePage({
           </li>
           <li aria-hidden className="text-muted-foreground/50">/</li>
           <li>
-            <Link href="/articles" className="hover:text-foreground">News</Link>
+            <Link href="/quote" className="hover:text-foreground">Quotes</Link>
           </li>
           <li aria-hidden className="text-muted-foreground/50">/</li>
           <li className="font-medium text-foreground" aria-current="page">
