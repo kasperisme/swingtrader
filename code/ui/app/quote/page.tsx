@@ -4,7 +4,7 @@ import { notFound } from "next/navigation";
 import type { Metadata } from "next";
 import { ArrowLeft, ArrowRight, Search, X } from "lucide-react";
 import { listCoveredTickers, type CoveredTicker } from "@/app/actions/quotes";
-import { TickerLogo } from "./_components/ticker-logo";
+import { TickerLogo } from "@/components/ticker-logo";
 import { SentimentMeter } from "./_components/sentiment-meter";
 
 // Must match the root layout's metadataBase host exactly — the site canonicalises
@@ -101,7 +101,7 @@ function TickerRow({ t, rank, index }: { t: CoveredTicker; rank: number; index: 
     >
       <Link
         href={`/quote/${t.ticker}`}
-        className="group grid grid-cols-[1.5rem_2.25rem_minmax(0,1fr)_auto_auto] items-center gap-x-3 border-b border-border/60 py-3 pr-1 transition-colors hover:bg-accent/40 focus-visible:bg-accent/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500/60 sm:grid-cols-[2.5rem_2.25rem_minmax(0,1fr)_6rem_auto] sm:gap-x-4"
+        className="group grid grid-cols-[1.5rem_2.25rem_minmax(0,1fr)_auto_auto] items-center gap-x-3 border-b border-border/60 py-3 pr-1 transition-colors hover:bg-muted/60 focus-visible:bg-muted/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500/60 sm:grid-cols-[2.5rem_2.25rem_minmax(0,1fr)_6rem_auto] sm:gap-x-4"
       >
         <span className="font-mono text-xs tabular-nums text-muted-foreground">
           {rank}
@@ -174,7 +174,7 @@ function SearchForm({ q }: { q: string }) {
           <Link
             href="/quote"
             aria-label="Clear search"
-            className="inline-flex h-11 shrink-0 cursor-pointer items-center gap-1.5 rounded-lg border border-border px-3.5 text-sm text-muted-foreground transition-colors hover:bg-accent/50 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500/60"
+            className="inline-flex h-11 shrink-0 cursor-pointer items-center gap-1.5 rounded-lg border border-border px-3.5 text-sm text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500/60"
           >
             <X className="h-3.5 w-3.5" aria-hidden />
             <span className="hidden sm:inline">Clear</span>
@@ -201,11 +201,11 @@ function Pagination({ q, page, total }: { q: string; page: number; total: number
 
   // 44px min touch target on every control (h-11 = 2.75rem).
   const step =
-    "inline-flex h-11 items-center gap-1.5 rounded-lg border border-border px-3.5 text-sm transition-colors hover:bg-accent/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500/60 cursor-pointer";
+    "inline-flex h-11 items-center gap-1.5 rounded-lg border border-border px-3.5 text-sm transition-colors hover:bg-muted/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500/60 cursor-pointer";
   const stepOff =
     "inline-flex h-11 items-center gap-1.5 rounded-lg border border-border/50 px-3.5 text-sm text-muted-foreground/40";
   const num =
-    "inline-flex h-11 w-11 items-center justify-center rounded-lg border border-border font-mono text-sm tabular-nums transition-colors hover:bg-accent/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500/60 cursor-pointer";
+    "inline-flex h-11 w-11 items-center justify-center rounded-lg border border-border font-mono text-sm tabular-nums transition-colors hover:bg-muted/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500/60 cursor-pointer";
 
   return (
     <nav

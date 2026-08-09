@@ -47,8 +47,9 @@ export type TopicArticle = {
 };
 
 export type TopicStats = {
-  articleCount: number;
-  claimCount: number;
+  /** null means "could not be counted", which is not the same as 0. */
+  articleCount: number | null;
+  claimCount: number | null;
   firstSeen: string | null;
   lastSeen: string | null;
 };
@@ -209,8 +210,137 @@ export async function getTopicsForArticle(articleId: number): Promise<Topic[]> {
   return (topics ?? []) as Topic[];
 }
 
+/**
+ * Headline counts for a topic.
+ *
+ * The counts are nullable ON PURPOSE. This used to coerce a failed query to 0
+ * (`articles.count ?? 0`) while every other query in this file throws, so any
+ * transient error — the article count is an exact count over the live
+ * membership view, the one query here that can actually time out — rendered a
+ * confident "0 stories" on a page tracking hundreds. Unknown is not zero, so a
+ * failure returns null and the UI shows "—".
+ */
+export type TopicTickerImpact = {
+  ticker: string;
+  claims: number;
+  /** Mean scored impact, -1..+1, on the same scale as an individual claim. */
+  meanImpact: number;
+  positive: number;
+  negative: number;
+};
+
+export type TopicMonth = {
+  /** YYYY-MM */
+  month: string;
+  claims: number;
+  meanImpact: number;
+  positive: number;
+  negative: number;
+};
+
+export type TopicVisuals = {
+  byTicker: TopicTickerImpact[];
+  byMonth: TopicMonth[];
+};
+
+/**
+ * The aggregates behind the hub's charts — both shapes in one RPC, because the
+ * page is bound by round trips rather than query time.
+ */
+export async function getTopicVisuals(slug: string): Promise<TopicVisuals> {
+  const sb = createServiceClient();
+  const { data, error } = await sb.schema(SCHEMA).rpc("get_topic_visuals", { p_slug: slug });
+  if (error || !data) {
+    console.warn(`[topics] getTopicVisuals(${slug}) failed:`, error?.message);
+    return { byTicker: [], byMonth: [] };
+  }
+  const raw = data as { byTicker?: unknown[]; byMonth?: unknown[] };
+  const num = (v: unknown) => (Number.isFinite(Number(v)) ? Number(v) : 0);
+
+  return {
+    byTicker: (raw.byTicker ?? []).map((r) => {
+      const o = r as Record<string, unknown>;
+      return {
+        ticker: String(o.ticker ?? "").toUpperCase(),
+        claims: num(o.claims),
+        meanImpact: num(o.mean_impact),
+        positive: num(o.positive),
+        negative: num(o.negative),
+      };
+    }).filter((r) => r.ticker),
+    byMonth: (raw.byMonth ?? []).map((r) => {
+      const o = r as Record<string, unknown>;
+      return {
+        month: String(o.month ?? ""),
+        claims: num(o.claims),
+        meanImpact: num(o.mean_impact),
+        positive: num(o.positive),
+        negative: num(o.negative),
+      };
+    }).filter((r) => r.month),
+  };
+}
+
+/**
+ * Stats for every topic in ONE round trip.
+ *
+ * The index used to await listTopics() and then fan out a getTopicStats() per
+ * topic — two sequential hops. A Supabase round trip costs far more than any of
+ * these queries (~140ms of network vs ~35ms of work), so the page was paying for
+ * depth, not for data. Callers now fire this alongside listTopics() and zip the
+ * two in memory.
+ */
+export async function listTopicStats(): Promise<Record<string, TopicStats>> {
+  const sb = createServiceClient();
+  const { data, error } = await sb
+    .schema(SCHEMA)
+    .from("topic_stats")
+    .select("topic_slug,article_count,claim_count,first_seen,last_seen");
+  if (error) {
+    console.warn("[topics] listTopicStats failed:", error.message);
+    return {};
+  }
+  const out: Record<string, TopicStats> = {};
+  for (const r of (data ?? []) as Record<string, unknown>[]) {
+    const slug = String(r.topic_slug ?? "");
+    if (!slug) continue;
+    out[slug] = {
+      articleCount: Number(r.article_count ?? 0),
+      claimCount: Number(r.claim_count ?? 0),
+      firstSeen: r.first_seen != null ? String(r.first_seen) : null,
+      lastSeen: r.last_seen != null ? String(r.last_seen) : null,
+    };
+  }
+  return out;
+}
+
 export async function getTopicStats(slug: string): Promise<TopicStats> {
   const sb = createServiceClient();
+
+  // Fast path: one indexed row, rebuilt post-ingest alongside the claim arcs it
+  // describes. Falls through to the live counts below when the row is missing —
+  // a topic published since the last ingest still shows real numbers rather
+  // than dashes, it just pays the old cost until the next refresh.
+  const { data: pre, error: preErr } = await sb
+    .schema(SCHEMA)
+    .from("topic_stats")
+    .select("article_count,claim_count,first_seen,last_seen")
+    .eq("topic_slug", slug)
+    .maybeSingle();
+  if (preErr) console.warn(`[topics] topic_stats(${slug}) failed, falling back to live counts:`, preErr.message);
+  if (pre) {
+    const row = pre as {
+      article_count: number; claim_count: number;
+      first_seen: string | null; last_seen: string | null;
+    };
+    return {
+      articleCount: Number(row.article_count),
+      claimCount: Number(row.claim_count),
+      firstSeen: row.first_seen,
+      lastSeen: row.last_seen,
+    };
+  }
+
   const [articles, claims, oldest, newest] = await Promise.all([
     sb.schema(SCHEMA).from("topic_article_v").select("article_id", { count: "exact", head: true })
       .eq("topic_slug", slug),
@@ -221,9 +351,21 @@ export async function getTopicStats(slug: string): Promise<TopicStats> {
     sb.schema(SCHEMA).from("topic_claim_stats").select("article_ts")
       .eq("topic_slug", slug).order("article_ts", { ascending: false }).limit(1).maybeSingle(),
   ]);
+
+  // Surfaced in the server log rather than swallowed — a page silently showing
+  // the wrong number is the failure mode this whole function guards against.
+  for (const [label, res] of [
+    ["articleCount", articles],
+    ["claimCount", claims],
+    ["firstSeen", oldest],
+    ["lastSeen", newest],
+  ] as const) {
+    if (res.error) console.warn(`[topics] getTopicStats(${slug}).${label} failed:`, res.error.message);
+  }
+
   return {
-    articleCount: articles.count ?? 0,
-    claimCount: claims.count ?? 0,
+    articleCount: articles.error ? null : articles.count ?? null,
+    claimCount: claims.error ? null : claims.count ?? null,
     firstSeen: (oldest.data as { article_ts: string } | null)?.article_ts ?? null,
     lastSeen: (newest.data as { article_ts: string } | null)?.article_ts ?? null,
   };
