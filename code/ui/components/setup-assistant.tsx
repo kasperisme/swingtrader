@@ -7,19 +7,29 @@
  * tools server-side via /api/ai/onboarding.
  *
  * The chat itself (`SetupAssistantChat`) is chrome-less and embeddable — it's
- * dropped straight into the welcome dialog right after the tutorial video, and
- * also rendered inside a centered modal (`SetupAssistantRoot`) for re-entry
+ * dropped straight into the welcome dialog after the founder's welcome note,
+ * and also rendered inside a centered modal (`SetupAssistantRoot`) for re-entry
  * from the profile page. It is never a sidebar.
  */
 
 import {
   useCallback,
   useEffect,
+  useId,
   useRef,
   useState,
   type FormEvent,
 } from "react";
-import { Loader2, Pencil, Send, Sparkles, Wand2 } from "lucide-react";
+import {
+  AlertCircle,
+  Check,
+  Loader2,
+  Pencil,
+  RotateCcw,
+  Send,
+  Sparkles,
+  Wand2,
+} from "lucide-react";
 
 import { ChatMarkdown } from "@/components/chat-markdown";
 import {
@@ -146,7 +156,7 @@ export function SetupAssistantRoot() {
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
-      <DialogContent className="flex h-[85vh] flex-col gap-4 overflow-hidden sm:max-w-2xl">
+      <DialogContent className="flex h-[100dvh] max-h-[100dvh] flex-col gap-4 overflow-hidden rounded-none sm:h-[85dvh] sm:max-w-2xl sm:rounded-lg">
         <DialogHeader className="shrink-0">
           <DialogTitle className="flex items-center gap-2 text-xl">
             <Sparkles className="h-4 w-4 text-amber-500" />
@@ -171,14 +181,25 @@ export function SetupAssistantRoot() {
 export function SetupAssistantChat({
   className = "",
   surface = "welcome",
+  onProgress,
 }: {
   className?: string;
   /** Where the assistant was opened — "welcome" (first-join) | "profile" (re-entry). */
   surface?: string;
+  /**
+   * How many of the 5 setup tasks the agent has completed so far. Lets a host
+   * (the welcome dialog) reflect real progress in its own chrome instead of
+   * offering an always-primary "Next" that skips a setup nothing has been
+   * written to yet.
+   */
+  onProgress?: (doneCount: number) => void;
 }) {
   const [messages, setMessages] = useState<AssistantChatMessage[]>([]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
+  // The chat can be mounted twice (welcome dialog + the standalone modal), so
+  // the composer's label association can't use a hardcoded id.
+  const inputId = useId();
   // Analytics refs (don't trigger renders): fire `opened` once, count user
   // messages, remember which of the 5 tasks are already done, and emit a
   // `finished` summary on unmount.
@@ -225,7 +246,8 @@ export function SetupAssistantChat({
       }
     }
     doneRef.current = d;
-  }, [messages, surface]);
+    onProgress?.(SETUP_STEPS.filter((s) => d[s.key]).length);
+  }, [messages, surface, onProgress]);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
@@ -237,12 +259,15 @@ export function SetupAssistantChat({
   // would never arrive. The `loading` guard below already prevents overlap.
 
   const runTurn = useCallback(
-    async (userText: string | null) => {
+    // `baseOverride` replays on a history other than current state — used by
+    // retry, which rewinds past the failed turn and can't wait for the setState
+    // that does the rewinding to land.
+    async (userText: string | null, baseOverride?: AssistantChatMessage[]) => {
       if (loading) return;
       const trimmed = userText?.trim() ?? null;
 
       // A null userText = kickoff (no user bubble).
-      const base = messages;
+      const base = baseOverride ?? messages;
       const withUser: AssistantChatMessage[] = trimmed
         ? [...base, { role: "user", content: trimmed }]
         : [...base];
@@ -364,6 +389,33 @@ export function SetupAssistantChat({
     void runTurn(null);
   }, [runTurn]);
 
+  /**
+   * Replay the last user turn after a failed step. Rewinds the transcript to
+   * just before that turn so the broken assistant reply is discarded rather
+   * than replayed — an errored/empty assistant turn hard-fails the next call.
+   */
+  const retryLast = useCallback(() => {
+    if (loading) return;
+    let idx = -1;
+    for (let i = messages.length - 1; i >= 0; i--) {
+      if (messages[i].role === "user") {
+        idx = i;
+        break;
+      }
+    }
+    track("setup_assistant_retried", { surface });
+    // No user turn yet → the opening kickoff itself failed; re-kick it clean.
+    if (idx === -1) {
+      setMessages([]);
+      void runTurn(null, []);
+      return;
+    }
+    const text = messages[idx].content;
+    const rewound = messages.slice(0, idx);
+    setMessages(rewound);
+    void runTurn(text, rewound);
+  }, [loading, messages, runTurn, surface]);
+
   function onSubmit(e: FormEvent) {
     e.preventDefault();
     if (input.trim()) {
@@ -374,6 +426,7 @@ export function SetupAssistantChat({
   }
 
   const done = deriveDone(messages);
+  const doneCount = SETUP_STEPS.filter((s) => done[s.key]).length;
 
   // Tap-able quick replies from the latest answered question (only once the
   // turn has fully streamed in). When present, the free-text box is collapsed
@@ -393,42 +446,54 @@ export function SetupAssistantChat({
 
   return (
     <div className={`flex min-h-0 flex-col ${className}`}>
-      {/* Progress strip */}
-      <div className="flex shrink-0 flex-wrap items-center gap-1.5 rounded-md border border-border bg-muted/30 px-3 py-2">
+      {/* Progress strip. Done-state carries an icon as well as colour — colour
+          alone is not an accessible indicator, and the old 1.5px dot was
+          effectively invisible either way. */}
+      <div
+        className="flex shrink-0 flex-wrap items-center gap-x-2 gap-y-1 rounded-md border border-border bg-muted/30 px-3 py-2"
+        aria-label={`Setup progress: ${doneCount} of ${SETUP_STEPS.length} complete`}
+      >
         {SETUP_STEPS.map((step, i) => (
-          <div key={step.key} className="flex items-center gap-1.5">
+          <div key={step.key} className="flex items-center gap-2">
             <span
-              className={
+              className={`inline-flex items-center gap-1 text-xs font-medium transition-colors ${
                 done[step.key]
-                  ? "inline-flex items-center gap-1 text-[11px] font-medium text-emerald-600 dark:text-emerald-400"
-                  : "inline-flex items-center gap-1 text-[11px] font-medium text-muted-foreground"
-              }
+                  ? "text-emerald-600 dark:text-emerald-400"
+                  : "text-muted-foreground"
+              }`}
             >
-              <span
-                className={
-                  done[step.key]
-                    ? "h-1.5 w-1.5 rounded-full bg-emerald-500"
-                    : "h-1.5 w-1.5 rounded-full bg-muted-foreground/30"
-                }
-              />
+              {done[step.key] ? (
+                <Check className="h-3 w-3 shrink-0" aria-hidden />
+              ) : (
+                <span className="h-1.5 w-1.5 shrink-0 rounded-full border border-muted-foreground/40" />
+              )}
               {step.label}
+              <span className="sr-only">
+                {done[step.key] ? " — done" : " — not started"}
+              </span>
             </span>
             {i < SETUP_STEPS.length - 1 && (
-              <span className="text-muted-foreground/30">·</span>
+              <span aria-hidden className="text-muted-foreground/30">
+                ·
+              </span>
             )}
           </div>
         ))}
       </div>
 
       <div className="min-h-0 flex-1 overflow-y-auto py-3">
-        <ul className="flex flex-col gap-3">
+        {/* Replies stream in rather than navigating — announce them politely so
+            screen-reader users hear each answer as it lands. */}
+        <ul className="flex flex-col gap-3" aria-live="polite" aria-busy={loading}>
           {messages.map((m, i) => (
             <li
               key={i}
               className={
                 m.role === "user"
-                  ? "self-end max-w-[85%] rounded-lg bg-foreground/10 px-3 py-2 text-sm"
-                  : "self-start w-full max-w-[92%] rounded-lg border border-border bg-card px-3 py-2 text-sm"
+                  ? "self-end max-w-[85%] animate-in fade-in slide-in-from-bottom-1 rounded-lg bg-foreground/10 px-3 py-2 text-sm duration-200"
+                  : m.error
+                    ? "self-start w-full max-w-[92%] animate-in fade-in slide-in-from-bottom-1 rounded-lg border border-destructive/40 bg-destructive/5 px-3 py-2 text-sm duration-200"
+                    : "self-start w-full max-w-[92%] animate-in fade-in slide-in-from-bottom-1 rounded-lg border border-border bg-card px-3 py-2 text-sm duration-200"
               }
             >
               {m.role === "assistant" && !m.content && loading ? (
@@ -436,6 +501,28 @@ export function SetupAssistantChat({
                   <Loader2 className="h-3.5 w-3.5 animate-spin" />
                   Setting things up…
                 </span>
+              ) : m.role === "assistant" && m.error ? (
+                // A failed step is a dead end unless we hand back a way out —
+                // "tap your last choice again" only works if the choices are
+                // still on screen, and after an error they are not.
+                <div role="alert" className="flex flex-col gap-2">
+                  <p className="flex items-start gap-1.5 text-foreground">
+                    <AlertCircle
+                      className="mt-0.5 h-3.5 w-3.5 shrink-0 text-destructive"
+                      aria-hidden
+                    />
+                    <span>{m.content.replace(/^Error:\s*/i, "")}</span>
+                  </p>
+                  <button
+                    type="button"
+                    onClick={retryLast}
+                    disabled={loading}
+                    className="inline-flex min-h-9 w-fit cursor-pointer items-center gap-1.5 rounded-full border border-border bg-background px-3 text-xs font-medium transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:opacity-50"
+                  >
+                    <RotateCcw className="h-3.5 w-3.5" aria-hidden />
+                    Try that step again
+                  </button>
+                </div>
               ) : m.role === "assistant" ? (
                 <>
                   {(() => {
@@ -471,7 +558,7 @@ export function SetupAssistantChat({
                   track("setup_assistant_message_sent", { surface, via: "quick_reply" });
                   void runTurn(opt);
                 }}
-                className="rounded-full border border-border bg-background px-3.5 py-1.5 text-sm font-medium text-foreground transition-colors hover:border-foreground/30 hover:bg-muted active:scale-[0.98]"
+                className="inline-flex min-h-11 cursor-pointer items-center rounded-full border border-border bg-background px-4 text-sm font-medium text-foreground transition-colors hover:border-foreground/30 hover:bg-muted focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring active:scale-[0.98]"
               >
                 {opt}
               </button>
@@ -480,7 +567,7 @@ export function SetupAssistantChat({
               <button
                 type="button"
                 onClick={revealComposer}
-                className="inline-flex items-center gap-1.5 rounded-full border border-dashed border-border px-3.5 py-1.5 text-sm font-medium text-muted-foreground transition-colors hover:border-foreground/30 hover:text-foreground"
+                className="inline-flex min-h-11 cursor-pointer items-center gap-1.5 rounded-full border border-dashed border-border px-4 text-sm font-medium text-muted-foreground transition-colors hover:border-foreground/30 hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
               >
                 <Pencil className="h-3.5 w-3.5" />
                 Add note / comment
@@ -495,8 +582,12 @@ export function SetupAssistantChat({
           onSubmit={onSubmit}
           className={optionsActive ? "shrink-0 pt-2" : "shrink-0 border-t border-border pt-3"}
         >
+          <label htmlFor={inputId} className="sr-only">
+            Your answer to the setup assistant
+          </label>
           <div className="flex items-end gap-2">
             <textarea
+              id={inputId}
               ref={textareaRef}
               value={input}
               onChange={(e) => setInput(e.target.value)}
@@ -509,12 +600,12 @@ export function SetupAssistantChat({
               placeholder={optionsActive ? "Add a note or your own answer…" : "Type your answer…"}
               rows={1}
               disabled={loading}
-              className="min-h-[40px] max-h-32 flex-1 resize-none rounded-md border border-input bg-background px-3 py-2 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-60"
+              className="min-h-11 max-h-32 flex-1 resize-none rounded-md border border-input bg-background px-3 py-2.5 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-60"
             />
             <button
               type="submit"
               disabled={loading || !input.trim()}
-              className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-md bg-foreground text-background transition-opacity hover:opacity-90 disabled:opacity-40"
+              className="inline-flex h-11 w-11 shrink-0 cursor-pointer items-center justify-center rounded-md bg-foreground text-background transition-opacity hover:opacity-90 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-default disabled:opacity-40"
               aria-label="Send"
             >
               {loading ? (

@@ -94,12 +94,19 @@ export default async function RelationshipsPage({
   const raw = Array.isArray(params.ticker) ? params.ticker[0] : params.ticker;
   const initialTicker = normalizeTicker(raw);
 
+  // The graph deliberately bleeds past the layout's horizontal padding, but
+  // each negative margin has to be paid for with matching width. This was
+  // `w-[85vw]` — 85% of the VIEWPORT inside a max-w-7xl padded container —
+  // which overflowed on wide screens and clipped the graph on narrow ones.
   return (
-    <div className="sm:-mx-2 lg:-mx-4 xl:-mx-8 flex flex-col h-[calc(100svh-9rem)] min-h-[480px] w-[85vw] content-center">
+    <div className="flex h-[calc(100svh-9rem)] min-h-[480px] w-full flex-col sm:-mx-2 sm:w-[calc(100%+1rem)] lg:-mx-4 lg:w-[calc(100%+2rem)] xl:-mx-8 xl:w-[calc(100%+4rem)]">
       <Suspense
         fallback={
-          <div className="flex-1 flex items-center justify-center text-sm text-muted-foreground animate-pulse">
-            Loading explore view…
+          <div className="flex flex-1 flex-col gap-2 p-2" aria-hidden>
+            <div className="h-9 w-full animate-pulse rounded-md bg-muted/60" />
+            <div className="h-6 w-2/3 animate-pulse rounded bg-muted/40" />
+            <div className="flex-1 animate-pulse rounded-xl bg-card" />
+            <span className="sr-only">Loading explore view…</span>
           </div>
         }
       >

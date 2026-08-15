@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useState, useTransition } from "react";
-import { AlertTriangle, ArrowRight, PlayCircle, Sparkles } from "lucide-react";
+import { useCallback, useEffect, useId, useState, useTransition } from "react";
+import { AlertTriangle, ArrowLeft, ArrowRight, Sparkles } from "lucide-react";
 
 import { markWelcomed } from "@/app/actions/onboarding";
 import { track } from "@/lib/analytics/events";
@@ -19,37 +19,72 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 
-const TUTORIAL_PLAYLIST_URL =
-  process.env.NEXT_PUBLIC_TUTORIAL_PLAYLIST_URL ?? "https://www.youtube.com/@newsimpactscreener";
-
-// The welcome tutorial is hosted in Supabase Storage. Override with a full URL
-// via NEXT_PUBLIC_TUTORIAL_VIDEO_URL; otherwise fall back to the conventional
-// public object path in the project's storage bucket.
-const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL ?? "";
-const TUTORIAL_VIDEO_URL =
-  process.env.NEXT_PUBLIC_TUTORIAL_VIDEO_URL ??
-  (SUPABASE_URL
-    ? `${SUPABASE_URL}/storage/v1/object/public/tutorials/welcome.mp4`
-    : null);
+// Signed by a person — it is the only thing in the dialog that speaks as an
+// individual rather than as the product.
+const FOUNDER_SIGNATURE = "Kasper - Founder";
 
 type Props = {
   displayName: string | null;
 };
 
 // The ordered welcome-dialog steps — drives the funnel's step_index.
-const STEP_ORDER = ["video", "setup", "plan"] as const;
+// NOTE: the first step was "video" until the tutorial was replaced with a
+// written welcome. Renamed so the event name matches what is on screen; PostHog
+// funnels filtered on step="video" need updating to "welcome".
+const STEP_ORDER = ["welcome", "setup", "plan"] as const;
+const STEP_LABELS: Record<(typeof STEP_ORDER)[number], string> = {
+  welcome: "Welcome",
+  setup: "Set up",
+  plan: "Plan",
+};
+
+/**
+ * Three dots + a label, so an open-ended AI interview doesn't feel like an
+ * unbounded commitment — the user can see it's three steps and where they are.
+ */
+function StepIndicator({ step }: { step: (typeof STEP_ORDER)[number] }) {
+  const index = STEP_ORDER.indexOf(step);
+  return (
+    <div
+      className="flex items-center gap-2"
+      aria-label={`Step ${index + 1} of ${STEP_ORDER.length}: ${STEP_LABELS[step]}`}
+    >
+      <div className="flex items-center gap-1" aria-hidden>
+        {STEP_ORDER.map((s, i) => (
+          <span
+            key={s}
+            className={`h-1 rounded-full transition-all duration-300 ${
+              i === index
+                ? "w-5 bg-amber-500"
+                : i < index
+                  ? "w-1.5 bg-amber-500/50"
+                  : "w-1.5 bg-muted-foreground/25"
+            }`}
+          />
+        ))}
+      </div>
+      <span className="font-mono text-[11px] uppercase tracking-[0.14em] text-muted-foreground">
+        {index + 1}/{STEP_ORDER.length} · {STEP_LABELS[step]}
+      </span>
+    </div>
+  );
+}
 
 export function WelcomeDialog({ displayName }: Props) {
   const [open, setOpen] = useState(true);
-  const [step, setStep] = useState<"video" | "setup" | "plan">("video");
+  const [step, setStep] = useState<"welcome" | "setup" | "plan">("welcome");
   const [confirmingExit, setConfirmingExit] = useState(false);
   const [isPending, startTransition] = useTransition();
+  // How many of the agent's 5 setup tasks have actually landed. Drives whether
+  // advancing to billing reads as "continue" or as "skip".
+  const [tasksDone, setTasksDone] = useState(0);
+  const languageId = useId();
 
   const greetingName = displayName?.trim() || "trader";
 
   // First-join funnel: emit a step-view each time a step becomes visible, so
-  // PostHog can chart where new users drop off (video → setup → plan). Fires on
-  // mount (video) and on every step change; guarded by `open` so closing the
+  // PostHog can chart where new users drop off (welcome → setup → plan). Fires
+  // on mount (welcome) and on every step change; guarded by `open` so closing the
   // dialog doesn't emit.
   useEffect(() => {
     if (!open) return;
@@ -67,7 +102,7 @@ export function WelcomeDialog({ displayName }: Props) {
     });
   }
 
-  // Skip the tutorial entirely — close and highlight the Ask AI buttons.
+  // Skip onboarding entirely — close and highlight the Ask AI buttons.
   function skip() {
     track("onboarding_completed", { skipped: true });
     setPostWelcomeHighlight();
@@ -75,12 +110,26 @@ export function WelcomeDialog({ displayName }: Props) {
     setOpen(false);
   }
 
-  // Watched (or skipped) the video → continue into AI onboarding in this dialog.
+  // Read (or skipped) the welcome note → continue into AI onboarding here.
+  // NB: this is step 1 of 3, not the end of onboarding — `onboarding_completed`
+  // used to fire here, which made the funnel report ~100% completion.
   function startSetup() {
-    track("onboarding_completed", { skipped: false });
+    track("onboarding_welcome_accepted", {});
     persistWelcomed();
     setStep("setup");
   }
+
+  // Setup → billing. Records how much the agent actually configured, so the
+  // drop-off between "set nothing up" and "set everything up" is visible.
+  function goToPlan() {
+    track("onboarding_completed", { skipped: tasksDone === 0 });
+    setStep("plan");
+  }
+
+  // Stable identity — SetupAssistantChat calls this from an effect.
+  const handleProgress = useCallback((count: number) => {
+    setTasksDone(count);
+  }, []);
 
   // Confirmed they want to leave without setting up billing — close for good.
   function leaveAnyway() {
@@ -97,8 +146,8 @@ export function WelcomeDialog({ displayName }: Props) {
 
   function handleOpenChange(next: boolean) {
     if (next) return;
-    // Skipping the tutorial up front is fine — nothing has been configured yet.
-    if (step === "video") {
+    // Skipping at the welcome note is fine — nothing has been configured yet.
+    if (step === "welcome") {
       skip();
       return;
     }
@@ -111,52 +160,60 @@ export function WelcomeDialog({ displayName }: Props) {
   return (
     <>
     <Dialog open={open} onOpenChange={handleOpenChange}>
+      {/* Full-screen sheet below `sm` — this is the longest dialog in the
+          product and a chat + composer does not fit in a centred modal on a
+          phone. `dvh` (not `vh`) so mobile browser chrome can't push the
+          composer and footer out of the visible viewport. */}
       <DialogContent
         className={
           step === "setup"
-            ? "flex h-[85vh] flex-col gap-4 overflow-hidden sm:max-w-2xl"
+            ? "flex h-[100dvh] max-h-[100dvh] flex-col gap-4 overflow-hidden rounded-none p-4 sm:h-[85dvh] sm:max-w-2xl sm:rounded-lg sm:p-6"
             : step === "plan"
-              ? "flex max-h-[88vh] flex-col gap-4 overflow-hidden sm:max-w-2xl"
-              : "sm:max-w-xl"
+              ? "flex h-[100dvh] max-h-[100dvh] flex-col gap-4 overflow-hidden rounded-none p-4 sm:h-auto sm:max-h-[88dvh] sm:max-w-2xl sm:rounded-lg sm:p-6"
+              : "max-h-[100dvh] overflow-y-auto p-4 sm:max-h-[90dvh] sm:max-w-xl sm:p-6"
         }
       >
-        {step === "video" ? (
+        {step === "welcome" ? (
           <>
             <DialogHeader>
-              <DialogTitle className="text-2xl">Welcome, {greetingName}.</DialogTitle>
+              <StepIndicator step={step} />
+              <DialogTitle className="pt-3 text-2xl tracking-tight">
+                Welcome, {greetingName}.
+              </DialogTitle>
               <DialogDescription className="pt-2 text-base">
-                News Impact Screener turns headlines into trade ideas. Watch the
-                90-second tour of the screener, the news feed, and how to save an entry.
+                News Impact Screener turns headlines into trade ideas.
               </DialogDescription>
             </DialogHeader>
 
-            {TUTORIAL_VIDEO_URL ? (
-              <div className="aspect-video w-full overflow-hidden rounded-lg bg-black">
-                <video
-                  src={TUTORIAL_VIDEO_URL}
-                  controls
-                  autoPlay
-                  playsInline
-                  className="h-full w-full"
-                >
-                  <track kind="captions" />
-                </video>
-              </div>
-            ) : (
-              <div className="flex aspect-video w-full items-center justify-center rounded-lg border bg-muted/40">
-                <Button asChild variant="outline">
-                  <a href={TUTORIAL_PLAYLIST_URL} target="_blank" rel="noopener noreferrer">
-                    <PlayCircle className="mr-2 h-4 w-4" />
-                    Watch on YouTube
-                  </a>
-                </Button>
-              </div>
-            )}
+            {/* A note in one voice, not the product's. The accent rail keeps it
+                reading as a letter rather than another panel of UI copy. */}
+            <div className="border-l-2 border-amber-500/60 pl-5">
+              <p className="text-[15px] leading-relaxed text-foreground">
+                Thanks for being here — genuinely. I built this because I wanted
+                one place that connects the news to the stocks it actually moves,
+                and it means a lot that you&apos;re trying it.
+              </p>
+              <p className="mt-3 text-[15px] leading-relaxed text-foreground">
+                You don&apos;t have to work it out on your own. From here the
+                onboarding agent takes over — it walks you through the rest of the
+                setup and builds your first one with you. Just answer along.
+              </p>
+              <p className="mt-4 font-mono text-xs uppercase tracking-[0.2em] text-muted-foreground">
+                {FOUNDER_SIGNATURE}
+              </p>
+            </div>
 
-            <div className="flex flex-col gap-1.5 rounded-lg border border-border bg-muted/30 px-4 py-3">
+            {/* A divider, not another boxed panel — the letter above is the
+                only thing on this screen that should read as a surface. */}
+            <div className="flex flex-col gap-1.5 border-t border-border pt-4">
               <div className="flex items-center justify-between gap-3">
-                <span className="text-sm font-medium text-foreground">Language</span>
-                <LanguageSelector className="w-44 shrink-0" />
+                <label
+                  htmlFor={languageId}
+                  className="text-sm font-medium text-foreground"
+                >
+                  Language
+                </label>
+                <LanguageSelector id={languageId} className="w-44 shrink-0" />
               </div>
               <p className="text-xs text-muted-foreground">
                 Your agent alerts and Telegram messages will be delivered in this language.
@@ -164,19 +221,26 @@ export function WelcomeDialog({ displayName }: Props) {
             </div>
 
             <DialogFooter className="gap-2 sm:gap-2">
-              <Button variant="ghost" onClick={skip} disabled={isPending}>
+              <Button
+                variant="ghost"
+                className="min-h-11"
+                onClick={skip}
+                disabled={isPending}
+              >
                 Skip for now
               </Button>
-              <Button onClick={startSetup} disabled={isPending}>
+              <Button className="min-h-11" onClick={startSetup} disabled={isPending}>
                 Set up my account
+                <ArrowRight className="ml-1.5 h-4 w-4" />
               </Button>
             </DialogFooter>
           </>
         ) : step === "setup" ? (
           <>
             <DialogHeader className="shrink-0">
-              <DialogTitle className="flex items-center gap-2 text-xl">
-                <Sparkles className="h-4 w-4 text-amber-500" />
+              <StepIndicator step={step} />
+              <DialogTitle className="flex items-center gap-2 pt-3 text-xl tracking-tight">
+                <Sparkles className="h-4 w-4 shrink-0 text-amber-500" aria-hidden />
                 Let&apos;s get you set up
               </DialogTitle>
               <DialogDescription>
@@ -185,11 +249,30 @@ export function WelcomeDialog({ displayName }: Props) {
               </DialogDescription>
             </DialogHeader>
 
-            <SetupAssistantChat className="min-h-0 flex-1" surface="welcome" />
+            <SetupAssistantChat
+              className="min-h-0 flex-1"
+              surface="welcome"
+              onProgress={handleProgress}
+            />
 
-            <DialogFooter className="shrink-0">
-              <Button onClick={() => setStep("plan")}>
-                Next
+            {/* Advancing with nothing configured is leaving, not continuing —
+                so it isn't dressed as the primary action until the agent has
+                actually written something. */}
+            <DialogFooter className="shrink-0 sm:justify-between">
+              <Button
+                variant="ghost"
+                className="min-h-11"
+                onClick={() => setStep("welcome")}
+              >
+                <ArrowLeft className="mr-1.5 h-4 w-4" />
+                Back
+              </Button>
+              <Button
+                variant={tasksDone === 0 ? "outline" : "default"}
+                className="min-h-11"
+                onClick={goToPlan}
+              >
+                {tasksDone === 0 ? "Skip to plans" : "Continue"}
                 <ArrowRight className="ml-1.5 h-4 w-4" />
               </Button>
             </DialogFooter>
@@ -197,8 +280,9 @@ export function WelcomeDialog({ displayName }: Props) {
         ) : (
           <>
             <DialogHeader className="shrink-0">
-              <DialogTitle className="flex items-center gap-2 text-xl">
-                <Sparkles className="h-4 w-4 text-amber-500" />
+              <StepIndicator step={step} />
+              <DialogTitle className="flex items-center gap-2 pt-3 text-xl tracking-tight">
+                <Sparkles className="h-4 w-4 shrink-0 text-amber-500" aria-hidden />
                 Choose your plan
               </DialogTitle>
               <DialogDescription>
@@ -223,10 +307,15 @@ export function WelcomeDialog({ displayName }: Props) {
           if (!o) setConfirmingExit(false);
         }}
       >
-        <DialogContent className="sm:max-w-md">
+        {/* Stacked on the welcome dialog, which already dims the page — a
+            second full-strength scrim would double the darkening. */}
+        <DialogContent
+          className="sm:max-w-md"
+          overlayClassName="bg-black/25 backdrop-blur-none"
+        >
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
-              <AlertTriangle className="h-5 w-5 text-amber-500" />
+              <AlertTriangle className="h-5 w-5 shrink-0 text-amber-500" aria-hidden />
               Leave without setting up billing?
             </DialogTitle>
             <DialogDescription className="pt-2">
@@ -238,10 +327,12 @@ export function WelcomeDialog({ displayName }: Props) {
             </DialogDescription>
           </DialogHeader>
           <DialogFooter className="gap-2 sm:gap-2">
-            <Button variant="ghost" onClick={leaveAnyway}>
+            <Button variant="ghost" className="min-h-11" onClick={leaveAnyway}>
               Leave anyway
             </Button>
-            <Button onClick={goToBilling}>Set up billing</Button>
+            <Button className="min-h-11" onClick={goToBilling}>
+              Set up billing
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

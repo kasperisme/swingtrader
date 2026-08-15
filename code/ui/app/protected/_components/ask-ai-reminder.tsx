@@ -15,7 +15,7 @@ import { clearPostWelcomeHighlight } from "./onboarding-highlight";
 export function AskAiReminder() {
   return (
     <div
-      data-tour="onboarding-checklist"
+      data-tour="ask-ai-reminder"
       className="rounded-lg border border-border/60 bg-muted/20 px-4 py-3 text-xs text-muted-foreground"
     >
       <div className="flex items-center gap-2">
@@ -29,7 +29,7 @@ export function AskAiReminder() {
               clearPostWelcomeHighlight();
               openHelpChat();
             }}
-            className="font-medium text-foreground underline-offset-2 hover:underline"
+            className="cursor-pointer font-medium text-foreground underline underline-offset-2 decoration-muted-foreground/40 transition-colors hover:decoration-foreground"
           >
             Ask AI
           </button>{" "}

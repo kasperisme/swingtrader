@@ -32,10 +32,6 @@ RESEND_WAITLIST_SEGMENT_ID=            # optional — see step 3
 RESEND_WAITLIST_WELCOME_TEMPLATE_ID=   # stored-template ID or alias — see step 4
 RESEND_WELCOME_TEMPLATE_ID=            # stored-template ID or alias — see step 4
 NEXT_PUBLIC_APP_URL=https://newsimpactscreener.com
-
-# Tutorial dialog
-NEXT_PUBLIC_TUTORIAL_VIDEO_URL=        # YouTube embed URL, e.g. https://www.youtube.com/embed/abc123
-NEXT_PUBLIC_TUTORIAL_PLAYLIST_URL=https://www.youtube.com/@newsimpactscreener
 ```
 
 `RESEND_API_KEY` is the only required value. If `RESEND_WAITLIST_SEGMENT_ID` is unset, contacts simply aren't synced (errors are logged, not thrown).

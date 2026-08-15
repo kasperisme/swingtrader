@@ -2,7 +2,15 @@ import { Suspense } from "react";
 import { createClient } from "@/lib/supabase/server";
 import { redirect } from "next/navigation";
 import Link from "next/link";
-import { KeyRound, Lock, LogOut, Sparkles, Mail } from "lucide-react";
+import {
+  AlertTriangle,
+  ChevronRight,
+  KeyRound,
+  Lock,
+  LogOut,
+  Mail,
+  Sparkles,
+} from "lucide-react";
 import { LogoutButton } from "@/components/logout-button";
 import { TelegramConnect } from "@/components/telegram-connect";
 import { ManageBillingButton } from "@/components/manage-billing-button";
@@ -18,6 +26,15 @@ import { RestartOnboardingButton } from "@/app/protected/_components/restart-onb
 import { SetupAssistantTrigger } from "@/components/setup-assistant";
 
 export const metadata = { title: "Profile" };
+
+// One label style, defined once. It used to be pasted into six card headers,
+// which is why every group on the page shouted at the same volume.
+const SECTION_LABEL =
+  "font-mono text-[11px] font-semibold uppercase tracking-[0.16em] text-amber-700 dark:text-amber-500";
+const CARD = "rounded-2xl border border-border bg-card overflow-hidden";
+const ROW = "flex items-center justify-between gap-4 px-5 py-3";
+const DT = "text-sm text-muted-foreground";
+const DD = "font-mono text-[13px] tabular-nums text-foreground";
 
 function StatusBadge({ status, grandfathered }: { status: string; grandfathered: boolean }) {
   const label = status.replace(/_/g, " ");
@@ -38,6 +55,89 @@ function StatusBadge({ status, grandfathered }: { status: string; grandfathered:
     return <Badge variant="secondary">Canceled</Badge>;
   }
   return <Badge variant="outline" className="capitalize">{label}</Badge>;
+}
+
+/** Section heading. These were `<p>` tags, so the page had an h1 and no other
+ *  headings at all — no outline for screen readers, and no visual hierarchy
+ *  between "Subscription" and "Preferences". */
+function SectionHeading({ id, children }: { id: string; children: React.ReactNode }) {
+  return (
+    <h2 id={id} className={`${SECTION_LABEL} mb-3`}>
+      {children}
+    </h2>
+  );
+}
+
+/** A destination. Chevron because it navigates — actions in the same list get a
+ *  button instead, so affordance matches behaviour. */
+function SettingsLink({
+  href,
+  icon,
+  title,
+  description,
+  external,
+  ...rest
+}: {
+  href: string;
+  icon: React.ReactNode;
+  title: string;
+  description: string;
+  external?: boolean;
+  [key: string]: unknown;
+}) {
+  const inner = (
+    <>
+      <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-border bg-background">
+        {icon}
+      </span>
+      <span className="min-w-0 flex-1">
+        <span className="block text-sm font-medium text-foreground">{title}</span>
+        <span className="block truncate text-xs text-muted-foreground">{description}</span>
+      </span>
+      <ChevronRight
+        className="h-4 w-4 shrink-0 text-muted-foreground transition-transform group-hover:translate-x-0.5"
+        aria-hidden
+      />
+    </>
+  );
+  const className =
+    "group flex min-h-[3.5rem] cursor-pointer items-center gap-3 px-5 py-3.5 transition-colors hover:bg-muted/60 focus-visible:bg-muted/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-amber-500/60";
+
+  return external ? (
+    <a href={href} className={className} {...rest}>
+      {inner}
+    </a>
+  ) : (
+    <Link href={href} className={className} {...rest}>
+      {inner}
+    </Link>
+  );
+}
+
+/** An action. No chevron — nothing navigates; the control is the affordance. */
+function SettingsAction({
+  icon,
+  title,
+  description,
+  control,
+}: {
+  icon: React.ReactNode;
+  title: string;
+  description: string;
+  control: React.ReactNode;
+}) {
+  return (
+    <div className="flex min-h-[3.5rem] items-center gap-3 px-5 py-3.5">
+      <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-border bg-background">
+        {icon}
+      </span>
+      <div className="min-w-0 flex-1">
+        <p className="text-sm font-medium text-foreground">{title}</p>
+        <p className="text-xs leading-relaxed text-muted-foreground">{description}</p>
+      </div>
+      {control}
+    </div>
+  );
 }
 
 async function ProfileContent() {
@@ -66,232 +166,267 @@ async function ProfileContent() {
 
   const joined = new Date(user.created_at).toLocaleDateString("en-US", {
     year: "numeric",
-    month: "long",
+    month: "short",
     day: "numeric",
   });
 
   const lastSignIn = user.last_sign_in_at
     ? new Date(user.last_sign_in_at).toLocaleDateString("en-US", {
         year: "numeric",
-        month: "long",
+        month: "short",
         day: "numeric",
         hour: "2-digit",
         minute: "2-digit",
       })
     : null;
 
+  const monogram = (user.email ?? "?").trim().charAt(0).toUpperCase();
+  const planLabel = subscription?.plan ?? "Free";
+  // The two states that silently stop the product working. Worth an alert
+  // rather than a badge three rows down a list.
+  const needsAttention =
+    subscription?.status === "past_due" || subscription?.status === "canceled";
+
   return (
-    <div className="flex flex-col gap-8 w-full">
-      <div className="flex items-start justify-between gap-4">
-        <div>
-          <div className="flex items-center gap-2">
-            <span className="inline-block h-1.5 w-1.5 rounded-full bg-amber-500" />
-            <p className="font-mono text-[11px] font-semibold uppercase tracking-[0.16em] text-amber-500">Account</p>
-          </div>
-          <h1 className="mt-1.5 text-2xl font-bold tracking-tight">Profile</h1>
-          <p className="mt-1 text-sm text-muted-foreground">Your account details and settings.</p>
-        </div>
-        <SetupAssistantTrigger className="inline-flex shrink-0 items-center gap-1.5 rounded-md border border-amber-500/40 bg-amber-500/5 px-3 py-1.5 text-sm font-medium text-foreground transition-colors hover:bg-amber-500/10" />
-      </div>
-
-      {/* Account info */}
-      <section className="rounded-2xl border border-border bg-card overflow-hidden">
-        <div className="border-b border-border px-5 py-3">
-          <p className="font-mono text-[11px] font-semibold uppercase tracking-[0.16em] text-amber-500">
-            Account details
+    <div className="flex w-full flex-col gap-10">
+      {/* ── Header ───────────────────────────────────────────────────────── */}
+      <header className="flex flex-wrap items-end justify-between gap-4 border-b border-border/60 pb-6">
+        <div className="min-w-0">
+          <p className="mb-3 inline-flex items-center gap-2 font-mono text-[10px] uppercase tracking-[0.2em] text-amber-700 dark:text-amber-500/90">
+            <span className="h-px w-6 bg-amber-500/60" />
+            Account
+          </p>
+          <h1 className="text-3xl font-bold leading-[1.05] tracking-tighter sm:text-4xl">
+            Profile
+          </h1>
+          <p className="mt-3 max-w-[58ch] text-sm leading-relaxed text-muted-foreground">
+            Your account, your plan, and the settings that decide how the agents
+            work for you.
           </p>
         </div>
-        <dl className="divide-y divide-border">
-          <div className="flex items-center justify-between gap-4 px-5 py-3">
-            <dt className="text-sm text-muted-foreground">Email</dt>
-            <dd className="truncate font-mono text-[13px] font-medium">{user.email}</dd>
-          </div>
+        <SetupAssistantTrigger className="inline-flex shrink-0 cursor-pointer items-center gap-1.5 rounded-lg border border-amber-500/40 bg-amber-500/5 px-3.5 py-2 text-sm font-medium text-foreground transition-colors hover:bg-amber-500/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500/60" />
+      </header>
 
-          <div className="flex items-center justify-between gap-4 px-5 py-3">
-            <dt className="text-sm text-muted-foreground">Member since</dt>
-            <dd className="font-mono text-[13px] tabular-nums text-foreground/80">{joined}</dd>
-          </div>
-          {lastSignIn && (
-            <div className="flex items-center justify-between gap-4 px-5 py-3">
-              <dt className="text-sm text-muted-foreground">Last sign-in</dt>
-              <dd className="font-mono text-[13px] tabular-nums text-foreground/80">{lastSignIn}</dd>
-            </div>
-          )}
-        </dl>
-      </section>
-
-      {/* Subscription */}
-      <section data-tour="subscription" className="rounded-2xl border border-border bg-card overflow-hidden">
-        <div className="border-b border-border px-5 py-3 flex items-center justify-between">
-          <p className="font-mono text-[11px] font-semibold uppercase tracking-[0.16em] text-amber-500">
-            Subscription
-          </p>
-          {subscription?.stripe_customer_id && <ManageBillingButton />}
-        </div>
-        <dl className="divide-y divide-border">
-          <div className="flex items-center justify-between gap-4 px-5 py-3">
-            <dt className="text-sm text-muted-foreground">Plan</dt>
-            <dd>
-              {subscription ? (
-                <span className="rounded border border-amber-500/30 bg-amber-500/5 px-1.5 py-0.5 font-mono text-[11px] font-semibold uppercase tracking-[0.1em] text-amber-600 dark:text-amber-400">{subscription.plan}</span>
-              ) : (
-                <span className="rounded border border-border px-1.5 py-0.5 font-mono text-[11px] font-semibold uppercase tracking-[0.1em] text-muted-foreground">Free</span>
-              )}
-            </dd>
-          </div>
-          {subscription && (
-            <>
-              <div className="flex items-center justify-between gap-4 px-5 py-3">
-                <dt className="text-sm text-muted-foreground">Billing</dt>
-                <dd className="font-mono text-[13px] capitalize text-foreground/80">{subscription.billing_interval}</dd>
+      {/* ── Identity ─────────────────────────────────────────────────────────
+          Absorbs what used to be a separate "Account details" card: who you are
+          and what you're on, answered before anything asks you to scroll. */}
+      <section aria-labelledby="identity">
+        <h2 id="identity" className="sr-only">
+          Account identity
+        </h2>
+        <div className="flex flex-wrap items-center gap-x-5 gap-y-4">
+          <span
+            aria-hidden
+            className="grid h-14 w-14 shrink-0 place-items-center rounded-2xl border border-amber-500/30 bg-amber-500/10 font-mono text-xl font-semibold text-amber-600 dark:text-amber-400"
+          >
+            {monogram}
+          </span>
+          <div className="min-w-0 flex-1">
+            <p className="truncate font-mono text-[15px] font-medium text-foreground">
+              {user.email}
+            </p>
+            <dl className="mt-1.5 flex flex-wrap items-center gap-x-5 gap-y-1 text-xs text-muted-foreground">
+              <div className="flex items-center gap-1.5">
+                <dt>Member since</dt>
+                <dd className="font-mono tabular-nums text-foreground">{joined}</dd>
               </div>
-              <div className="flex items-center justify-between gap-4 px-5 py-3">
-                <dt className="text-sm text-muted-foreground">Status</dt>
-                <dd>
-                  <StatusBadge status={subscription.status} grandfathered={subscription.grandfathered} />
-                </dd>
-              </div>
-              {subscription.current_period_end && (
-                <div className="flex items-center justify-between gap-4 px-5 py-3">
-                  <dt className="text-sm text-muted-foreground">
-                    {subscription.status === "canceled" ? "Access until" : "Renews"}
-                  </dt>
-                  <dd className="font-mono text-[13px] tabular-nums text-foreground/80">
-                    {new Date(subscription.current_period_end).toLocaleDateString("en-US", {
-                      year: "numeric",
-                      month: "long",
-                      day: "numeric",
-                    })}
-                  </dd>
+              {lastSignIn && (
+                <div className="flex items-center gap-1.5">
+                  <dt>Last sign-in</dt>
+                  <dd className="font-mono tabular-nums text-foreground">{lastSignIn}</dd>
                 </div>
               )}
-            </>
-          )}
-          {/* Plan picker — Checkout for free/lapsed accounts, in-place switch
-              for live subscriptions. The API decides which. */}
-          <ChangePlan hasSubscription={Boolean(subscription?.stripe_customer_id)} />
-        </dl>
-      </section>
-
-      {/* Telegram — pair account for Daily Narrative delivery */}
-      <section data-tour="telegram-connect">
-        <div className="mb-3">
-          <p className="font-mono text-[11px] font-semibold uppercase tracking-[0.16em] text-amber-500">
-            Notifications
-          </p>
-        </div>
-        <TelegramConnect />
-      </section>
-
-      {/* Trading strategy */}
-      <section data-tour="trading-strategy" className="rounded-2xl border border-border bg-card overflow-hidden">
-        <div className="border-b border-border px-5 py-3">
-          <p className="font-mono text-[11px] font-semibold uppercase tracking-[0.16em] text-amber-500">
-            Trading strategy
-          </p>
-        </div>
-        <div className="px-5 py-4 flex flex-col gap-2">
-          <p className="text-xs text-muted-foreground leading-relaxed">
-            Describe your trading approach. All AI agents — chart analysis, screening, and synthesis — will align their recommendations to your strategy.
-          </p>
-          <TradingStrategyForm initialStrategy={tradingStrategy} />
+            </dl>
+          </div>
+          {/* Own line on mobile: at 390px the avatar, email and badges were
+              fighting over ~150px and the email truncated to nothing. */}
+          <div className="flex w-full shrink-0 items-center gap-2 sm:w-auto">
+            <span className="rounded-md border border-amber-500/30 bg-amber-500/5 px-2 py-1 font-mono text-[11px] font-semibold uppercase tracking-[0.1em] text-amber-600 dark:text-amber-400">
+              {planLabel}
+            </span>
+            {subscription && (
+              <StatusBadge
+                status={subscription.status}
+                grandfathered={subscription.grandfathered}
+              />
+            )}
+          </div>
         </div>
       </section>
 
-      {/* Preferences */}
-      <section className="rounded-2xl border border-border bg-card overflow-hidden">
-        <div className="border-b border-border px-5 py-3">
-          <p className="font-mono text-[11px] font-semibold uppercase tracking-[0.16em] text-amber-500">
-            Preferences
-          </p>
-        </div>
-        <div className="flex flex-col gap-2 px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
-          <div className="min-w-0">
-            <p className="text-sm font-medium">Language</p>
-            <p className="text-xs text-muted-foreground">
-              Language for AI agent alerts and Telegram messages.
+      {/* Only rendered when something is actually wrong. */}
+      {needsAttention && (
+        <div className="flex items-start gap-3 rounded-xl border border-destructive/40 bg-destructive/5 px-4 py-3.5">
+          <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-destructive" aria-hidden />
+          <div className="min-w-0 flex-1">
+            <p className="text-sm font-medium text-foreground">
+              {subscription?.status === "past_due"
+                ? "Your last payment failed."
+                : "Your subscription is cancelled."}
+            </p>
+            <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
+              Scheduled agents don&apos;t run without an active plan — they only send a
+              reminder. Update billing below to start them again.
             </p>
           </div>
-          <LanguageSelector initialValue={preferredLanguage} className="w-full sm:w-56" />
+          {subscription?.stripe_customer_id && <ManageBillingButton />}
         </div>
-      </section>
+      )}
 
-      {/* Settings links */}
-      <section className="rounded-2xl border border-border bg-card overflow-hidden">
-        <div className="border-b border-border px-5 py-3">
-          <p className="font-mono text-[11px] font-semibold uppercase tracking-[0.16em] text-amber-500">
-            Settings
-          </p>
+      {/* ── Two columns on desktop ───────────────────────────────────────────
+          The page was pinned to max-w-2xl inside a max-w-7xl layout: six
+          identical cards in a single narrow ribbon. What you act on sits in the
+          main column; what you set once sits beside it. */}
+      <div className="grid gap-10 lg:grid-cols-3 lg:gap-8">
+        <div className="flex flex-col gap-8 lg:col-span-2">
+          {/* Subscription */}
+          <section data-tour="subscription" aria-labelledby="subscription-heading">
+            <div className="mb-3 flex items-center justify-between gap-4">
+              <h2 id="subscription-heading" className={SECTION_LABEL}>
+                Subscription
+              </h2>
+              {subscription?.stripe_customer_id && !needsAttention && <ManageBillingButton />}
+            </div>
+            <div className={CARD}>
+              <dl className="divide-y divide-border">
+                {subscription ? (
+                  <>
+                    <div className={ROW}>
+                      <dt className={DT}>Billing</dt>
+                      <dd className={`${DD} capitalize`}>{subscription.billing_interval}</dd>
+                    </div>
+                    {subscription.current_period_end && (
+                      <div className={ROW}>
+                        <dt className={DT}>
+                          {subscription.status === "canceled" ? "Access until" : "Renews"}
+                        </dt>
+                        <dd className={DD}>
+                          {new Date(subscription.current_period_end).toLocaleDateString("en-US", {
+                            year: "numeric",
+                            month: "long",
+                            day: "numeric",
+                          })}
+                        </dd>
+                      </div>
+                    )}
+                  </>
+                ) : (
+                  <div className="px-5 py-4">
+                    <p className="text-sm text-muted-foreground">
+                      You&apos;re on the free tier. Pick a plan to run scheduled agents
+                      and unlock the full impact history.
+                    </p>
+                  </div>
+                )}
+                {/* Checkout for free/lapsed accounts, in-place switch for live
+                    subscriptions. The API decides which. */}
+                <ChangePlan hasSubscription={Boolean(subscription?.stripe_customer_id)} />
+              </dl>
+            </div>
+          </section>
+
+          {/* Trading strategy */}
+          <section data-tour="trading-strategy" aria-labelledby="strategy-heading">
+            <SectionHeading id="strategy-heading">Trading strategy</SectionHeading>
+            <div className={CARD}>
+              <div className="flex flex-col gap-2 px-5 py-4">
+                <p className="text-xs leading-relaxed text-muted-foreground">
+                  Describe your trading approach. All AI agents — chart analysis,
+                  screening, and synthesis — align their recommendations to it.
+                </p>
+                <TradingStrategyForm initialStrategy={tradingStrategy} />
+              </div>
+            </div>
+          </section>
+
+          {/* Telegram — brings its own card chrome. */}
+          <section data-tour="telegram-connect" aria-labelledby="notifications-heading">
+            <SectionHeading id="notifications-heading">Notifications</SectionHeading>
+            <TelegramConnect />
+          </section>
         </div>
-        <div className="divide-y divide-border">
-          <a
-            href={`mailto:k@newsimpactscreener.com?subject=${encodeURIComponent("News Impact Screener — feedback")}`}
-            className="flex cursor-pointer items-center gap-3 px-5 py-4 transition-colors hover:bg-muted/50"
-          >
-            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-border bg-background">
-              <Mail className="h-4 w-4 text-amber-400" />
+
+        {/* ── Aside ────────────────────────────────────────────────────────── */}
+        <div className="flex flex-col gap-8">
+          <section aria-labelledby="preferences-heading">
+            <SectionHeading id="preferences-heading">Preferences</SectionHeading>
+            <div className={CARD}>
+              <div className="flex flex-col gap-3 px-5 py-4">
+                <div className="min-w-0">
+                  <label
+                    htmlFor="preferred-language"
+                    className="text-sm font-medium text-foreground"
+                  >
+                    Language
+                  </label>
+                  <p className="mt-0.5 text-xs leading-relaxed text-muted-foreground">
+                    Used for agent alerts and Telegram messages.
+                  </p>
+                </div>
+                <LanguageSelector id="preferred-language" initialValue={preferredLanguage} className="w-full" />
+              </div>
             </div>
-            <div className="flex-1 min-w-0">
-              <p className="text-sm font-medium">Feedback &amp; support</p>
-              <p className="truncate text-xs text-muted-foreground">
-                Questions, ideas, or issues? Email k@newsimpactscreener.com
-              </p>
+          </section>
+
+          <section aria-labelledby="settings-heading">
+            <SectionHeading id="settings-heading">Settings</SectionHeading>
+            <div className={CARD}>
+              <div className="divide-y divide-border">
+                <SettingsLink
+                  data-tour="api-keys"
+                  href="/protected/api-keys"
+                  icon={<KeyRound className="h-4 w-4 text-amber-500" />}
+                  title="API keys"
+                  description="Keys for the public REST API"
+                />
+                <SettingsLink
+                  href="/auth/update-password"
+                  icon={<Lock className="h-4 w-4 text-amber-500" />}
+                  title="Change password"
+                  description="Update your login password"
+                />
+                <SettingsLink
+                  external
+                  href={`mailto:k@newsimpactscreener.com?subject=${encodeURIComponent("News Impact Screener — feedback")}`}
+                  icon={<Mail className="h-4 w-4 text-amber-500" />}
+                  title="Feedback & support"
+                  description="k@newsimpactscreener.com"
+                />
+                <SettingsAction
+                  icon={<Sparkles className="h-4 w-4 text-amber-500" />}
+                  title="Onboarding tour"
+                  description={
+                    onboardingCompleted === onboardingTotal
+                      ? `All ${onboardingTotal} steps complete.`
+                      : `${onboardingCompleted} of ${onboardingTotal} steps complete.`
+                  }
+                  control={
+                    <RestartOnboardingButton
+                      completedSteps={onboardingCompleted}
+                      totalSteps={onboardingTotal}
+                    />
+                  }
+                />
+              </div>
             </div>
-          </a>
-          <div className="flex items-center gap-3 px-5 py-4">
-            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-border bg-background">
-              <Sparkles className="h-4 w-4 text-amber-400" />
+          </section>
+
+          {/* Sign out — separated so it is never a mis-click inside the list. */}
+          <section aria-labelledby="session-heading">
+            <h2 id="session-heading" className="sr-only">
+              Session
+            </h2>
+            <div className="flex items-center gap-3 rounded-2xl border border-border px-5 py-3.5">
+              <LogOut className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden />
+              <div className="min-w-0 flex-1">
+                <p className="text-sm font-medium text-foreground">Sign out</p>
+                <p className="text-xs text-muted-foreground">Sign out of this device</p>
+              </div>
+              <LogoutButton />
             </div>
-            <div className="flex-1 min-w-0">
-              <p className="text-sm font-medium">Onboarding tour</p>
-              <p className="text-xs text-muted-foreground">
-                {onboardingCompleted === onboardingTotal
-                  ? `All ${onboardingTotal} steps complete — restart to revisit any page tour.`
-                  : `${onboardingCompleted} of ${onboardingTotal} steps complete — restart to clear progress and walk through every page tour again.`}
-              </p>
-            </div>
-            <RestartOnboardingButton
-              completedSteps={onboardingCompleted}
-              totalSteps={onboardingTotal}
-            />
-          </div>
-          <Link
-            data-tour="api-keys"
-            href="/protected/api-keys"
-            className="flex cursor-pointer items-center gap-3 px-5 py-4 transition-colors hover:bg-muted/50"
-          >
-            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-border bg-background">
-              <KeyRound className="h-4 w-4 text-amber-400" />
-            </div>
-            <div className="flex-1 min-w-0">
-              <p className="text-sm font-medium">API Keys</p>
-              <p className="text-xs text-muted-foreground">Manage keys for the public REST API</p>
-            </div>
-          </Link>
-          <Link
-            href="/auth/update-password"
-            className="flex cursor-pointer items-center gap-3 px-5 py-4 transition-colors hover:bg-muted/50"
-          >
-            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-border bg-background">
-              <Lock className="h-4 w-4 text-amber-400" />
-            </div>
-            <div className="flex-1 min-w-0">
-              <p className="text-sm font-medium">Change password</p>
-              <p className="text-xs text-muted-foreground">Update your login password</p>
-            </div>
-          </Link>
-          <div className="flex items-center gap-3 px-5 py-4">
-            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-border bg-background">
-              <LogOut className="h-4 w-4 text-muted-foreground" />
-            </div>
-            <div className="flex-1 min-w-0">
-              <p className="text-sm font-medium">Sign out</p>
-              <p className="text-xs text-muted-foreground">Sign out of this device</p>
-            </div>
-            <LogoutButton />
-          </div>
+          </section>
         </div>
-      </section>
+      </div>
     </div>
   );
 }
@@ -303,10 +438,10 @@ async function ProfileTourMount() {
 
 export default function ProfilePage() {
   return (
-    <div className="flex-1 w-full max-w-2xl">
+    <div className="w-full max-w-5xl flex-1">
       <Suspense
         fallback={
-          <div className="text-sm text-muted-foreground animate-pulse">Loading profile…</div>
+          <div className="animate-pulse text-sm text-muted-foreground">Loading profile…</div>
         }
       >
         <ProfileContent />

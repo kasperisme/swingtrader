@@ -11,6 +11,10 @@ import {
 
 type Props = {
   initialValue?: LanguageCode;
+  /** Associates a visible <label htmlFor>. When set, the built-in aria-label is
+   *  dropped — an aria-label would override the visible text for screen-reader
+   *  users and desync the accessible name from what is on screen. */
+  id?: string;
   /** Notifies the parent of a successful change (e.g. to thread into other flows). */
   onChanged?: (lang: LanguageCode) => void;
   className?: string;
@@ -21,7 +25,7 @@ type Props = {
  * (the agent + Telegram delivery read the same key). Optimistic UI with a small
  * saved/saving indicator; reverts the visible value if the save fails.
  */
-export function LanguageSelector({ initialValue = DEFAULT_LANGUAGE, onChanged, className }: Props) {
+export function LanguageSelector({ initialValue = DEFAULT_LANGUAGE, id, onChanged, className }: Props) {
   const [value, setValue] = useState<LanguageCode>(initialValue);
   const [pending, startTransition] = useTransition();
   const [saved, setSaved] = useState(false);
@@ -50,7 +54,8 @@ export function LanguageSelector({ initialValue = DEFAULT_LANGUAGE, onChanged, c
       <div className="relative">
         <Globe className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
         <select
-          aria-label="Preferred language"
+          id={id}
+          aria-label={id ? undefined : "Preferred language"}
           value={value}
           onChange={(e) => handleChange(e.target.value as LanguageCode)}
           disabled={pending}

@@ -3,8 +3,8 @@
 /**
  * Post-welcome highlight tour. Fires once after the welcome dialog
  * dismisses and points the user at the two surfaces they'll need next:
- * the onboarding checklist (for first-time orientation) and the Ask AI
- * button (for everything after).
+ * the Ask AI reminder banner (the way back into setup) and the Ask AI
+ * button in the top bar (for everything after).
  *
  * Uses the same Driver.js mechanic as the per-page tours so the visual
  * treatment is identical — popover with title + description, spotlight
@@ -37,11 +37,11 @@ type DriverStepConfig = {
 
 const STEPS: ReadonlyArray<DriverStepConfig> = [
   {
-    element: '[data-tour="onboarding-checklist"]',
+    element: '[data-tour="ask-ai-reminder"]',
     popover: {
       title: "Start here",
       description:
-        "This is your guided walkthrough. Each step opens a different page on the platform and explains what you'll get from it. Use the arrows to navigate — you can come back any time from your profile.",
+        "This banner is your shortcut back into setup. Whatever you skipped — strategy, holdings, screenings, Telegram, your first agent — the AI can still configure it for you from here.",
       side: "bottom",
       align: "start",
     },

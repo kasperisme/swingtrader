@@ -32,10 +32,11 @@ import {
   type FmpCompanyProfile,
 } from "@/app/actions/fmp";
 import { TickerSearchCombobox } from "@/components/ticker-search-combobox";
-import { Loader2 } from "lucide-react";
+import { ChevronRight, Loader2, Network, Table as TableIcon, X } from "lucide-react";
 import type { ReactNode } from "react";
 import { VectorsUI, type TickerRow } from "@/app/protected/vectors/vectors-ui";
 import { NetworkGraphD3 } from "./network-graph-d3";
+import { RelationshipTableView } from "./relationship-table-view";
 
 const REL_COLORS: Record<string, string> = {
   competitor: "hsl(var(--chart-3))",
@@ -55,6 +56,16 @@ const REL_TYPES = [
   "subsidiary",
 ] as const;
 
+// The "vectors" tab was labelled "Company Profile", which collided with the
+// overview tab — the one that actually shows the FMP company profile. It renders
+// the company's dimension vectors, so it is named for that.
+const SIDE_TABS = [
+  { key: "overview", label: "Basic info" },
+  { key: "details", label: "How it's linked" },
+  { key: "vectors", label: "Dimensions" },
+  { key: "sentiment", label: "Sentiment" },
+] as const;
+
 export type RelationshipNetworkExplorerProps = {
   vectors?: TickerRow[];
   initialSeedTicker?: string;
@@ -66,62 +77,292 @@ export type RelationshipNetworkExplorerProps = {
 
 const NODE_R = 18;
 
+/** Rows per page for every paginated list in the details drawer. */
+const DRAWER_PAGE_SIZE = 10;
+
 type SelectedEdge = {
   from_ticker: string;
   to_ticker: string;
   rel_type?: string;
 } | null;
 
+/**
+ * The drawer's three paginated lists (edge evidence, node news, sentiment) each
+ * inlined their own Prev/Next pair. None of them bounded `Next`, so paging past
+ * the end showed an empty list with no explanation; none disabled `Prev` at page
+ * 1; and all three rendered the same two accessible names, so a screen reader
+ * heard "Prev, Next" six times on one panel with no way to tell them apart.
+ *
+ * `hasNext` is inferred from a full page of rows — the queries return rows, not
+ * a total count.
+ */
+function Pager({
+  label,
+  page,
+  setPage,
+  rowCount,
+  disabled = false,
+}: {
+  label: string;
+  page: number;
+  setPage: Dispatch<SetStateAction<number>>;
+  rowCount: number;
+  disabled?: boolean;
+}) {
+  const btnClass =
+    "inline-flex min-h-9 cursor-pointer items-center rounded border border-border px-2.5 text-xs font-medium transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-default disabled:opacity-40";
+  const hasNext = rowCount >= DRAWER_PAGE_SIZE;
+  return (
+    <div className="flex items-center gap-1">
+      <button
+        type="button"
+        onClick={() => setPage((p) => Math.max(1, p - 1))}
+        disabled={disabled || page <= 1}
+        className={btnClass}
+        aria-label={`Previous page of ${label}`}
+      >
+        Prev
+      </button>
+      <span
+        className="min-w-6 text-center text-xs tabular-nums text-muted-foreground"
+        aria-label={`${label}, page ${page}`}
+      >
+        {page}
+      </span>
+      <button
+        type="button"
+        onClick={() => setPage((p) => p + 1)}
+        disabled={disabled || !hasNext}
+        className={btnClass}
+        aria-label={`Next page of ${label}`}
+      >
+        Next
+      </button>
+    </div>
+  );
+}
+
+/** Section heading for the explain-it tab — sentence case, no graph jargon. */
+function SectionHeading({ children }: { children: ReactNode }) {
+  return <h4 className="text-sm font-semibold tracking-tight">{children}</h4>;
+}
+
+function fmtDay(iso: string | null): string {
+  if (!iso) return "—";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "—";
+  return new Intl.DateTimeFormat("en-GB", {
+    year: "numeric",
+    month: "short",
+    day: "2-digit",
+  }).format(d);
+}
+
+/**
+ * Plain-English definition of each relationship type, written for someone who
+ * wants to know what the link *means for the two businesses* — not what an edge
+ * is. Phrased without asserting which side is which: the stored direction is
+ * whatever the articles described, and it is shown separately rather than baked
+ * into a sentence we can't guarantee.
+ */
+const REL_MEANING: Record<string, string> = {
+  competitor:
+    "They chase the same customers in the same market. News that helps one often works against the other.",
+  supplier:
+    "One supplies parts, components or services to the other. Demand at the buyer flows back to the supplier.",
+  customer:
+    "One buys the other's products or services, so its spending turns up in the other's revenue.",
+  partner:
+    "They work together — a joint venture, a distribution deal, or shared technology.",
+  acquirer: "One has acquired, or is moving to acquire, the other.",
+  subsidiary: "One is owned by, or operates under, the other.",
+};
+
+/**
+ * Reasoning text is stored with a direction marker (`[a_to_b]` / `[b_to_a]`)
+ * glued to the front. That's a storage detail; it read as noise at the start of
+ * every explanation. Strip it, and surface the reversed case as words instead.
+ */
+function cleanReasoning(text: string): { text: string; reversed: boolean } {
+  const m = text.match(/^\s*\[(a_to_b|b_to_a)\]\s*/i);
+  if (!m) return { text: text.trim(), reversed: false };
+  return {
+    text: text.slice(m[0].length).trim(),
+    reversed: m[1].toLowerCase() === "b_to_a",
+  };
+}
+
+/**
+ * Database and transport failures are not written for readers. Translate the
+ * ones we actually see into something a non-engineer can act on, and keep the
+ * raw text available underneath rather than throwing it away.
+ */
+function humaneError(raw: string): { headline: string; detail: string | null } {
+  const s = raw.toLowerCase();
+  if (s.includes("statement timeout") || s.includes("canceling statement")) {
+    return {
+      headline:
+        "This is taking too long to load — the query timed out. Try a narrower view (Tier 1) or reload.",
+      detail: raw,
+    };
+  }
+  if (s.includes("fetch") || s.includes("network")) {
+    return { headline: "Couldn't reach the server. Check your connection and retry.", detail: raw };
+  }
+  return { headline: raw, detail: null };
+}
+
+/** A failed panel section, in words rather than a stack trace. */
+function SectionError({ raw }: { raw: string }) {
+  const { headline, detail } = humaneError(raw);
+  return (
+    <div role="alert" className="text-xs">
+      <p className="text-destructive">{headline}</p>
+      {detail ? (
+        <details className="mt-1">
+          <summary className="cursor-pointer text-muted-foreground">
+            Technical detail
+          </summary>
+          <p className="mt-1 break-words font-mono text-[11px] text-muted-foreground">
+            {detail}
+          </p>
+        </details>
+      ) : null}
+    </div>
+  );
+}
+
+/** How much weight to put on a link, in words rather than a bare percentage. */
+function confidenceRead(strength: number): string {
+  if (strength >= 0.85) return "Sources agree strongly on this.";
+  if (strength >= 0.6) return "Most sources describe it this way.";
+  if (strength >= 0.35) return "Mixed support — worth checking the articles.";
+  return "Only loosely supported. Read the articles before relying on it.";
+}
+
+/** What this link is, and how it came to exist. */
+function RelationshipExplainer({
+  edge,
+  detail,
+}: {
+  edge: NonNullable<SelectedEdge>;
+  detail: RelationshipEdge | null;
+}) {
+  const relType = edge.rel_type ?? "related";
+  return (
+    <section className="flex flex-col gap-2">
+      <SectionHeading>What this link says</SectionHeading>
+      <p className="text-sm">
+        <span className="font-mono font-semibold">{edge.from_ticker}</span> and{" "}
+        <span className="font-mono font-semibold">{edge.to_ticker}</span> are
+        recorded as <span className="font-semibold">{relType}</span>.
+      </p>
+      <p className="text-xs leading-relaxed text-muted-foreground">
+        {REL_MEANING[relType] ??
+          "The two companies are linked, but this link type has no plain-language description yet."}
+      </p>
+      <p className="rounded-md border border-border bg-muted/30 p-2 text-xs leading-relaxed text-muted-foreground">
+        Nobody typed this in. Each time a news article describes these two
+        companies this way, the link is recorded and its confidence re-scored —
+        so the numbers below summarise what the coverage actually said, and the
+        articles underneath are the receipts. Direction is stored as the articles
+        put it ({edge.from_ticker} → {edge.to_ticker}); it is not a claim about
+        who depends on whom.
+      </p>
+      {detail ? (
+        <>
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+            <Metric
+              label="confidence"
+              value={`${(detail.strength_avg * 100).toFixed(0)}%`}
+            />
+            <Metric label="articles" value={String(detail.article_count ?? 0)} />
+            <Metric label="mentions" value={String(detail.mention_count ?? 0)} />
+            <Metric label="first said" value={fmtDay(detail.first_seen_at)} />
+            <Metric label="last said" value={fmtDay(detail.last_seen_at)} />
+            <Metric
+              label="peak"
+              value={`${(detail.strength_max * 100).toFixed(0)}%`}
+            />
+          </div>
+          <p className="text-xs text-muted-foreground">
+            <span className="font-medium text-foreground">
+              {confidenceRead(detail.strength_avg)}
+            </span>{" "}
+            Confidence is the average across every article that described the
+            link — not a probability that it is true.
+          </p>
+        </>
+      ) : null}
+    </section>
+  );
+}
+
+/** The articles the link was derived from — the "show me why" section. */
 function GraphDetailsEdgeEvidence({
   selectedEdge,
   evidencePage,
   setEvidencePage,
   evidenceRows,
+  loading,
   listMaxClass,
 }: {
   selectedEdge: SelectedEdge;
   evidencePage: number;
   setEvidencePage: Dispatch<SetStateAction<number>>;
   evidenceRows: EdgeEvidence[];
+  loading: boolean;
   listMaxClass: string;
 }) {
   return (
-    <div>
-      <div className="flex items-center justify-between">
-        <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-          Edge Evidence
-        </p>
+    <section className="flex flex-col gap-2">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <SectionHeading>The articles behind it</SectionHeading>
         {selectedEdge ? (
-          <div className="flex items-center gap-1">
-            <button
-              type="button"
-              onClick={() => setEvidencePage((p) => Math.max(1, p - 1))}
-              className="rounded border border-border px-2 py-0.5 text-xs"
-            >
-              Prev
-            </button>
-            <span className="text-xs text-muted-foreground">
-              {evidencePage}
-            </span>
-            <button
-              type="button"
-              onClick={() => setEvidencePage((p) => p + 1)}
-              className="rounded border border-border px-2 py-0.5 text-xs"
-            >
-              Next
-            </button>
-          </div>
+          <Pager
+            label="supporting articles"
+            page={evidencePage}
+            setPage={setEvidencePage}
+            rowCount={evidenceRows.length}
+            disabled={loading}
+          />
         ) : null}
       </div>
-      <div className={`mt-1 overflow-auto ${listMaxClass}`}>
-        {evidenceRows.length === 0 ? (
-          <p className="p-2 text-xs text-muted-foreground">
-            Select an edge to load article provenance.
+      {selectedEdge && evidenceRows.length > 0 ? (
+        <p className="text-xs text-muted-foreground">
+          Every article that described this relationship, with the sentence-level
+          reason it counted.
+        </p>
+      ) : null}
+      <div className={`overflow-auto ${listMaxClass}`}>
+        {loading ? (
+          // Without this the empty state renders mid-fetch and tells the user
+          // there are no articles for a link that has six of them.
+          <p className="inline-flex items-center gap-2 text-xs text-muted-foreground">
+            <Loader2 className="h-3 w-3 animate-spin" aria-hidden />
+            Loading articles…
+          </p>
+        ) : evidenceRows.length === 0 ? (
+          // "No articles for this link" and "you haven't picked a link" are
+          // different states; one message for both read as if the selection
+          // hadn't registered.
+          <p className="text-xs text-muted-foreground">
+            {selectedEdge ? (
+              <>
+                No articles are retained for{" "}
+                <span className="font-mono">
+                  {selectedEdge.from_ticker} → {selectedEdge.to_ticker}
+                </span>
+                {evidencePage > 1 ? " on this page." : "."}
+              </>
+            ) : (
+              "Pick a relationship to see the articles it came from."
+            )}
           </p>
         ) : (
-          <div className="divide-y divide-border">
+          <ol className="divide-y divide-border">
             {evidenceRows.map((row) => (
-              <div key={`${row.edge_id}-${row.article_id}`} className="p-2">
+              <li key={`${row.edge_id}-${row.article_id}`} className="py-2">
                 <a
                   href={row.article_url ?? "#"}
                   target="_blank"
@@ -132,24 +373,43 @@ function GraphDetailsEdgeEvidence({
                 </a>
                 <p className="mt-0.5 text-[11px] text-muted-foreground">
                   {row.published_at
-                    ? new Date(row.published_at).toLocaleString()
-                    : "Unknown date"}{" "}
-                  · confidence{" "}
+                    ? new Date(row.published_at).toLocaleDateString("en-GB", {
+                        year: "numeric",
+                        month: "short",
+                        day: "2-digit",
+                      })
+                    : "Date unknown"}
                   {row.head_confidence == null
-                    ? "—"
-                    : row.head_confidence.toFixed(2)}
+                    ? ""
+                    : ` · ${(row.head_confidence * 100).toFixed(0)}% confident`}
                 </p>
                 {row.reasoning_text ? (
-                  <p className="mt-1 text-[11px] text-muted-foreground line-clamp-3">
-                    {row.reasoning_text}
-                  </p>
+                  (() => {
+                    const { text, reversed } = cleanReasoning(row.reasoning_text);
+                    if (!text) return null;
+                    return (
+                      <p className="mt-1 text-[11px] leading-relaxed text-muted-foreground">
+                        <span className="font-medium text-foreground">
+                          Why it counted:
+                        </span>{" "}
+                        {text}
+                        {reversed ? (
+                          <span className="text-muted-foreground/70">
+                            {" "}
+                            (this article put the relationship the other way
+                            round)
+                          </span>
+                        ) : null}
+                      </p>
+                    );
+                  })()
                 ) : null}
-              </div>
+              </li>
             ))}
-          </div>
+          </ol>
         )}
       </div>
-    </div>
+    </section>
   );
 }
 
@@ -203,7 +463,7 @@ function ZScoreGauge({ z }: { z: number }) {
           style={{ left: `${zToPct(z)}%`, backgroundColor: regime.color }}
         />
       </div>
-      <div className="mt-0.5 flex justify-between text-[10px] text-muted-foreground">
+      <div className="mt-0.5 flex justify-between text-[11px] text-muted-foreground">
         <span>-3.5</span>
         <span>-2</span>
         <span>0</span>
@@ -261,7 +521,7 @@ function PairCointegrationPanel({
       <div className="flex items-center justify-between">
         {header}
         <span
-          className="rounded px-1.5 py-0.5 text-[10px] font-semibold"
+          className="rounded px-1.5 py-0.5 text-[11px] font-semibold"
           style={{
             color: is_cointegrated ? "hsl(var(--chart-3))" : "hsl(var(--muted-foreground))",
             backgroundColor: is_cointegrated
@@ -313,7 +573,7 @@ function Metric({
 }) {
   return (
     <div className="rounded border border-border px-2 py-1">
-      <p className="text-[10px] uppercase tracking-wide text-muted-foreground">{label}</p>
+      <p className="text-[11px] uppercase tracking-wide text-muted-foreground">{label}</p>
       <p className="font-mono text-sm font-medium" style={valueColor ? { color: valueColor } : undefined}>
         {value}
       </p>
@@ -365,6 +625,14 @@ export function RelationshipNetworkExplorer(
   const [sideTab, setSideTab] = useState<
     "overview" | "details" | "vectors" | "sentiment"
   >("overview");
+  // Graph vs table are two reads of the SAME loaded neighbourhood — switching
+  // never refetches and never changes the selection, only the presentation.
+  const [viewMode, setViewMode] = useState<"graph" | "table">("graph");
+  // Which company the table is pivoted on. Deliberately NOT `selectedNode`:
+  // clicking a cell in AAPL's row of competitors should load Samsung into the
+  // details panel while the table stays on AAPL. Re-rooting only happens when
+  // you click a company name.
+  const [tableFocus, setTableFocus] = useState<string | null>(null);
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
   const [seedInput, setSeedInput] = useState(props.initialSeedTicker ?? "AAPL");
   const [loading, setLoading] = useState(false);
@@ -397,6 +665,7 @@ export function RelationshipNetworkExplorer(
   const [sentimentLoading, setSentimentLoading] = useState(false);
   const [sentimentError, setSentimentError] = useState<string | null>(null);
   const [evidenceRows, setEvidenceRows] = useState<EdgeEvidence[]>([]);
+  const [evidenceLoading, setEvidenceLoading] = useState(false);
   const [evidencePage, setEvidencePage] = useState(1);
   const [pairStat, setPairStat] = useState<PairStat | null>(null);
   const [pairStatLoading, setPairStatLoading] = useState(false);
@@ -425,6 +694,21 @@ export function RelationshipNetworkExplorer(
     () => edges.filter((e) => selectedRelTypes.includes(e.rel_type)),
     [edges, selectedRelTypes],
   );
+
+  // `selectedEdge` is only an identity triple. The explainer needs the link's
+  // real numbers (confidence, article/mention counts, first and last seen),
+  // which live on the loaded edge set.
+  const selectedEdgeDetail = useMemo(() => {
+    if (!selectedEdge) return null;
+    return (
+      edges.find(
+        (e) =>
+          e.from_ticker === selectedEdge.from_ticker &&
+          e.to_ticker === selectedEdge.to_ticker &&
+          (selectedEdge.rel_type == null || e.rel_type === selectedEdge.rel_type),
+      ) ?? null
+    );
+  }, [edges, selectedEdge]);
 
   // The loaded neighborhood, with the rel-type legend applied live (all types are
   // selected by default, so the default view shows everything). Fetch depth is the
@@ -491,8 +775,6 @@ export function RelationshipNetworkExplorer(
     return vectors.filter((row) => allowed.has(row.ticker.toUpperCase()));
   }, [aliasesByNode, selectedNode, vectors]);
 
-  const edgeFocusMode = Boolean(selectedEdge && !selectedNode);
-
   const showBootstrapSpinner =
     hideSeedControls && loading && nodes.length === 0 && !error;
   const showMainGraph = !hideSeedControls || !showBootstrapSpinner;
@@ -533,6 +815,7 @@ export function RelationshipNetworkExplorer(
     setTruncated(result.data.truncated);
     if (resetSelection) {
       setSelectedEdge(null);
+      setTableFocus(null);
       setEvidenceRows([]);
       setEvidencePage(1);
       setNodeNewsRows([]);
@@ -636,6 +919,39 @@ export function RelationshipNetworkExplorer(
     [],
   );
 
+  /**
+   * Picking a relationship in the table. The panel loads the COUNTERPARTY —
+   * clicking Samsung's cell in AAPL's competitor column is a question about
+   * Samsung — while the table itself stays pivoted on AAPL.
+   *
+   * Table mode has no floating Details toggle, so this is also what opens the
+   * panel; the current tab is left alone so the answer lands where the user was
+   * already looking.
+   */
+  const onTableEdgeSelect = useCallback(
+    (
+      edge: { from_ticker: string; to_ticker: string; rel_type: string },
+      peer?: string,
+    ) => {
+      if (peer) setSelectedNode(peer);
+      setSelectedEdge(edge);
+      setEvidencePage(1);
+      setNodeNewsPage(1);
+      setSentimentPage(1);
+      setIsDrawerOpen(true);
+    },
+    [],
+  );
+
+  /** Clicking a company NAME re-roots the table on it. */
+  const onTableFocusNode = useCallback(
+    (ticker: string) => {
+      setTableFocus(ticker);
+      onGraphNodeClick(ticker);
+    },
+    [onGraphNodeClick],
+  );
+
   const onGraphSvgBackgroundDoubleClick = useCallback(() => {
     setIsDrawerOpen((prev) => {
       if (prev) return false;
@@ -686,7 +1002,7 @@ export function RelationshipNetworkExplorer(
     relationshipsGetNodeNews({
       ticker: selectedNode,
       page: nodeNewsPage,
-      pageSize: 10,
+      pageSize: DRAWER_PAGE_SIZE,
     })
       .then((res) => {
         setNodeNewsLoading(false);
@@ -713,7 +1029,7 @@ export function RelationshipNetworkExplorer(
     relationshipsGetNodeSentiment({
       ticker: selectedNode,
       page: sentimentPage,
-      pageSize: 10,
+      pageSize: DRAWER_PAGE_SIZE,
     })
       .then((res) => {
         setSentimentLoading(false);
@@ -737,17 +1053,35 @@ export function RelationshipNetworkExplorer(
   }, [selectedNode, sentimentPage]);
 
   useEffect(() => {
-    if (!selectedEdge) return;
+    if (!selectedEdge) {
+      setEvidenceRows([]);
+      setEvidenceLoading(false);
+      return;
+    }
+    let cancelled = false;
+    setEvidenceLoading(true);
+    // Drop the previous link's articles immediately — they are evidence for a
+    // different claim, and leaving them up attributes them to the new one.
+    setEvidenceRows([]);
     relationshipsGetEdgeEvidence({
       fromTicker: selectedEdge.from_ticker,
       toTicker: selectedEdge.to_ticker,
       relType: selectedEdge.rel_type,
       page: evidencePage,
-      pageSize: 10,
-    }).then((res) => {
-      if (!res.ok) return;
-      setEvidenceRows(res.data.rows);
-    });
+      pageSize: DRAWER_PAGE_SIZE,
+    })
+      .then((res) => {
+        if (cancelled) return;
+        setEvidenceLoading(false);
+        if (!res.ok) return;
+        setEvidenceRows(res.data.rows);
+      })
+      .catch(() => {
+        if (!cancelled) setEvidenceLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [selectedEdge, evidencePage]);
 
   useEffect(() => {
@@ -851,7 +1185,7 @@ export function RelationshipNetworkExplorer(
                 />
                 <button
                   onClick={() => void loadNeighborhood(true)}
-                  className="h-9 shrink-0 cursor-pointer rounded-md border border-border bg-background px-3 text-sm font-medium text-foreground transition-colors hover:bg-muted disabled:opacity-50"
+                  className="min-h-11 shrink-0 cursor-pointer rounded-md border border-border bg-background px-4 text-sm font-medium text-foreground transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-default disabled:opacity-50"
                   disabled={loading}
                 >
                   {loading ? "Loading..." : "Explore"}
@@ -859,7 +1193,7 @@ export function RelationshipNetworkExplorer(
               </div>
             ) : null}
             <div data-tour="relations-filters" className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1">
-              <span className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+              <span className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
                 Edges
               </span>
               {REL_TYPES.map((type) => {
@@ -880,11 +1214,13 @@ export function RelationshipNetworkExplorer(
                       e.preventDefault();
                       setSelectedRelTypes([...REL_TYPES]);
                     }}
-                    className={`inline-flex cursor-pointer items-center gap-1 rounded border px-1.5 py-0.5 min-h-[32px] sm:min-h-0 text-[11px] transition-colors ${
+                    className={`inline-flex min-h-11 cursor-pointer items-center gap-1 rounded border px-2 text-xs transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring ${
                       active
                         ? "border-foreground/40 text-foreground"
                         : "border-border text-muted-foreground opacity-50 hover:opacity-80"
                     }`}
+                    aria-pressed={active}
+                    aria-label={`${active ? "Hide" : "Show"} ${type} edges`}
                     title={active ? `Hide ${type} edges` : `Show ${type} edges`}
                   >
                     <span
@@ -898,11 +1234,44 @@ export function RelationshipNetworkExplorer(
                   </button>
                 );
               })}
-              <div className="ml-auto inline-flex rounded-md border border-border bg-muted/40 p-0.5">
+              {/* Graph ↔ table. The graph shows shape; the table answers
+                  "rank these" — which the force layout is bad at. */}
+              <div
+                role="radiogroup"
+                aria-label="View mode"
+                className="ml-auto inline-flex rounded-md border border-border bg-muted/40 p-0.5"
+              >
+                {(
+                  [
+                    { key: "graph", label: "Graph", Icon: Network },
+                    { key: "table", label: "Table", Icon: TableIcon },
+                  ] as const
+                ).map(({ key, label, Icon }) => {
+                  const active = viewMode === key;
+                  return (
+                    <button
+                      key={key}
+                      type="button"
+                      role="radio"
+                      aria-checked={active}
+                      onClick={() => setViewMode(key)}
+                      className={`inline-flex min-h-11 cursor-pointer items-center gap-1.5 rounded px-3 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring ${
+                        active
+                          ? "bg-background text-foreground"
+                          : "text-muted-foreground hover:text-foreground"
+                      }`}
+                    >
+                      <Icon className="h-3.5 w-3.5 shrink-0" aria-hidden />
+                      {label}
+                    </button>
+                  );
+                })}
+              </div>
+              <div className="inline-flex rounded-md border border-border bg-muted/40 p-0.5">
                 <button
                   type="button"
                   onClick={() => setHops(1)}
-                  className={`cursor-pointer rounded px-2 py-0.5 text-[11px] font-medium transition-colors ${
+                  className={`inline-flex min-h-11 cursor-pointer items-center rounded px-3 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring ${
                     hops === 1
                       ? "bg-background text-foreground"
                       : "text-muted-foreground hover:text-foreground"
@@ -914,7 +1283,7 @@ export function RelationshipNetworkExplorer(
                 <button
                   type="button"
                   onClick={() => setHops(2)}
-                  className={`cursor-pointer rounded px-2 py-0.5 text-[11px] font-medium transition-colors ${
+                  className={`inline-flex min-h-11 cursor-pointer items-center rounded px-3 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring ${
                     hops === 2
                       ? "bg-background text-foreground"
                       : "text-muted-foreground hover:text-foreground"
@@ -937,47 +1306,81 @@ export function RelationshipNetworkExplorer(
             </div>
           </div>
 
-          {error ? <p className="text-sm text-rose-500">{error}</p> : null}
+          {error ? (
+            <p role="alert" className="px-2 text-sm text-destructive">
+              {error}
+            </p>
+          ) : null}
 
           <div
             className={fillViewport ? "relative flex-1 min-h-0" : "relative"}
           >
-            <button
-              type="button"
-              onClick={() => setIsDrawerOpen((prev) => !prev)}
-              className="absolute right-3 top-3 z-40 rounded-md border border-border bg-background px-2.5 py-1 min-h-[36px] sm:min-h-0 text-xs font-medium text-foreground transition-colors hover:bg-muted"
-            >
-              {isDrawerOpen ? "Hide" : "Details"}
-            </button>
+            {/* Opens only. The drawer closes via its own X, so this no longer
+                needs a "Hide" state — as a toggle it rendered directly on top
+                of that X at the same corner. Hidden in table mode, where a
+                relationship is opened by clicking it and a floating button
+                would just cover the table headers. */}
+            {viewMode === "graph" && !isDrawerOpen ? (
+              <button
+                type="button"
+                data-tour="relations-edges"
+                onClick={() => setIsDrawerOpen(true)}
+                className="absolute right-3 top-3 z-40 inline-flex min-h-11 cursor-pointer items-center rounded-md border border-border bg-background px-3 text-xs font-medium text-foreground transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+              >
+                Details
+              </button>
+            ) : null}
             <div
               ref={containerRef}
               data-tour="relations-graph"
-              className={
+              className={`${
                 fillViewport
                   ? "relative z-0 isolate h-full overflow-hidden bg-card"
                   : "relative z-0 isolate overflow-hidden rounded-xl bg-card"
-              }
+              } ${
+                // The panel is an overlay. Over a force graph that's fine — the
+                // interesting nodes are centred and reflowing would re-run the
+                // simulation and move everything. Over a table it just hides
+                // columns, so the table gets out of its way instead.
+                // Mobile keeps the overlay: the panel is a bottom sheet there.
+                viewMode === "table" && isDrawerOpen
+                  ? "transition-[padding] duration-200 sm:pr-[30rem]"
+                  : "transition-[padding] duration-200"
+              }`}
             >
-              <NetworkGraphD3
-                width={GW}
-                height={GH}
-                nodeRadius={NODE_R}
-                relColors={REL_COLORS}
-                nodes={visibleGraph.nodes}
-                edges={visibleGraph.edges}
-                allEdges={edges}
-                selectedNode={selectedNode}
-                selectedEdge={selectedEdge}
-                connectedSet={connectedSet}
-                dimDistantGraph={false}
-                manualPositions={manualPositions}
-                onManualPositionsMerge={onManualPositionsMerge}
-                onNodeClick={onGraphNodeClick}
-                onNodeDoubleClick={onGraphNodeDoubleClick}
-                onEdgeClick={onGraphEdgeClick}
-                onEdgeDoubleClick={onGraphEdgeDoubleClick}
-                onSvgBackgroundDoubleClick={onGraphSvgBackgroundDoubleClick}
-              />
+              {viewMode === "graph" ? (
+                <NetworkGraphD3
+                  width={GW}
+                  height={GH}
+                  nodeRadius={NODE_R}
+                  relColors={REL_COLORS}
+                  nodes={visibleGraph.nodes}
+                  edges={visibleGraph.edges}
+                  allEdges={edges}
+                  selectedNode={selectedNode}
+                  selectedEdge={selectedEdge}
+                  connectedSet={connectedSet}
+                  dimDistantGraph={false}
+                  manualPositions={manualPositions}
+                  onManualPositionsMerge={onManualPositionsMerge}
+                  onNodeClick={onGraphNodeClick}
+                  onNodeDoubleClick={onGraphNodeDoubleClick}
+                  onEdgeClick={onGraphEdgeClick}
+                  onEdgeDoubleClick={onGraphEdgeDoubleClick}
+                  onSvgBackgroundDoubleClick={onGraphSvgBackgroundDoubleClick}
+                />
+              ) : (
+                <RelationshipTableView
+                  edges={visibleGraph.edges}
+                  relTypes={REL_TYPES.filter((t) => selectedRelTypes.includes(t))}
+                  relColors={REL_COLORS}
+                  seedTicker={seedTicker}
+                  focusTicker={tableFocus ?? seedTicker}
+                  selectedEdge={selectedEdge}
+                  onSelectNode={onTableFocusNode}
+                  onSelectEdge={onTableEdgeSelect}
+                />
+              )}
             </div>
 
             {isDrawerOpen ? (
@@ -992,59 +1395,61 @@ export function RelationshipNetworkExplorer(
                 <div className="sm:hidden flex justify-center pt-1 pb-2">
                   <div className="w-8 h-1 rounded-full bg-border" />
                 </div>
-                <div className="inline-flex w-fit flex-wrap items-center gap-1 rounded-md bg-muted/60 p-1">
+                {/* The drawer owns its own dismissal — it used to be closable
+                    only via the floating toggle outside it, which table mode
+                    doesn't render. */}
+                <div className="flex items-start justify-between gap-2">
+                {/* A real tablist. These were four bare <button>s switching a
+                    panel with no role/aria-selected, so assistive tech had no
+                    idea they were a set or which one was active. */}
+                <div
+                  role="tablist"
+                  aria-label="Selection details"
+                  className="inline-flex w-fit flex-wrap items-center gap-1 rounded-md bg-muted/60 p-1"
+                >
+                  {SIDE_TABS.map((tab) => {
+                    const active = sideTab === tab.key;
+                    return (
+                      <button
+                        key={tab.key}
+                        type="button"
+                        role="tab"
+                        id={`reltab-${tab.key}`}
+                        aria-selected={active}
+                        aria-controls="reltabpanel"
+                        onClick={() => setSideTab(tab.key)}
+                        className={`inline-flex min-h-11 cursor-pointer items-center gap-1.5 rounded-md px-3 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring ${
+                          active
+                            ? "bg-background text-foreground"
+                            : "text-muted-foreground hover:text-foreground"
+                        }`}
+                      >
+                        {tab.label}
+                        {tab.key === "overview" && selectedNode && fmpOverviewBusy ? (
+                          <span
+                            className="inline-block size-1.5 shrink-0 animate-pulse rounded-full bg-muted-foreground/80"
+                            aria-hidden
+                          />
+                        ) : null}
+                      </button>
+                    );
+                  })}
+                </div>
                   <button
                     type="button"
-                    onClick={() => setSideTab("overview")}
-                    className={`inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${
-                      sideTab === "overview"
-                        ? "bg-background text-foreground"
-                        : "text-muted-foreground hover:text-foreground"
-                    }`}
+                    onClick={() => setIsDrawerOpen(false)}
+                    className="inline-flex h-11 w-11 shrink-0 cursor-pointer items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                    aria-label="Close details panel"
                   >
-                    Basic info
-                    {selectedNode && fmpOverviewBusy ? (
-                      <span
-                        className="inline-block size-1.5 shrink-0 animate-pulse rounded-full bg-muted-foreground/80"
-                        aria-hidden
-                      />
-                    ) : null}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setSideTab("details")}
-                    className={`rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${
-                      sideTab === "details"
-                        ? "bg-background text-foreground"
-                        : "text-muted-foreground hover:text-foreground"
-                    }`}
-                  >
-                    Graph Details
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setSideTab("vectors")}
-                    className={`rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${
-                      sideTab === "vectors"
-                        ? "bg-background text-foreground"
-                        : "text-muted-foreground hover:text-foreground"
-                    }`}
-                  >
-                    Company Profile
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setSideTab("sentiment")}
-                    className={`rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${
-                      sideTab === "sentiment"
-                        ? "bg-background text-foreground"
-                        : "text-muted-foreground hover:text-foreground"
-                    }`}
-                  >
-                    Sentiment
+                    <X className="h-4 w-4" aria-hidden />
                   </button>
                 </div>
 
+                <div
+                  role="tabpanel"
+                  id="reltabpanel"
+                  aria-labelledby={`reltab-${sideTab}`}
+                >
                 {sideTab === "overview" ? (
                   <div className="p-2">
                     {!selectedNode ? (
@@ -1083,7 +1488,25 @@ export function RelationshipNetworkExplorer(
                         </div>
                       </div>
                     ) : fmpProfileError ? (
-                      <p className="text-xs text-rose-500">{fmpProfileError}</p>
+                      // Plenty of graph nodes are entities, not listed symbols
+                      // (SAMSUNG, HUAWEI, OPENAI…). A failed profile lookup for
+                      // those is an expected state, not a fault, so it reads as
+                      // information and points at the tabs that do have data.
+                      <div className="text-xs text-muted-foreground">
+                        <p>
+                          No company profile for{" "}
+                          <span className="font-mono text-foreground">
+                            {selectedNode}
+                          </span>
+                          .
+                        </p>
+                        <p className="mt-1">
+                          Financial Modeling Prep only covers listed symbols — this
+                          node looks like an entity or private company. Its
+                          relationships, news and sentiment are still available on
+                          the other tabs.
+                        </p>
+                      </div>
                     ) : fmpProfile ? (
                       <div className="flex flex-col gap-3">
                         <div className="flex gap-3 border-b border-border pb-3">
@@ -1135,9 +1558,9 @@ export function RelationshipNetworkExplorer(
                           <dd
                             className={`text-right font-mono tabular-nums ${
                               (fmpProfile.change ?? 0) > 0
-                                ? "text-emerald-600"
+                                ? "text-emerald-600 dark:text-emerald-400"
                                 : (fmpProfile.change ?? 0) < 0
-                                  ? "text-rose-600"
+                                  ? "text-rose-600 dark:text-rose-400"
                                   : ""
                             }`}
                           >
@@ -1207,7 +1630,7 @@ export function RelationshipNetworkExplorer(
                               "—"}
                           </dd>
                           <dt className="text-muted-foreground">CIK / ISIN</dt>
-                          <dd className="break-all text-right font-mono text-[10px]">
+                          <dd className="break-all text-right font-mono text-[11px]">
                             {[fmpProfile.cik, fmpProfile.isin]
                               .filter(Boolean)
                               .join(" · ") || "—"}
@@ -1242,7 +1665,7 @@ export function RelationshipNetworkExplorer(
                           </div>
                         ) : null}
 
-                        <div className="flex flex-wrap gap-1.5 text-[10px] text-muted-foreground">
+                        <div className="flex flex-wrap gap-1.5 text-[11px] text-muted-foreground">
                           {fmpProfile.isEtf ? (
                             <span className="rounded border border-border px-1.5 py-0.5">
                               ETF
@@ -1267,7 +1690,7 @@ export function RelationshipNetworkExplorer(
 
                         {fmpProfile.description ? (
                           <div>
-                            <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                            <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
                               Description
                             </p>
                             <p className="mt-1 max-h-48 overflow-y-auto text-xs leading-relaxed text-muted-foreground">
@@ -1286,7 +1709,7 @@ export function RelationshipNetworkExplorer(
                   <div className="p-2">
                     {!selectedNode ? (
                       <p className="text-sm text-muted-foreground">
-                        Select a node to view company profile for that ticker.
+                        Select a node to view its dimension vectors.
                       </p>
                     ) : (
                       <VectorsUI
@@ -1302,25 +1725,13 @@ export function RelationshipNetworkExplorer(
                         Ticker Sentiment
                       </p>
                       {selectedNode ? (
-                        <div className="flex items-center gap-1">
-                          <button
-                            onClick={() =>
-                              setSentimentPage((p) => Math.max(1, p - 1))
-                            }
-                            className="rounded border border-border px-2 py-0.5 text-xs"
-                          >
-                            Prev
-                          </button>
-                          <span className="text-xs text-muted-foreground">
-                            {sentimentPage}
-                          </span>
-                          <button
-                            onClick={() => setSentimentPage((p) => p + 1)}
-                            className="rounded border border-border px-2 py-0.5 text-xs"
-                          >
-                            Next
-                          </button>
-                        </div>
+                        <Pager
+                          label="ticker sentiment"
+                          page={sentimentPage}
+                          setPage={setSentimentPage}
+                          rowCount={sentimentRows.length}
+                          disabled={sentimentLoading}
+                        />
                       ) : null}
                     </div>
                     <div className="mt-2 max-h-[36rem] overflow-auto">
@@ -1347,7 +1758,7 @@ export function RelationshipNetworkExplorer(
                                 key={`sent-window-${days}`}
                                 className="bg-background/60 px-2 py-1.5"
                               >
-                                <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                                <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
                                   {days}D
                                 </p>
                                 <p
@@ -1357,7 +1768,7 @@ export function RelationshipNetworkExplorer(
                                     ? "—"
                                     : `${score > 0 ? "+" : ""}${score.toFixed(2)}`}
                                 </p>
-                                <p className="text-[10px] text-muted-foreground">
+                                <p className="text-[11px] text-muted-foreground">
                                   {bucket?.mention_count ?? 0} mentions
                                 </p>
                               </div>
@@ -1374,9 +1785,9 @@ export function RelationshipNetworkExplorer(
                           Loading sentiment…
                         </p>
                       ) : sentimentError ? (
-                        <p className="p-2 text-xs text-rose-500">
-                          {sentimentError}
-                        </p>
+                        <div className="p-2">
+                          <SectionError raw={sentimentError} />
+                        </div>
                       ) : sentimentRows.length === 0 ? (
                         <p className="p-2 text-xs text-muted-foreground">
                           No sentiment rows found for{" "}
@@ -1444,209 +1855,69 @@ export function RelationshipNetworkExplorer(
                     </div>
                   </div>
                 ) : (
-                  <div className="p-2 flex flex-col gap-3">
-                    <div>
-                      <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                        Selection
+                  <div className="flex flex-col gap-5 p-2">
+                    {!selectedNode && !selectedEdge ? (
+                      <p className="text-sm text-muted-foreground">
+                        Pick a company or one of its relationships to see how the
+                        link was worked out, the articles behind it, and the
+                        latest news.
                       </p>
-                      {selectedNode ? (
-                        <p className="mt-1 text-sm">
-                          Node:{" "}
-                          <span className="font-mono font-semibold">
-                            {selectedNode}
-                          </span>
-                        </p>
-                      ) : (
-                        <p className="mt-1 text-sm text-muted-foreground">
-                          Select a node or edge
-                        </p>
-                      )}
-                      {selectedNode &&
-                      (aliasesByNode[selectedNode]?.length ?? 0) > 0 ? (
-                        <p className="mt-1 text-xs text-muted-foreground">
-                          Aliases:{" "}
-                          <span className="font-mono">
-                            {aliasesByNode[selectedNode]!.slice(0, 6).join(
-                              ", ",
-                            )}
-                          </span>
-                        </p>
-                      ) : null}
-                      {selectedEdge ? (
-                        <p className="mt-1 text-xs text-muted-foreground">
-                          Edge:{" "}
-                          <span className="font-mono">
-                            {selectedEdge.from_ticker} →{" "}
-                            {selectedEdge.to_ticker} ({selectedEdge.rel_type})
-                          </span>
-                        </p>
-                      ) : null}
-                    </div>
-
-                    {edgeFocusMode ? (
-                      <>
-                        <PairCointegrationPanel
-                          pairStat={pairStat}
-                          loading={pairStatLoading}
-                        />
-                        <GraphDetailsEdgeEvidence
-                          selectedEdge={selectedEdge}
-                          evidencePage={evidencePage}
-                          setEvidencePage={setEvidencePage}
-                          evidenceRows={evidenceRows}
-                          listMaxClass="max-h-[min(30rem,64vh)]"
-                        />
-                      </>
                     ) : null}
 
-                    {!edgeFocusMode ? (
-                      <div>
-                        <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                          Aliases
-                        </p>
-                        {aliases.length === 0 ? (
-                          <p className="mt-1 text-xs text-muted-foreground">
-                            No aliases loaded
-                          </p>
-                        ) : (
-                          <div className="mt-1 max-h-32 overflow-auto">
-                            <table className="w-full text-xs">
-                              <tbody className="divide-y divide-border">
-                                {aliases.slice(0, 12).map((a, idx) => (
-                                  <tr
-                                    key={`${a.alias_kind}-${a.alias_value}-${idx}`}
-                                  >
-                                    <td className="px-2 py-1.5 font-mono">
-                                      {a.alias_value}
-                                    </td>
-                                    <td className="px-2 py-1.5 text-muted-foreground">
-                                      {a.alias_kind}
-                                    </td>
-                                    <td className="px-2 py-1.5 text-right">
-                                      {a.verified ? "verified" : "unverified"}
-                                    </td>
-                                  </tr>
-                                ))}
-                              </tbody>
-                            </table>
-                          </div>
-                        )}
-                      </div>
+                    {/* 1 — what the link actually says, and where it came from. */}
+                    {selectedEdge ? (
+                      <RelationshipExplainer
+                        edge={selectedEdge}
+                        detail={selectedEdgeDetail}
+                      />
                     ) : null}
 
-                    {!edgeFocusMode ? (
-                      <div>
-                        <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                          Connections ({nodeConnections.length})
-                        </p>
-                        <div className="mt-1 max-h-36 overflow-auto">
-                          <table className="w-full text-xs">
-                            <tbody className="divide-y divide-border">
-                              {nodeConnections
-                                .slice(0, 20)
-                                .flatMap((c, idx) => {
-                                  const aliasList = aliasesByNode[c.peer] ?? [];
-                                  const rows: ReactNode[] = [
-                                    <tr
-                                      key={`${c.peer}-${c.rel_type}-${idx}`}
-                                      className="cursor-pointer hover:bg-muted/40"
-                                      onClick={() =>
-                                        setSelectedEdge({
-                                          from_ticker: c.from_ticker,
-                                          to_ticker: c.to_ticker,
-                                          rel_type: c.rel_type,
-                                        })
-                                      }
-                                    >
-                                      <td className="px-2 py-1.5 font-mono">
-                                        {c.peer}
-                                      </td>
-                                      <td className="px-2 py-1.5 text-muted-foreground">
-                                        {c.rel_type}
-                                      </td>
-                                      <td className="px-2 py-1.5 text-right tabular-nums">
-                                        {(c.strength_avg * 100).toFixed(0)}%
-                                      </td>
-                                    </tr>,
-                                  ];
-                                  if (aliasList.length > 0) {
-                                    rows.push(
-                                      <tr
-                                        key={`${c.peer}-aliases-${idx}`}
-                                        className="bg-muted/20"
-                                      >
-                                        <td
-                                          colSpan={3}
-                                          className="px-2 py-1 text-[10px] text-muted-foreground"
-                                        >
-                                          {c.peer} aliases:{" "}
-                                          <span className="font-mono">
-                                            {aliasList.slice(0, 4).join(", ")}
-                                          </span>
-                                        </td>
-                                      </tr>,
-                                    );
-                                  }
-                                  return rows;
-                                })}
-                            </tbody>
-                          </table>
+                    {/* 2 — the receipts. */}
+                    {selectedEdge ? (
+                      <GraphDetailsEdgeEvidence
+                        selectedEdge={selectedEdge}
+                        evidencePage={evidencePage}
+                        setEvidencePage={setEvidencePage}
+                        evidenceRows={evidenceRows}
+                        loading={evidenceLoading}
+                        listMaxClass="max-h-[min(30rem,50vh)]"
+                      />
+                    ) : null}
+
+                    {/* 3 — what is being said about the company right now. */}
+                    {selectedNode ? (
+                      <section className="flex flex-col gap-2">
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <SectionHeading>
+                            Latest news about{" "}
+                            <span className="font-mono">{selectedNode}</span>
+                          </SectionHeading>
+                          <Pager
+                            label={`news about ${selectedNode}`}
+                            page={nodeNewsPage}
+                            setPage={setNodeNewsPage}
+                            rowCount={nodeNewsRows.length}
+                            disabled={nodeNewsLoading}
+                          />
                         </div>
-                      </div>
-                    ) : null}
-
-                    {!edgeFocusMode ? (
-                      <div>
-                        <div className="flex items-center justify-between">
-                          <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                            Node News
-                          </p>
-                          {selectedNode ? (
-                            <div className="flex items-center gap-1">
-                              <button
-                                onClick={() =>
-                                  setNodeNewsPage((p) => Math.max(1, p - 1))
-                                }
-                                className="rounded border border-border px-2 py-0.5 text-xs"
-                              >
-                                Prev
-                              </button>
-                              <span className="text-xs text-muted-foreground">
-                                {nodeNewsPage}
-                              </span>
-                              <button
-                                onClick={() => setNodeNewsPage((p) => p + 1)}
-                                className="rounded border border-border px-2 py-0.5 text-xs"
-                              >
-                                Next
-                              </button>
-                            </div>
-                          ) : null}
-                        </div>
-                        <div className="mt-1 max-h-44 overflow-auto">
-                          {!selectedNode ? (
-                            <p className="p-2 text-xs text-muted-foreground">
-                              Select a node to load related news.
-                            </p>
-                          ) : nodeNewsLoading ? (
-                            <p className="p-2 text-xs text-muted-foreground">
-                              Loading node news…
+                        <div className="max-h-[min(24rem,44vh)] overflow-auto">
+                          {nodeNewsLoading ? (
+                            <p className="text-xs text-muted-foreground">
+                              Loading news…
                             </p>
                           ) : nodeNewsError ? (
-                            <p className="p-2 text-xs text-rose-500">
-                              {nodeNewsError}
-                            </p>
+                            <SectionError raw={nodeNewsError} />
                           ) : nodeNewsRows.length === 0 ? (
-                            <p className="p-2 text-xs text-muted-foreground">
-                              No related news found for{" "}
+                            <p className="text-xs text-muted-foreground">
+                              No recent articles mention{" "}
                               <span className="font-mono">{selectedNode}</span>.
                             </p>
                           ) : (
-                            <div className="divide-y divide-border">
+                            <ol className="divide-y divide-border">
                               {nodeNewsRows.map((row) => (
-                                <div
+                                <li
                                   key={`${row.article_id}-${row.matched_ticker}`}
-                                  className="p-2"
+                                  className="py-2"
                                 >
                                   <a
                                     href={row.url ?? "#"}
@@ -1658,34 +1929,131 @@ export function RelationshipNetworkExplorer(
                                   </a>
                                   <p className="mt-0.5 text-[11px] text-muted-foreground">
                                     {row.published_at
-                                      ? new Date(
-                                          row.published_at,
-                                        ).toLocaleString()
-                                      : "Unknown date"}{" "}
-                                    · matched{" "}
-                                    <span className="font-mono">
-                                      {row.matched_ticker}
-                                    </span>
+                                      ? new Date(row.published_at).toLocaleDateString(
+                                          "en-GB",
+                                          {
+                                            year: "numeric",
+                                            month: "short",
+                                            day: "2-digit",
+                                          },
+                                        )
+                                      : "Date unknown"}
+                                    {row.source ? ` · ${row.source}` : ""}
                                   </p>
-                                </div>
+                                </li>
                               ))}
-                            </div>
+                            </ol>
                           )}
                         </div>
-                      </div>
+                      </section>
                     ) : null}
 
-                    {!edgeFocusMode ? (
-                      <GraphDetailsEdgeEvidence
-                        selectedEdge={selectedEdge}
-                        evidencePage={evidencePage}
-                        setEvidencePage={setEvidencePage}
-                        evidenceRows={evidenceRows}
-                        listMaxClass="max-h-48"
-                      />
+                    {/* Supporting context, deliberately below the three things
+                        the user came for. */}
+                    {selectedEdge ? (
+                      <details className="group border-t border-border pt-3">
+                        <summary className="flex min-h-9 cursor-pointer list-none items-center gap-1.5 text-sm font-semibold tracking-tight">
+                          <ChevronRight
+                            className="h-4 w-4 shrink-0 transition-transform group-open:rotate-90"
+                            aria-hidden
+                          />
+                          Do their share prices actually track each other?
+                        </summary>
+                        <p className="mt-2 text-xs leading-relaxed text-muted-foreground">
+                          A relationship in the news does not guarantee the two
+                          stocks move together. This is the statistical check on
+                          whether they historically have — and whether they are
+                          unusually far apart right now.
+                        </p>
+                        <div className="mt-2">
+                          <PairCointegrationPanel
+                            pairStat={pairStat}
+                            loading={pairStatLoading}
+                          />
+                        </div>
+                      </details>
+                    ) : null}
+
+                    {selectedNode ? (
+                      <details className="group border-t border-border pt-3">
+                        <summary className="flex min-h-9 cursor-pointer list-none items-center gap-1.5 text-sm font-semibold tracking-tight">
+                          <ChevronRight
+                            className="h-4 w-4 shrink-0 transition-transform group-open:rotate-90"
+                            aria-hidden
+                          />
+                          Its other relationships ({nodeConnections.length})
+                        </summary>
+                        <p className="mt-2 text-xs text-muted-foreground">
+                          Pick one to see how that link was established.
+                        </p>
+                        <ul className="mt-2 max-h-44 divide-y divide-border overflow-auto">
+                          {nodeConnections.slice(0, 20).map((c, idx) => (
+                            <li key={`${c.peer}-${c.rel_type}-${idx}`}>
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  setSelectedEdge({
+                                    from_ticker: c.from_ticker,
+                                    to_ticker: c.to_ticker,
+                                    rel_type: c.rel_type,
+                                  })
+                                }
+                                className="flex min-h-11 w-full cursor-pointer items-center justify-between gap-2 px-1 text-left text-xs transition-colors hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-ring"
+                              >
+                                <span className="font-mono font-medium">
+                                  {c.peer}
+                                </span>
+                                <span className="text-muted-foreground">
+                                  {c.rel_type} ·{" "}
+                                  <span className="tabular-nums">
+                                    {(c.strength_avg * 100).toFixed(0)}%
+                                  </span>
+                                </span>
+                              </button>
+                            </li>
+                          ))}
+                        </ul>
+                      </details>
+                    ) : null}
+
+                    {selectedNode && aliases.length > 0 ? (
+                      <details className="group border-t border-border pt-3">
+                        <summary className="flex min-h-9 cursor-pointer list-none items-center gap-1.5 text-sm font-semibold tracking-tight">
+                          <ChevronRight
+                            className="h-4 w-4 shrink-0 transition-transform group-open:rotate-90"
+                            aria-hidden
+                          />
+                          Other names it appears under
+                        </summary>
+                        <p className="mt-2 text-xs leading-relaxed text-muted-foreground">
+                          Articles rarely use the ticker. These are the names
+                          matched to{" "}
+                          <span className="font-mono">{selectedNode}</span> when
+                          reading coverage.
+                        </p>
+                        <ul className="mt-2 flex flex-wrap gap-1.5">
+                          {aliases.slice(0, 12).map((a, idx) => (
+                            <li
+                              key={`${a.alias_kind}-${a.alias_value}-${idx}`}
+                              className="rounded-full border border-border px-2 py-0.5 text-[11px]"
+                              title={
+                                a.verified
+                                  ? `${a.alias_kind}, verified`
+                                  : `${a.alias_kind}, not verified`
+                              }
+                            >
+                              {a.alias_value}
+                              {a.verified ? null : (
+                                <span className="text-muted-foreground"> ?</span>
+                              )}
+                            </li>
+                          ))}
+                        </ul>
+                      </details>
                     ) : null}
                   </div>
                 )}
+                </div>{/* end tabpanel */}
               </div>{/* end panel */}
             </>
             ) : null}

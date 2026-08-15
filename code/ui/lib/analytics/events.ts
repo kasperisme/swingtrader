@@ -75,12 +75,23 @@ type EventMap = {
   checkout_initiated: { plan: string; interval: string };
   api_key_created: { scopes: string[] };
   api_key_revoked: Record<string, never>;
+  // Fired when the user leaves the SETUP step for the plan step (or skips out
+  // at the welcome note). `skipped` = the agent configured nothing.
+  // NB: this used to fire when the user clicked into setup — i.e. at step 1 of
+  // 3 — which made the funnel read ~100% completion. Funnels built before that
+  // fix are measuring "accepted the welcome note", now
+  // `onboarding_welcome_accepted`.
   onboarding_completed: { skipped: boolean };
+  // Clicked through the founder's welcome note into the AI setup step.
+  onboarding_welcome_accepted: Record<string, never>;
   // First-join onboarding funnel — one event each time a welcome-dialog step is
-  // shown (video → setup → plan). Build a PostHog funnel on `step` to see where
-  // new users drop off. `step_index` is 1-based; `step_count` is the total.
+  // shown (welcome → setup → plan). Build a PostHog funnel on `step` to see
+  // where new users drop off. `step_index` is 1-based; `step_count` is total.
   onboarding_step_viewed: {
-    step: "video" | "setup" | "plan";
+    // Historical events carry step="video" — the first step was a tutorial
+    // video before it became the written welcome note. Filter for both when
+    // querying anything older than that change.
+    step: "welcome" | "setup" | "plan";
     step_index: number;
     step_count: number;
   };
@@ -104,6 +115,10 @@ type EventMap = {
     tasks_completed: number;
     messages_sent: number;
   };
+  // User hit "Try that step again" after a step failed mid-stream. A rising
+  // rate here means the onboarding tool calls are flaky, not that users are
+  // confused.
+  setup_assistant_retried: { surface: string };
   onboarding_exit_without_billing: Record<string, never>;
 
   paywall_viewed: {
