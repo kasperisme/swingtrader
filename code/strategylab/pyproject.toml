@@ -1,0 +1,28 @@
+[project]
+name = "strategylab"
+version = "0.1.0"
+description = "LLM-in-the-loop reinforcement search over swing-trading strategies"
+requires-python = ">=3.11"
+dependencies = [
+  "numpy>=1.26",
+  "pandas>=2.1",
+  "scipy>=1.11",
+  "requests>=2.31",
+  "python-dotenv>=1.0",
+  "anthropic>=0.40",
+  "matplotlib>=3.8",
+]
+
+[project.optional-dependencies]
+news = ["psycopg2-binary>=2.9"]
+dev = ["pytest>=8.0"]
+
+[project.scripts]
+strategylab = "strategylab.cli:main"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["strategylab*"]
