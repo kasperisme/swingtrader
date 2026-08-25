@@ -179,46 +179,51 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
     console.warn("[sitemap] failed to list articles", e);
   }
 
-  // Per-ticker quote pages — distinct symbols with recent scored news, freshest
-  // first. Deduped in JS since the heads table has many rows per ticker.
+  // Per-ticker quote pages + the directory's own pages, from the same RPC the
+  // /quote hub itself pages through.
+  //
+  // This used to scan `ticker_sentiment_heads` (353k rows) with `.range()`,
+  // which worked locally and silently failed in production: the REST role has
+  // an 8s statement timeout, and ~30 deep-offset requests over that table blew
+  // straight through it. The catch swallowed it and the deployed sitemap
+  // shipped with ZERO /quote/<symbol> URLs — the exact pages this was for.
+  // `get_top_covered_tickers` reads the materialized `ticker_coverage_daily`
+  // rollup that exists for this query, and caps at 200 rows per call, so the
+  // full list is 8 cheap calls instead of 30 expensive ones.
+  const QUOTE_RPC_PAGE = 200;
   let quoteRoutes: MetadataRoute.Sitemap = [];
+  let quoteIndexRoutes: MetadataRoute.Sitemap = [];
   try {
-    const supabase = createServiceClient();
-    const data = await fetchAllRows<{ ticker: string | null; article_ts: string | null }>(
-      (from, to) =>
-        supabase
-          .schema("swingtrader")
-          .from("ticker_sentiment_heads")
-          .select("ticker, article_ts")
-          .not("ticker", "is", null)
-          .order("article_ts", { ascending: false, nullsFirst: false })
-          .range(from, to),
-      QUOTE_SITEMAP_LIMIT * 20,
-    );
     const seen = new Map<string, Date>();
-    for (const r of data) {
-      const ticker = typeof r.ticker === "string" ? r.ticker.trim().toUpperCase() : "";
-      if (!ticker || !/^[A-Z][A-Z0-9.\-]{0,11}$/.test(ticker) || seen.has(ticker)) continue;
-      seen.set(ticker, r.article_ts ? new Date(r.article_ts) : now);
+    let total = 0;
+    for (let offset = 0; offset < QUOTE_SITEMAP_LIMIT; offset += QUOTE_RPC_PAGE) {
+      const page = await listCoveredTickers({
+        days: QUOTE_HUB_WINDOW_DAYS,
+        limit: QUOTE_RPC_PAGE,
+        offset,
+      });
+      total = page.total || total;
+      if (page.items.length === 0) break;
+      for (const item of page.items) {
+        const ticker = item.ticker.trim().toUpperCase();
+        if (!ticker || !/^[A-Z][A-Z0-9.\-]{0,11}$/.test(ticker) || seen.has(ticker)) continue;
+        seen.set(ticker, item.lastDay ? new Date(item.lastDay) : now);
+        if (seen.size >= QUOTE_SITEMAP_LIMIT) break;
+      }
       if (seen.size >= QUOTE_SITEMAP_LIMIT) break;
     }
+
     quoteRoutes = [...seen.entries()].map(([ticker, lastModified]) => ({
       url: `${baseUrl}/quote/${ticker}`,
       lastModified,
       changeFrequency: "daily" as const,
       priority: 0.6,
     }));
-  } catch (e) {
-    console.warn("[sitemap] failed to list quote tickers", e);
-  }
 
-  // The /quote directory's own pages. It runs to ~74 pages and the pager only
-  // renders a 5-page window, so reaching the tail means walking the whole
-  // chain — which never happens on a small crawl budget. Listing the pages
-  // directly gives every ticker beyond QUOTE_SITEMAP_LIMIT a one-hop path.
-  let quoteIndexRoutes: MetadataRoute.Sitemap = [];
-  try {
-    const { total } = await listCoveredTickers({ days: QUOTE_HUB_WINDOW_DAYS, limit: 1 });
+    // The hub runs to ~74 pages and its pager renders only a 5-page window, so
+    // reaching the tail means walking the whole chain — which never happens on
+    // a small crawl budget. Listing the pages gives every ticker beyond
+    // QUOTE_SITEMAP_LIMIT a one-hop path.
     const lastPage = Math.min(
       QUOTE_HUB_PAGE_CAP,
       Math.max(1, Math.ceil(total / QUOTE_HUB_PAGE_SIZE)),
@@ -232,8 +237,9 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
       });
     }
   } catch (e) {
-    console.warn("[sitemap] failed to page the quote directory", e);
+    console.warn("[sitemap] failed to list quote tickers", e);
   }
+
 
   if (!isSanityConfigured) {
     return [
