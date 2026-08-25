@@ -154,3 +154,49 @@ def test_n_trials_without_ancestry_is_just_own_count(tmp_path):
     lab = Lab.__new__(Lab)
     lab.ledger = Ledger(tmp_path / "runs" / "solo" / "ledger.sqlite")
     assert lab.n_trials() == 1
+
+
+def test_daemon_campaign_records_its_ancestry(tmp_path):
+    """The daemon drives its own loop; if it skips log_run_start, the ledger
+    reads back zero ancestry and every DSR it publishes is too high."""
+    import inspect
+    from strategylab.autonomous.daemon import Daemon
+
+    src = inspect.getsource(Daemon._run_campaign)
+    assert "log_run_start()" in src, (
+        "the daemon must record run_started itself — it never calls Lab.run()")
+
+
+def test_log_run_start_persists_inherited_trials(tmp_path):
+    from strategylab.loop import Lab
+
+    _ledger(tmp_path / "runs", "r", [("a", 0.1, 0.2)])
+    led = Ledger(tmp_path / "runs" / "r" / "ledger.sqlite")
+
+    lab = Lab.__new__(Lab)
+    lab.ledger = led
+    lab.inherited_trials = 522
+    lab.seed_origin = "8 prior runs"
+    lab.seed_genome = None
+    lab.policy = None
+
+    class _Splits:
+        dev_start = dev_end = vault_start = vault_end = "2020-01-01"
+
+    class _Cfg:
+        splits = _Splits()
+        protocol_version = "1.2.0"
+        benchmark = "SPY"
+
+    class _Panel:
+        symbols = ["A", "B"]
+
+    class _Ctx:
+        panel = _Panel()
+        dates = [1, 2, 3]
+
+    lab.cfg, lab.ctx = _Cfg(), _Ctx()
+    lab.log_run_start()
+
+    assert led.inherited_trials() == 522
+    assert lab.n_trials() == 523, "own trials plus recovered ancestry"

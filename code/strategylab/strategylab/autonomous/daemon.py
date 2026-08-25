@@ -207,6 +207,10 @@ class Daemon:
         err = ""
 
         try:
+            # Records the protocol variables AND the inherited trial count.
+            # Without it the ledger reads back 0 ancestry and every deflated
+            # Sharpe this campaign publishes would be too high.
+            lab.log_run_start()
             if not ledger.count(rung=1, distinct=False):
                 lab.seed_baseline()
             lab._prime_notes()

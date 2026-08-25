@@ -181,11 +181,19 @@ class Ollama:
             return []
 
     def generate(self, model: str, prompt: str, schema: dict, system: str = "",
-                 temperature: float = 0.5, num_ctx: int = 32768) -> LLMResult:
+                 temperature: float = 0.5, num_ctx: int = 32768,
+                 num_predict: int | None = None) -> LLMResult:
+        opts = {"temperature": temperature, "num_ctx": num_ctx}
+        if num_predict:
+            # Left unset the server picks its own ceiling, and a long structured
+            # reply comes back cut mid-object — which surfaces as "no JSON
+            # object in reply" and reads like a compliance failure rather than a
+            # truncation. Callers that know how long their reply can be say so.
+            opts["num_predict"] = int(num_predict)
         payload = {
             "model": model, "prompt": prompt, "stream": False, "think": False,
             "format": schema,                       # honoured locally, ignored in cloud
-            "options": {"temperature": temperature, "num_ctx": num_ctx},
+            "options": opts,
         }
         if system:
             payload["system"] = system

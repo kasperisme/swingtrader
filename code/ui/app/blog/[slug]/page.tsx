@@ -1,3 +1,4 @@
+import type { Metadata } from "next";
 import Link from "next/link";
 import { headers } from "next/headers";
 import { notFound } from "next/navigation";
@@ -21,6 +22,37 @@ function formatDate(date: string): string {
 type Props = {
   params: Promise<{ slug: string }>;
 };
+
+// Without this every post inherited the site-wide title/description AND the
+// root canonical, so all of /blog/* declared the homepage as their canonical.
+export async function generateMetadata({ params }: Props): Promise<Metadata> {
+  const { slug } = await params;
+  const canonical = `/blog/${slug}`;
+  if (!isSanityConfigured) {
+    return { alternates: { canonical }, robots: { index: false, follow: true } };
+  }
+
+  const post = await sanityFetch<BlogPost | null>(blogPostBySlugQuery, { slug });
+  if (!post) {
+    return { alternates: { canonical }, robots: { index: false, follow: true } };
+  }
+
+  const description = post.excerpt?.trim() || undefined;
+  return {
+    title: post.title,
+    description,
+    alternates: { canonical },
+    openGraph: {
+      type: "article",
+      url: canonical,
+      title: post.title,
+      description,
+      publishedTime: post.publishedAt ?? undefined,
+      authors: post.authorName ? [post.authorName] : undefined,
+    },
+    twitter: { card: "summary_large_image", title: post.title, description },
+  };
+}
 
 export default async function BlogPostPage({ params }: Props) {
   if (!isSanityConfigured) {

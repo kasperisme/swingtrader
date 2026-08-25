@@ -5,13 +5,9 @@ import { ArrowUpRight } from "lucide-react";
 import { listTopicStats, listTopics, type TopicStats } from "@/app/actions/topics";
 import { TickerLogo } from "@/components/ticker-logo";
 import { accentFor } from "./_components/accent";
+import { SITE_URL } from "@/lib/site";
 
-// Must match the root layout's metadataBase host exactly. The site canonicalises
-// on WWW; emitting a bare-host canonical here would split ranking signals
-// between two hosts for these pages alone.
-const SITE = (
-  process.env.NEXT_PUBLIC_SITE_URL ?? "https://www.newsimpactscreener.com"
-).replace(/\/$/, "");
+const SITE = SITE_URL;
 
 export const metadata: Metadata = {
   title: "Topics", // root layout template supplies the site suffix

@@ -7,10 +7,9 @@ import {
   listLeaderboard,
   listResearchNotes,
 } from "@/app/actions/research";
+import { SITE_URL } from "@/lib/site";
 
-const SITE = (
-  process.env.NEXT_PUBLIC_SITE_URL ?? "https://www.newsimpactscreener.com"
-).replace(/\/$/, "");
+const SITE = SITE_URL;
 
 export const metadata: Metadata = {
   title: "Research",

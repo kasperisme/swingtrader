@@ -16,6 +16,7 @@ import {
 import { TickerLogo } from "@/components/ticker-logo";
 import { accentFor } from "../_components/accent";
 import { ClaimTimeline, TickerImpactBars } from "../_components/topic-visuals";
+import { SITE_URL } from "@/lib/site";
 
 type Props = { params: Promise<{ slug: string }> };
 
@@ -33,10 +34,7 @@ function fmtCount(n: number | null): string {
   return n == null ? "—" : n.toLocaleString();
 }
 
-// Must match the root layout's metadataBase host exactly. The site canonicalises
-// on WWW; emitting a bare-host canonical here would split ranking signals
-// between two hosts for these pages alone.
-const SITE = (process.env.NEXT_PUBLIC_SITE_URL ?? "https://www.newsimpactscreener.com").replace(/\/$/, "");
+const SITE = SITE_URL;
 
 /**
  * Rendered per request, matching every other public page here — the project runs

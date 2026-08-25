@@ -1,13 +1,21 @@
 import Link from "next/link";
 import { ThemeSwitcher } from "@/components/theme-switcher";
+import {
+  SITE_X_PROFILE_URL,
+  SITE_X_HANDLE,
+  SITE_INSTAGRAM_PROFILE_URL,
+  SITE_INSTAGRAM_HANDLE,
+} from "@/lib/site";
 
-/** Canonical X (Twitter) profile for metadata and footer links. */
-export const SITE_X_PROFILE_URL = "https://x.com/newsimpactscrnr";
-const X_HANDLE = "@newsimpactscrnr";
+// Single-sourced in lib/site.ts so structured data, robots.ts and sitemap.ts
+// can read the same profiles without importing a React component.
+export {
+  SITE_X_PROFILE_URL,
+  SITE_INSTAGRAM_PROFILE_URL,
+  SITE_INSTAGRAM_HANDLE,
+} from "@/lib/site";
 
-/** Canonical Instagram profile for metadata and footer links. */
-export const SITE_INSTAGRAM_PROFILE_URL = "https://instagram.com/newsimpactscreener";
-export const SITE_INSTAGRAM_HANDLE = "@newsimpactscreener";
+const X_HANDLE = SITE_X_HANDLE;
 const INSTAGRAM_HANDLE = SITE_INSTAGRAM_HANDLE;
 
 export function SiteFooter() {
@@ -36,6 +44,9 @@ export function SiteFooter() {
           >
             {INSTAGRAM_HANDLE} on Instagram
           </a>
+          <Link href="/about" className="transition-colors hover:text-foreground">
+            About
+          </Link>
           <Link href="/briefings" className="transition-colors hover:text-foreground">
             Briefings
           </Link>

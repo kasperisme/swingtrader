@@ -1,3 +1,4 @@
+import type { Metadata } from "next";
 import Link from "next/link";
 import { isSanityConfigured, sanityFetch } from "@/lib/sanity/client";
 import { blogPostPreviewsQuery } from "@/lib/sanity/queries";
@@ -12,6 +13,14 @@ function formatDate(date: string): string {
     day: "2-digit",
   }).format(parsed);
 }
+
+export const metadata: Metadata = {
+  title: "Blog",
+  description:
+    "Market notes, pre-market briefings and research from the News Impact Screener team.",
+  alternates: { canonical: "/blog" },
+  openGraph: { url: "/blog" },
+};
 
 export default async function BlogPage() {
   if (!isSanityConfigured) {

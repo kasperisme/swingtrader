@@ -18,9 +18,9 @@ import {
   fetchRelatedArticles,
   RelatedArticles,
 } from "./_components/related-articles";
+import { SITE_URL, AUTHOR } from "@/lib/site";
 
-const SITE_BASE_URL =
-  process.env.NEXT_PUBLIC_SITE_URL ?? "https://www.newsimpactscreener.com";
+const SITE_BASE_URL = SITE_URL;
 
 function clampText(s: string, max: number): string {
   const t = s.trim().replace(/\s+/g, " ");
@@ -381,9 +381,13 @@ function StockRow({
       <div className="min-w-0">
         <div className="mb-1 flex items-baseline justify-between gap-3">
           <span className="truncate text-sm">
-            <span className="font-semibold tracking-tight text-foreground">
+            <Link
+              href={quoteHref(s.ticker)}
+              title={`${s.ticker} price chart and news catalysts`}
+              className="font-semibold tracking-tight text-foreground transition-colors hover:text-amber-400"
+            >
               {s.ticker}
-            </span>
+            </Link>
             {s.sector ? (
               <span className="ml-2 text-xs text-muted-foreground">
                 {s.sector}
@@ -475,9 +479,13 @@ function TickerSentimentList({
       {rows.map((row) => (
         <li key={row.ticker} className="py-3 first:pt-0 last:pb-0">
           <div className="flex items-baseline justify-between gap-3">
-            <span className="font-semibold tracking-tight text-foreground">
+            <Link
+              href={quoteHref(row.ticker)}
+              title={`${row.ticker} price chart and news catalysts`}
+              className="font-semibold tracking-tight text-foreground transition-colors hover:text-amber-400"
+            >
               {row.ticker}
-            </span>
+            </Link>
             <ScoreText value={row.score} digits={2} />
           </div>
           {row.reason ? (
@@ -699,6 +707,15 @@ function KeyPointsList({
 
 function relationsHref(ticker: string): string {
   return `/protected/relations?ticker=${encodeURIComponent(ticker)}`;
+}
+
+/** Public, crawlable ticker page. Every ticker an article names links here —
+ *  articles are the only URLs on the site with any organic history, and until
+ *  now the only ticker links they carried pointed at /protected/relations,
+ *  which robots.txt disallows. That left /quote/* with no inbound path at all
+ *  ("URL is unknown to Google" for every symbol we checked). */
+function quoteHref(ticker: string): string {
+  return `/quote/${encodeURIComponent(ticker.trim().toUpperCase())}`;
 }
 
 function TickerRelationshipList({
@@ -1216,10 +1233,17 @@ async function ArticleData({ params }: { params: Promise<{ slug?: string }> }) {
     image: article.image_url ? [article.image_url] : undefined,
     url: canonicalUrl,
     mainEntityOfPage: { "@type": "WebPage", "@id": canonicalUrl },
+    author: {
+      "@type": "Person",
+      "@id": `${SITE_BASE_URL}/#author`,
+      name: AUTHOR.name,
+      url: `${SITE_BASE_URL}/about`,
+    },
     publisher: {
       "@type": "Organization",
+      "@id": `${SITE_BASE_URL}/#organization`,
       name: "NewsImpactScreener",
-      url: "https://www.newsimpactscreener.com",
+      url: SITE_BASE_URL,
     },
     about: aboutTickers.length
       ? aboutTickers.map((ticker) => ({
@@ -1303,6 +1327,20 @@ async function ArticleData({ params }: { params: Promise<{ slug?: string }> }) {
         <p className="mt-3 text-[13px] text-muted-foreground">
           NewsImpactScreener rates every claim in this story for market impact
           and maps it to the tickers most exposed.
+        </p>
+
+        {/* Named byline. Stock analysis is a YMYL topic — an anonymous page
+            making per-ticker calls has no way to clear the trust bar, and the
+            site had no attribution anywhere. Links to the methodology. */}
+        <p className="mt-2 text-[13px] text-muted-foreground">
+          Analysis by{" "}
+          <Link
+            href="/about"
+            className="text-foreground underline underline-offset-4 hover:text-amber-400"
+          >
+            {AUTHOR.name}
+          </Link>
+          <span className="text-muted-foreground/60"> · {AUTHOR.role}</span>
         </p>
 
         {/* The "Read original" attribution link is deliberately not here — it's

@@ -1,7 +1,7 @@
 import { redirect } from "next/navigation";
 
 export const metadata = {
-  title: "Documentation | News Impact Screener",
+  title: "Documentation",
   description: "Learn how to use News Impact Screener to track news themes and their impact on stocks.",
 };
 

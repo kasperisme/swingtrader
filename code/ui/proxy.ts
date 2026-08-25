@@ -23,6 +23,8 @@ export async function proxy(request: NextRequest) {
 
 export const config = {
   matcher: [
-    "/((?!_next/static|_next/image|favicon\\.ico|sitemap\\.xml|robots\\.txt|.*\\.(?:svg|png|jpg|jpeg|gif|webp|pdf|ico|woff|woff2|ttf|otf)$).*)",
+    // `.txt` was missing here, so /llms.txt — and any IndexNow key file —
+    // 307ed to /auth/login for every logged-out client, crawlers included.
+    "/((?!_next/static|_next/image|favicon\\.ico|sitemap\\.xml|robots\\.txt|.*\\.(?:txt|svg|png|jpg|jpeg|gif|webp|pdf|ico|woff|woff2|ttf|otf)$).*)",
   ],
 };

@@ -3,9 +3,13 @@ import { connection } from "next/server";
 import { isSanityConfigured, sanityFetch } from "@/lib/sanity/client";
 import { docPageSlugListQuery, blogPostSlugListQuery } from "@/lib/sanity/queries";
 import { listMarketScreenings } from "@/app/actions/market-screenings";
+import { listCoveredTickers } from "@/app/actions/quotes";
 import { createServiceClient } from "@/lib/supabase/service";
+import { SITE_URL } from "@/lib/site";
 
-const baseUrl = process.env.NEXT_PUBLIC_SITE_URL ?? "https://newsimpactscreener.com";
+// Was defaulting to the apex host while every page canonicalised to `www`,
+// so all ~6.5k sitemap URLs were redirects (GSC: 1,600 submitted / 0 indexed).
+const baseUrl = SITE_URL;
 
 // Cap article URLs — protocol limit is 50k/file and the freshest articles
 // matter most for indexing. Older pieces remain reachable via internal links.
@@ -14,6 +18,37 @@ const ARTICLE_SITEMAP_LIMIT = 5000;
 // Cap /quote/[symbol] URLs to the most-covered tickers. Sourced from recent
 // sentiment heads so only symbols with real news-impact data get indexed.
 const QUOTE_SITEMAP_LIMIT = 1500;
+
+// Mirror of the /quote hub's own paging so the directory pages we list here
+// resolve to real pages (past the last page it 404s, deliberately).
+const QUOTE_HUB_PAGE_SIZE = 50;
+const QUOTE_HUB_WINDOW_DAYS = 30;
+const QUOTE_HUB_PAGE_CAP = 100;
+
+/**
+ * PostgREST caps a single response at 1000 rows regardless of `.limit()`, so
+ * `limit(5000)` silently returned 1000 and the sitemap shipped a fraction of
+ * what it claimed: exactly 1000 articles, and ~450 distinct tickers instead of
+ * QUOTE_SITEMAP_LIMIT. Page through with `.range()` until the cap is reached
+ * or the source runs dry.
+ */
+const PAGE_ROWS = 1000;
+
+async function fetchAllRows<T>(
+  build: (from: number, to: number) => PromiseLike<{ data: T[] | null; error: unknown }>,
+  cap: number,
+): Promise<T[]> {
+  const out: T[] = [];
+  for (let from = 0; from < cap; from += PAGE_ROWS) {
+    const to = Math.min(from + PAGE_ROWS, cap) - 1;
+    const { data, error } = await build(from, to);
+    if (error) throw error;
+    const rows = data ?? [];
+    out.push(...rows);
+    if (rows.length < to - from + 1) break; // source exhausted
+  }
+  return out;
+}
 
 export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
   // Built from live DB + Sanity data, so generate at request time rather than
@@ -28,7 +63,10 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
     { url: `${baseUrl}/topics`, lastModified: now, changeFrequency: "daily", priority: 0.9 },
     { url: `${baseUrl}/quote`, lastModified: now, changeFrequency: "daily", priority: 0.8 },
     { url: `${baseUrl}/blog`, lastModified: now, changeFrequency: "weekly", priority: 0.8 },
-    { url: `${baseUrl}/docs`, lastModified: now, changeFrequency: "weekly", priority: 0.8 },
+    { url: `${baseUrl}/about`, lastModified: now, changeFrequency: "monthly", priority: 0.7 },
+    { url: `${baseUrl}/research`, lastModified: now, changeFrequency: "weekly", priority: 0.7 },
+    // /docs redirects to the first page — list the destination, not the hop.
+    { url: `${baseUrl}/docs/getting-started`, lastModified: now, changeFrequency: "weekly", priority: 0.8 },
     { url: `${baseUrl}/pricing`, lastModified: now, changeFrequency: "monthly", priority: 0.7 },
     { url: `${baseUrl}/changelog`, lastModified: now, changeFrequency: "weekly", priority: 0.5 },
     { url: `${baseUrl}/terms`, lastModified: now, changeFrequency: "yearly", priority: 0.3 },
@@ -84,20 +122,48 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
     console.warn("[sitemap] failed to list topics", e);
   }
 
-  // Per-article pages — sourced from the news_articles table, freshest first.
-  let articleRoutes: MetadataRoute.Sitemap = [];
+  // Published research write-ups. Reads the public view, so drafts — which are
+  // most of them, deliberately — never reach the sitemap.
+  let researchRoutes: MetadataRoute.Sitemap = [];
   try {
     const supabase = createServiceClient();
     const { data, error } = await supabase
       .schema("swingtrader")
-      .from("news_articles")
-      .select("slug, published_at, created_at")
-      .not("slug", "is", null)
-      .order("published_at", { ascending: false, nullsFirst: false })
-      .order("created_at", { ascending: false })
-      .limit(ARTICLE_SITEMAP_LIMIT);
+      .from("research_public_v")
+      .select("slug, updated_at")
+      .order("updated_at", { ascending: false });
     if (error) throw error;
-    articleRoutes = (data ?? [])
+    researchRoutes = (data ?? []).map((r) => ({
+      url: `${baseUrl}/research/${r.slug as string}`,
+      lastModified: r.updated_at ? new Date(r.updated_at as string) : now,
+      changeFrequency: "monthly" as const,
+      priority: 0.6,
+    }));
+  } catch (e) {
+    console.warn("[sitemap] failed to list research", e);
+  }
+
+  // Per-article pages — sourced from the news_articles table, freshest first.
+  let articleRoutes: MetadataRoute.Sitemap = [];
+  try {
+    const supabase = createServiceClient();
+    const data = await fetchAllRows<{
+      slug: string | null;
+      published_at: string | null;
+      created_at: string | null;
+    }>(
+      (from, to) =>
+        supabase
+          .schema("swingtrader")
+          .from("news_articles")
+          .select("slug, published_at, created_at")
+          .not("slug", "is", null)
+          .order("published_at", { ascending: false, nullsFirst: false })
+          .order("created_at", { ascending: false })
+          .range(from, to),
+      ARTICLE_SITEMAP_LIMIT,
+    );
+    articleRoutes = data
       .filter((r) => typeof r.slug === "string" && r.slug.length > 0)
       .map((r) => ({
         url: `${baseUrl}/articles/${r.slug}`,
@@ -118,16 +184,19 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
   let quoteRoutes: MetadataRoute.Sitemap = [];
   try {
     const supabase = createServiceClient();
-    const { data, error } = await supabase
-      .schema("swingtrader")
-      .from("ticker_sentiment_heads")
-      .select("ticker, article_ts")
-      .not("ticker", "is", null)
-      .order("article_ts", { ascending: false, nullsFirst: false })
-      .limit(QUOTE_SITEMAP_LIMIT * 20);
-    if (error) throw error;
+    const data = await fetchAllRows<{ ticker: string | null; article_ts: string | null }>(
+      (from, to) =>
+        supabase
+          .schema("swingtrader")
+          .from("ticker_sentiment_heads")
+          .select("ticker, article_ts")
+          .not("ticker", "is", null)
+          .order("article_ts", { ascending: false, nullsFirst: false })
+          .range(from, to),
+      QUOTE_SITEMAP_LIMIT * 20,
+    );
     const seen = new Map<string, Date>();
-    for (const r of data ?? []) {
+    for (const r of data) {
       const ticker = typeof r.ticker === "string" ? r.ticker.trim().toUpperCase() : "";
       if (!ticker || !/^[A-Z][A-Z0-9.\-]{0,11}$/.test(ticker) || seen.has(ticker)) continue;
       seen.set(ticker, r.article_ts ? new Date(r.article_ts) : now);
@@ -143,8 +212,37 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
     console.warn("[sitemap] failed to list quote tickers", e);
   }
 
+  // The /quote directory's own pages. It runs to ~74 pages and the pager only
+  // renders a 5-page window, so reaching the tail means walking the whole
+  // chain — which never happens on a small crawl budget. Listing the pages
+  // directly gives every ticker beyond QUOTE_SITEMAP_LIMIT a one-hop path.
+  let quoteIndexRoutes: MetadataRoute.Sitemap = [];
+  try {
+    const { total } = await listCoveredTickers({ days: QUOTE_HUB_WINDOW_DAYS, limit: 1 });
+    const lastPage = Math.min(
+      QUOTE_HUB_PAGE_CAP,
+      Math.max(1, Math.ceil(total / QUOTE_HUB_PAGE_SIZE)),
+    );
+    for (let page = 2; page <= lastPage; page++) {
+      quoteIndexRoutes.push({
+        url: `${baseUrl}/quote?page=${page}`,
+        lastModified: now,
+        changeFrequency: "daily" as const,
+        priority: 0.5,
+      });
+    }
+  } catch (e) {
+    console.warn("[sitemap] failed to page the quote directory", e);
+  }
+
   if (!isSanityConfigured) {
-    return [...staticRoutes, ...screeningRoutes, ...articleRoutes, ...quoteRoutes];
+    return [
+    ...staticRoutes,
+    ...screeningRoutes,
+    ...articleRoutes,
+    ...quoteRoutes,
+    ...quoteIndexRoutes,
+  ];
   }
 
   const [docSlugs, blogSlugs] = await Promise.all([
@@ -172,7 +270,9 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
     ...screeningRoutes,
     ...articleRoutes,
     ...quoteRoutes,
+    ...quoteIndexRoutes,
     ...docRoutes,
     ...blogRoutes,
+    ...researchRoutes,
   ];
 }

@@ -12,10 +12,9 @@ import {
 import { Artifacts } from "../_components/artifacts";
 import { NoteBody } from "../_components/note-body";
 import { ResearchFigure } from "../_components/research-figure";
+import { SITE_URL } from "@/lib/site";
 
-const SITE = (
-  process.env.NEXT_PUBLIC_SITE_URL ?? "https://www.newsimpactscreener.com"
-).replace(/\/$/, "");
+const SITE = SITE_URL;
 
 export async function generateStaticParams() {
   const notes = await listResearchNotes();

@@ -7,3 +7,4 @@ anthropic>=0.40
 matplotlib>=3.8
 psycopg2-binary>=2.9   # optional: news-impact overlay (Supabase)
 pytest>=8.0            # dev
+statsmodels>=0.14      # optional: cross-checks the pairs ADF in tests

@@ -157,12 +157,20 @@ class Lab:
         return ev
 
     # ------------------------------------------------------------------
-    def run(self, iterations: int, on_iteration=None) -> list[IterationReport]:
-        reports: list[IterationReport] = []
-        # The loaded universe is a protocol variable the genome cannot see, and
-        # results are materially sensitive to it — the incumbent scores Sharpe
-        # 0.25 on the 600 most liquid US names and roughly 0 on the top 800.
-        # Recording it is what makes two runs comparable at all.
+    def log_run_start(self) -> None:
+        """Record the protocol variables this run was executed under.
+
+        The loaded universe is a protocol variable the genome cannot see, and
+        results are materially sensitive to it — the incumbent scores Sharpe
+        0.25 on the 600 most liquid US names and roughly 0 on the top 800.
+        Recording it is what makes two runs comparable at all.
+
+        This lives outside `run()` because the autonomous daemon drives its own
+        iteration loop and never calls `run()`. While this was inline, every
+        daemon campaign wrote no `run_started` event, so `inherited_trials()`
+        read back 0 — which silently inflated the deflated Sharpe and loosened
+        the deploy gate on exactly the runs that publish themselves.
+        """
         self.ledger.log_event("run_started", {
             "universe_loaded": len(self.ctx.panel.symbols),
             "sessions": int(len(self.ctx.dates)),
@@ -175,6 +183,10 @@ class Lab:
             "seed_origin": self.seed_origin,
             "inherited_trials": self.inherited_trials,
         })
+
+    def run(self, iterations: int, on_iteration=None) -> list[IterationReport]:
+        reports: list[IterationReport] = []
+        self.log_run_start()
         if not self.ledger.count(rung=1, distinct=False):
             self.seed_baseline()
         self._prime_notes()

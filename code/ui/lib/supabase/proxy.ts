@@ -82,6 +82,8 @@ export async function updateSession(request: NextRequest) {
     pathname.startsWith("/topics") ||  // topic hubs — indexable by design; gating them would 307 every crawler
     pathname.startsWith("/research") ||  // published research — the point is that anyone can read and replicate it; a login wall would defeat that and 307 every crawler
     pathname.startsWith("/api/news/semantic-search") ||  // public article search (tags + semantic), mirrors the public /articles page
+    pathname === "/about" ||  // public about/methodology/disclaimer — a login wall here would 307 every crawler
+    pathname === "/llms.txt" ||  // public site map for LLM clients
     pathname === "/terms" ||
     pathname === "/privacy" ||
     pathname.startsWith("/api/v1") ||  // public API — uses its own Bearer auth

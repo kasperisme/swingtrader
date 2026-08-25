@@ -19,6 +19,10 @@ export const INSIGHTS_LINKS = [
   { href: "/articles", label: "Articles" },
   { href: "/topics", label: "Topics" },
   { href: "/quote", label: "Quotes" },
+  // The strategy lab's published write-ups. Last because it is the most
+  // specialist of the four, and unlike the others it is mostly negative
+  // results — worth finding, not worth leading with.
+  { href: "/research", label: "Research" },
 ] as const;
 
 export const FREE_SERVICE_LINKS = [

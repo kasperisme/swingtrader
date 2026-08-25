@@ -1,14 +1,13 @@
 import { connection } from "next/server";
 import { isSanityConfigured, sanityFetch } from "@/lib/sanity/client";
 import { docPagePreviewsQuery, blogPostPreviewsQuery } from "@/lib/sanity/queries";
+import { SITE_URL as baseUrl } from "@/lib/site";
 
 // /llms.txt — a curated, human-readable map of the site for inference-time LLM
 // consumption (the llmstxt.org convention). Complements robots.ts / sitemap.ts,
 // which target search crawlers. Generated at request time so the docs + blog
 // sections stay in sync with Sanity, exactly like sitemap.ts.
 
-const baseUrl =
-  process.env.NEXT_PUBLIC_SITE_URL ?? "https://newsimpactscreener.com";
 
 // Cap the per-post list so the file stays a concise index, not a full dump.
 const BLOG_LLMS_LIMIT = 25;

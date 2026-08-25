@@ -8,15 +8,16 @@ import {
   type FmpOhlcBar,
 } from "@/app/actions/fmp";
 import { getTickerImpactNews, type ScoredNewsEvent } from "@/lib/quote/ticker-impact";
+import { getPricedInVote } from "@/lib/quote/priced-in";
+import { PricedInPanel } from "./_components/priced-in-panel";
 import {
   TickerImpactChart,
   type ChartEvent,
 } from "./_components/ticker-impact-chart";
 import { ArticleBriefingCTA } from "@/app/articles/[slug]/_components/article-briefing-cta";
+import { SITE_URL } from "@/lib/site";
 
-const SITE_BASE_URL = (
-  process.env.NEXT_PUBLIC_SITE_URL ?? "https://www.newsimpactscreener.com"
-).replace(/\/$/, "");
+const SITE_BASE_URL = SITE_URL;
 
 function normSymbol(raw: string): string {
   return decodeURIComponent(raw || "").trim().toUpperCase().slice(0, 12);
@@ -164,11 +165,12 @@ export default async function QuotePage({
 }) {
   const symbol = normSymbol((await params).symbol);
 
-  const [profileRes, quoteRes, ohlcRes, events] = await Promise.all([
+  const [profileRes, quoteRes, ohlcRes, events, pricedIn] = await Promise.all([
     fmpGetCompanyProfile(symbol),
     fmpGetQuote(symbol),
     fmpGetOhlc(symbol, "1day"),
     getTickerImpactNews(symbol, { days: 365, limit: 150, perBucket: 2 }),
+    getPricedInVote(symbol),
   ]);
 
   const profile: FmpCompanyProfile | null = profileRes.ok ? profileRes.data : null;
@@ -366,6 +368,20 @@ export default async function QuotePage({
         </div>
       </section>
 
+      {pricedIn && (
+        <section>
+          <h2 className="mb-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+            What the price already reflects
+          </h2>
+          <p className="mb-3 max-w-[70ch] text-xs text-muted-foreground">
+            Analysts publish price targets on {symbol}, and they disagree. Where
+            the share price actually sits among them shows which of their
+            arguments the market is buying — and which it is ignoring.
+          </p>
+          <PricedInPanel vote={pricedIn} livePrice={price} />
+        </section>
+      )}
+
       {/* ── Key statistics ────────────────────────────────────────── */}
       <section>
         <h2 className="mb-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
@@ -388,6 +404,7 @@ export default async function QuotePage({
       </section>
 
       {/* ── News feed ─────────────────────────────────────────────── */}
+
       <section className="grid gap-6 lg:grid-cols-[1.6fr_1fr]">
         <div>
           <h2 className="mb-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground">

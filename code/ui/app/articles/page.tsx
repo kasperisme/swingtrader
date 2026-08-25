@@ -1,3 +1,4 @@
+import type { Metadata } from "next";
 import { Suspense } from "react";
 import { createClient } from "@/lib/supabase/server";
 import { createServiceClient } from "@/lib/supabase/service";
@@ -50,6 +51,16 @@ async function ArticlesTourMount() {
   const tours = await getOnboardingTours();
   return <PageTour tourKey="articles" autoStart={!tours.articles} />;
 }
+
+// `?tag=…` views are filtered slices of the same feed — hundreds of thin,
+// near-duplicate URLs — so they all consolidate onto /articles.
+export const metadata: Metadata = {
+  title: "Market news, scored by impact",
+  description:
+    "Every breaking market story mapped to the tickers and sectors it touches, ranked by news-impact score.",
+  alternates: { canonical: "/articles" },
+  openGraph: { url: "/articles" },
+};
 
 export default async function ArticlesPage({
   searchParams,

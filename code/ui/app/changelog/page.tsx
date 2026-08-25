@@ -5,8 +5,10 @@ import type { ChangelogEntry } from "@/lib/sanity/types";
 import { CavemanContent } from "@/components/caveman-content";
 
 export const metadata = {
-  title: "Changelog | News Impact Screener",
+  title: "Changelog",
   description: "What's new — feature releases, improvements, and fixes.",
+  alternates: { canonical: "/changelog" },
+  openGraph: { url: "/changelog" },
 };
 
 const TAG_STYLES: Record<string, string> = {

@@ -1,0 +1,5667 @@
+{
+ "generated": "2026-08-25",
+ "objects": [
+  {
+   "name": "api_rate_limits",
+   "kind": "table",
+   "rows_est": 1,
+   "columns": [
+    [
+     "key_id",
+     "uuid"
+    ],
+    [
+     "window_start",
+     "timestamp with time zone"
+    ],
+    [
+     "request_count",
+     "integer"
+    ]
+   ],
+   "last_row_at": null,
+   "values": {},
+   "intent": "api_rate_limits: 1-minute sliding window buckets",
+   "domain": "Other"
+  },
+  {
+   "name": "company_vectors",
+   "kind": "table",
+   "rows_est": 3401,
+   "columns": [
+    [
+     "id",
+     "bigint"
+    ],
+    [
+     "ticker",
+     "character varying"
+    ],
+    [
+     "vector_date",
+     "date"
+    ],
+    [
+     "dimensions_json",
+     "jsonb"
+    ],
+    [
+     "raw_json",
+     "jsonb"
+    ],
+    [
+     "metadata_json",
+     "jsonb"
+    ],
+    [
+     "fetched_at",
+     "timestamp with time zone"
+    ]
+   ],
+   "last_row_at": "2026-04-29",
+   "fresh_col": "fetched_at",
+   "values": {},
+   "intent": "company_vectors: fundamental dimension vectors per ticker per date",
+   "domain": "Company factor vectors"
+  },
+  {
+   "name": "daily_narratives",
+   "kind": "table",
+   "rows_est": 0,
+   "columns": [
+    [
+     "id",
+     "uuid"
+    ],
+    [
+     "user_id",
+     "uuid"
+    ],
+    [
+     "narrative_date",
+     "date"
+    ],
+    [
+     "portfolio_section",
+     "jsonb"
+    ],
+    [
+     "screening_section",
+     "jsonb"
+    ],
+    [
+     "alert_warnings",
+     "jsonb"
+    ],
+    [
+     "market_pulse",
+     "text"
+    ],
+    [
+     "model",
+     "character varying"
+    ],
+    [
+     "latency_ms",
+     "integer"
+    ],
+    [
+     "generated_at",
+     "timestamp with time zone"
+    ],
+    [
+     "delivered_at",
+     "timestamp with time zone"
+    ],
+    [
+     "market_pulse_sources",
+     "jsonb"
+    ]
+   ],
+   "last_row_at": null,
+   "values": {
+    "model": [
+     "gemma4:31b-cloud",
+     "gemma4:e4b"
+    ]
+   },
+   "intent": "\u2500\u2500 daily_narratives \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500",
+   "domain": "Other"
+  },
+  {
+   "name": "early_access_signups",
+   "kind": "table",
+   "rows_est": 54,
+   "columns": [
+    [
+     "id",
+     "bigint"
+    ],
+    [
+     "created_at",
+     "timestamp with time zone"
+    ],
+    [
+     "email",
+     "character varying"
+    ],
+    [
+     "source",
+     "character varying"
+    ],
+    [
+     "contacted",
+     "date"
+    ],
+    [
+     "metadata",
+     "jsonb"
+    ],
+    [
+     "meta_capi_sent_at",
+     "timestamp with time zone"
+    ]
+   ],
+   "last_row_at": "2026-08-23",
+   "fresh_col": "created_at",
+   "values": {
+    "source": [
+     "article",
+     "article_briefing",
+     "briefings_page",
+     "briefings_preset",
+     "landing",
+     "landing-hero",
+     "screening_detail_subscribe"
+    ]
+   },
+   "intent": "Early access signups: waitlist captured when a visitor (anonymous OR authenticated) clicks \"Subscribe\" on a public screening in the gallery. We do not auto-create a real subscription row. The product is in early- access mode; conversions to `public_screening_subscriptions` happen later via an admin/manual approval flow.",
+   "domain": "Other"
+  },
+  {
+   "name": "job_health",
+   "kind": "table",
+   "rows_est": 15,
+   "columns": [
+    [
+     "job_name",
+     "text"
+    ],
+    [
+     "last_started_at",
+     "timestamp with time zone"
+    ],
+    [
+     "last_finished_at",
+     "timestamp with time zone"
+    ],
+    [
+     "last_status",
+     "text"
+    ],
+    [
+     "last_error",
+     "text"
+    ],
+    [
+     "consecutive_fails",
+     "integer"
+    ],
+    [
+     "expected_interval",
+     "interval"
+    ],
+    [
+     "metadata",
+     "jsonb"
+    ]
+   ],
+   "last_row_at": null,
+   "values": {
+    "last_status": [
+     "failed",
+     "running",
+     "success"
+    ]
+   },
+   "intent": "",
+   "domain": "Agents & jobs"
+  },
+  {
+   "name": "job_runs",
+   "kind": "table",
+   "rows_est": 256091,
+   "columns": [
+    [
+     "id",
+     "bigint"
+    ],
+    [
+     "job_name",
+     "text"
+    ],
+    [
+     "started_at",
+     "timestamp with time zone"
+    ],
+    [
+     "finished_at",
+     "timestamp with time zone"
+    ],
+    [
+     "status",
+     "text"
+    ],
+    [
+     "duration_s",
+     "double precision"
+    ],
+    [
+     "error",
+     "text"
+    ],
+    [
+     "created_at",
+     "timestamp with time zone"
+    ]
+   ],
+   "last_row_at": "2026-08-25",
+   "fresh_col": "created_at",
+   "values": {
+    "status": [
+     "failed",
+     "success"
+    ]
+   },
+   "intent": "",
+   "domain": "Agents & jobs"
+  },
+  {
+   "name": "market_screening_email_subscriptions",
+   "kind": "table",
+   "rows_est": 23,
+   "columns": [
+    [
+     "id",
+     "uuid"
+    ],
+    [
+     "email",
+     "text"
+    ],
+    [
+     "market_screening_id",
+     "uuid"
+    ],
+    [
+     "channel",
+     "text"
+    ],
+    [
+     "status",
+     "text"
+    ],
+    [
+     "source",
+     "text"
+    ],
+    [
+     "user_id",
+     "uuid"
+    ],
+    [
+     "referrer",
+     "text"
+    ],
+    [
+     "user_agent",
+     "text"
+    ],
+    [
+     "metadata",
+     "jsonb"
+    ],
+    [
+     "confirmation_sent_at",
+     "timestamp with time zone"
+    ],
+    [
+     "unsubscribed_at",
+     "timestamp with time zone"
+    ],
+    [
+     "created_at",
+     "timestamp with time zone"
+    ],
+    [
+     "updated_at",
+     "timestamp with time zone"
+    ]
+   ],
+   "last_row_at": "2026-08-19",
+   "fresh_col": "updated_at",
+   "values": {
+    "status": [
+     "active",
+     "unsubscribed"
+    ],
+    "source": [
+     "gallery_card_subscribe",
+     "gallery_csv_download",
+     "screening_detail_subscribe"
+    ]
+   },
+   "intent": "Market screening EMAIL subscriptions: the lightweight, email-only delivery list that powers the \"Send me the results\" CTA across the site (article bridge CTA + the screenings gallery Subscribe buttons). This is deliberately separate from the two existing tables: * early_access_signups            \u2014 a waitlist / lead capture. No delivery intent; conversions are manual. * market_screening_subscriptions  \u2014 auth-only (user_id FK). In-app + Telegram delivery for signed-in users. This table answers \"which email wants which screening results, on which channel\" with no account required. One row per (em",
+   "domain": "Screening & scans"
+  },
+  {
+   "name": "market_screening_result_rows",
+   "kind": "table",
+   "rows_est": 111610,
+   "columns": [
+    [
+     "id",
+     "bigint"
+    ],
+    [
+     "market_screening_id",
+     "uuid"
+    ],
+    [
+     "result_id",
+     "uuid"
+    ],
+    [
+     "run_at",
+     "timestamp with time zone"
+    ],
+    [
+     "scan_date",
+     "date"
+    ],
+    [
+     "dataset",
+     "character varying"
+    ],
+    [
+     "symbol",
+     "character varying"
+    ],
+    [
+     "row_data",
+     "jsonb"
+    ],
+    [
+     "created_at",
+     "timestamp with time zone"
+    ]
+   ],
+   "last_row_at": "2026-08-25",
+   "fresh_col": "created_at",
+   "values": {},
+   "intent": "",
+   "domain": "Screening & scans"
+  },
+  {
+   "name": "market_screening_results",
+   "kind": "table",
+   "rows_est": 3832,
+   "columns": [
+    [
+     "id",
+     "uuid"
+    ],
+    [
+     "market_screening_id",
+     "uuid"
+    ],
+    [
+     "run_at",
+     "timestamp with time zone"
+    ],
+    [
+     "started_at",
+     "timestamp with time zone"
+    ],
+    [
+     "status",
+     "text"
+    ],
+    [
+     "triggered",
+     "boolean"
+    ],
+    [
+     "summary",
+     "text"
+    ],
+    [
+     "data_used",
+     "jsonb"
+    ],
+    [
+     "error",
+     "text"
+    ],
+    [
+     "is_test",
+     "boolean"
+    ],
+    [
+     "created_at",
+     "timestamp with time zone"
+    ],
+    [
+     "bulk_analysis_status",
+     "text"
+    ],
+    [
+     "bulk_analysis_started_at",
+     "timestamp with time zone"
+    ],
+    [
+     "bulk_analysis_finished_at",
+     "timestamp with time zone"
+    ],
+    [
+     "bulk_analysis_error",
+     "text"
+    ]
+   ],
+   "last_row_at": "2026-08-25",
+   "fresh_col": "created_at",
+   "values": {
+    "status": [
+     "done",
+     "due",
+     "error"
+    ],
+    "bulk_analysis_status": [
+     "done",
+     "queued"
+    ]
+   },
+   "intent": "",
+   "domain": "Screening & scans"
+  },
+  {
+   "name": "market_screening_subscriptions",
+   "kind": "table",
+   "rows_est": 0,
+   "columns": [
+    [
+     "id",
+     "uuid"
+    ],
+    [
+     "user_id",
+     "uuid"
+    ],
+    [
+     "market_screening_id",
+     "uuid"
+    ],
+    [
+     "notifications_enabled",
+     "boolean"
+    ],
+    [
+     "subscribed_at",
+     "timestamp with time zone"
+    ]
+   ],
+   "last_row_at": null,
+   "values": {},
+   "intent": "",
+   "domain": "Screening & scans"
+  },
+  {
+   "name": "market_screenings",
+   "kind": "table",
+   "rows_est": 10,
+   "columns": [
+    [
+     "id",
+     "uuid"
+    ],
+    [
+     "author_user_id",
+     "uuid"
+    ],
+    [
+     "slug",
+     "text"
+    ],
+    [
+     "script_key",
+     "text"
+    ],
+    [
+     "name",
+     "text"
+    ],
+    [
+     "description",
+     "text"
+    ],
+    [
+     "category",
+     "text"
+    ],
+    [
+     "schedule",
+     "text"
+    ],
+    [
+     "timezone",
+     "text"
+    ],
+    [
+     "is_active",
+     "boolean"
+    ],
+    [
+     "is_published",
+     "boolean"
+    ],
+    [
+     "next_run_at",
+     "timestamp with time zone"
+    ],
+    [
+     "last_run_at",
+     "timestamp with time zone"
+    ],
+    [
+     "last_triggered",
+     "boolean"
+    ],
+    [
+     "run_requested_at",
+     "timestamp with time zone"
+    ],
+    [
+     "created_at",
+     "timestamp with time zone"
+    ],
+    [
+     "updated_at",
+     "timestamp with time zone"
+    ],
+    [
+     "download_count",
+     "bigint"
+    ],
+    [
+     "llm_prompt",
+     "text"
+    ]
+   ],
+   "last_row_at": "2026-08-25",
+   "fresh_col": "updated_at",
+   "values": {
+    "category": [
+     "IPO",
+     "Insider",
+     "Thematic",
+     "fundamentals",
+     "technical",
+     "technical-fundamental",
+     "test"
+    ]
+   },
+   "intent": "",
+   "domain": "Screening & scans"
+  },
+  {
+   "name": "news_article_embedding_jobs",
+   "kind": "table",
+   "rows_est": 220126,
+   "columns": [
+    [
+     "article_id",
+     "bigint"
+    ],
+    [
+     "status",
+     "text"
+    ],
+    [
+     "attempt_count",
+     "integer"
+    ],
+    [
+     "last_error",
+     "text"
+    ],
+    [
+     "last_attempt_at",
+     "timestamp with time zone"
+    ],
+    [
+     "completed_at",
+     "timestamp with time zone"
+    ],
+    [
+     "created_at",
+     "timestamp with time zone"
+    ],
+    [
+     "updated_at",
+     "timestamp with time zone"
+    ]
+   ],
+   "last_row_at": "2026-08-25",
+   "fresh_col": "updated_at",
+   "values": {
+    "status": [
+     "completed",
+     "failed",
+     "pending",
+     "processing"
+    ]
+   },
+   "intent": "Embedding setup for semantic retrieval over scored news.",
+   "domain": "News: articles & scoring"
+  },
+  {
+   "name": "news_article_embeddings",
+   "kind": "table",
+   "rows_est": 1827954,
+   "columns": [
+    [
+     "id",
+     "bigint"
+    ],
+    [
+     "article_id",
+     "bigint"
+    ],
+    [
+     "chunk_index",
+     "integer"
+    ],
+    [
+     "chunk_hash",
+     "text"
+    ],
+    [
+     "chunk_text",
+     "text"
+    ],
+    [
+     "embedding",
+     "USER-DEFINED"
+    ],
+    [
+     "embedding_model",
+     "text"
+    ],
+    [
+     "created_at",
+     "timestamp with time zone"
+    ],
+    [
+     "published_at",
+     "timestamp with time zone"
+    ]
+   ],
+   "last_row_at": null,
+   "values": {},
+   "intent": "Embedding setup for semantic retrieval over scored news.",
+   "domain": "News: articles & scoring"
+  },
+  {
+   "name": "news_article_tickers",
+   "kind": "table",
+   "rows_est": 727992,
+   "columns": [
+    [
+     "article_id",
+     "bigint"
+    ],
+    [
+     "ticker",
+     "character varying"
+    ],
+    [
+     "source",
+     "character varying"
+    ]
+   ],
+   "last_row_at": null,
+   "values": {},
+   "intent": "news_article_tickers: ticker mentions extracted from articles",
+   "domain": "News: articles & scoring"
+  },
+  {
+   "name": "news_articles",
+   "kind": "table",
+   "rows_est": 216666,
+   "columns": [
+    [
+     "id",
+     "bigint"
+    ],
+    [
+     "created_at",
+     "timestamp with time zone"
+    ],
+    [
+     "url",
+     "character varying"
+    ],
+    [
+     "title",
+     "character varying"
+    ],
+    [
+     "body",
+     "text"
+    ],
+    [
+     "source",
+     "character varying"
+    ],
+    [
+     "article_hash",
+     "character varying"
+    ],
+    [
+     "published_at",
+     "timestamp with time zone"
+    ],
+    [
+     "publisher",
+     "text"
+    ],
+    [
+     "image_url",
+     "text"
+    ],
+    [
+     "slug",
+     "text"
+    ],
+    [
+     "article_stream",
+     "text"
+    ],
+    [
+     "processing_status",
+     "text"
+    ],
+    [
+     "search_tags",
+     "ARRAY"
+    ],
+    [
+     "fts",
+     "tsvector"
+    ]
+   ],
+   "last_row_at": "2026-08-25",
+   "fresh_col": "created_at",
+   "values": {
+    "article_stream": [
+     "fmp_general",
+     "fmp_stock",
+     "unknown"
+    ],
+    "processing_status": [
+     "complete",
+     "failed",
+     "partial"
+    ]
+   },
+   "intent": "news_articles: article content and metadata",
+   "domain": "News: articles & scoring"
+  },
+  {
+   "name": "news_briefing_subscriptions",
+   "kind": "table",
+   "rows_est": 34,
+   "columns": [
+    [
+     "id",
+     "uuid"
+    ],
+    [
+     "email",
+     "text"
+    ],
+    [
+     "tickers",
+     "ARRAY"
+    ],
+    [
+     "tags",
+     "ARRAY"
+    ],
+    [
+     "status",
+     "text"
+    ],
+    [
+     "source",
+     "text"
+    ],
+    [
+     "user_id",
+     "uuid"
+    ],
+    [
+     "referrer",
+     "text"
+    ],
+    [
+     "user_agent",
+     "text"
+    ],
+    [
+     "metadata",
+     "jsonb"
+    ],
+    [
+     "initial_briefing_requested_at",
+     "timestamp with time zone"
+    ],
+    [
+     "last_sent_at",
+     "timestamp with time zone"
+    ],
+    [
+     "unsubscribed_at",
+     "timestamp with time zone"
+    ],
+    [
+     "created_at",
+     "timestamp with time zone"
+    ],
+    [
+     "updated_at",
+     "timestamp with time zone"
+    ]
+   ],
+   "last_row_at": "2026-08-24",
+   "fresh_col": "updated_at",
+   "values": {
+    "status": [
+     "active",
+     "unsubscribed"
+    ],
+    "source": [
+     "article_briefing",
+     "briefings_page",
+     "briefings_preset"
+    ]
+   },
+   "intent": "News briefing subscriptions: the free, no-account email service that sends a nicely structured PDF of the last 24h of news, summaries and impact for the tickers / tags a visitor cares about. Mirrors market_screening_email_subscriptions (email-only, soft-unsubscribe, service-role access) but the unit a visitor subscribes to is their OWN watchlist of tickers + tags rather than a curated screening. One briefing per email \u2014 editing the watchlist is an in-place update via a signed manage link, no login required. Delivery: * On signup we set initial_briefing_requested_at; the Python briefing tick ge",
+   "domain": "News: articles & scoring"
+  },
+  {
+   "name": "news_embedding_daily_cluster_articles",
+   "kind": "table",
+   "rows_est": 0,
+   "columns": [
+    [
+     "bucket_start",
+     "timestamp with time zone"
+    ],
+    [
+     "embedding_model",
+     "text"
+    ],
+    [
+     "article_id",
+     "bigint"
+    ],
+    [
+     "cluster_index",
+     "integer"
+    ],
+    [
+     "computed_at",
+     "timestamp with time zone"
+    ]
+   ],
+   "last_row_at": null,
+   "values": {},
+   "intent": "Hourly / daily embedding clusters over swingtrader.news_article_embeddings (UTC buckets). Populated by services/news/embeddings/time_bucket_clustering.py (scripts/cluster_news_embedding_buckets.py). Per bucket: run metadata, one centroid row per cluster (float8[] + nearest-chunk reverse text), one article assignment row per article.",
+   "domain": "News: articles & scoring"
+  },
+  {
+   "name": "news_embedding_daily_cluster_centroids",
+   "kind": "table",
+   "rows_est": 0,
+   "columns": [
+    [
+     "bucket_start",
+     "timestamp with time zone"
+    ],
+    [
+     "embedding_model",
+     "text"
+    ],
+    [
+     "cluster_index",
+     "integer"
+    ],
+    [
+     "centroid",
+     "ARRAY"
+    ],
+    [
+     "reverse_embedding_text",
+     "text"
+    ],
+    [
+     "reverse_embedding_article_id",
+     "bigint"
+    ],
+    [
+     "reverse_embedding_chunk_index",
+     "integer"
+    ],
+    [
+     "member_count",
+     "integer"
+    ],
+    [
+     "computed_at",
+     "timestamp with time zone"
+    ]
+   ],
+   "last_row_at": null,
+   "values": {},
+   "intent": "Hourly / daily embedding clusters over swingtrader.news_article_embeddings (UTC buckets). Populated by services/news/embeddings/time_bucket_clustering.py (scripts/cluster_news_embedding_buckets.py). Per bucket: run metadata, one centroid row per cluster (float8[] + nearest-chunk reverse text), one article assignment row per article.",
+   "domain": "News: articles & scoring"
+  },
+  {
+   "name": "news_embedding_daily_cluster_runs",
+   "kind": "table",
+   "rows_est": 0,
+   "columns": [
+    [
+     "bucket_start",
+     "timestamp with time zone"
+    ],
+    [
+     "embedding_model",
+     "text"
+    ],
+    [
+     "n_clusters",
+     "integer"
+    ],
+    [
+     "article_count",
+     "integer"
+    ],
+    [
+     "chunk_rows_used",
+     "integer"
+    ],
+    [
+     "embedding_dim",
+     "integer"
+    ],
+    [
+     "computed_at",
+     "timestamp with time zone"
+    ]
+   ],
+   "last_row_at": null,
+   "values": {},
+   "intent": "\u2500\u2500 Daily \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500",
+   "domain": "News: articles & scoring"
+  },
+  {
+   "name": "news_embedding_hourly_cluster_articles",
+   "kind": "table",
+   "rows_est": 57,
+   "columns": [
+    [
+     "bucket_start",
+     "timestamp with time zone"
+    ],
+    [
+     "embedding_model",
+     "text"
+    ],
+    [
+     "article_id",
+     "bigint"
+    ],
+    [
+     "cluster_index",
+     "integer"
+    ],
+    [
+     "computed_at",
+     "timestamp with time zone"
+    ]
+   ],
+   "last_row_at": null,
+   "values": {},
+   "intent": "Hourly / daily embedding clusters over swingtrader.news_article_embeddings (UTC buckets). Populated by services/news/embeddings/time_bucket_clustering.py (scripts/cluster_news_embedding_buckets.py). Per bucket: run metadata, one centroid row per cluster (float8[] + nearest-chunk reverse text), one article assignment row per article.",
+   "domain": "News: articles & scoring"
+  },
+  {
+   "name": "news_embedding_hourly_cluster_centroids",
+   "kind": "table",
+   "rows_est": 0,
+   "columns": [
+    [
+     "bucket_start",
+     "timestamp with time zone"
+    ],
+    [
+     "embedding_model",
+     "text"
+    ],
+    [
+     "cluster_index",
+     "integer"
+    ],
+    [
+     "centroid",
+     "ARRAY"
+    ],
+    [
+     "reverse_embedding_text",
+     "text"
+    ],
+    [
+     "reverse_embedding_article_id",
+     "bigint"
+    ],
+    [
+     "reverse_embedding_chunk_index",
+     "integer"
+    ],
+    [
+     "member_count",
+     "integer"
+    ],
+    [
+     "computed_at",
+     "timestamp with time zone"
+    ]
+   ],
+   "last_row_at": null,
+   "values": {},
+   "intent": "Hourly / daily embedding clusters over swingtrader.news_article_embeddings (UTC buckets). Populated by services/news/embeddings/time_bucket_clustering.py (scripts/cluster_news_embedding_buckets.py). Per bucket: run metadata, one centroid row per cluster (float8[] + nearest-chunk reverse text), one article assignment row per article.",
+   "domain": "News: articles & scoring"
+  },
+  {
+   "name": "news_embedding_hourly_cluster_runs",
+   "kind": "table",
+   "rows_est": 0,
+   "columns": [
+    [
+     "bucket_start",
+     "timestamp with time zone"
+    ],
+    [
+     "embedding_model",
+     "text"
+    ],
+    [
+     "n_clusters",
+     "integer"
+    ],
+    [
+     "article_count",
+     "integer"
+    ],
+    [
+     "chunk_rows_used",
+     "integer"
+    ],
+    [
+     "embedding_dim",
+     "integer"
+    ],
+    [
+     "computed_at",
+     "timestamp with time zone"
+    ]
+   ],
+   "last_row_at": null,
+   "values": {},
+   "intent": "\u2500\u2500 Hourly \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500",
+   "domain": "News: articles & scoring"
+  },
+  {
+   "name": "news_impact_heads",
+   "kind": "table",
+   "rows_est": 2692533,
+   "columns": [
+    [
+     "id",
+     "bigint"
+    ],
+    [
+     "article_id",
+     "bigint"
+    ],
+    [
+     "cluster",
+     "character varying"
+    ],
+    [
+     "scores_json",
+     "jsonb"
+    ],
+    [
+     "reasoning_json",
+     "jsonb"
+    ],
+    [
+     "confidence",
+     "double precision"
+    ],
+    [
+     "model",
+     "character varying"
+    ],
+    [
+     "latency_ms",
+     "integer"
+    ],
+    [
+     "created_at",
+     "timestamp with time zone"
+    ]
+   ],
+   "last_row_at": "2026-08-25",
+   "fresh_col": "created_at",
+   "values": {
+    "cluster": [
+     "ARTICLE_TAGS",
+     "BUSINESS_MODEL",
+     "FINANCIAL_STRUCTURE",
+     "GEOGRAPHY_TRADE",
+     "GROWTH_PROFILE",
+     "MACRO_SENSITIVITY",
+     "MARKET_BEHAVIOUR",
+     "SECTOR_ROTATION",
+     "STORY_KEY_POINTS",
+     "SUPPLY_CHAIN_EXPOSURE",
+     "TICKER_RELATIONSHIPS",
+     "TICKER_SENTIMENT",
+     "VALUATION_POSITIONING"
+    ]
+   },
+   "intent": "news_impact_heads: per-cluster LLM scoring results",
+   "domain": "News: articles & scoring"
+  },
+  {
+   "name": "news_impact_vectors",
+   "kind": "table",
+   "rows_est": 209330,
+   "columns": [
+    [
+     "id",
+     "bigint"
+    ],
+    [
+     "article_id",
+     "bigint"
+    ],
+    [
+     "impact_json",
+     "jsonb"
+    ],
+    [
+     "top_dimensions",
+     "jsonb"
+    ],
+    [
+     "created_at",
+     "timestamp with time zone"
+    ],
+    [
+     "impact_magnitude",
+     "double precision"
+    ]
+   ],
+   "last_row_at": "2026-08-25",
+   "fresh_col": "created_at",
+   "values": {},
+   "intent": "news_impact_vectors: aggregated impact dimension vectors",
+   "domain": "News: articles & scoring"
+  },
+  {
+   "name": "news_source_dry_days",
+   "kind": "table",
+   "rows_est": 684,
+   "columns": [
+    [
+     "source_stream",
+     "character varying"
+    ],
+    [
+     "day",
+     "date"
+    ],
+    [
+     "marked_at",
+     "timestamp with time zone"
+    ],
+    [
+     "pages_checked",
+     "integer"
+    ],
+    [
+     "articles_found",
+     "integer"
+    ],
+    [
+     "note",
+     "text"
+    ]
+   ],
+   "last_row_at": null,
+   "values": {
+    "source_stream": [
+     "fmp_general",
+     "fmp_stock"
+    ]
+   },
+   "intent": "Track calendar days where a news source stream has been fully exhausted (all available articles fetched/processed, no new content from the API). Used to skip re-polling dry days in future runs.",
+   "domain": "News: articles & scoring"
+  },
+  {
+   "name": "news_trends_article_base_v",
+   "kind": "view",
+   "rows_est": 0,
+   "columns": [
+    [
+     "article_id",
+     "bigint"
+    ],
+    [
+     "published_at",
+     "timestamp with time zone"
+    ],
+    [
+     "bucket_day",
+     "timestamp with time zone"
+    ],
+    [
+     "bucket_hour",
+     "timestamp with time zone"
+    ],
+    [
+     "impact_jsonb",
+     "jsonb"
+    ],
+    [
+     "confidence_mean",
+     "double precision"
+    ],
+    [
+     "id",
+     "bigint"
+    ],
+    [
+     "title",
+     "character varying"
+    ],
+    [
+     "url",
+     "character varying"
+    ],
+    [
+     "source",
+     "character varying"
+    ],
+    [
+     "slug",
+     "text"
+    ],
+    [
+     "image_url",
+     "text"
+    ],
+    [
+     "article_created_at",
+     "timestamp with time zone"
+    ]
+   ],
+   "last_row_at": null,
+   "values": {},
+   "intent": "1) Article-level base rows with parsed vectors + mean confidence.",
+   "domain": "News: articles & scoring"
+  },
+  {
+   "name": "news_trends_cluster_daily_v",
+   "kind": "view",
+   "rows_est": 0,
+   "columns": [
+    [
+     "bucket_day",
+     "timestamp with time zone"
+    ],
+    [
+     "cluster_id",
+     "text"
+    ],
+    [
+     "bucket_article_count",
+     "bigint"
+    ],
+    [
+     "article_count",
+     "bigint"
+    ],
+    [
+     "cluster_avg",
+     "double precision"
+    ],
+    [
+     "cluster_weighted_avg",
+     "double precision"
+    ]
+   ],
+   "last_row_at": null,
+   "values": {},
+   "intent": "4) Cluster rollups from dimensions, matching UI logic: per-article cluster = mean(dimensions in cluster), then weighted mean by bucket.",
+   "domain": "News: articles & scoring"
+  },
+  {
+   "name": "news_trends_cluster_hourly_v",
+   "kind": "view",
+   "rows_est": 0,
+   "columns": [
+    [
+     "bucket_hour",
+     "timestamp with time zone"
+    ],
+    [
+     "cluster_id",
+     "text"
+    ],
+    [
+     "bucket_article_count",
+     "bigint"
+    ],
+    [
+     "article_count",
+     "bigint"
+    ],
+    [
+     "cluster_avg",
+     "double precision"
+    ],
+    [
+     "cluster_weighted_avg",
+     "double precision"
+    ]
+   ],
+   "last_row_at": null,
+   "values": {},
+   "intent": "Bound hourly news-trends views to last 60 days so their CTEs don't scan the full base table. Original views (in 20260414100000_news_trends_aggregate_views.sql) compute `bucket_counts` and `article_cluster_scores` over every article \u2014 the outer WHERE on `bucket_hour` cannot push into those CTEs, which causes statement timeouts on Supabase. Filtering inside the view on `published_at` (indexed via idx_news_articles_published_at) bounds the scan up-front so the rollup stays under `statement_timeout`.",
+   "domain": "News: articles & scoring"
+  },
+  {
+   "name": "news_trends_dimension_cluster_map_v",
+   "kind": "view",
+   "rows_est": 0,
+   "columns": [
+    [
+     "dimension_key",
+     "text"
+    ],
+    [
+     "cluster_id",
+     "text"
+    ]
+   ],
+   "last_row_at": null,
+   "values": {},
+   "intent": "",
+   "domain": "News: articles & scoring"
+  },
+  {
+   "name": "news_trends_dimension_daily_v",
+   "kind": "view",
+   "rows_est": 0,
+   "columns": [
+    [
+     "bucket_day",
+     "timestamp with time zone"
+    ],
+    [
+     "dimension_key",
+     "text"
+    ],
+    [
+     "bucket_article_count",
+     "bigint"
+    ],
+    [
+     "sample_count",
+     "bigint"
+    ],
+    [
+     "article_count",
+     "bigint"
+    ],
+    [
+     "dimension_avg",
+     "double precision"
+    ],
+    [
+     "dimension_weighted_avg",
+     "double precision"
+    ]
+   ],
+   "last_row_at": null,
+   "values": {},
+   "intent": "3) Dimension aggregates (daily / hourly), weighted and unweighted.",
+   "domain": "News: articles & scoring"
+  },
+  {
+   "name": "news_trends_dimension_hourly_v",
+   "kind": "view",
+   "rows_est": 0,
+   "columns": [
+    [
+     "bucket_hour",
+     "timestamp with time zone"
+    ],
+    [
+     "dimension_key",
+     "text"
+    ],
+    [
+     "bucket_article_count",
+     "bigint"
+    ],
+    [
+     "sample_count",
+     "bigint"
+    ],
+    [
+     "article_count",
+     "bigint"
+    ],
+    [
+     "dimension_avg",
+     "double precision"
+    ],
+    [
+     "dimension_weighted_avg",
+     "double precision"
+    ]
+   ],
+   "last_row_at": null,
+   "values": {},
+   "intent": "Bound hourly news-trends views to last 60 days so their CTEs don't scan the full base table. Original views (in 20260414100000_news_trends_aggregate_views.sql) compute `bucket_counts` and `article_cluster_scores` over every article \u2014 the outer WHERE on `bucket_hour` cannot push into those CTEs, which causes statement timeouts on Supabase. Filtering inside the view on `published_at` (indexed via idx_news_articles_published_at) bounds the scan up-front so the rollup stays under `statement_timeout`.",
+   "domain": "News: articles & scoring"
+  },
+  {
+   "name": "news_trends_dimension_points_v",
+   "kind": "view",
+   "rows_est": 0,
+   "columns": [
+    [
+     "article_id",
+     "bigint"
+    ],
+    [
+     "published_at",
+     "timestamp with time zone"
+    ],
+    [
+     "bucket_day",
+     "timestamp with time zone"
+    ],
+    [
+     "bucket_hour",
+     "timestamp with time zone"
+    ],
+    [
+     "confidence_mean",
+     "double precision"
+    ],
+    [
+     "dimension_key",
+     "text"
+    ],
+    [
+     "dimension_value",
+     "double precision"
+    ]
+   ],
+   "last_row_at": null,
+   "values": {},
+   "intent": "2) One row per article/dimension with numeric value.",
+   "domain": "News: articles & scoring"
+  },
+  {
+   "name": "news_trends_heads_daily_v",
+   "kind": "view",
+   "rows_est": 0,
+   "columns": [
+    [
+     "bucket_day",
+     "timestamp with time zone"
+    ],
+    [
+     "cluster",
+     "character varying"
+    ],
+    [
+     "bucket_article_count",
+     "bigint"
+    ],
+    [
+     "head_count",
+     "bigint"
+    ],
+    [
+     "article_count",
+     "bigint"
+    ],
+    [
+     "confidence_avg",
+     "double precision"
+    ]
+   ],
+   "last_row_at": null,
+   "values": {},
+   "intent": "5) Head-level aggregates for diagnostics/trend overlays.",
+   "domain": "News: articles & scoring"
+  },
+  {
+   "name": "news_trends_heads_hourly_v",
+   "kind": "view",
+   "rows_est": 0,
+   "columns": [
+    [
+     "bucket_hour",
+     "timestamp with time zone"
+    ],
+    [
+     "cluster",
+     "character varying"
+    ],
+    [
+     "bucket_article_count",
+     "bigint"
+    ],
+    [
+     "head_count",
+     "bigint"
+    ],
+    [
+     "article_count",
+     "bigint"
+    ],
+    [
+     "confidence_avg",
+     "double precision"
+    ]
+   ],
+   "last_row_at": null,
+   "values": {},
+   "intent": "Pre-aggregated views for News Trends charts. Goal: avoid scanning/parsing every raw row in the UI path. Supporting indexes for faster joins/bucketing.",
+   "domain": "News: articles & scoring"
+  },
+  {
+   "name": "news_trends_tag_daily_v",
+   "kind": "view",
+   "rows_est": 0,
+   "columns": [
+    [
+     "bucket_day",
+     "date"
+    ],
+    [
+     "tag",
+     "text"
+    ],
+    [
+     "article_count",
+     "bigint"
+    ]
+   ],
+   "last_row_at": null,
+   "values": {},
+   "intent": "2) Theme-tag frequency per day. search_tags holds lowercase theme/event slugs PLUS uppercase tickers in one array. Tickers are covered by view (1); here we keep theme slugs only via `tag = lower(tag)` (tickers are uppercase by construction).",
+   "domain": "News: articles & scoring"
+  },
+  {
+   "name": "news_trends_ticker_daily_v",
+   "kind": "view",
+   "rows_est": 0,
+   "columns": [
+    [
+     "bucket_day",
+     "date"
+    ],
+    [
+     "ticker",
+     "character varying"
+    ],
+    [
+     "mention_count",
+     "bigint"
+    ],
+    [
+     "scored_count",
+     "bigint"
+    ],
+    [
+     "avg_sentiment",
+     "double precision"
+    ],
+    [
+     "weighted_sentiment",
+     "double precision"
+    ]
+   ],
+   "last_row_at": null,
+   "values": {},
+   "intent": "1) Ticker mentions per day, with sentiment overlay. mention_count  = # articles mentioning the ticker that day (all mentions) scored_count   = # of those with an LLM sentiment head avg_sentiment  = mean sentiment over scored mentions  \u2208 [-1, 1] weighted_sentiment = confidence-weighted mean sentiment",
+   "domain": "News: articles & scoring"
+  },
+  {
+   "name": "podcast_episodes",
+   "kind": "table",
+   "rows_est": 6,
+   "columns": [
+    [
+     "id",
+     "integer"
+    ],
+    [
+     "date",
+     "date"
+    ],
+    [
+     "title",
+     "text"
+    ],
+    [
+     "episode_url",
+     "text"
+    ],
+    [
+     "duration_seconds",
+     "integer"
+    ],
+    [
+     "script_word_count",
+     "integer"
+    ],
+    [
+     "elevenlabs_chars",
+     "integer"
+    ],
+    [
+     "estimated_cost_usd",
+     "real"
+    ],
+    [
+     "status",
+     "text"
+    ],
+    [
+     "created_at",
+     "timestamp with time zone"
+    ],
+    [
+     "description",
+     "text"
+    ],
+    [
+     "audio_url",
+     "text"
+    ],
+    [
+     "cover_url",
+     "text"
+    ],
+    [
+     "file_size_bytes",
+     "bigint"
+    ],
+    [
+     "guid",
+     "text"
+    ],
+    [
+     "published_at",
+     "timestamp with time zone"
+    ]
+   ],
+   "last_row_at": "2026-05-14",
+   "fresh_col": "created_at",
+   "values": {
+    "status": [
+     "error",
+     "published"
+    ]
+   },
+   "intent": "",
+   "domain": "Other"
+  },
+  {
+   "name": "research_artifacts",
+   "kind": "table",
+   "rows_est": 0,
+   "columns": [
+    [
+     "id",
+     "bigint"
+    ],
+    [
+     "note_slug",
+     "text"
+    ],
+    [
+     "name",
+     "text"
+    ],
+    [
+     "description",
+     "text"
+    ],
+    [
+     "available",
+     "boolean"
+    ],
+    [
+     "reason",
+     "text"
+    ],
+    [
+     "public_url",
+     "text"
+    ],
+    [
+     "storage_path",
+     "text"
+    ],
+    [
+     "bytes",
+     "bigint"
+    ],
+    [
+     "sha256",
+     "text"
+    ],
+    [
+     "sort_order",
+     "integer"
+    ],
+    [
+     "created_at",
+     "timestamp with time zone"
+    ],
+    [
+     "updated_at",
+     "timestamp with time zone"
+    ]
+   ],
+   "last_row_at": "2026-08-19",
+   "fresh_col": "updated_at",
+   "values": {},
+   "intent": "Artifacts attached to a research write-up. The notes reference the files they were computed from \u2014 a pre-registration record, a results JSON, a data panel. Printed as bare local paths those references are worse than useless: they look like evidence while pointing at a directory on one laptop. So each referenced file becomes a row. Either it is genuinely downloadable (`available = true`, with a public URL), or it is not, and `reason` has to say why. The second case is not a gap to hide \u2014 \"this panel is derived from licensed vendor data and cannot be redistributed\" is information a replicator ne",
+   "domain": "Other"
+  },
+  {
+   "name": "research_artifacts_public_v",
+   "kind": "view",
+   "rows_est": 0,
+   "columns": [
+    [
+     "note_slug",
+     "text"
+    ],
+    [
+     "name",
+     "text"
+    ],
+    [
+     "description",
+     "text"
+    ],
+    [
+     "available",
+     "boolean"
+    ],
+    [
+     "reason",
+     "text"
+    ],
+    [
+     "public_url",
+     "text"
+    ],
+    [
+     "bytes",
+     "bigint"
+    ],
+    [
+     "sha256",
+     "text"
+    ],
+    [
+     "sort_order",
+     "integer"
+    ]
+   ],
+   "last_row_at": null,
+   "values": {},
+   "intent": "Artifacts attached to a research write-up. The notes reference the files they were computed from \u2014 a pre-registration record, a results JSON, a data panel. Printed as bare local paths those references are worse than useless: they look like evidence while pointing at a directory on one laptop. So each referenced file becomes a row. Either it is genuinely downloadable (`available = true`, with a public URL), or it is not, and `reason` has to say why. The second case is not a gap to hide \u2014 \"this panel is derived from licensed vendor data and cannot be redistributed\" is information a replicator ne",
+   "domain": "Other"
+  },
+  {
+   "name": "research_campaigns",
+   "kind": "table",
+   "rows_est": 0,
+   "columns": [
+    [
+     "id",
+     "bigint"
+    ],
+    [
+     "run_id",
+     "text"
+    ],
+    [
+     "started_at",
+     "timestamp with time zone"
+    ],
+    [
+     "ended_at",
+     "timestamp with time zone"
+    ],
+    [
+     "protocol_version",
+     "text"
+    ],
+    [
+     "universe_size",
+     "integer"
+    ],
+    [
+     "prefilter",
+     "text"
+    ],
+    [
+     "dev_start",
+     "date"
+    ],
+    [
+     "dev_end",
+     "date"
+    ],
+    [
+     "costs_json",
+     "jsonb"
+    ],
+    [
+     "iterations",
+     "integer"
+    ],
+    [
+     "trials_own",
+     "integer"
+    ],
+    [
+     "trials_inherited",
+     "integer"
+    ],
+    [
+     "best_genome_hash",
+     "text"
+    ],
+    [
+     "best_reward",
+     "double precision"
+    ],
+    [
+     "best_sharpe",
+     "double precision"
+    ],
+    [
+     "pbo",
+     "double precision"
+    ],
+    [
+     "stop_reason",
+     "text"
+    ],
+    [
+     "stop_detail",
+     "text"
+    ],
+    [
+     "models_used",
+     "jsonb"
+    ],
+    [
+     "created_at",
+     "timestamp with time zone"
+    ]
+   ],
+   "last_row_at": "2026-08-19",
+   "fresh_col": "created_at",
+   "values": {},
+   "intent": "Autonomous quant research lab \u2014 the published record. Written by strategylab's research daemon, read by the public site. The whole point is that a reader can REPLICATE, so every row carries the exact inputs (genome, protocol, data window, universe) alongside the result. The schema encodes one hard-won lesson: a single good backtest is not a finding. Everything the lab produced that looked good on first sight failed its first honest replication \u2014 a pre-filter worth +0.156 Sharpe on one genome ... p = 0.53 across seven an \"impact law\" with R2 = 0.83 ................... p = 0.92 out of sample a s",
+   "domain": "Other"
+  },
+  {
+   "name": "research_charts",
+   "kind": "table",
+   "rows_est": 40,
+   "columns": [
+    [
+     "id",
+     "bigint"
+    ],
+    [
+     "slug",
+     "text"
+    ],
+    [
+     "title",
+     "text"
+    ],
+    [
+     "caption",
+     "text"
+    ],
+    [
+     "kind",
+     "text"
+    ],
+    [
+     "sample_window",
+     "text"
+    ],
+    [
+     "storage_path",
+     "text"
+    ],
+    [
+     "public_url",
+     "text"
+    ],
+    [
+     "bytes",
+     "integer"
+    ],
+    [
+     "sha256",
+     "text"
+    ],
+    [
+     "campaign_run_id",
+     "text"
+    ],
+    [
+     "genome_hash",
+     "text"
+    ],
+    [
+     "note_slug",
+     "text"
+    ],
+    [
+     "trials_considered",
+     "integer"
+    ],
+    [
+     "sort_order",
+     "integer"
+    ],
+    [
+     "published",
+     "boolean"
+    ],
+    [
+     "created_at",
+     "timestamp with time zone"
+    ],
+    [
+     "updated_at",
+     "timestamp with time zone"
+    ],
+    [
+     "width",
+     "integer"
+    ],
+    [
+     "height",
+     "integer"
+    ]
+   ],
+   "last_row_at": "2026-08-19",
+   "fresh_col": "updated_at",
+   "values": {
+    "kind": [
+     "diagnostic",
+     "equity",
+     "exposure",
+     "folds",
+     "search_operators",
+     "search_reward",
+     "search_sources",
+     "sides",
+     "trades"
+    ]
+   },
+   "intent": "Charts for the research lab. Companion to 20260819220000_quant_research_lab.sql. Images live in Supabase Storage; this table is the catalogue that gives each one its meaning. Two columns are NOT NULL for a reason that is specific to quant research. `sample_window` \u2014 an equity curve drawn on the window the search optimised over is the single most misleading artifact this lab produces. It always slopes up and to the right, because it was selected to. The same strategy's out-of-sample curve went from 5.5x the incumbent to +0.03. So no chart can be stored without declaring which window it is drawn",
+   "domain": "Other"
+  },
+  {
+   "name": "research_charts_public_v",
+   "kind": "view",
+   "rows_est": 0,
+   "columns": [
+    [
+     "slug",
+     "text"
+    ],
+    [
+     "title",
+     "text"
+    ],
+    [
+     "caption",
+     "text"
+    ],
+    [
+     "kind",
+     "text"
+    ],
+    [
+     "sample_window",
+     "text"
+    ],
+    [
+     "public_url",
+     "text"
+    ],
+    [
+     "width",
+     "integer"
+    ],
+    [
+     "height",
+     "integer"
+    ],
+    [
+     "campaign_run_id",
+     "text"
+    ],
+    [
+     "genome_hash",
+     "text"
+    ],
+    [
+     "note_slug",
+     "text"
+    ],
+    [
+     "trials_considered",
+     "integer"
+    ],
+    [
+     "sort_order",
+     "integer"
+    ],
+    [
+     "created_at",
+     "timestamp with time zone"
+    ],
+    [
+     "is_in_sample",
+     "boolean"
+    ]
+   ],
+   "last_row_at": null,
+   "values": {},
+   "intent": "Intrinsic pixel dimensions for chart images. Not cosmetic. The figures are lazy-loaded, and a lazy <img> with no width or height collapses to zero height until it loads \u2014 so it never enters the viewport, so it never loads. Seven figures rendered as a 0px-tall region and the whole article measured 966px. Storing the real dimensions lets the page reserve the right box up front, which both fixes the deadlock and removes the layout shift when each plot arrives.",
+   "domain": "Other"
+  },
+  {
+   "name": "research_findings",
+   "kind": "table",
+   "rows_est": 0,
+   "columns": [
+    [
+     "id",
+     "bigint"
+    ],
+    [
+     "slug",
+     "text"
+    ],
+    [
+     "claim",
+     "text"
+    ],
+    [
+     "status",
+     "text"
+    ],
+    [
+     "replications",
+     "integer"
+    ],
+    [
+     "refutations",
+     "integer"
+    ],
+    [
+     "evidence_json",
+     "jsonb"
+    ],
+    [
+     "caveats",
+     "text"
+    ],
+    [
+     "reproduce_command",
+     "text"
+    ],
+    [
+     "source_campaign",
+     "text"
+    ],
+    [
+     "published",
+     "boolean"
+    ],
+    [
+     "created_at",
+     "timestamp with time zone"
+    ],
+    [
+     "updated_at",
+     "timestamp with time zone"
+    ]
+   ],
+   "last_row_at": null,
+   "fresh_col": "updated_at",
+   "values": {},
+   "intent": "Findings: claims, and how much evidence stands behind each one.",
+   "domain": "Other"
+  },
+  {
+   "name": "research_leaderboard_v",
+   "kind": "view",
+   "rows_est": 0,
+   "columns": [
+    [
+     "genome_hash",
+     "text"
+    ],
+    [
+     "campaign_run_id",
+     "text"
+    ],
+    [
+     "dev_sharpe",
+     "double precision"
+    ],
+    [
+     "holdout_sharpe",
+     "double precision"
+    ],
+    [
+     "trials_considered",
+     "integer"
+    ],
+    [
+     "deflated_sharpe",
+     "double precision"
+    ],
+    [
+     "pbo",
+     "double precision"
+    ],
+    [
+     "gate_passed",
+     "boolean"
+    ],
+    [
+     "prefilter",
+     "text"
+    ],
+    [
+     "dev_start",
+     "date"
+    ],
+    [
+     "dev_end",
+     "date"
+    ],
+    [
+     "created_at",
+     "timestamp with time zone"
+    ]
+   ],
+   "last_row_at": null,
+   "values": {},
+   "intent": "Autonomous quant research lab \u2014 the published record. Written by strategylab's research daemon, read by the public site. The whole point is that a reader can REPLICATE, so every row carries the exact inputs (genome, protocol, data window, universe) alongside the result. The schema encodes one hard-won lesson: a single good backtest is not a finding. Everything the lab produced that looked good on first sight failed its first honest replication \u2014 a pre-filter worth +0.156 Sharpe on one genome ... p = 0.53 across seven an \"impact law\" with R2 = 0.83 ................... p = 0.92 out of sample a s",
+   "domain": "Other"
+  },
+  {
+   "name": "research_notes",
+   "kind": "table",
+   "rows_est": 0,
+   "columns": [
+    [
+     "id",
+     "bigint"
+    ],
+    [
+     "slug",
+     "text"
+    ],
+    [
+     "title",
+     "text"
+    ],
+    [
+     "summary",
+     "text"
+    ],
+    [
+     "body_md",
+     "text"
+    ],
+    [
+     "result_kind",
+     "text"
+    ],
+    [
+     "tags",
+     "ARRAY"
+    ],
+    [
+     "charts",
+     "jsonb"
+    ],
+    [
+     "published",
+     "boolean"
+    ],
+    [
+     "created_at",
+     "timestamp with time zone"
+    ],
+    [
+     "updated_at",
+     "timestamp with time zone"
+    ]
+   ],
+   "last_row_at": "2026-08-19",
+   "fresh_col": "updated_at",
+   "values": {},
+   "intent": "Long-form write-ups (the markdown in research/), versioned by slug.",
+   "domain": "Other"
+  },
+  {
+   "name": "research_prediction_events",
+   "kind": "table",
+   "rows_est": 0,
+   "columns": [
+    [
+     "id",
+     "bigint"
+    ],
+    [
+     "at",
+     "timestamp with time zone"
+    ],
+    [
+     "kind",
+     "text"
+    ],
+    [
+     "lock",
+     "text"
+    ],
+    [
+     "payload",
+     "jsonb"
+    ]
+   ],
+   "last_row_at": null,
+   "values": {},
+   "intent": "3) The ledger's log, moved with the ledger.",
+   "domain": "Other"
+  },
+  {
+   "name": "research_predictions",
+   "kind": "table",
+   "rows_est": 65,
+   "columns": [
+    [
+     "lock",
+     "text"
+    ],
+    [
+     "ticker",
+     "text"
+    ],
+    [
+     "driver",
+     "text"
+    ],
+    [
+     "priced_in_pct",
+     "double precision"
+    ],
+    [
+     "p_resolves",
+     "double precision"
+    ],
+    [
+     "move_if_true",
+     "double precision"
+    ],
+    [
+     "move_if_false",
+     "double precision"
+    ],
+    [
+     "resolver",
+     "text"
+    ],
+    [
+     "spec_json",
+     "jsonb"
+    ],
+    [
+     "made_on",
+     "date"
+    ],
+    [
+     "resolve_on",
+     "date"
+    ],
+    [
+     "price_at_prediction",
+     "double precision"
+    ],
+    [
+     "rationale",
+     "text"
+    ],
+    [
+     "priced_in_id",
+     "bigint"
+    ],
+    [
+     "outcome",
+     "text"
+    ],
+    [
+     "outcome_detail",
+     "jsonb"
+    ],
+    [
+     "resolved_at",
+     "date"
+    ],
+    [
+     "price_at_resolution",
+     "double precision"
+    ],
+    [
+     "realised_move",
+     "double precision"
+    ],
+    [
+     "published",
+     "boolean"
+    ],
+    [
+     "created_at",
+     "timestamp with time zone"
+    ]
+   ],
+   "last_row_at": "2026-08-25",
+   "fresh_col": "created_at",
+   "values": {},
+   "intent": "2) Forward predictions. Sealed at creation; resolved once.",
+   "domain": "Other"
+  },
+  {
+   "name": "research_predictions_integrity_v",
+   "kind": "view",
+   "rows_est": 0,
+   "columns": [
+    [
+     "lock",
+     "text"
+    ],
+    [
+     "ticker",
+     "text"
+    ],
+    [
+     "driver",
+     "text"
+    ],
+    [
+     "made_on",
+     "date"
+    ],
+    [
+     "resolve_on",
+     "date"
+    ],
+    [
+     "outcome",
+     "text"
+    ],
+    [
+     "resolved_without_date",
+     "boolean"
+    ],
+    [
+     "overdue",
+     "boolean"
+    ]
+   ],
+   "last_row_at": null,
+   "values": {},
+   "intent": "5) Integrity. Anything listed here means the ledger was edited outside the intended path; the client recomputes the hash and compares.",
+   "domain": "Other"
+  },
+  {
+   "name": "research_predictions_scored_v",
+   "kind": "view",
+   "rows_est": 0,
+   "columns": [
+    [
+     "lock",
+     "text"
+    ],
+    [
+     "ticker",
+     "text"
+    ],
+    [
+     "driver",
+     "text"
+    ],
+    [
+     "priced_in_pct",
+     "double precision"
+    ],
+    [
+     "resolver",
+     "text"
+    ],
+    [
+     "p_resolves",
+     "double precision"
+    ],
+    [
+     "move_if_true",
+     "double precision"
+    ],
+    [
+     "move_if_false",
+     "double precision"
+    ],
+    [
+     "made_on",
+     "date"
+    ],
+    [
+     "resolve_on",
+     "date"
+    ],
+    [
+     "resolved_at",
+     "date"
+    ],
+    [
+     "outcome",
+     "text"
+    ],
+    [
+     "price_at_prediction",
+     "double precision"
+    ],
+    [
+     "price_at_resolution",
+     "double precision"
+    ],
+    [
+     "realised_move",
+     "double precision"
+    ],
+    [
+     "brier",
+     "double precision"
+    ],
+    [
+     "cell",
+     "text"
+    ]
+   ],
+   "last_row_at": null,
+   "values": {},
+   "intent": "4) Scoring view. Brier is reported per row; the base-rate comparison has to be done over a set, because a Brier score in absolute means nothing \u2014 a 75% \"beat\" call against a 75% base rate is not skill.",
+   "domain": "Other"
+  },
+  {
+   "name": "research_priced_in",
+   "kind": "table",
+   "rows_est": 34,
+   "columns": [
+    [
+     "id",
+     "bigint"
+    ],
+    [
+     "ticker",
+     "text"
+    ],
+    [
+     "as_of",
+     "date"
+    ],
+    [
+     "price",
+     "double precision"
+    ],
+    [
+     "implied_revenue_cagr",
+     "double precision"
+    ],
+    [
+     "discount_rate",
+     "double precision"
+    ],
+    [
+     "terminal_growth",
+     "double precision"
+    ],
+    [
+     "fcf_margin",
+     "double precision"
+    ],
+    [
+     "n_targets",
+     "integer"
+    ],
+    [
+     "target_low",
+     "double precision"
+    ],
+    [
+     "target_high",
+     "double precision"
+    ],
+    [
+     "target_median",
+     "double precision"
+    ],
+    [
+     "median_gap",
+     "double precision"
+    ],
+    [
+     "n_rejected_bull",
+     "integer"
+    ],
+    [
+     "n_rejected_bear",
+     "integer"
+    ],
+    [
+     "n_endorsed",
+     "integer"
+    ],
+    [
+     "drivers_json",
+     "jsonb"
+    ],
+    [
+     "cases_json",
+     "jsonb"
+    ],
+    [
+     "summary",
+     "text"
+    ],
+    [
+     "pipeline_version",
+     "text"
+    ],
+    [
+     "model",
+     "text"
+    ],
+    [
+     "generation_is_pit",
+     "boolean"
+    ],
+    [
+     "note_slug",
+     "text"
+    ],
+    [
+     "published",
+     "boolean"
+    ],
+    [
+     "created_at",
+     "timestamp with time zone"
+    ],
+    [
+     "summary_json",
+     "jsonb"
+    ]
+   ],
+   "last_row_at": "2026-08-25",
+   "fresh_col": "created_at",
+   "values": {
+    "model": [
+     "claude-opus-5",
+     "glm-5.1:cloud"
+    ]
+   },
+   "intent": "1) What a price already contains, reconstructed at a point in time.",
+   "domain": "Other"
+  },
+  {
+   "name": "research_priced_in_public_v",
+   "kind": "view",
+   "rows_est": 0,
+   "columns": [
+    [
+     "ticker",
+     "text"
+    ],
+    [
+     "as_of",
+     "date"
+    ],
+    [
+     "price",
+     "double precision"
+    ],
+    [
+     "implied_revenue_cagr",
+     "double precision"
+    ],
+    [
+     "n_targets",
+     "integer"
+    ],
+    [
+     "target_low",
+     "double precision"
+    ],
+    [
+     "target_high",
+     "double precision"
+    ],
+    [
+     "target_median",
+     "double precision"
+    ],
+    [
+     "median_gap",
+     "double precision"
+    ],
+    [
+     "drivers_json",
+     "jsonb"
+    ],
+    [
+     "summary",
+     "text"
+    ],
+    [
+     "created_at",
+     "timestamp with time zone"
+    ],
+    [
+     "summary_json",
+     "jsonb"
+    ]
+   ],
+   "last_row_at": null,
+   "values": {},
+   "intent": "Structured summary for research_priced_in. `summary` held the whole reconstruction as one ~1,500-character paragraph. The content was right \u2014 where the price sits, what it pays for, what it declines, and the one investigable question \u2014 but all four ran together, and on a quote page that is a wall nobody reads. Splitting it at GENERATION rather than parsing it out afterwards: the model already knows which sentence is doing which job, so asking for the parts is both more reliable than a regex and better prose, because each part is now written to stand alone. `summary` is kept and still populated",
+   "domain": "Other"
+  },
+  {
+   "name": "research_priced_in_queue_v",
+   "kind": "view",
+   "rows_est": 0,
+   "columns": [
+    [
+     "symbol",
+     "text"
+    ],
+    [
+     "exchange",
+     "text"
+    ],
+    [
+     "company_name",
+     "text"
+    ],
+    [
+     "market_cap",
+     "bigint"
+    ],
+    [
+     "n_targets",
+     "integer"
+    ],
+    [
+     "mentions_180d",
+     "bigint"
+    ],
+    [
+     "priority",
+     "double precision"
+    ],
+    [
+     "last_run_at",
+     "timestamp with time zone"
+    ],
+    [
+     "last_run_status",
+     "text"
+    ],
+    [
+     "consecutive_failures",
+     "integer"
+    ],
+    [
+     "cooldown_until",
+     "date"
+    ],
+    [
+     "last_as_of",
+     "date"
+    ],
+    [
+     "last_published",
+     "boolean"
+    ],
+    [
+     "days_since_run",
+     "integer"
+    ]
+   ],
+   "last_row_at": null,
+   "values": {},
+   "intent": "4) What the batch runner asks for: the next names due. Kept as a view so the ordering rule is stated once, in the database, rather than reimplemented in whichever process happens to be draining the queue. `due_days` is a parameter of the caller, so the view exposes the age and lets the caller threshold it.",
+   "domain": "Other"
+  },
+  {
+   "name": "research_priced_in_runs",
+   "kind": "table",
+   "rows_est": 0,
+   "columns": [
+    [
+     "id",
+     "bigint"
+    ],
+    [
+     "started_at",
+     "timestamp with time zone"
+    ],
+    [
+     "ended_at",
+     "timestamp with time zone"
+    ],
+    [
+     "backend",
+     "text"
+    ],
+    [
+     "models",
+     "text"
+    ],
+    [
+     "pipeline_version",
+     "text"
+    ],
+    [
+     "attempted",
+     "integer"
+    ],
+    [
+     "succeeded",
+     "integer"
+    ],
+    [
+     "failed",
+     "integer"
+    ],
+    [
+     "published",
+     "integer"
+    ],
+    [
+     "held",
+     "integer"
+    ],
+    [
+     "predictions_registered",
+     "integer"
+    ],
+    [
+     "usage_json",
+     "jsonb"
+    ],
+    [
+     "stop_reason",
+     "text"
+    ],
+    [
+     "detail",
+     "text"
+    ]
+   ],
+   "last_row_at": null,
+   "values": {},
+   "intent": "2) One row per batch pass.",
+   "domain": "Other"
+  },
+  {
+   "name": "research_priced_in_universe",
+   "kind": "table",
+   "rows_est": 5807,
+   "columns": [
+    [
+     "symbol",
+     "text"
+    ],
+    [
+     "exchange",
+     "text"
+    ],
+    [
+     "company_name",
+     "text"
+    ],
+    [
+     "market_cap",
+     "bigint"
+    ],
+    [
+     "eligible",
+     "boolean"
+    ],
+    [
+     "reason",
+     "text"
+    ],
+    [
+     "n_targets",
+     "integer"
+    ],
+    [
+     "mentions_180d",
+     "bigint"
+    ],
+    [
+     "checked_at",
+     "timestamp with time zone"
+    ],
+    [
+     "priority",
+     "double precision"
+    ],
+    [
+     "last_run_at",
+     "timestamp with time zone"
+    ],
+    [
+     "last_run_status",
+     "text"
+    ],
+    [
+     "last_error",
+     "text"
+    ],
+    [
+     "consecutive_failures",
+     "integer"
+    ],
+    [
+     "cooldown_until",
+     "date"
+    ],
+    [
+     "runs",
+     "integer"
+    ],
+    [
+     "updated_at",
+     "timestamp with time zone"
+    ]
+   ],
+   "last_row_at": "2026-08-25",
+   "fresh_col": "updated_at",
+   "values": {
+    "last_run_status": [
+     "ineligible",
+     "ok"
+    ]
+   },
+   "intent": "1) The working universe and its schedule.",
+   "domain": "Other"
+  },
+  {
+   "name": "research_public_v",
+   "kind": "view",
+   "rows_est": 0,
+   "columns": [
+    [
+     "slug",
+     "text"
+    ],
+    [
+     "title",
+     "text"
+    ],
+    [
+     "summary",
+     "text"
+    ],
+    [
+     "body_md",
+     "text"
+    ],
+    [
+     "result_kind",
+     "text"
+    ],
+    [
+     "tags",
+     "ARRAY"
+    ],
+    [
+     "charts",
+     "jsonb"
+    ],
+    [
+     "created_at",
+     "timestamp with time zone"
+    ],
+    [
+     "updated_at",
+     "timestamp with time zone"
+    ]
+   ],
+   "last_row_at": null,
+   "values": {},
+   "intent": "Public read access. Only PUBLISHED rows, and only through a view, so a half-finished campaign cannot leak onto the site mid-run.",
+   "domain": "Other"
+  },
+  {
+   "name": "research_strategies",
+   "kind": "table",
+   "rows_est": 35,
+   "columns": [
+    [
+     "id",
+     "bigint"
+    ],
+    [
+     "genome_hash",
+     "text"
+    ],
+    [
+     "campaign_run_id",
+     "text"
+    ],
+    [
+     "genome_json",
+     "jsonb"
+    ],
+    [
+     "changes_vs_incumbent",
+     "text"
+    ],
+    [
+     "dev_metrics",
+     "jsonb"
+    ],
+    [
+     "fold_metrics",
+     "jsonb"
+    ],
+    [
+     "holdout_metrics",
+     "jsonb"
+    ],
+    [
+     "vault_metrics",
+     "jsonb"
+    ],
+    [
+     "trials_considered",
+     "integer"
+    ],
+    [
+     "deflated_sharpe",
+     "double precision"
+    ],
+    [
+     "pbo",
+     "double precision"
+    ],
+    [
+     "gate_passed",
+     "boolean"
+    ],
+    [
+     "gate_failures",
+     "ARRAY"
+    ],
+    [
+     "created_at",
+     "timestamp with time zone"
+    ],
+    [
+     "published",
+     "boolean"
+    ]
+   ],
+   "last_row_at": "2026-08-19",
+   "fresh_col": "created_at",
+   "values": {},
+   "intent": "The strategies themselves: everything needed to re-run one exactly.",
+   "domain": "Other"
+  },
+  {
+   "name": "security_identity_map",
+   "kind": "table",
+   "rows_est": 2019,
+   "columns": [
+    [
+     "id",
+     "bigint"
+    ],
+    [
+     "alias_kind",
+     "text"
+    ],
+    [
+     "alias_value",
+     "text"
+    ],
+    [
+     "alias_value_norm",
+     "text"
+    ],
+    [
+     "canonical_ticker",
+     "text"
+    ],
+    [
+     "canonical_company_name",
+     "text"
+    ],
+    [
+     "confidence",
+     "double precision"
+    ],
+    [
+     "source",
+     "text"
+    ],
+    [
+     "verified",
+     "boolean"
+    ],
+    [
+     "metadata_json",
+     "jsonb"
+    ],
+    [
+     "created_at",
+     "timestamp with time zone"
+    ],
+    [
+     "updated_at",
+     "timestamp with time zone"
+    ]
+   ],
+   "last_row_at": "2026-04-15",
+   "fresh_col": "updated_at",
+   "values": {
+    "alias_kind": [
+     "company_name",
+     "ticker"
+    ],
+    "source": [
+     "manual",
+     "manual_mcp",
+     "swingtrader.tickers"
+    ]
+   },
+   "intent": "Unified security identity map + graph integration Goal: - Keep ticker aliases and company-name aliases in one table. - Resolve graph edges to canonical tickers through that map.",
+   "domain": "Other"
+  },
+  {
+   "name": "telegram_message_log",
+   "kind": "table",
+   "rows_est": 1253,
+   "columns": [
+    [
+     "id",
+     "uuid"
+    ],
+    [
+     "user_id",
+     "uuid"
+    ],
+    [
+     "chat_id",
+     "character varying"
+    ],
+    [
+     "message_type",
+     "character varying"
+    ],
+    [
+     "message_text",
+     "text"
+    ],
+    [
+     "telegram_message_id",
+     "bigint"
+    ],
+    [
+     "success",
+     "boolean"
+    ],
+    [
+     "error_text",
+     "text"
+    ],
+    [
+     "sent_at",
+     "timestamp with time zone"
+    ]
+   ],
+   "last_row_at": null,
+   "values": {
+    "message_type": [
+     "daily_narrative",
+     "market_screening_alert",
+     "market_screening_error",
+     "public_screening_alert",
+     "public_screening_no_trigger",
+     "screening_alert",
+     "screening_error",
+     "screening_no_trigger"
+    ]
+   },
+   "intent": "telegram_message_log \u2014 record every Telegram message sent by the platform Populated by the Mac Mini cron (run_daily_narrative.py) and any future server-side Telegram sender.  Read-only from the UI for audit/debug.",
+   "domain": "Other"
+  },
+  {
+   "name": "telegram_update_requests",
+   "kind": "table",
+   "rows_est": 5,
+   "columns": [
+    [
+     "id",
+     "uuid"
+    ],
+    [
+     "user_id",
+     "uuid"
+    ],
+    [
+     "chat_id",
+     "character varying"
+    ],
+    [
+     "status",
+     "character varying"
+    ],
+    [
+     "requested_at",
+     "timestamp with time zone"
+    ],
+    [
+     "started_at",
+     "timestamp with time zone"
+    ],
+    [
+     "completed_at",
+     "timestamp with time zone"
+    ],
+    [
+     "response_preview",
+     "text"
+    ],
+    [
+     "telegram_message_id",
+     "bigint"
+    ],
+    [
+     "error_text",
+     "text"
+    ],
+    [
+     "created_at",
+     "timestamp with time zone"
+    ],
+    [
+     "updated_at",
+     "timestamp with time zone"
+    ],
+    [
+     "request_type",
+     "character varying"
+    ],
+    [
+     "request_text",
+     "text"
+    ]
+   ],
+   "last_row_at": "2026-05-08",
+   "fresh_col": "updated_at",
+   "values": {
+    "request_type": [
+     "search",
+     "update"
+    ]
+   },
+   "intent": "telegram_update_requests Queue table for on-demand Telegram /update requests. Webhook inserts pending rows; Mac worker processes and sends responses.",
+   "domain": "Other"
+  },
+  {
+   "name": "ticker_coverage_daily",
+   "kind": "table",
+   "rows_est": 63572,
+   "columns": [
+    [
+     "bucket_day",
+     "date"
+    ],
+    [
+     "ticker",
+     "text"
+    ],
+    [
+     "mention_count",
+     "bigint"
+    ],
+    [
+     "scored_count",
+     "bigint"
+    ],
+    [
+     "avg_sentiment",
+     "double precision"
+    ]
+   ],
+   "last_row_at": "2026-08-25",
+   "fresh_col": "bucket_day",
+   "values": {},
+   "intent": "Materialize the /quote directory's daily rollup. get_top_covered_tickers read news_trends_ticker_daily_v directly, which rescans 120 days of news_article_tickers + news_articles + ticker_sentiment heads on every call: measured 4.6s for a plain page and 7.6s for a search \u2014 against the REST role's 8s statement_timeout. That is a page that breaks the first time the corpus grows. Same split the topic hubs use: membership stays live, the expensive rollup is materialized and rebuilt post-ingest. A table (not a matview) so it can carry RLS like its siblings. Only the daily rollup is stored, NOT the w",
+   "domain": "Tickers: sentiment & coverage"
+  },
+  {
+   "name": "ticker_pair_candidates_v",
+   "kind": "view",
+   "rows_est": 0,
+   "columns": [
+    [
+     "ticker_a",
+     "text"
+    ],
+    [
+     "ticker_b",
+     "text"
+    ],
+    [
+     "article_count",
+     "numeric"
+    ],
+    [
+     "mention_count",
+     "numeric"
+    ],
+    [
+     "strength_max_any",
+     "double precision"
+    ],
+    [
+     "last_seen_at",
+     "timestamp with time zone"
+    ],
+    [
+     "rel_types",
+     "ARRAY"
+    ]
+   ],
+   "last_row_at": null,
+   "values": {},
+   "intent": "Candidate pairs: order-normalized, deduped across rel_types, off the canonicalized graph. This is the whole moat in one view \u2014 calibrate_cli only ever fits pairs that appear here, so we test hundreds of news-linked pairs per week, not the tens of thousands a blind universe scan would.",
+   "domain": "Relationships & graph"
+  },
+  {
+   "name": "ticker_pair_stats",
+   "kind": "table",
+   "rows_est": 795,
+   "columns": [
+    [
+     "id",
+     "bigint"
+    ],
+    [
+     "ticker_a",
+     "text"
+    ],
+    [
+     "ticker_b",
+     "text"
+    ],
+    [
+     "hedge_ratio",
+     "double precision"
+    ],
+    [
+     "coint_pvalue",
+     "double precision"
+    ],
+    [
+     "half_life_days",
+     "double precision"
+    ],
+    [
+     "spread_mean",
+     "double precision"
+    ],
+    [
+     "spread_std",
+     "double precision"
+    ],
+    [
+     "window_days",
+     "integer"
+    ],
+    [
+     "n_obs",
+     "integer"
+    ],
+    [
+     "is_cointegrated",
+     "boolean"
+    ],
+    [
+     "calibrated_at",
+     "timestamp with time zone"
+    ],
+    [
+     "current_price_a",
+     "double precision"
+    ],
+    [
+     "current_price_b",
+     "double precision"
+    ],
+    [
+     "current_spread",
+     "double precision"
+    ],
+    [
+     "current_zscore",
+     "double precision"
+    ],
+    [
+     "zscore_at",
+     "timestamp with time zone"
+    ],
+    [
+     "updated_at",
+     "timestamp with time zone"
+    ],
+    [
+     "metadata_json",
+     "jsonb"
+    ]
+   ],
+   "last_row_at": "2026-06-15",
+   "fresh_col": "updated_at",
+   "values": {},
+   "intent": "Ticker Pair Stats (cointegration / pairs-trading metrics on the graph) Why: - The news-derived relationship graph (ticker_relationship_edges) already prunes the candidate set: we only ever test pairs that share a verified economic link, not a blind N^2 universe scan. - Price-derived statistics (hedge ratio, Engle-Granger p-value, OU half-life, rolling spread mean/std) live HERE, in a separate lineage from the news-derived edges, so the relationship-graph refresh never clobbers them and vice versa. The two are stitched together in a view. Two clocks (kept up to date by two separate CLIs / cron ",
+   "domain": "Relationships & graph"
+  },
+  {
+   "name": "ticker_relationship_edge_evidence",
+   "kind": "table",
+   "rows_est": 85590,
+   "columns": [
+    [
+     "edge_id",
+     "bigint"
+    ],
+    [
+     "article_id",
+     "bigint"
+    ],
+    [
+     "rel_pair_key",
+     "text"
+    ],
+    [
+     "rel_type",
+     "text"
+    ],
+    [
+     "pair_strength",
+     "double precision"
+    ],
+    [
+     "head_confidence",
+     "double precision"
+    ],
+    [
+     "reasoning_text",
+     "text"
+    ],
+    [
+     "published_at",
+     "timestamp with time zone"
+    ],
+    [
+     "impact_json_snapshot",
+     "jsonb"
+    ],
+    [
+     "top_dimensions_snapshot",
+     "jsonb"
+    ],
+    [
+     "created_at",
+     "timestamp with time zone"
+    ]
+   ],
+   "last_row_at": "2026-08-25",
+   "fresh_col": "created_at",
+   "values": {
+    "rel_type": [
+     "acquirer",
+     "client/representative",
+     "competitor",
+     "competitor|supplier|customer|partner|acquirer|subsidiary",
+     "customer",
+     "investigates",
+     "investigating",
+     "investigation",
+     "investigation_subject",
+     "investigation_target",
+     "investor",
+     "investor_holding",
+     "mutual",
+     "n/a",
+     "none",
+     "other",
+     "partner",
+     "potential partner",
+     "potential_acquirer",
+     "potential_customer",
+     "potential_partner",
+     "service_provider",
+     "subsidiary",
+     "supplier"
+    ]
+   },
+   "intent": "Ticker relationship edge traceability Goal: - Provide deterministic traceability from ticker_relationship_edges back to source articles and impact-vector dimensions.",
+   "domain": "Relationships & graph"
+  },
+  {
+   "name": "ticker_relationship_edge_traceability_v",
+   "kind": "view",
+   "rows_est": 0,
+   "columns": [
+    [
+     "edge_id",
+     "bigint"
+    ],
+    [
+     "from_ticker",
+     "text"
+    ],
+    [
+     "to_ticker",
+     "text"
+    ],
+    [
+     "rel_type",
+     "text"
+    ],
+    [
+     "strength_avg",
+     "double precision"
+    ],
+    [
+     "mention_count",
+     "integer"
+    ],
+    [
+     "article_id",
+     "bigint"
+    ],
+    [
+     "article_title",
+     "character varying"
+    ],
+    [
+     "article_url",
+     "character varying"
+    ],
+    [
+     "published_at",
+     "timestamp with time zone"
+    ],
+    [
+     "pair_strength",
+     "double precision"
+    ],
+    [
+     "head_confidence",
+     "double precision"
+    ],
+    [
+     "reasoning_text",
+     "text"
+    ],
+    [
+     "top_dimensions_snapshot",
+     "jsonb"
+    ],
+    [
+     "impact_json_snapshot",
+     "jsonb"
+    ]
+   ],
+   "last_row_at": null,
+   "values": {},
+   "intent": "Ticker relationship edge traceability Goal: - Provide deterministic traceability from ticker_relationship_edges back to source articles and impact-vector dimensions.",
+   "domain": "Relationships & graph"
+  },
+  {
+   "name": "ticker_relationship_edges",
+   "kind": "table",
+   "rows_est": 38789,
+   "columns": [
+    [
+     "id",
+     "bigint"
+    ],
+    [
+     "from_ticker",
+     "text"
+    ],
+    [
+     "to_ticker",
+     "text"
+    ],
+    [
+     "rel_type",
+     "text"
+    ],
+    [
+     "strength_avg",
+     "double precision"
+    ],
+    [
+     "strength_max",
+     "double precision"
+    ],
+    [
+     "mention_count",
+     "integer"
+    ],
+    [
+     "article_count",
+     "integer"
+    ],
+    [
+     "first_seen_at",
+     "timestamp with time zone"
+    ],
+    [
+     "last_seen_at",
+     "timestamp with time zone"
+    ],
+    [
+     "updated_at",
+     "timestamp with time zone"
+    ],
+    [
+     "metadata_json",
+     "jsonb"
+    ]
+   ],
+   "last_row_at": "2026-08-25",
+   "fresh_col": "updated_at",
+   "values": {
+    "rel_type": [
+     "acquirer",
+     "client/representative",
+     "competitor",
+     "competitor|supplier|customer|partner|acquirer|subsidiary",
+     "customer",
+     "investigates",
+     "investigating",
+     "investigation",
+     "investigation_subject",
+     "investigation_target",
+     "investor",
+     "investor_holding",
+     "mutual",
+     "n/a",
+     "none",
+     "other",
+     "partner",
+     "potential partner",
+     "potential_acquirer",
+     "potential_customer",
+     "potential_partner",
+     "service_provider",
+     "subsidiary",
+     "supplier"
+    ]
+   },
+   "intent": "Ticker Relationship Network (graph-ready adjacency structure) Why: - Avoid scanning/parsing JSONB relationship heads for every narrative run. - Materialize ticker->ticker edges with indexed lookup for multi-hop traversal. - Keep provenance + recency so downstream ranking can prioritize fresh edges.",
+   "domain": "Relationships & graph"
+  },
+  {
+   "name": "ticker_relationship_network_pairs_v",
+   "kind": "view",
+   "rows_est": 0,
+   "columns": [
+    [
+     "from_ticker",
+     "text"
+    ],
+    [
+     "to_ticker",
+     "text"
+    ],
+    [
+     "rel_type",
+     "text"
+    ],
+    [
+     "strength_avg",
+     "double precision"
+    ],
+    [
+     "strength_max",
+     "double precision"
+    ],
+    [
+     "mention_count",
+     "bigint"
+    ],
+    [
+     "article_count",
+     "bigint"
+    ],
+    [
+     "first_seen_at",
+     "timestamp with time zone"
+    ],
+    [
+     "last_seen_at",
+     "timestamp with time zone"
+    ],
+    [
+     "hedge_ratio",
+     "double precision"
+    ],
+    [
+     "coint_pvalue",
+     "double precision"
+    ],
+    [
+     "is_cointegrated",
+     "boolean"
+    ],
+    [
+     "half_life_days",
+     "double precision"
+    ],
+    [
+     "spread_mean",
+     "double precision"
+    ],
+    [
+     "spread_std",
+     "double precision"
+    ],
+    [
+     "current_zscore",
+     "double precision"
+    ],
+    [
+     "zscore_at",
+     "timestamp with time zone"
+    ],
+    [
+     "calibrated_at",
+     "timestamp with time zone"
+    ]
+   ],
+   "last_row_at": null,
+   "values": {},
+   "intent": "The stitched view: every news-derived edge, now carrying its pair's live cointegration metrics. A news event triggers the existing graph traversal (get_relationship_neighborhood / relationshipsGetNeighborhood) and every returned edge already has is_cointegrated + current_zscore on it \u2014 no new plumbing for the UI/agent layer.",
+   "domain": "Relationships & graph"
+  },
+  {
+   "name": "ticker_relationship_network_resolved_mv",
+   "kind": "matview",
+   "rows_est": 21734,
+   "columns": [],
+   "last_row_at": null,
+   "values": {},
+   "intent": "Relationship network materialization Problem (statement timeout on /protected/relations): ticker_relationship_network_resolved_v calls resolve_canonical_ticker() TWICE per edge across all ~22k rows of ticker_relationship_edges (each call is a security_identity_map lookup), then GROUP BYs \u2014 on EVERY query. So get_relationship_neighborhood() paid a fixed ~6s cost regardless of seed or hop count (measured: 1-hop and 2-hop both ~6.3s; the resolved view costs ~4.5s just to COUNT). Every node click on the relations side panel re-runs it, tripping the Postgres statement_timeout. Fix: Materialize the ",
+   "domain": "Relationships & graph"
+  },
+  {
+   "name": "ticker_relationship_network_resolved_v",
+   "kind": "view",
+   "rows_est": 0,
+   "columns": [
+    [
+     "from_ticker",
+     "text"
+    ],
+    [
+     "to_ticker",
+     "text"
+    ],
+    [
+     "rel_type",
+     "text"
+    ],
+    [
+     "strength_avg",
+     "double precision"
+    ],
+    [
+     "strength_max",
+     "double precision"
+    ],
+    [
+     "mention_count",
+     "bigint"
+    ],
+    [
+     "article_count",
+     "bigint"
+    ],
+    [
+     "first_seen_at",
+     "timestamp with time zone"
+    ],
+    [
+     "last_seen_at",
+     "timestamp with time zone"
+    ]
+   ],
+   "last_row_at": null,
+   "values": {},
+   "intent": "Canonicalized graph view for adjacency traversal.",
+   "domain": "Relationships & graph"
+  },
+  {
+   "name": "ticker_relationship_network_v",
+   "kind": "view",
+   "rows_est": 0,
+   "columns": [
+    [
+     "from_ticker",
+     "text"
+    ],
+    [
+     "to_ticker",
+     "text"
+    ],
+    [
+     "rel_type",
+     "text"
+    ],
+    [
+     "strength_avg",
+     "double precision"
+    ],
+    [
+     "strength_max",
+     "double precision"
+    ],
+    [
+     "mention_count",
+     "integer"
+    ],
+    [
+     "article_count",
+     "integer"
+    ],
+    [
+     "first_seen_at",
+     "timestamp with time zone"
+    ],
+    [
+     "last_seen_at",
+     "timestamp with time zone"
+    ]
+   ],
+   "last_row_at": null,
+   "values": {},
+   "intent": "Ticker Relationship Network (graph-ready adjacency structure) Why: - Avoid scanning/parsing JSONB relationship heads for every narrative run. - Materialize ticker->ticker edges with indexed lookup for multi-hop traversal. - Keep provenance + recency so downstream ranking can prioritize fresh edges.",
+   "domain": "Relationships & graph"
+  },
+  {
+   "name": "ticker_sentiment_heads",
+   "kind": "table",
+   "rows_est": 353761,
+   "columns": [
+    [
+     "head_id",
+     "bigint"
+    ],
+    [
+     "article_id",
+     "bigint"
+    ],
+    [
+     "ticker",
+     "text"
+    ],
+    [
+     "sentiment_score",
+     "double precision"
+    ],
+    [
+     "reasoning_text",
+     "text"
+    ],
+    [
+     "confidence",
+     "double precision"
+    ],
+    [
+     "model",
+     "text"
+    ],
+    [
+     "latency_ms",
+     "integer"
+    ],
+    [
+     "scored_at",
+     "timestamp with time zone"
+    ],
+    [
+     "article_ts",
+     "timestamp with time zone"
+    ],
+    [
+     "updated_at",
+     "timestamp with time zone"
+    ]
+   ],
+   "last_row_at": "2026-08-25",
+   "fresh_col": "updated_at",
+   "values": {
+    "model": [
+     "claude-haiku-4-5",
+     "do-agent",
+     "gemma4:31b-cloud",
+     "gemma4:e4b"
+    ]
+   },
+   "intent": "Ticker Sentiment Materialization (pre-exploded, indexed) Why: - swingtrader.ticker_sentiment_heads_v explodes EVERY TICKER_SENTIMENT head's scores_json (text->jsonb cast + jsonb_each_text) and joins news_articles on every request. The `ticker` column is derived from JSON keys and `article_ts` from a join, so neither a `ticker IN (...)` nor a date filter can be pushed down or indexed \u2014 the view is O(all sentiment heads) per call and was taking 4\u20138s for a single ticker (and growing with ingestion). - This pre-explodes the same data into a real table keyed by (head_id, ticker) with an index on (t",
+   "domain": "Tickers: sentiment & coverage"
+  },
+  {
+   "name": "ticker_sentiment_heads_v",
+   "kind": "view",
+   "rows_est": 0,
+   "columns": [
+    [
+     "head_id",
+     "bigint"
+    ],
+    [
+     "article_id",
+     "bigint"
+    ],
+    [
+     "ticker",
+     "text"
+    ],
+    [
+     "sentiment_score",
+     "double precision"
+    ],
+    [
+     "reasoning_text",
+     "text"
+    ],
+    [
+     "confidence",
+     "double precision"
+    ],
+    [
+     "model",
+     "character varying"
+    ],
+    [
+     "latency_ms",
+     "integer"
+    ],
+    [
+     "scored_at",
+     "timestamp with time zone"
+    ],
+    [
+     "article_ts",
+     "timestamp with time zone"
+    ],
+    [
+     "published_at",
+     "timestamp with time zone"
+    ],
+    [
+     "article_source",
+     "character varying"
+    ],
+    [
+     "article_publisher",
+     "text"
+    ],
+    [
+     "article_title",
+     "character varying"
+    ],
+    [
+     "article_url",
+     "character varying"
+    ]
+   ],
+   "last_row_at": null,
+   "values": {},
+   "intent": "Ticker Sentiment View (article-level, parsed from TICKER_SENTIMENT heads) Why: - Expose sentiment by (article, ticker) without JSON parsing in application code. - Keep traceability to source head metadata and article publication timestamps.",
+   "domain": "Tickers: sentiment & coverage"
+  },
+  {
+   "name": "tickers",
+   "kind": "table",
+   "rows_est": 5810,
+   "columns": [
+    [
+     "symbol",
+     "character varying"
+    ],
+    [
+     "exchange",
+     "character varying"
+    ],
+    [
+     "company_name",
+     "character varying"
+    ],
+    [
+     "sector",
+     "character varying"
+    ],
+    [
+     "industry",
+     "character varying"
+    ],
+    [
+     "market_cap",
+     "bigint"
+    ],
+    [
+     "price",
+     "double precision"
+    ],
+    [
+     "volume",
+     "bigint"
+    ],
+    [
+     "beta",
+     "double precision"
+    ],
+    [
+     "country",
+     "character varying"
+    ],
+    [
+     "is_actively_trading",
+     "boolean"
+    ],
+    [
+     "last_seen_at",
+     "timestamp with time zone"
+    ],
+    [
+     "updated_at",
+     "timestamp with time zone"
+    ]
+   ],
+   "last_row_at": "2026-08-08",
+   "fresh_col": "updated_at",
+   "values": {},
+   "intent": "tickers: universe of actively-traded NYSE and NASDAQ stocks Seeded via scripts/seed_tickers.py (FMP company-screener endpoint).",
+   "domain": "Other"
+  },
+  {
+   "name": "topic_article_v",
+   "kind": "view",
+   "rows_est": 0,
+   "columns": [
+    [
+     "topic_slug",
+     "text"
+    ],
+    [
+     "article_id",
+     "bigint"
+    ],
+    [
+     "title",
+     "character varying"
+    ],
+    [
+     "article_slug",
+     "text"
+    ],
+    [
+     "published_at",
+     "timestamp with time zone"
+    ],
+    [
+     "search_tags",
+     "ARRAY"
+    ],
+    [
+     "matched_tickers",
+     "ARRAY"
+    ]
+   ],
+   "last_row_at": null,
+   "values": {},
+   "intent": "topic_article_v \u2014 the membership query, as a view. Deliberately NOT materialized: it resolves in ~30ms and materializing it would reintroduce the staleness the whole design exists to avoid. The heavy rollups (15-month arcs) are materialized separately below.",
+   "domain": "News: topics & claims"
+  },
+  {
+   "name": "topic_claim_stats",
+   "kind": "table",
+   "rows_est": 1394,
+   "columns": [
+    [
+     "topic_slug",
+     "text"
+    ],
+    [
+     "article_id",
+     "bigint"
+    ],
+    [
+     "claim_key",
+     "text"
+    ],
+    [
+     "claim",
+     "text"
+    ],
+    [
+     "impact",
+     "real"
+    ],
+    [
+     "article_ts",
+     "timestamp with time zone"
+    ],
+    [
+     "article_title",
+     "text"
+    ],
+    [
+     "article_slug",
+     "text"
+    ],
+    [
+     "tickers",
+     "ARRAY"
+    ],
+    [
+     "updated_at",
+     "timestamp with time zone"
+    ]
+   ],
+   "last_row_at": "2026-08-25",
+   "fresh_col": "updated_at",
+   "values": {},
+   "intent": "topic_claim_stats \u2014 the materialized half. Ranked STORY_KEY_POINTS across a topic's whole arc. This CANNOT be live: it scans every matching article's heads, and the REST role (`authenticator`) caps statements at 8s. Refreshed after each ingest, exactly like ticker_sentiment_heads / ticker_relationship_edges. Every claim keeps `article_ts`. A permanent page that aggregates claims will otherwise enshrine stale numbers as evergreen fact \u2014 observed repeatedly: NVIDIA \"$119B supply commitments / $91B guide\" (pre-quarter, reports Aug 26) and Micron \"+346% to $41.46B\" (a prior quarter) both resurface",
+   "domain": "News: topics & claims"
+  },
+  {
+   "name": "topic_stats",
+   "kind": "table",
+   "rows_est": 2,
+   "columns": [
+    [
+     "topic_slug",
+     "text"
+    ],
+    [
+     "article_count",
+     "bigint"
+    ],
+    [
+     "claim_count",
+     "bigint"
+    ],
+    [
+     "first_seen",
+     "timestamp with time zone"
+    ],
+    [
+     "last_seen",
+     "timestamp with time zone"
+    ],
+    [
+     "refreshed_at",
+     "timestamp with time zone"
+    ]
+   ],
+   "last_row_at": null,
+   "values": {},
+   "intent": "Materialize the topic headline counts. getTopicStats ran an exact count over topic_article_v \u2014 the LIVE membership view \u2014 for every topic on every render. Measured against the built app: /quote (reads a materialized rollup) serves in ~0.10s while /topics and /topics/[slug] take ~0.35s, and that count is the whole difference. It is also the one query on the page that can time out, which is how a tracker with 791 stories could render \"0 stories\". Only the COUNT moves. The feed stays live \u2014 it is `limit 24` off an indexed view (~50ms) and being live is the point of it. Refreshed inside exec_topic",
+   "domain": "News: topics & claims"
+  },
+  {
+   "name": "topics",
+   "kind": "table",
+   "rows_est": 0,
+   "columns": [
+    [
+     "slug",
+     "text"
+    ],
+    [
+     "title",
+     "text"
+    ],
+    [
+     "subtitle",
+     "text"
+    ],
+    [
+     "theme_tags",
+     "ARRAY"
+    ],
+    [
+     "lens_tickers",
+     "ARRAY"
+    ],
+    [
+     "min_impact",
+     "real"
+    ],
+    [
+     "visual_archetype",
+     "text"
+    ],
+    [
+     "scene",
+     "text"
+    ],
+    [
+     "accent",
+     "text"
+    ],
+    [
+     "hero_tickers",
+     "ARRAY"
+    ],
+    [
+     "thesis_ref",
+     "text"
+    ],
+    [
+     "seo_description",
+     "text"
+    ],
+    [
+     "is_published",
+     "boolean"
+    ],
+    [
+     "created_at",
+     "timestamp with time zone"
+    ],
+    [
+     "updated_at",
+     "timestamp with time zone"
+    ],
+    [
+     "extra_keywords",
+     "ARRAY"
+    ]
+   ],
+   "last_row_at": "2026-08-03",
+   "fresh_col": "updated_at",
+   "values": {},
+   "intent": "Topic hubs \u2014 permanent, auto-updating deep-dive pages over the scraped corpus. The idea: /articles publishes ~5k single-news-item URLs that rank for nothing (Search Console: 20 impressions, 0 clicks, avg position 24 over a week). Thin spokes don't earn topical authority; a small number of deep hubs can. A topic consolidates many articles into one evergreen page carrying the whole arc of a story \u2014 e.g. 15 months of the Iran conflict against the oil complex. A topic is a SAVED QUERY, not generated content: theme_tags  (what the story is)  AND  lens_tickers (who it hits) Membership is therefore a",
+   "domain": "Other"
+  },
+  {
+   "name": "user_api_keys",
+   "kind": "table",
+   "rows_est": 2,
+   "columns": [
+    [
+     "id",
+     "uuid"
+    ],
+    [
+     "user_id",
+     "uuid"
+    ],
+    [
+     "name",
+     "character varying"
+    ],
+    [
+     "key_hash",
+     "text"
+    ],
+    [
+     "key_prefix",
+     "character varying"
+    ],
+    [
+     "scopes",
+     "ARRAY"
+    ],
+    [
+     "created_at",
+     "timestamp with time zone"
+    ],
+    [
+     "last_used_at",
+     "timestamp with time zone"
+    ],
+    [
+     "expires_at",
+     "timestamp with time zone"
+    ],
+    [
+     "revoked_at",
+     "timestamp with time zone"
+    ]
+   ],
+   "last_row_at": "2026-04-12",
+   "fresh_col": "created_at",
+   "values": {},
+   "intent": "user_api_keys",
+   "domain": "Users, plans & billing"
+  },
+  {
+   "name": "user_bulk_analysis_jobs",
+   "kind": "table",
+   "rows_est": 6,
+   "columns": [
+    [
+     "id",
+     "uuid"
+    ],
+    [
+     "user_id",
+     "uuid"
+    ],
+    [
+     "scan_run_id",
+     "bigint"
+    ],
+    [
+     "status",
+     "text"
+    ],
+    [
+     "total_tickers",
+     "integer"
+    ],
+    [
+     "completed_tickers",
+     "integer"
+    ],
+    [
+     "failed_tickers",
+     "integer"
+    ],
+    [
+     "started_at",
+     "timestamp with time zone"
+    ],
+    [
+     "finished_at",
+     "timestamp with time zone"
+    ],
+    [
+     "error_message",
+     "text"
+    ],
+    [
+     "created_at",
+     "timestamp with time zone"
+    ],
+    [
+     "user_prompt",
+     "text"
+    ],
+    [
+     "ticker_subset",
+     "ARRAY"
+    ],
+    [
+     "chart_granularity",
+     "text"
+    ],
+    [
+     "chart_date_from",
+     "date"
+    ],
+    [
+     "chart_date_to",
+     "date"
+    ],
+    [
+     "bulk_chat_messages",
+     "jsonb"
+    ]
+   ],
+   "last_row_at": "2026-06-02",
+   "fresh_col": "created_at",
+   "values": {
+    "status": [
+     "done",
+     "error"
+    ]
+   },
+   "intent": "user_bulk_analysis_jobs Tracks fire-and-forget bulk per-ticker technical-analysis jobs. One job per \"Analyze all\" click on a scan run. The Python worker (services.bulk_analysis) picks up status='queued' rows on its 1-min tick, iterates the run's tickers via Ollama, writes the result into user_ticker_chart_workspace.ai_chat_messages and the call into user_scan_row_notes.status, then marks the job done.",
+   "domain": "Users, plans & billing"
+  },
+  {
+   "name": "user_narrative_preferences",
+   "kind": "table",
+   "rows_est": 0,
+   "columns": [
+    [
+     "id",
+     "uuid"
+    ],
+    [
+     "user_id",
+     "uuid"
+    ],
+    [
+     "is_enabled",
+     "boolean"
+    ],
+    [
+     "delivery_time",
+     "time without time zone"
+    ],
+    [
+     "timezone",
+     "character varying"
+    ],
+    [
+     "delivery_method",
+     "character varying"
+    ],
+    [
+     "lookback_hours",
+     "integer"
+    ],
+    [
+     "include_portfolio",
+     "boolean"
+    ],
+    [
+     "include_screenings",
+     "boolean"
+    ],
+    [
+     "created_at",
+     "timestamp with time zone"
+    ],
+    [
+     "updated_at",
+     "timestamp with time zone"
+    ]
+   ],
+   "last_row_at": "2026-04-12",
+   "fresh_col": "updated_at",
+   "values": {},
+   "intent": "\u2500\u2500 user_narrative_preferences \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500",
+   "domain": "Users, plans & billing"
+  },
+  {
+   "name": "user_portfolio_alerts",
+   "kind": "table",
+   "rows_est": 0,
+   "columns": [
+    [
+     "id",
+     "uuid"
+    ],
+    [
+     "user_id",
+     "uuid"
+    ],
+    [
+     "ticker",
+     "character varying"
+    ],
+    [
+     "alert_type",
+     "character varying"
+    ],
+    [
+     "price",
+     "numeric"
+    ],
+    [
+     "direction",
+     "character varying"
+    ],
+    [
+     "notes",
+     "text"
+    ],
+    [
+     "is_active",
+     "boolean"
+    ],
+    [
+     "triggered_at",
+     "timestamp with time zone"
+    ],
+    [
+     "created_at",
+     "timestamp with time zone"
+    ],
+    [
+     "updated_at",
+     "timestamp with time zone"
+    ]
+   ],
+   "last_row_at": null,
+   "fresh_col": "updated_at",
+   "values": {},
+   "intent": "\u2500\u2500 user_portfolio_alerts \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500",
+   "domain": "Users, plans & billing"
+  },
+  {
+   "name": "user_profiles",
+   "kind": "table",
+   "rows_est": 15,
+   "columns": [
+    [
+     "user_id",
+     "uuid"
+    ],
+    [
+     "created_at",
+     "timestamp with time zone"
+    ],
+    [
+     "updated_at",
+     "timestamp with time zone"
+    ],
+    [
+     "welcomed_at",
+     "timestamp with time zone"
+    ],
+    [
+     "display_name",
+     "text"
+    ],
+    [
+     "metadata",
+     "jsonb"
+    ],
+    [
+     "onboarding_dismissed_at",
+     "timestamp with time zone"
+    ]
+   ],
+   "last_row_at": "2026-08-18",
+   "fresh_col": "updated_at",
+   "values": {},
+   "intent": "user_profiles Per-user app state that doesn't belong in auth.users.user_metadata. Designed to grow: free-form `metadata` jsonb for ad-hoc flags so adding a new piece of profile state doesn't require a migration. `welcomed_at` drives the first-login welcome dialog: NULL = show, set = skip.",
+   "domain": "Users, plans & billing"
+  },
+  {
+   "name": "user_scan_jobs",
+   "kind": "table",
+   "rows_est": 237,
+   "columns": [
+    [
+     "id",
+     "bigint"
+    ],
+    [
+     "created_at",
+     "timestamp with time zone"
+    ],
+    [
+     "started_at",
+     "timestamp with time zone"
+    ],
+    [
+     "finished_at",
+     "timestamp with time zone"
+    ],
+    [
+     "status",
+     "character varying"
+    ],
+    [
+     "scan_source",
+     "character varying"
+    ],
+    [
+     "script_rel",
+     "character varying"
+    ],
+    [
+     "args_json",
+     "jsonb"
+    ],
+    [
+     "pid",
+     "integer"
+    ],
+    [
+     "exit_code",
+     "integer"
+    ],
+    [
+     "scan_run_id",
+     "bigint"
+    ],
+    [
+     "stdout_log",
+     "text"
+    ],
+    [
+     "stderr_log",
+     "text"
+    ],
+    [
+     "error_message",
+     "text"
+    ],
+    [
+     "progress_message",
+     "character varying"
+    ],
+    [
+     "user_id",
+     "uuid"
+    ]
+   ],
+   "last_row_at": "2026-08-24",
+   "fresh_col": "created_at",
+   "values": {
+    "status": [
+     "completed",
+     "failed",
+     "running"
+    ],
+    "scan_source": [
+     "ai_supercycle",
+     "ibd_screener",
+     "insider_congress",
+     "ipo_screener",
+     "nis_fundamentals",
+     "nis_momentum",
+     "stage_2",
+     "test_aapl"
+    ]
+   },
+   "intent": "",
+   "domain": "Users, plans & billing"
+  },
+  {
+   "name": "user_scan_row_notes",
+   "kind": "table",
+   "rows_est": 21384,
+   "columns": [
+    [
+     "id",
+     "bigint"
+    ],
+    [
+     "scan_row_id",
+     "bigint"
+    ],
+    [
+     "run_id",
+     "bigint"
+    ],
+    [
+     "ticker",
+     "character varying"
+    ],
+    [
+     "status",
+     "character varying"
+    ],
+    [
+     "highlighted",
+     "boolean"
+    ],
+    [
+     "comment",
+     "text"
+    ],
+    [
+     "stage",
+     "character varying"
+    ],
+    [
+     "priority",
+     "smallint"
+    ],
+    [
+     "tags",
+     "ARRAY"
+    ],
+    [
+     "metadata_json",
+     "jsonb"
+    ],
+    [
+     "created_at",
+     "timestamp with time zone"
+    ],
+    [
+     "updated_at",
+     "timestamp with time zone"
+    ],
+    [
+     "user_id",
+     "uuid"
+    ]
+   ],
+   "last_row_at": "2026-08-24",
+   "fresh_col": "updated_at",
+   "values": {
+    "status": [
+     "active",
+     "dismissed",
+     "pipeline",
+     "watchlist"
+    ]
+   },
+   "intent": "",
+   "domain": "Users, plans & billing"
+  },
+  {
+   "name": "user_scan_rows",
+   "kind": "table",
+   "rows_est": 68397,
+   "columns": [
+    [
+     "id",
+     "bigint"
+    ],
+    [
+     "run_id",
+     "bigint"
+    ],
+    [
+     "scan_date",
+     "date"
+    ],
+    [
+     "dataset",
+     "character varying"
+    ],
+    [
+     "symbol",
+     "character varying"
+    ],
+    [
+     "row_data",
+     "jsonb"
+    ],
+    [
+     "user_id",
+     "uuid"
+    ]
+   ],
+   "last_row_at": "2026-08-24",
+   "fresh_col": "scan_date",
+   "values": {},
+   "intent": "",
+   "domain": "Users, plans & billing"
+  },
+  {
+   "name": "user_scan_runs",
+   "kind": "table",
+   "rows_est": 216,
+   "columns": [
+    [
+     "id",
+     "bigint"
+    ],
+    [
+     "created_at",
+     "timestamp with time zone"
+    ],
+    [
+     "scan_date",
+     "date"
+    ],
+    [
+     "source",
+     "character varying"
+    ],
+    [
+     "market_json",
+     "jsonb"
+    ],
+    [
+     "result_json",
+     "jsonb"
+    ],
+    [
+     "user_id",
+     "uuid"
+    ],
+    [
+     "status",
+     "character varying"
+    ]
+   ],
+   "last_row_at": "2026-08-24",
+   "fresh_col": "created_at",
+   "values": {
+    "source": [
+     "LaggeX",
+     "Phines screenings",
+     "VSAT",
+     "ibd_screener",
+     "ibd_screener_smoke_test",
+     "market_screening:ai-supercycle",
+     "market_screening:insider-congress",
+     "market_screening:ipo-screener",
+     "market_screening:nis-fundamentals",
+     "market_screening:nis-momentum",
+     "market_screening:stage-2",
+     "public_screening:nis-momentum",
+     "public_screening:stage-2",
+     "public_screening:test-aapl"
+    ],
+    "status": [
+     "active",
+     "deleted"
+    ]
+   },
+   "intent": "",
+   "domain": "Users, plans & billing"
+  },
+  {
+   "name": "user_scheduled_screenings",
+   "kind": "table",
+   "rows_est": 5,
+   "columns": [
+    [
+     "id",
+     "uuid"
+    ],
+    [
+     "user_id",
+     "uuid"
+    ],
+    [
+     "name",
+     "text"
+    ],
+    [
+     "prompt",
+     "text"
+    ],
+    [
+     "schedule",
+     "text"
+    ],
+    [
+     "timezone",
+     "text"
+    ],
+    [
+     "is_active",
+     "boolean"
+    ],
+    [
+     "last_run_at",
+     "timestamp with time zone"
+    ],
+    [
+     "last_triggered",
+     "boolean"
+    ],
+    [
+     "created_at",
+     "timestamp with time zone"
+    ],
+    [
+     "updated_at",
+     "timestamp with time zone"
+    ],
+    [
+     "run_requested_at",
+     "timestamp with time zone"
+    ],
+    [
+     "tickers",
+     "ARRAY"
+    ],
+    [
+     "linked_scan_run_ids",
+     "ARRAY"
+    ],
+    [
+     "next_run_at",
+     "timestamp with time zone"
+    ],
+    [
+     "scan_filters",
+     "jsonb"
+    ],
+    [
+     "trading_session",
+     "text"
+    ],
+    [
+     "condition_enabled",
+     "boolean"
+    ],
+    [
+     "trigger_condition",
+     "text"
+    ],
+    [
+     "linked_scan_sources",
+     "ARRAY"
+    ]
+   ],
+   "last_row_at": "2026-08-25",
+   "fresh_col": "updated_at",
+   "values": {},
+   "intent": "\u2500\u2500 user_scheduled_screenings \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500",
+   "domain": "Users, plans & billing"
+  },
+  {
+   "name": "user_screening_results",
+   "kind": "table",
+   "rows_est": 2238,
+   "columns": [
+    [
+     "id",
+     "uuid"
+    ],
+    [
+     "screening_id",
+     "uuid"
+    ],
+    [
+     "user_id",
+     "uuid"
+    ],
+    [
+     "run_at",
+     "timestamp with time zone"
+    ],
+    [
+     "triggered",
+     "boolean"
+    ],
+    [
+     "summary",
+     "text"
+    ],
+    [
+     "data_used",
+     "jsonb"
+    ],
+    [
+     "delivered",
+     "boolean"
+    ],
+    [
+     "created_at",
+     "timestamp with time zone"
+    ],
+    [
+     "is_test",
+     "boolean"
+    ],
+    [
+     "status",
+     "text"
+    ],
+    [
+     "started_at",
+     "timestamp with time zone"
+    ],
+    [
+     "trace",
+     "jsonb"
+    ]
+   ],
+   "last_row_at": "2026-08-25",
+   "fresh_col": "created_at",
+   "values": {
+    "status": [
+     "done",
+     "due",
+     "error",
+     "running",
+     "skipped"
+    ]
+   },
+   "intent": "\u2500\u2500 user_screening_results \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500",
+   "domain": "Users, plans & billing"
+  },
+  {
+   "name": "user_subscriptions",
+   "kind": "table",
+   "rows_est": 0,
+   "columns": [
+    [
+     "id",
+     "uuid"
+    ],
+    [
+     "created_at",
+     "timestamp with time zone"
+    ],
+    [
+     "updated_at",
+     "timestamp with time zone"
+    ],
+    [
+     "user_id",
+     "uuid"
+    ],
+    [
+     "email",
+     "text"
+    ],
+    [
+     "stripe_customer_id",
+     "text"
+    ],
+    [
+     "stripe_subscription_id",
+     "text"
+    ],
+    [
+     "status",
+     "text"
+    ],
+    [
+     "plan",
+     "text"
+    ],
+    [
+     "billing_interval",
+     "text"
+    ],
+    [
+     "phase",
+     "text"
+    ],
+    [
+     "grandfathered",
+     "boolean"
+    ],
+    [
+     "current_period_end",
+     "timestamp with time zone"
+    ]
+   ],
+   "last_row_at": null,
+   "fresh_col": "updated_at",
+   "values": {},
+   "intent": "user_subscriptions Tracks Stripe subscriptions per user. Created by the Stripe webhook Edge Function on checkout.session.completed / customer.subscription.* events. user_id is nullable so a row can be created before the user has a Supabase auth account (payment first, then account creation).",
+   "domain": "Users, plans & billing"
+  },
+  {
+   "name": "user_telegram_connections",
+   "kind": "table",
+   "rows_est": 0,
+   "columns": [
+    [
+     "id",
+     "uuid"
+    ],
+    [
+     "user_id",
+     "uuid"
+    ],
+    [
+     "chat_id",
+     "character varying"
+    ],
+    [
+     "link_token",
+     "character varying"
+    ],
+    [
+     "link_expires_at",
+     "timestamp with time zone"
+    ],
+    [
+     "connected_at",
+     "timestamp with time zone"
+    ],
+    [
+     "created_at",
+     "timestamp with time zone"
+    ],
+    [
+     "updated_at",
+     "timestamp with time zone"
+    ]
+   ],
+   "last_row_at": "2026-08-06",
+   "fresh_col": "updated_at",
+   "values": {},
+   "intent": "user_telegram_connections: general-purpose Telegram account linkage Decoupled from user_narrative_preferences so any feature can send personalised Telegram messages without coupling to the narrative system. Also removes the Telegram-specific columns that were added to user_narrative_preferences in the previous migrations.",
+   "domain": "Users, plans & billing"
+  },
+  {
+   "name": "user_ticker_chart_workspace",
+   "kind": "table",
+   "rows_est": 4643,
+   "columns": [
+    [
+     "user_id",
+     "uuid"
+    ],
+    [
+     "ticker",
+     "character varying"
+    ],
+    [
+     "annotations",
+     "jsonb"
+    ],
+    [
+     "ai_chat_messages",
+     "jsonb"
+    ],
+    [
+     "updated_at",
+     "timestamp with time zone"
+    ]
+   ],
+   "last_row_at": "2026-08-24",
+   "fresh_col": "updated_at",
+   "values": {},
+   "intent": "Per-user chart workspace: annotations + Chart AI conversation, keyed by ticker. Used by protected/charts; RLS restricts rows to the owning user.",
+   "domain": "Users, plans & billing"
+  },
+  {
+   "name": "user_trade_reviews",
+   "kind": "table",
+   "rows_est": 0,
+   "columns": [
+    [
+     "id",
+     "bigint"
+    ],
+    [
+     "user_id",
+     "uuid"
+    ],
+    [
+     "closing_trade_id",
+     "bigint"
+    ],
+    [
+     "ticker",
+     "character varying"
+    ],
+    [
+     "position_snapshot",
+     "jsonb"
+    ],
+    [
+     "messages",
+     "jsonb"
+    ],
+    [
+     "summary",
+     "text"
+    ],
+    [
+     "scores",
+     "jsonb"
+    ],
+    [
+     "created_at",
+     "timestamp with time zone"
+    ],
+    [
+     "updated_at",
+     "timestamp with time zone"
+    ]
+   ],
+   "last_row_at": "2026-06-07",
+   "fresh_col": "updated_at",
+   "values": {},
+   "intent": "user_trade_reviews: AI post-trade review chats keyed by the closing trade A \"review\" lives on the trade row that flattens a position back to zero (the closing fill). The position itself is derived client/server-side by replaying user_trades; we just need a stable key (the closing trade id) and a place to persist the chat + final AI summary so users can revisit.",
+   "domain": "Users, plans & billing"
+  },
+  {
+   "name": "user_trades",
+   "kind": "table",
+   "rows_est": 36,
+   "columns": [
+    [
+     "id",
+     "bigint"
+    ],
+    [
+     "user_id",
+     "uuid"
+    ],
+    [
+     "side",
+     "character varying"
+    ],
+    [
+     "position_side",
+     "character varying"
+    ],
+    [
+     "ticker",
+     "character varying"
+    ],
+    [
+     "quantity",
+     "numeric"
+    ],
+    [
+     "price_per_unit",
+     "numeric"
+    ],
+    [
+     "currency",
+     "character varying"
+    ],
+    [
+     "executed_at",
+     "timestamp with time zone"
+    ],
+    [
+     "broker",
+     "character varying"
+    ],
+    [
+     "account_label",
+     "character varying"
+    ],
+    [
+     "notes",
+     "text"
+    ],
+    [
+     "metadata_json",
+     "jsonb"
+    ],
+    [
+     "created_at",
+     "timestamp with time zone"
+    ],
+    [
+     "updated_at",
+     "timestamp with time zone"
+    ],
+    [
+     "is_paper",
+     "boolean"
+    ]
+   ],
+   "last_row_at": "2026-08-15",
+   "fresh_col": "updated_at",
+   "values": {},
+   "intent": "user_trades: per-user trade ledger (buy/sell \u00d7 long/short) Semantics: side            : 'buy' | 'sell' (execution direction) position_side   : 'long' | 'short' (which side of the book) Examples: Open long:   buy  + long Close long:  sell + long Open short:  sell + short Cover short: buy  + short",
+   "domain": "Users, plans & billing"
+  },
+  {
+   "name": "user_trading_strategy",
+   "kind": "table",
+   "rows_est": 0,
+   "columns": [
+    [
+     "user_id",
+     "uuid"
+    ],
+    [
+     "strategy",
+     "text"
+    ],
+    [
+     "updated_at",
+     "timestamp with time zone"
+    ]
+   ],
+   "last_row_at": "2026-08-18",
+   "fresh_col": "updated_at",
+   "values": {},
+   "intent": "",
+   "domain": "Users, plans & billing"
+  }
+ ],
+ "functions": [
+  {
+   "name": "exec_ticker_coverage_refresh",
+   "args": "",
+   "returns": "void",
+   "intent": "Post-ingest entry point, mirroring exec_topic_claims_refresh.",
+   "domain": "Other"
+  },
+  {
+   "name": "exec_ticker_relationship_heads_refresh",
+   "args": "",
+   "returns": "void",
+   "intent": "Auto-refresh ticker relationship materialization when relevant heads change news_impact_heads rows (cluster = TICKER_RELATIONSHIPS) feed refresh_ticker_relationship_edges / refresh_ticker_relationship_edge_evidence. Statement-level triggers + transition tables => one full refresh per SQL statement, not once per row. Split by event (INSERT / UPDATE / DELETE) because PostgreSQL does not allow transition tables on a single trigger with multiple events (0A000). UPDATE cannot use UPDATE OF (column list) with transition tables (0A000), so this fires on any column change; the TICKER_RELATIONSHIPS gua",
+   "domain": "Other"
+  },
+  {
+   "name": "exec_ticker_sentiment_heads_refresh",
+   "args": "",
+   "returns": "void",
+   "intent": "Void wrapper for no-arg RPC calls (matches exec_ticker_relationship_heads_refresh).",
+   "domain": "Other"
+  },
+  {
+   "name": "exec_topic_claims_refresh",
+   "args": "",
+   "returns": "void",
+   "intent": "Topic hubs \u2014 permanent, auto-updating deep-dive pages over the scraped corpus. The idea: /articles publishes ~5k single-news-item URLs that rank for nothing (Search Console: 20 impressions, 0 clicks, avg position 24 over a week). Thin spokes don't earn topical authority; a small number of deep hubs can. A topic consolidates many articles into one evergreen page carrying the whole arc of a story \u2014 e.g. 15 months of the Iran conflict against the oil complex. A topic is a SAVED QUERY, not generated content: theme_tags  (what the story is)  AND  lens_tickers (who it hits) Membership is therefore a",
+   "domain": "Other"
+  },
+  {
+   "name": "get_relationship_neighborhood",
+   "args": "p_seed text, p_hops integer, p_min_strength double precision, p_min_mentions integer, p_rel_types text[], p_limit_nodes integer, p_limit_edges integer, p_days_lookback integer",
+   "returns": "TABLE(row_type text, seed_ticker text, node_ticker text, from_ticker text, to_ticker text, rel_type text, strength_avg double precision, strength_max double precision, mention_count integer, article_count integer, first_seen_at timestamp with time zone, last_seen_at timestamp with time zone, truncated boolean)",
+   "intent": "Repoint the neighborhood RPC at the matview. ONLY the source relation changes (filtered_edges now reads the materialized snapshot instead of recomputing the canonicalization per call); all filtering/traversal/limits are unchanged.",
+   "domain": "Other"
+  },
+  {
+   "name": "get_relationship_node_news",
+   "args": "p_ticker text, p_page integer, p_page_size integer, p_days_lookback integer",
+   "returns": "TABLE(canonical_ticker text, article_id bigint, title text, url text, source text, publisher text, published_at timestamp with time zone, matched_ticker text)",
+   "intent": "Relationship side-panel RPC speedup (node news + sentiment) Symptom: the /protected/relations side panel was still slow after the neighborhood matview fix. On node-select it fires three RPCs in parallel; measured for GM: get_relationship_node_news ~8.1s, get_relationship_node_sentiment ~4.4s, get_relationship_node_sentiment_windows ~1.5s (aliases ~0.1s). Two root causes, both fixed here: 1. The sentiment RPCs still read ticker_sentiment_heads_v \u2014 the un-materialized view that re-explodes EVERY sentiment head per call. A materialized `ticker_sentiment_heads` table (indexed on (ticker, article_t",
+   "domain": "Other"
+  },
+  {
+   "name": "get_relationship_node_sentiment",
+   "args": "p_ticker text, p_page integer, p_page_size integer",
+   "returns": "TABLE(canonical_ticker text, head_id bigint, article_id bigint, ticker text, sentiment_score double precision, reasoning_text text, confidence double precision, article_ts timestamp with time zone, published_at timestamp with time zone, article_source text, article_publisher text, article_title text, article_url text)",
+   "intent": "Relationship side-panel RPC speedup (node news + sentiment) Symptom: the /protected/relations side panel was still slow after the neighborhood matview fix. On node-select it fires three RPCs in parallel; measured for GM: get_relationship_node_news ~8.1s, get_relationship_node_sentiment ~4.4s, get_relationship_node_sentiment_windows ~1.5s (aliases ~0.1s). Two root causes, both fixed here: 1. The sentiment RPCs still read ticker_sentiment_heads_v \u2014 the un-materialized view that re-explodes EVERY sentiment head per call. A materialized `ticker_sentiment_heads` table (indexed on (ticker, article_t",
+   "domain": "Other"
+  },
+  {
+   "name": "get_relationship_node_sentiment_windows",
+   "args": "p_ticker text",
+   "returns": "TABLE(days integer, avg_sentiment double precision, weighted_sentiment double precision, mention_count integer)",
+   "intent": "Relationship side-panel RPC speedup (node news + sentiment) Symptom: the /protected/relations side panel was still slow after the neighborhood matview fix. On node-select it fires three RPCs in parallel; measured for GM: get_relationship_node_news ~8.1s, get_relationship_node_sentiment ~4.4s, get_relationship_node_sentiment_windows ~1.5s (aliases ~0.1s). Two root causes, both fixed here: 1. The sentiment RPCs still read ticker_sentiment_heads_v \u2014 the un-materialized view that re-explodes EVERY sentiment head per call. A materialized `ticker_sentiment_heads` table (indexed on (ticker, article_t",
+   "domain": "Other"
+  },
+  {
+   "name": "get_ticker_impact_news",
+   "args": "p_ticker text, p_days integer, p_limit integer, p_per_bucket integer",
+   "returns": "TABLE(article_id bigint, title text, url text, source text, slug text, published_at timestamp with time zone, sentiment double precision, impact_magnitude double precision, top_dimensions jsonb)",
+   "intent": "Per-ticker impact-ranked, time-spread news for the quote page hero. p_days       lookback window (capped to 400) p_limit      max events returned (capped to 400) p_per_bucket max events kept per ISO week (the spread guarantee) Returns the loudest catalysts per week, ordered by impact. SECURITY DEFINER so the public (service-role) quote page reads it under RLS.",
+   "domain": "Other"
+  },
+  {
+   "name": "get_top_covered_tickers",
+   "args": "p_days integer, p_limit integer, p_offset integer, p_search text",
+   "returns": "TABLE(ticker text, mention_count bigint, scored_count bigint, avg_sentiment double precision, last_day date, company_name text, sector text, total_count bigint)",
+   "intent": "/quote index: search + pagination. The directory turned out to hold ~3.7k tickers over a 30-day window, so the first cut (top 200, no controls) hid most of it and gave a visitor no way to reach a specific symbol. This replaces the RPC with a paged, searchable one. Return type changes (adds total_count), so the old two-arg signature has to be dropped rather than REPLACEd. total_count rides along on every row via count(*) OVER () \u2014 one scan answers both \"this page\" and \"how many pages\", instead of a second count query. An empty result returns no rows at all, so callers must treat a missing total",
+   "domain": "Other"
+  },
+  {
+   "name": "get_topic_visuals",
+   "args": "p_slug text",
+   "returns": "jsonb",
+   "intent": "Aggregates behind the topic hub's charts. Both shapes come back in ONE jsonb payload because the page's cost is round trips, not query work (~140ms of network vs a few ms over a few hundred rows). Two separate selects would have doubled the hop count for nothing. Aggregated in Postgres rather than by pulling the claims: the claim TEXT is the bulk of that table, and the page needs counts, not prose. byTicker  which names the story actually moves \u2014 mean impact per ticker, with the claim count next to it. The interesting part is that the two disagree: on the defence topic LMT is the most-mentione",
+   "domain": "Other"
+  },
+  {
+   "name": "impact_vector_magnitude",
+   "args": "p_impact jsonb",
+   "returns": "double precision",
+   "intent": "sum(|value|) over the numeric entries of an impact vector.",
+   "domain": "Other"
+  },
+  {
+   "name": "increment_market_screening_download",
+   "args": "p_id uuid",
+   "returns": "bigint",
+   "intent": "\u2500\u2500 Download incrementer body (outside the DO block so we can use $$ quoting) \u2500\u2500",
+   "domain": "Other"
+  },
+  {
+   "name": "link_subscription_on_signup",
+   "args": "",
+   "returns": "trigger",
+   "intent": "Helper: link pending subscriptions when a user creates their account. Call this from a post-signup trigger or on first login.",
+   "domain": "Other"
+  },
+  {
+   "name": "news_article_fts",
+   "args": "title text, search_tags text[], body text",
+   "returns": "tsvector",
+   "intent": "Weighted document vector: title (A) > tags (B) > body (C). ts_rank_cd weights these {A:1.0, B:0.4, C:0.2} by default, so a title hit outranks a body hit. IMMUTABLE wrapper: a STABLE function (array_to_string) can't be used directly in a generated column / index, but the result is genuinely deterministic, so wrapping it lets the column trigger and index reference one shared definition.",
+   "domain": "News: articles & scoring"
+  },
+  {
+   "name": "news_articles_fts_maintain",
+   "args": "",
+   "returns": "trigger",
+   "intent": "Full-text search over news articles with relevance ranking. Tag overlap (search_news_by_tags) only matches the curated `search_tags` array and sorts purely by recency, so a free-text query like \"iran oil crisis\" can neither match body text nor rank by how well it fits. This adds a weighted, materialized tsvector over title + tags + body and a ranking RPC that ORs the query terms and scores with ts_rank_cd. Weighted document vector: title (A) > tags (B) > body (C). ts_rank_cd weights these {A:1.0, B:0.4, C:0.2} by default, so a title hit outranks a body hit. IMMUTABLE wrapper: a STABLE function",
+   "domain": "News: articles & scoring"
+  },
+  {
+   "name": "recompute_market_screenings_next_run_at",
+   "args": "",
+   "returns": "trigger",
+   "intent": "",
+   "domain": "Other"
+  },
+  {
+   "name": "refresh_relationship_network_mv",
+   "args": "",
+   "returns": "void",
+   "intent": "Relationship network materialization Problem (statement timeout on /protected/relations): ticker_relationship_network_resolved_v calls resolve_canonical_ticker() TWICE per edge across all ~22k rows of ticker_relationship_edges (each call is a security_identity_map lookup), then GROUP BYs \u2014 on EVERY query. So get_relationship_neighborhood() paid a fixed ~6s cost regardless of seed or hop count (measured: 1-hop and 2-hop both ~6.3s; the resolved view costs ~4.5s just to COUNT). Every node click on the relations side panel re-runs it, tripping the Postgres statement_timeout. Fix: Materialize the ",
+   "domain": "Other"
+  },
+  {
+   "name": "refresh_ticker_coverage_daily",
+   "args": "",
+   "returns": "integer",
+   "intent": "Materialize the /quote directory's daily rollup. get_top_covered_tickers read news_trends_ticker_daily_v directly, which rescans 120 days of news_article_tickers + news_articles + ticker_sentiment heads on every call: measured 4.6s for a plain page and 7.6s for a search \u2014 against the REST role's 8s statement_timeout. That is a page that breaks the first time the corpus grows. Same split the topic hubs use: membership stays live, the expensive rollup is materialized and rebuilt post-ingest. A table (not a matview) so it can carry RLS like its siblings. Only the daily rollup is stored, NOT the w",
+   "domain": "Other"
+  },
+  {
+   "name": "refresh_ticker_relationship_edge_evidence",
+   "args": "p_lookback interval",
+   "returns": "integer",
+   "intent": "Ticker relationship edge traceability Goal: - Provide deterministic traceability from ticker_relationship_edges back to source articles and impact-vector dimensions.",
+   "domain": "Other"
+  },
+  {
+   "name": "refresh_ticker_relationship_edges",
+   "args": "p_lookback interval",
+   "returns": "integer",
+   "intent": "Ticker Relationship Network (graph-ready adjacency structure) Why: - Avoid scanning/parsing JSONB relationship heads for every narrative run. - Materialize ticker->ticker edges with indexed lookup for multi-hop traversal. - Keep provenance + recency so downstream ranking can prioritize fresh edges.",
+   "domain": "Other"
+  },
+  {
+   "name": "refresh_ticker_sentiment_heads",
+   "args": "p_lookback interval",
+   "returns": "integer",
+   "intent": "Refresh: re-explode TICKER_SENTIMENT heads into the table. p_lookback NULL  -> full rebuild (delete all, reinsert) p_lookback set   -> only heads whose article_ts is within the window SECURITY DEFINER so the delete/insert run as the table owner regardless of the caller (service_role / cron). Delete-then-insert (rather than pure upsert) so a re-scored head whose ticker set shrank never leaves stale (head_id, ticker) rows behind.",
+   "domain": "Other"
+  },
+  {
+   "name": "refresh_topic_claims",
+   "args": "p_slug text",
+   "returns": "integer",
+   "intent": "Claim-level topicality gate. The article-level AND gate (theme tag AND lens ticker) admits the right ARTICLES, but an admitted article can still contain claims about something else entirely. Observed immediately on the first build of iran-conflict-oil-market: [+0.60] 2026-08-03  \"Berkshire Hathaway significantly increased its stake in Alphabet through open market purchases and a $10B \u2026\" The article qualified (it discusses Berkshire trimming Chevron, and carries an oil tag) but this particular claim is about Alphabet. On a permanent page built to rank, off-topic claims are worse than useless \u2014 ",
+   "domain": "Other"
+  },
+  {
+   "name": "refresh_topic_stats",
+   "args": "",
+   "returns": "integer",
+   "intent": "Materialize the topic headline counts. getTopicStats ran an exact count over topic_article_v \u2014 the LIVE membership view \u2014 for every topic on every render. Measured against the built app: /quote (reads a materialized rollup) serves in ~0.10s while /topics and /topics/[slug] take ~0.35s, and that count is the whole difference. It is also the one query on the page that can time out, which is how a tracker with 791 stories could render \"0 stories\". Only the COUNT moves. The feed stays live \u2014 it is `limit 24` off an indexed view (~50ms) and being live is the point of it. Refreshed inside exec_topic",
+   "domain": "Other"
+  },
+  {
+   "name": "research_predictions_immutable",
+   "args": "",
+   "returns": "trigger",
+   "intent": "3) Immutability. The sealed fields are the prediction; changing any of them after the fact is the failure this tier exists to prevent, so the database refuses it rather than trusting the client to behave.",
+   "domain": "Other"
+  },
+  {
+   "name": "resolve_canonical_graph_ticker",
+   "args": "p_alias_value text",
+   "returns": "text",
+   "intent": "",
+   "domain": "Other"
+  },
+  {
+   "name": "resolve_canonical_ticker",
+   "args": "p_alias_value text, p_alias_kind text",
+   "returns": "text",
+   "intent": "Unified security identity map + graph integration Goal: - Keep ticker aliases and company-name aliases in one table. - Resolve graph edges to canonical tickers through that map.",
+   "domain": "Other"
+  },
+  {
+   "name": "search_news_article_embeddings_gte",
+   "args": "query_embedding double precision[], match_count integer, lookback_days integer, stream_filter text",
+   "returns": "TABLE(article_id bigint, title text, url text, source text, slug text, image_url text, article_stream text, published_at timestamp with time zone, snippet text, similarity double precision)",
+   "intent": "Secondary embedding table for Supabase Edge Runtime model parity (gte-small). Query-time embeddings from Edge Functions should match this dimension/model.",
+   "domain": "Other"
+  },
+  {
+   "name": "search_news_by_tags",
+   "args": "tag_filter text[], match_count integer, lookback_hours integer, stream_filter text",
+   "returns": "TABLE(article_id bigint, title text, url text, source text, slug text, image_url text, article_stream text, published_at timestamp with time zone, snippet text, similarity double precision)",
+   "intent": "Fast tag-only search (no embedding). Used when query tokens match known tags.",
+   "domain": "Other"
+  },
+  {
+   "name": "search_news_embeddings",
+   "args": "query_embedding double precision[], match_count integer, lookback_hours integer, stream_filter text, ticker_filter text[]",
+   "returns": "TABLE(article_id bigint, title text, url text, source text, slug text, image_url text, article_stream text, published_at timestamp with time zone, snippet text, similarity double precision)",
+   "intent": "search_news_embeddings: timeout fix. Symptom: function hits Supabase's statement_timeout (57014) when called with a wide ticker_filter (~68 tickers) plus the lookback window. Root cause analysis: 1. The EXISTS subquery wrapped both `nat.ticker` and the unnest output in upper(...) \u2014 preventing any regular btree on `(ticker)` or `(article_id, ticker)` from being used, so each of the 40 candidate rows triggered a sequential scan over news_article_tickers. 2. The function inherited the role's statement_timeout (no SET LOCAL), so a marginal query couldn't recover from cold caches. Fixes in this mig",
+   "domain": "Other"
+  },
+  {
+   "name": "search_news_fulltext",
+   "args": "query_text text, match_count integer, lookback_hours integer, stream_filter text",
+   "returns": "TABLE(article_id bigint, title text, url text, source text, slug text, image_url text, article_stream text, published_at timestamp with time zone, snippet text, similarity double precision)",
+   "intent": "Ranked full-text search. The query is lexed and stemmed, then the lexemes are OR-combined so \"iran oil crisis\" matches articles containing iran OR oil OR crisis, ranked by ts_rank_cd (more / rarer / higher-weighted matches score higher). Returns the same shape as search_news_by_tags; `similarity` carries the raw ts_rank_cd score (normalized client-side for display).",
+   "domain": "Other"
+  },
+  {
+   "name": "set_news_article_slug",
+   "args": "",
+   "returns": "trigger",
+   "intent": "Generate and maintain news_articles.slug inside the database. This keeps slug logic centralized and independent of app code.",
+   "domain": "Other"
+  },
+  {
+   "name": "set_user_profiles_updated_at",
+   "args": "",
+   "returns": "trigger",
+   "intent": "user_profiles Per-user app state that doesn't belong in auth.users.user_metadata. Designed to grow: free-form `metadata` jsonb for ad-hoc flags so adding a new piece of profile state doesn't require a migration. `welcomed_at` drives the first-login welcome dialog: NULL = show, set = skip.",
+   "domain": "Other"
+  },
+  {
+   "name": "topic_keywords",
+   "args": "p_slug text",
+   "returns": "text[]",
+   "intent": "Company names for the lens, corporate suffixes stripped so the match is the distinctive part: \"The Boeing Company\" \u2192 \"Boeing\", \"Exxon Mobil Corporation\" \u2192 \"Exxon Mobil\". Keeping both words matters \u2014 the bare first token of \"General Dynamics Corporation\" is \"General\", which would match almost anything.",
+   "domain": "News: topics & claims"
+  },
+  {
+   "name": "touch_market_screenings_updated_at",
+   "args": "",
+   "returns": "trigger",
+   "intent": "",
+   "domain": "Other"
+  },
+  {
+   "name": "touch_narrative_prefs_updated_at",
+   "args": "",
+   "returns": "trigger",
+   "intent": "Daily Narrative: three new tables user_portfolio_alerts    \u2014 stop losses / take profits / price alerts per ticker user_narrative_preferences \u2014 when and how to deliver the daily narrative daily_narratives           \u2014 generated narratives (one per user per date) \u2500\u2500 user_portfolio_alerts \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500",
+   "domain": "Other"
+  },
+  {
+   "name": "touch_portfolio_alerts_updated_at",
+   "args": "",
+   "returns": "trigger",
+   "intent": "Daily Narrative: three new tables user_portfolio_alerts    \u2014 stop losses / take profits / price alerts per ticker user_narrative_preferences \u2014 when and how to deliver the daily narrative daily_narratives           \u2014 generated narratives (one per user per date) \u2500\u2500 user_portfolio_alerts \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500",
+   "domain": "Other"
+  },
+  {
+   "name": "touch_scheduled_screenings_updated_at",
+   "args": "",
+   "returns": "trigger",
+   "intent": "Scheduled Screening Agent: two tables for prompt-driven screening jobs user_scheduled_screenings  \u2014 job definitions (prompt + schedule) user_screening_results     \u2014 per-run history (trigger/no-trigger + summary) Delivery follows the daily narrative pattern: - Always persisted to DB (in-app) - Sent via Telegram if user has a chat_id in user_telegram_connections \u2500\u2500 user_scheduled_screenings \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500",
+   "domain": "Other"
+  },
+  {
+   "name": "touch_security_identity_map_updated_at",
+   "args": "",
+   "returns": "trigger",
+   "intent": "Unified security identity map + graph integration Goal: - Keep ticker aliases and company-name aliases in one table. - Resolve graph edges to canonical tickers through that map.",
+   "domain": "Other"
+  },
+  {
+   "name": "touch_telegram_connections_updated_at",
+   "args": "",
+   "returns": "trigger",
+   "intent": "user_telegram_connections: general-purpose Telegram account linkage Decoupled from user_narrative_preferences so any feature can send personalised Telegram messages without coupling to the narrative system. Also removes the Telegram-specific columns that were added to user_narrative_preferences in the previous migrations.",
+   "domain": "Other"
+  },
+  {
+   "name": "touch_telegram_update_requests_updated_at",
+   "args": "",
+   "returns": "trigger",
+   "intent": "telegram_update_requests Queue table for on-demand Telegram /update requests. Webhook inserts pending rows; Mac worker processes and sends responses.",
+   "domain": "Other"
+  },
+  {
+   "name": "touch_ticker_pair_stats_updated_at",
+   "args": "",
+   "returns": "trigger",
+   "intent": "Pick up the existing updated_at touch convention.",
+   "domain": "Other"
+  },
+  {
+   "name": "touch_ticker_relationship_edges_updated_at",
+   "args": "",
+   "returns": "trigger",
+   "intent": "Ticker Relationship Network (graph-ready adjacency structure) Why: - Avoid scanning/parsing JSONB relationship heads for every narrative run. - Materialize ticker->ticker edges with indexed lookup for multi-hop traversal. - Keep provenance + recency so downstream ranking can prioritize fresh edges.",
+   "domain": "Other"
+  },
+  {
+   "name": "touch_user_subscriptions",
+   "args": "",
+   "returns": "trigger",
+   "intent": "Auto-update updated_at",
+   "domain": "Other"
+  },
+  {
+   "name": "touch_user_ticker_chart_workspace_updated_at",
+   "args": "",
+   "returns": "trigger",
+   "intent": "Per-user chart workspace: annotations + Chart AI conversation, keyed by ticker. Used by protected/charts; RLS restricts rows to the owning user.",
+   "domain": "Other"
+  },
+  {
+   "name": "touch_user_trade_reviews_updated_at",
+   "args": "",
+   "returns": "trigger",
+   "intent": "user_trade_reviews: AI post-trade review chats keyed by the closing trade A \"review\" lives on the trade row that flattens a position back to zero (the closing fill). The position itself is derived client/server-side by replaying user_trades; we just need a stable key (the closing trade id) and a place to persist the chat + final AI summary so users can revisit.",
+   "domain": "Other"
+  },
+  {
+   "name": "touch_user_trades_updated_at",
+   "args": "",
+   "returns": "trigger",
+   "intent": "user_trades: per-user trade ledger (buy/sell \u00d7 long/short) Semantics: side            : 'buy' | 'sell' (execution direction) position_side   : 'long' | 'short' (which side of the book) Examples: Open long:   buy  + long Close long:  sell + long Open short:  sell + short Cover short: buy  + short",
+   "domain": "Other"
+  },
+  {
+   "name": "trg_set_impact_magnitude",
+   "args": "",
+   "returns": "trigger",
+   "intent": "Maintain on write. Fires only when impact_json changes (not on the backfill, which only touches impact_magnitude) so there's no recursion.",
+   "domain": "Other"
+  },
+  {
+   "name": "trg_stmt_nih_rel_graph_del",
+   "args": "",
+   "returns": "trigger",
+   "intent": "Auto-refresh ticker relationship materialization when relevant heads change news_impact_heads rows (cluster = TICKER_RELATIONSHIPS) feed refresh_ticker_relationship_edges / refresh_ticker_relationship_edge_evidence. Statement-level triggers + transition tables => one full refresh per SQL statement, not once per row. Split by event (INSERT / UPDATE / DELETE) because PostgreSQL does not allow transition tables on a single trigger with multiple events (0A000). UPDATE cannot use UPDATE OF (column list) with transition tables (0A000), so this fires on any column change; the TICKER_RELATIONSHIPS gua",
+   "domain": "Other"
+  },
+  {
+   "name": "trg_stmt_nih_rel_graph_ins",
+   "args": "",
+   "returns": "trigger",
+   "intent": "Auto-refresh ticker relationship materialization when relevant heads change news_impact_heads rows (cluster = TICKER_RELATIONSHIPS) feed refresh_ticker_relationship_edges / refresh_ticker_relationship_edge_evidence. Statement-level triggers + transition tables => one full refresh per SQL statement, not once per row. Split by event (INSERT / UPDATE / DELETE) because PostgreSQL does not allow transition tables on a single trigger with multiple events (0A000). UPDATE cannot use UPDATE OF (column list) with transition tables (0A000), so this fires on any column change; the TICKER_RELATIONSHIPS gua",
+   "domain": "Other"
+  },
+  {
+   "name": "trg_stmt_nih_rel_graph_upd",
+   "args": "",
+   "returns": "trigger",
+   "intent": "Auto-refresh ticker relationship materialization when relevant heads change news_impact_heads rows (cluster = TICKER_RELATIONSHIPS) feed refresh_ticker_relationship_edges / refresh_ticker_relationship_edge_evidence. Statement-level triggers + transition tables => one full refresh per SQL statement, not once per row. Split by event (INSERT / UPDATE / DELETE) because PostgreSQL does not allow transition tables on a single trigger with multiple events (0A000). UPDATE cannot use UPDATE OF (column list) with transition tables (0A000), so this fires on any column change; the TICKER_RELATIONSHIPS gua",
+   "domain": "Other"
+  },
+  {
+   "name": "validate_api_key",
+   "args": "p_key_hash text, p_rate_limit_per_minute integer",
+   "returns": "TABLE(key_id uuid, user_id uuid, scopes text[], rate_ok boolean)",
+   "intent": "validate_api_key() Atomically: 1. Looks up key by SHA-256 hash; returns nothing if invalid/revoked/expired. 2. Stamps last_used_at. 3. Upserts the rate-limit bucket for the current minute window. 4. Purges stale buckets (>2 h) for this key. Returns (key_id, user_id, scopes, rate_ok). rate_ok = false \u2192 caller should respond HTTP 429. SECURITY DEFINER so the public API (service_role) can call it without exposing the underlying tables directly. anon/authenticated are revoked.",
+   "domain": "Other"
+  }
+ ],
+ "index": "# swingtrader schema index (generated 2026-08-25)\n\n## Relationships & graph\n- `ticker_relationship_edge_evidence` (table, ~85,590 @2026-08-25) Ticker relationship edge traceability Goal: - Provide deterministic traceability from ticker_relationship_edge\n- `ticker_relationship_edges` (table, ~38,789 @2026-08-25) Ticker Relationship Network (graph-ready adjacency structure) Why: - Avoid scanning/parsing JSONB relationship\n- `ticker_relationship_network_resolved_mv` (matview, ~21,734) Relationship network materialization Problem (statement timeout on /protected/relations): ticker_relationship_\n- `ticker_pair_stats` (table, ~795 @2026-06-15) Ticker Pair Stats (cointegration / pairs-trading metrics on the graph) Why: - The news-derived relationship gr\n- `ticker_pair_candidates_v` (view) Candidate pairs: order-normalized, deduped across rel_types, off the canonicalized graph\n- `ticker_relationship_edge_traceability_v` (view) Ticker relationship edge traceability Goal: - Provide deterministic traceability from ticker_relationship_edge\n- `ticker_relationship_network_pairs_v` (view) The stitched view: every news-derived edge, now carrying its pair's live cointegration metrics\n- `ticker_relationship_network_resolved_v` (view) Canonicalized graph view for adjacency traversal.\n- `ticker_relationship_network_v` (view) Ticker Relationship Network (graph-ready adjacency structure) Why: - Avoid scanning/parsing JSONB relationship\n\n## News: articles & scoring\n- `news_impact_heads` (table, ~2,692,533 @2026-08-25) news_impact_heads: per-cluster LLM scoring results\n- `news_article_embeddings` (table, ~1,827,954) Embedding setup for semantic retrieval over scored news.\n- `news_article_tickers` (table, ~727,992) news_article_tickers: ticker mentions extracted from articles\n- `news_article_embedding_jobs` (table, ~220,126 @2026-08-25) Embedding setup for semantic retrieval over scored news.\n- `news_articles` (table, ~216,666 @2026-08-25) news_articles: article content and metadata\n- `news_impact_vectors` (table, ~209,330 @2026-08-25) news_impact_vectors: aggregated impact dimension vectors\n- `news_source_dry_days` (table, ~684) Track calendar days where a news source stream has been fully exhausted (all available articles fetched/proces\n- `news_embedding_hourly_cluster_articles` (table, ~57) Hourly / daily embedding clusters over swingtrader.news_article_embeddings (UTC buckets)\n- `news_briefing_subscriptions` (table, ~34 @2026-08-24) News briefing subscriptions: the free, no-account email service that sends a nicely structured PDF of the last\n- `news_embedding_daily_cluster_articles` (table, ~0) Hourly / daily embedding clusters over swingtrader.news_article_embeddings (UTC buckets)\n- `news_embedding_daily_cluster_centroids` (table, ~0) Hourly / daily embedding clusters over swingtrader.news_article_embeddings (UTC buckets)\n- `news_embedding_daily_cluster_runs` (table, ~0) \u2500\u2500 Daily \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n- `news_embedding_hourly_cluster_centroids` (table, ~0) Hourly / daily embedding clusters over swingtrader.news_article_embeddings (UTC buckets)\n- `news_embedding_hourly_cluster_runs` (table, ~0) \u2500\u2500 Hourly \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n- `news_trends_article_base_v` (view) 1) Article-level base rows with parsed vectors + mean confidence.\n- `news_trends_cluster_daily_v` (view) 4) Cluster rollups from dimensions, matching UI logic: per-article cluster = mean(dimensions in cluster), then\n- `news_trends_cluster_hourly_v` (view) Bound hourly news-trends views to last 60 days so their CTEs don't scan the full base table\n- `news_trends_dimension_cluster_map_v` (view) \n- `news_trends_dimension_daily_v` (view) 3) Dimension aggregates (daily / hourly), weighted and unweighted.\n- `news_trends_dimension_hourly_v` (view) Bound hourly news-trends views to last 60 days so their CTEs don't scan the full base table\n- `news_trends_dimension_points_v` (view) 2) One row per article/dimension with numeric value.\n- `news_trends_heads_daily_v` (view) 5) Head-level aggregates for diagnostics/trend overlays.\n- `news_trends_heads_hourly_v` (view) Pre-aggregated views for News Trends charts\n- `news_trends_tag_daily_v` (view) 2) Theme-tag frequency per day\n- `news_trends_ticker_daily_v` (view) 1) Ticker mentions per day, with sentiment overlay\n\n## News: topics & claims\n- `topic_claim_stats` (table, ~1,394 @2026-08-25) topic_claim_stats \u2014 the materialized half\n- `topic_stats` (table, ~2) Materialize the topic headline counts\n- `topic_article_v` (view) topic_article_v \u2014 the membership query, as a view\n\n## Tickers: sentiment & coverage\n- `ticker_sentiment_heads` (table, ~353,761 @2026-08-25) Ticker Sentiment Materialization (pre-exploded, indexed) Why: - swingtrader.ticker_sentiment_heads_v explodes \n- `ticker_coverage_daily` (table, ~63,572 @2026-08-25) Materialize the /quote directory's daily rollup\n- `ticker_sentiment_heads_v` (view) Ticker Sentiment View (article-level, parsed from TICKER_SENTIMENT heads) Why: - Expose sentiment by (article,\n\n## Company factor vectors\n- `company_vectors` (table, ~3,401 @2026-04-29) company_vectors: fundamental dimension vectors per ticker per date\n\n## Screening & scans\n- `market_screening_result_rows` (table, ~111,610 @2026-08-25) \n- `market_screening_results` (table, ~3,832 @2026-08-25) \n- `market_screening_email_subscriptions` (table, ~23 @2026-08-19) Market screening EMAIL subscriptions: the lightweight, email-only delivery list that powers the \"Send me the r\n- `market_screenings` (table, ~10 @2026-08-25) \n- `market_screening_subscriptions` (table, ~0) \n\n## Users, plans & billing\n- `user_scan_rows` (table, ~68,397 @2026-08-24) \n- `user_scan_row_notes` (table, ~21,384 @2026-08-24) \n- `user_ticker_chart_workspace` (table, ~4,643 @2026-08-24) Per-user chart workspace: annotations + Chart AI conversation, keyed by ticker\n- `user_screening_results` (table, ~2,238 @2026-08-25) \u2500\u2500 user_screening_results \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n- `user_scan_jobs` (table, ~237 @2026-08-24) \n- `user_scan_runs` (table, ~216 @2026-08-24) \n- `user_trades` (table, ~36 @2026-08-15) user_trades: per-user trade ledger (buy/sell \u00d7 long/short) Semantics: side            : 'buy' | 'sell' (execut\n- `user_profiles` (table, ~15 @2026-08-18) user_profiles Per-user app state that doesn't belong in auth.users.user_metadata\n- `user_bulk_analysis_jobs` (table, ~6 @2026-06-02) user_bulk_analysis_jobs Tracks fire-and-forget bulk per-ticker technical-analysis jobs\n- `user_scheduled_screenings` (table, ~5 @2026-08-25) \u2500\u2500 user_scheduled_screenings \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n- `user_api_keys` (table, ~2 @2026-04-12) user_api_keys\n- `user_narrative_preferences` (table, ~0 @2026-04-12) \u2500\u2500 user_narrative_preferences \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n- `user_portfolio_alerts` (table, ~0) \u2500\u2500 user_portfolio_alerts \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n- `user_subscriptions` (table, ~0) user_subscriptions Tracks Stripe subscriptions per user\n- `user_telegram_connections` (table, ~0 @2026-08-06) user_telegram_connections: general-purpose Telegram account linkage Decoupled from user_narrative_preferences \n- `user_trade_reviews` (table, ~0 @2026-06-07) user_trade_reviews: AI post-trade review chats keyed by the closing trade A \"review\" lives on the trade row th\n- `user_trading_strategy` (table, ~0 @2026-08-18) \n\n## Agents & jobs\n- `job_runs` (table, ~256,091 @2026-08-25) \n- `job_health` (table, ~15) \n\n## Other\n- `tickers` (table, ~5,810 @2026-08-08) tickers: universe of actively-traded NYSE and NASDAQ stocks Seeded via scripts/seed_tickers.py (FMP company-sc\n- `research_priced_in_universe` (table, ~5,807 @2026-08-25) 1) The working universe and its schedule.\n- `security_identity_map` (table, ~2,019 @2026-04-15) Unified security identity map + graph integration Goal: - Keep ticker aliases and company-name aliases in one \n- `telegram_message_log` (table, ~1,253) telegram_message_log \u2014 record every Telegram message sent by the platform Populated by the Mac Mini cron (run_\n- `research_predictions` (table, ~65 @2026-08-25) 2) Forward predictions\n- `early_access_signups` (table, ~54 @2026-08-23) Early access signups: waitlist captured when a visitor (anonymous OR authenticated) clicks \"Subscribe\" on a pu\n- `research_charts` (table, ~40 @2026-08-19) Charts for the research lab\n- `research_strategies` (table, ~35 @2026-08-19) The strategies themselves: everything needed to re-run one exactly.\n- `research_priced_in` (table, ~34 @2026-08-25) 1) What a price already contains, reconstructed at a point in time.\n- `podcast_episodes` (table, ~6 @2026-05-14) \n- `telegram_update_requests` (table, ~5 @2026-05-08) telegram_update_requests Queue table for on-demand Telegram /update requests\n- `api_rate_limits` (table, ~1) api_rate_limits: 1-minute sliding window buckets\n- `daily_narratives` (table, ~0) \u2500\u2500 daily_narratives \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n- `research_artifacts` (table, ~0 @2026-08-19) Artifacts attached to a research write-up\n- `research_campaigns` (table, ~0 @2026-08-19) Autonomous quant research lab \u2014 the published record\n- `research_findings` (table, ~0) Findings: claims, and how much evidence stands behind each one.\n- `research_notes` (table, ~0 @2026-08-19) Long-form write-ups (the markdown in research/), versioned by slug.\n- `research_prediction_events` (table, ~0) 3) The ledger's log, moved with the ledger.\n- `research_priced_in_runs` (table, ~0) 2) One row per batch pass.\n- `topics` (table, ~0 @2026-08-03) Topic hubs \u2014 permanent, auto-updating deep-dive pages over the scraped corpus\n- `research_artifacts_public_v` (view) Artifacts attached to a research write-up\n- `research_charts_public_v` (view) Intrinsic pixel dimensions for chart images\n- `research_leaderboard_v` (view) Autonomous quant research lab \u2014 the published record\n- `research_predictions_integrity_v` (view) 5) Integrity\n- `research_predictions_scored_v` (view) 4) Scoring view\n- `research_priced_in_public_v` (view) Structured summary for research_priced_in\n- `research_priced_in_queue_v` (view) 4) What the batch runner asks for: the next names due\n- `research_public_v` (view) Public read access\n\n## Functions\n- `exec_ticker_coverage_refresh()`\n- `exec_ticker_relationship_heads_refresh()`\n- `exec_ticker_sentiment_heads_refresh()`\n- `exec_topic_claims_refresh()`\n- `get_relationship_neighborhood(p_seed text, p_hops integer, p_min_strength double precision, p_min_mentions integer, p_rel_types text[], p_limit_nodes integer, p_limit_edges integer, p_days_lookback integer)`\n- `get_relationship_node_news(p_ticker text, p_page integer, p_page_size integer, p_days_lookback integer)`\n- `get_relationship_node_sentiment(p_ticker text, p_page integer, p_page_size integer)`\n- `get_relationship_node_sentiment_windows(p_ticker text)`\n- `get_ticker_impact_news(p_ticker text, p_days integer, p_limit integer, p_per_bucket integer)`\n- `get_top_covered_tickers(p_days integer, p_limit integer, p_offset integer, p_search text)`\n- `get_topic_visuals(p_slug text)`\n- `impact_vector_magnitude(p_impact jsonb)`\n- `increment_market_screening_download(p_id uuid)`\n- `link_subscription_on_signup()`\n- `news_article_fts(title text, search_tags text[], body text)`\n- `news_articles_fts_maintain()`\n- `recompute_market_screenings_next_run_at()`\n- `refresh_relationship_network_mv()`\n- `refresh_ticker_coverage_daily()`\n- `refresh_ticker_relationship_edge_evidence(p_lookback interval)`\n- `refresh_ticker_relationship_edges(p_lookback interval)`\n- `refresh_ticker_sentiment_heads(p_lookback interval)`\n- `refresh_topic_claims(p_slug text)`\n- `refresh_topic_stats()`\n- `research_predictions_immutable()`\n- `resolve_canonical_graph_ticker(p_alias_value text)`\n- `resolve_canonical_ticker(p_alias_value text, p_alias_kind text)`\n- `search_news_article_embeddings_gte(query_embedding double precision[], match_count integer, lookback_days integer, stream_filter text)`\n- `search_news_by_tags(tag_filter text[], match_count integer, lookback_hours integer, stream_filter text)`\n- `search_news_embeddings(query_embedding double precision[], match_count integer, lookback_hours integer, stream_filter text, ticker_filter text[])`\n- `search_news_fulltext(query_text text, match_count integer, lookback_hours integer, stream_filter text)`\n- `set_news_article_slug()`\n- `set_user_profiles_updated_at()`\n- `topic_keywords(p_slug text)`\n- `touch_market_screenings_updated_at()`\n- `touch_narrative_prefs_updated_at()`\n- `touch_portfolio_alerts_updated_at()`\n- `touch_scheduled_screenings_updated_at()`\n- `touch_security_identity_map_updated_at()`\n- `touch_telegram_connections_updated_at()`\n- `touch_telegram_update_requests_updated_at()`\n- `touch_ticker_pair_stats_updated_at()`\n- `touch_ticker_relationship_edges_updated_at()`\n- `touch_user_subscriptions()`\n- `touch_user_ticker_chart_workspace_updated_at()`\n- `touch_user_trade_reviews_updated_at()`\n- `touch_user_trades_updated_at()`\n- `trg_set_impact_magnitude()`\n- `trg_stmt_nih_rel_graph_del()`\n- `trg_stmt_nih_rel_graph_ins()`\n- `trg_stmt_nih_rel_graph_upd()`\n- `validate_api_key(p_key_hash text, p_rate_limit_per_minute integer)`"
+}

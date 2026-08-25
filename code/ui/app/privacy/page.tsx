@@ -7,8 +7,10 @@ import { portableTextComponents } from "@/lib/sanity/portable-text-components";
 import type { LegalPage } from "@/lib/sanity/types";
 
 export const metadata = {
-  title: "Privacy Policy | News Impact Screener",
+  title: "Privacy Policy",
   description: "Privacy policy for News Impact Screener.",
+  alternates: { canonical: "/privacy" },
+  openGraph: { url: "/privacy" },
 };
 
 async function PrivacyContent() {

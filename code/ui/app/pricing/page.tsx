@@ -5,9 +5,11 @@ import { EarlyAccessSignupForm } from "@/components/early-access-signup-form";
 import { PricingCheckoutButton } from "@/components/pricing-checkout-button";
 
 export const metadata: Metadata = {
-  title: "Pricing — newsimpactscreener",
+  title: "Pricing",
   description:
     "Simple phase-based pricing. Lock in the lowest rate during early access — your price is grandfathered for life.",
+  alternates: { canonical: "/pricing" },
+  openGraph: { url: "/pricing" },
 };
 
 // ── Data ──────────────────────────────────────────────────────────────────────

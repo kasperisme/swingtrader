@@ -1,7 +1,8 @@
 import type { MetadataRoute } from "next";
 
-const baseUrl =
-  process.env.NEXT_PUBLIC_SITE_URL ?? "https://newsimpactscreener.com";
+import { SITE_URL } from "@/lib/site";
+
+const baseUrl = SITE_URL;
 
 export default function robots(): MetadataRoute.Robots {
   return {
@@ -15,6 +16,7 @@ export default function robots(): MetadataRoute.Robots {
           "/docs",
           "/marketscreenings",
           "/quote",
+          "/about",
           "/pricing",
           "/changelog",
           "/terms",

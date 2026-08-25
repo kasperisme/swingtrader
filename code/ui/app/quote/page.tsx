@@ -6,12 +6,9 @@ import { ArrowLeft, ArrowRight, Search, X } from "lucide-react";
 import { listCoveredTickers, type CoveredTicker } from "@/app/actions/quotes";
 import { TickerLogo } from "@/components/ticker-logo";
 import { SentimentMeter } from "./_components/sentiment-meter";
+import { SITE_URL } from "@/lib/site";
 
-// Must match the root layout's metadataBase host exactly — the site canonicalises
-// on WWW, and a bare-host canonical here would split signals for this page alone.
-const SITE = (
-  process.env.NEXT_PUBLIC_SITE_URL ?? "https://www.newsimpactscreener.com"
-).replace(/\/$/, "");
+const SITE = SITE_URL;
 
 const WINDOW_DAYS = 30;
 const PAGE_SIZE = 50;

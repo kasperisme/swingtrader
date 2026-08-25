@@ -7,8 +7,10 @@ import { portableTextComponents } from "@/lib/sanity/portable-text-components";
 import type { LegalPage } from "@/lib/sanity/types";
 
 export const metadata = {
-  title: "Terms of Service | News Impact Screener",
+  title: "Terms of Service",
   description: "Terms of service for News Impact Screener.",
+  alternates: { canonical: "/terms" },
+  openGraph: { url: "/terms" },
 };
 
 async function TermsContent() {

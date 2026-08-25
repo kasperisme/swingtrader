@@ -1,3 +1,4 @@
+import type { Metadata } from "next";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { unstable_noStore as noStore } from "next/cache";
@@ -28,6 +29,13 @@ import { isSanityConfigured, sanityFetch } from "@/lib/sanity/client";
 import { landingPageQuery } from "@/lib/sanity/queries";
 import type { LandingPage, LandingCardItem, LandingStep, LandingPricingPlan } from "@/lib/sanity/types";
 import { listMarketScreenings, getLatestMarketScreeningResultRows } from "@/app/actions/market-screenings";
+
+// Self-canonical. The root layout deliberately no longer sets one, because
+// `alternates` is inherited by every child route that doesn't override it.
+export const metadata: Metadata = {
+  alternates: { canonical: "/" },
+  openGraph: { url: "/" },
+};
 import {
   collectAllRowDataKeys,
   orderedDataColumnKeys,

@@ -15,21 +15,14 @@ import { SiteHeader, SiteHeaderFallback } from "@/components/site-header";
 import { CavemanModeProvider } from "@/lib/caveman-mode";
 import { AnalyticsProvider } from "@/lib/analytics/AnalyticsProvider";
 import { Pixels } from "@/components/pixels";
+import {
+  METADATA_BASE,
+  SITE_URL,
+  SITE_NAME,
+  SITE_SAME_AS,
+  AUTHOR,
+} from "@/lib/site";
 
-// Always anchor metadataBase to the canonical production URL. Vercel preview
-// deployments set VERCEL_URL to a hashed `*.vercel.app` host — using that as
-// metadataBase leaks the preview URL into every OG/Twitter card and breaks
-// social-share previews for the production site.
-const canonicalSite =
-  process.env.NEXT_PUBLIC_SITE_URL ?? "https://www.newsimpactscreener.com";
-const previewSite = process.env.VERCEL_URL
-  ? `https://${process.env.VERCEL_URL}`
-  : "http://localhost:3000";
-const metadataBase = new URL(
-  process.env.VERCEL_ENV === "production" || !process.env.VERCEL_URL
-    ? canonicalSite
-    : previewSite,
-);
 
 const SITE_TITLE_PRIMARY =
   "News Impact Screener — Catch market-moving news before the crowd";
@@ -37,7 +30,7 @@ const SITE_DESCRIPTION =
   "News Impact Screener maps every breaking story to the tickers and sectors it touches — within minutes, not hours. Built for retail investors who want signal, not noise.";
 
 export const metadata: Metadata = {
-  metadataBase,
+  metadataBase: METADATA_BASE,
   title: {
     default: SITE_TITLE_PRIMARY,
     template: "%s · News Impact Screener",
@@ -45,7 +38,6 @@ export const metadata: Metadata = {
   description: SITE_DESCRIPTION,
   applicationName: "News Impact Screener",
   authors: [{ name: "News Impact Screener" }],
-  alternates: { canonical: "/" },
   twitter: {
     card: "summary_large_image",
     site: "@newsimpactscrnr",
@@ -53,9 +45,14 @@ export const metadata: Metadata = {
     title: SITE_TITLE_PRIMARY,
     description: SITE_DESCRIPTION,
   },
+  // NOTE: no `alternates.canonical` and no `openGraph.url` here on purpose.
+  // Both are INHERITED by every child segment that doesn't set its own, so a
+  // root-level "/" made /articles, /blog, /blog/*, /docs, /docs/* and /pricing
+  // all declare the homepage as their canonical — which is why they read
+  // "Crawled – currently not indexed" in Search Console. Each route sets its
+  // own; see `alternates: { canonical: … }` in the individual pages.
   openGraph: {
     type: "website",
-    url: "/",
     siteName: "News Impact Screener",
     title: SITE_TITLE_PRIMARY,
     description: SITE_DESCRIPTION,
@@ -65,6 +62,53 @@ export const metadata: Metadata = {
     "social:twitter": SITE_X_PROFILE_URL,
     "social:instagram": SITE_INSTAGRAM_PROFILE_URL,
   },
+};
+
+/**
+ * Site-wide entity graph. The site had no Organization markup at all, so
+ * nothing tied the domain to a real publisher or to the social profiles that
+ * carry the same brand — the `sameAs` set is what lets a search engine treat
+ * them as one entity rather than three unrelated accounts. `founder` points at
+ * the same Person node the About page and every article byline use.
+ */
+const siteJsonLd = {
+  "@context": "https://schema.org",
+  "@graph": [
+    {
+      "@type": "Organization",
+      "@id": `${SITE_URL}/#organization`,
+      name: SITE_NAME,
+      alternateName: "NewsImpactScreener",
+      url: SITE_URL,
+      logo: {
+        "@type": "ImageObject",
+        url: `${SITE_URL}/icon.png`,
+      },
+      sameAs: SITE_SAME_AS,
+      founder: { "@id": `${SITE_URL}/#author` },
+      knowsAbout: [
+        "stock market news",
+        "swing trading",
+        "equity research",
+        "news sentiment analysis",
+      ],
+    },
+    {
+      "@type": "Person",
+      "@id": `${SITE_URL}/#author`,
+      name: AUTHOR.name,
+      jobTitle: AUTHOR.role,
+      url: AUTHOR.url,
+      worksFor: { "@id": `${SITE_URL}/#organization` },
+    },
+    {
+      "@type": "WebSite",
+      "@id": `${SITE_URL}/#website`,
+      url: SITE_URL,
+      name: SITE_NAME,
+      publisher: { "@id": `${SITE_URL}/#organization` },
+    },
+  ],
 };
 
 const jakartaSans = Plus_Jakarta_Sans({
@@ -97,6 +141,10 @@ export default function RootLayout({
         <Pixels />
       </head>
       <body className={`${jakartaSans.className} antialiased`}>
+        <script
+          type="application/ld+json"
+          dangerouslySetInnerHTML={{ __html: JSON.stringify(siteJsonLd) }}
+        />
         <Analytics />
         <SpeedInsights />
         <AnalyticsProvider />

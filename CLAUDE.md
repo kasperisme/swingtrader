@@ -14,6 +14,26 @@ Key directories:
 - `code/ui/app/docs/` — Documentation pages
 - `code/ui/components/` — Shared UI components
 
+## Before touching Supabase data — READ THE CATALOG FIRST
+
+**Rule: never write a query, a migration, or any peer/aggregate/graph/similarity
+computation over `swingtrader` data before checking what already exists.**
+
+```bash
+cd code/analytics && cat docs/supabase_index.md        # 84 objects + 51 RPCs, one line each
+cd code/analytics && .venv/bin/python -m services.catalog.build find "<capability>"
+```
+
+The schema is large (84 tables/views, 851 columns, 51 functions) and much of what
+looks missing is already built and refreshed daily. A peer-relationship finder was
+once written from scratch, iterated through four failed designs, and still returned
+NVDA and AAPL as Crocs' peers — while `ticker_relationship_edges` held 38k typed,
+directional, evidence-backed edges and answered it correctly in one query.
+
+Load the **`supabase-schema`** skill for the workflow, the most-reinvented list, and
+the join traps. Regenerate after any migration:
+`cd code/analytics && .venv/bin/python -m services.catalog.build`
+
 ## Content Writing — Blog Posts & Documentation
 
 ### Always write two versions
@@ -66,6 +86,7 @@ The caveman/businessman toggle is global (localStorage-backed via `lib/caveman-m
 
 | Skill | Use when |
 |-------|---------|
+| `supabase-schema` | **Before** any query, migration, or peer/aggregate/graph/similarity computation over `swingtrader` data — the generated catalog of 84 tables/views + 51 RPCs with the intent behind each, plus the article-to-ticker join traps. Also use before concluding something "doesn't exist yet" |
 | `caveman` | Writing `cavemanBody` for any blog post or doc page |
 | `ui-ux-pro-max` | Designing or reviewing UI components, layouts, styles |
 | `taste-skill` | Building any UI — enforces premium design standards, kills generic AI patterns |
@@ -77,6 +98,33 @@ The caveman/businessman toggle is global (localStorage-backed via `lib/caveman-m
 | `nis-trend-radar` | Find the single most talked-about news **topic/trend of the last week** — a data-backed "trend brief" for downstream ad generation. Reuses the `/articles` trend views (tag + ticker daily aggregates), buckets current-vs-prior 7-day windows, excludes generic process tags, and picks the dominant thematic story by volume × acceleration; pulls real evidence headlines + tickers in play, a distilled `lead_story`, and preset `lead_magnets` deep-links. Writes `output/trends/<date>/trend_brief.{json,md}`; feeds the headline of `nis-ad-image` |
 | `ticker-pair-divergence` | Making a viral reel about a ticker PAIR — the non-obvious relationship (from `ticker_pair_stats` + the relationship graph), normalized line charts with company logos riding each line, the divergence flagged, and the mean-reversion (pairs) trade voiced |
 | `nis-performance` | The whole-funnel performance foundation — wires GA4 + Search Console + Meta Ads + Supabase leads + PostHog into ONE snapshot joined on `utm_content`/feature (Supabase leads = conversion truth), computes cost-per-real-lead, and derives deterministic **routed** action flags. Writes `output/performance/<date>/snapshot.{json,md}`; the JSON is the data foundation the action skills consume (feeds `nis-ad-image` Step 0, SEO, CRO, conversion instrumentation). Read-only. Run before an ad/content push or weekly |
+
+## Priced-In (scheduled, NYSE + NASDAQ)
+
+See `code/strategylab/research/PRICED-IN-FINDINGS.md` §8 and `code/strategylab/README.md`.
+
+Reconstructs what a share price already contains and publishes it to
+`/quote/<symbol>`. Runs unattended over the whole universe via the Mac Mini
+crontab (`code/strategylab/scripts/run_priced_in.sh`).
+
+```bash
+cd code/strategylab
+.venv/bin/python -m strategylab.social.cli universe queue    # what is due
+.venv/bin/python -m strategylab.social.cli batch --dry-run   # the pass, without running it
+.venv/bin/python -m strategylab.social.cli predict status    # the sealed Tier-3 ledger
+```
+
+Three things to know before touching it:
+
+- **The LLM backend is Ollama** (`glm-5.1:cloud`), set in `code/strategylab/.env`
+  via `STRATEGYLAB_LLM_BACKEND=ollama`. ~110s/ticker; a full 725-name pass is one
+  week of nightly runs. `investigate` needs tool use and stays on Anthropic.
+- **`batch` promotes rows to the PUBLIC quote pages.** The gate publishes only a
+  row that can render AND whose inputs moved (new analyst model, median ≥2%,
+  price ≥10%, or the live row ≥30 days old). Held rows are still written.
+- **The prediction ledger is Supabase, not `output/runs/predictions.db`.** The
+  local SQLite file is dead; `swingtrader.research_predictions` is the source of
+  truth and its trigger enforces seal-once/resolve-once server-side.
 
 ## Scheduled Screenings (Agent)
 

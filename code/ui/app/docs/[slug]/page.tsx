@@ -1,3 +1,4 @@
+import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { Suspense } from "react";
@@ -19,10 +20,25 @@ export async function generateStaticParams() {
   return params.length > 0 ? params : fallback;
 }
 
-export async function generateMetadata({ params }: Props) {
+export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const { slug } = await params;
+  const canonical = `/docs/${slug}`;
+
+  // Title used to be the raw slug, and the suffix collided with the root
+  // title template ("… | News Impact Screener · News Impact Screener").
+  // Let the template add the brand; take the real title from Sanity.
+  const page = isSanityConfigured
+    ? await sanityFetch<DocPage | null>(docPageBySlugQuery, { slug })
+    : null;
+
+  const title = page?.title || slug.replace(/-/g, " ");
+  const description = page?.description?.trim() || undefined;
+
   return {
-    title: `${slug} | Docs | News Impact Screener`,
+    title,
+    description,
+    alternates: { canonical },
+    openGraph: { type: "article", url: canonical, title, description },
   };
 }
 
