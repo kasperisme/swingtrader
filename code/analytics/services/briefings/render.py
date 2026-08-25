@@ -246,8 +246,18 @@ def render_briefing_email_html(
     manage_url: str,
     unsubscribe_url: str,
     is_welcome: bool = False,
+    signin_url: str | None = None,
+    action: dict[str, Any] | None = None,
 ) -> tuple[str, str]:
-    """Short email body (the PDF carries the detail). Returns (html, text)."""
+    """Short email body (the PDF carries the detail). Returns (html, text).
+
+    ``action`` + ``signin_url`` are the conversion half. When both are supplied
+    the email leads with one account-requiring action drawn from this reader's
+    own watchlist (see ``action.py``); the old cross-sell and upgrade links drop
+    to second and third, because three competing asks is how the previous
+    version converted nobody. Without them the email renders exactly as before,
+    which keeps ``preview`` and any other caller working.
+    """
     watchlist = _watchlist_summary(briefing)
     total = briefing.get("total_articles", 0)
     intro = (
@@ -273,11 +283,29 @@ def render_briefing_email_html(
         f"{_base}/pricing"
         "?utm_source=newsimpactscreener&utm_medium=email&utm_campaign=briefing&utm_content=briefing_email"
     )
-    ctas = cta_stack(
-        primary=("See what the screens flagged", _screen_url),
-        secondary=("Get real-time alerts + AI summaries", _upgrade_url),
-        tertiary=("Or edit your briefing", manage_url),
-    )
+    if signin_url and action:
+        # The one ask. It is first because it is the only one that can move this
+        # reader up a rung — the other two resolve while logged out.
+        from shared.email import cta_primary, cta_secondary, cta_tertiary
+        _sub = _esc(action.get("sublabel") or "")
+        ctas = (
+            f'<div style="margin:22px 0 0 0;">'
+            f'{cta_primary(action["label"], signin_url)}</div>'
+            + (f'<p style="font:400 13px/1.5 system-ui;color:#8b93a7;'
+               f'margin:9px 0 0;">{_sub}</p>' if _sub else "")
+            + '<p style="font:400 12px/1.5 system-ui;color:#5b6478;margin:7px 0 0;">'
+              'Opens signed in &mdash; no password to set.</p>'
+            + f'<div style="margin:18px 0 0 0;">'
+              f'{cta_secondary("See what the screens flagged", _screen_url)}</div>'
+            + f'<div style="margin:16px 0 0 0;">'
+              f'{cta_tertiary("Or edit your briefing", manage_url)}</div>'
+        )
+    else:
+        ctas = cta_stack(
+            primary=("See what the screens flagged", _screen_url),
+            secondary=("Get real-time alerts + AI summaries", _upgrade_url),
+            tertiary=("Or edit your briefing", manage_url),
+        )
 
     html_body = f"""<!doctype html><html><body style="margin:0;background:#0b0f17;padding:28px;font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;">
   <div style="max-width:520px;margin:0 auto;background:#111620;border:1px solid #1e2533;border-radius:14px;padding:28px;color:#e6e9ef;">
@@ -292,11 +320,19 @@ def render_briefing_email_html(
   </div>
 </body></html>"""
 
+    if signin_url and action:
+        _lead_action = (
+            f"{action['label']}: {signin_url}\n"
+            + (f"{action['sublabel']}\n" if action.get("sublabel") else "")
+            + "Opens signed in — no password to set.\n\n"
+        )
+    else:
+        _lead_action = ""
     text_body = (
         f"{'Welcome aboard — your first briefing.' if is_welcome else 'Your daily briefing.'}\n\n"
         f"{total} scored stories for {watchlist} in the last 24 hours. Full report attached as PDF.\n\n"
+        f"{_lead_action}"
         f"See what the screens flagged: {_screen_url}\n"
-        f"Get real-time alerts + AI summaries: {_upgrade_url}\n"
         f"Or edit your briefing: {manage_url}\n\n"
         f"Unsubscribe: {unsubscribe_url}\n"
     )

@@ -13,6 +13,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import { useState } from "react";
 import { track } from "@/lib/analytics/events";
 import { getPosthog } from "@/lib/analytics/posthog";
@@ -25,6 +26,10 @@ export function LoginForm({
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
+  // Routes that bounce someone here explain themselves through `?notice=`.
+  // Without this the one-click briefing link fails to a bare form, which reads
+  // as "the site is broken" rather than "that link has expired".
+  const notice = useSearchParams().get("notice");
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -77,6 +82,14 @@ export function LoginForm({
           <CardDescription>
             Enter your email below to login to your account
           </CardDescription>
+          {notice ? (
+            <p
+              role="status"
+              className="mt-3 rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-sm text-amber-700 dark:text-amber-400"
+            >
+              {notice}
+            </p>
+          ) : null}
         </CardHeader>
         <CardContent>
           <form onSubmit={handleLogin}>

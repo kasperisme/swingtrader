@@ -9,9 +9,11 @@ from typing import Any
 from shared.email import (
     build_briefing_manage_url,
     build_briefing_unsubscribe_url,
+    build_signin_url,
     send_email,
 )
 
+from .action import choose_action
 from .data import gather_briefing
 from .narrative import add_narratives
 from .render import render_briefing_email_html, render_briefing_pdf
@@ -51,11 +53,25 @@ def send_briefing(subscription: dict[str, Any], *, is_welcome: bool = False) -> 
 
     manage_url = build_briefing_manage_url(email)
     unsubscribe_url = build_briefing_unsubscribe_url(email)
+
+    # The one account-requiring ask, derived from this reader's own watchlist.
+    # Best-effort: a briefing that cannot pick an action is still worth sending,
+    # and falling back to the old CTA stack is strictly better than not sending.
+    signin_url = action = None
+    try:
+        action = choose_action(briefing, tickers=tickers, tags=tags)
+        signin_url = build_signin_url(email, action["next_path"])
+    except Exception as exc:  # noqa: BLE001
+        log.warning("[briefing] action selection failed for %s: %s", email, exc)
+        signin_url = action = None
+
     html, text = render_briefing_email_html(
         briefing,
         manage_url=manage_url,
         unsubscribe_url=unsubscribe_url,
         is_welcome=is_welcome,
+        signin_url=signin_url,
+        action=action,
     )
     filename = f"news-briefing-{datetime.now(timezone.utc).strftime('%Y-%m-%d')}.pdf"
 

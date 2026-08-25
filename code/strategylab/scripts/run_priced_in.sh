@@ -28,14 +28,21 @@
 # the time budget is a ceiling, not a target, and a pass that hits it simply
 # resumes tomorrow where it stopped.
 #
-# Add to crontab (crontab -e), using the real absolute path to this repo:
+# Add to crontab (crontab -e) on the Mac Mini. Slots are chosen to sit clear of
+# the jobs already there — 22:15 pairs z-score, 02:10/02:20 embeddings, 03:00
+# Sunday orphan cleanup, 06:00 Monday pairs calibration:
 #
-#   # settle due predictions, 06:10 daily
-#   10 6 * * *  /Users/<you>/projects/swingtrader/code/strategylab/scripts/run_priced_in.sh resolve  >> /Users/<you>/projects/swingtrader/logs/priced-in.log 2>&1
-#   # one reconstruction pass, 22:00 daily
-#   0 22 * * *  /Users/<you>/projects/swingtrader/code/strategylab/scripts/run_priced_in.sh batch    >> /Users/<you>/projects/swingtrader/logs/priced-in.log 2>&1
-#   # refresh the universe, 04:00 Sunday
-#   0 4 * * 0   /Users/<you>/projects/swingtrader/code/strategylab/scripts/run_priced_in.sh universe >> /Users/<you>/projects/swingtrader/logs/priced-in.log 2>&1
+#   # settle due Tier-3 predictions (no LLM, seconds), 06:40 daily
+#   40 6 * * *  /Users/kasperisme/projects/swingtrader/code/strategylab/scripts/run_priced_in.sh resolve  >> /Users/kasperisme/projects/swingtrader/logs/priced-in.log 2>&1
+#   # one reconstruction pass, 23:30 daily — after the US close, so targets and
+#   # prices are the day's final ones
+#   30 23 * * * /Users/kasperisme/projects/swingtrader/code/strategylab/scripts/run_priced_in.sh batch    >> /Users/kasperisme/projects/swingtrader/logs/priced-in.log 2>&1
+#   # refresh the universe + stale eligibility verdicts, 04:30 Sunday
+#   30 4 * * 0  /Users/kasperisme/projects/swingtrader/code/strategylab/scripts/run_priced_in.sh universe >> /Users/kasperisme/projects/swingtrader/logs/priced-in.log 2>&1
+#
+# cron runs with a near-empty environment; this script needs nothing from it
+# beyond HOME, and reaches Ollama over HTTP rather than the `ollama` binary, so
+# no PATH entry is required.
 #
 # Env: loaded from code/strategylab/.env (falling back to code/analytics/.env).
 #   STRATEGYLAB_LLM_BACKEND=ollama        route the pipeline through Ollama

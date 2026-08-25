@@ -1,10 +1,17 @@
+import { Suspense } from "react";
+
 import { LoginForm } from "@/components/login-form";
 
 export default function Page() {
   return (
     <div className="flex min-h-svh w-full items-center justify-center p-6 md:p-10">
       <div className="w-full max-w-sm">
-        <LoginForm />
+        {/* LoginForm reads `?notice=` so routes that bounce someone here can say
+            why — an expired one-click briefing link, most often. useSearchParams
+            opts the subtree into client rendering, which needs a boundary. */}
+        <Suspense fallback={null}>
+          <LoginForm />
+        </Suspense>
       </div>
     </div>
   );

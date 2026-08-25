@@ -225,3 +225,71 @@ def send_email(
         return True, str(data.get("id", ""))
     except Exception as exc:  # noqa: BLE001 — best-effort, never break the run
         return False, str(exc)
+
+
+# ── One-click sign-in token ─────────────────────────────────────────────────
+#
+# The briefing reaches every subscriber on a schedule and, until now, asked for
+# nothing that needed an account: its CTAs pointed at /marketscreenings and
+# /pricing, both reachable while logged out. 105 verified addresses had produced
+# 19 accounts, and no surface anywhere in the product invited the other 86.
+#
+# This token is what turns that ask from a form into a click. The subscriber
+# already proved the address when they confirmed the subscription, so asking
+# them to invent a password re-verifies a fact we hold. The link carries a
+# signed assertion of "we sent this to this address", and the route trades it
+# for a real session, creating the account if there isn't one.
+#
+# Two properties the manage/unsubscribe tokens above do NOT need, and this one
+# cannot go without:
+#
+#   * **Expiry.** A briefing sits in an inbox forever and gets forwarded. An
+#     unbounded link that mints a session is a permanent credential attached to
+#     a marketing email.
+#   * **Domain separation.** `p: "signin"` is inside the signed body, so a
+#     manage token — same secret, same shape — cannot be replayed at the sign-in
+#     route to take over the account. The verifier requires the purpose to
+#     match, which makes the two families disjoint despite the shared key.
+#
+# `next` travels inside the signature rather than as a sibling query parameter,
+# so the destination cannot be rewritten in the URL. The route still re-checks
+# that it is a same-origin path — a signature proves we minted it, not that it
+# is safe to redirect to.
+
+SIGNIN_TTL_DAYS = int(os.environ.get("BRIEFING_SIGNIN_TTL_DAYS", "7"))
+
+
+def sign_signin_token(email: str, next_path: str, *,
+                      ttl_days: int | None = None,
+                      now: int | None = None) -> str:
+    """HMAC-signed one-click sign-in assertion for `email`, good for `ttl_days`.
+
+    Mirrors ``verifySigninToken`` in code/ui/lib/email/signin-token.ts — same
+    secret, same body bytes, and the TS side re-derives the HMAC over the
+    token's body substring, so JSON key order here is irrelevant to validity.
+    """
+    import time
+
+    secret = os.environ.get("UNSUBSCRIBE_SECRET", "")
+    ttl = SIGNIN_TTL_DAYS if ttl_days is None else ttl_days
+    issued = int(time.time()) if now is None else now
+    body = _b64url_nopad(
+        json.dumps(
+            {"p": "signin", "email": email, "next": next_path,
+             "exp": issued + ttl * 86400},
+            separators=(",", ":"),
+        ).encode("utf-8")
+    )
+    sig = _b64url_nopad(
+        hmac.new(secret.encode("utf-8"), body.encode("ascii"), hashlib.sha256).digest()
+    )
+    return f"{body}.{sig}"
+
+
+def build_signin_url(email: str, next_path: str, *,
+                     ttl_days: int | None = None) -> str:
+    """The one-click link: verify the assertion, mint a session, land on `next_path`."""
+    from urllib.parse import quote
+
+    token = sign_signin_token(email, next_path, ttl_days=ttl_days)
+    return f"{_app_url()}/auth/briefing?token={quote(token, safe='')}"

@@ -92,6 +92,48 @@ def cmd_preview(args):
     }, indent=2))
 
 
+def cmd_preview_email(args):
+    """Render the EMAIL body (not the PDF) so the one ask can be iterated on.
+
+    The action is derived from live data, so this is the only way to see what a
+    given watchlist would actually be asked to do on a given day — including
+    the quiet-day copy, which is the branch most likely to read wrong and the
+    one you cannot reach by picking a busy ticker.
+    """
+    from .action import choose_action
+    from .data import gather_briefing
+    from .render import render_briefing_email_html
+    from shared.email import (build_briefing_manage_url,
+                              build_briefing_unsubscribe_url, build_signin_url)
+
+    tickers = [t.strip().upper() for t in (args.tickers or "").split(",") if t.strip()]
+    tags = [t.strip().lower() for t in (args.tags or "").split(",") if t.strip()]
+    if not tickers and not tags:
+        print("Provide --tickers and/or --tags", file=sys.stderr)
+        sys.exit(1)
+
+    briefing = gather_briefing(tickers, tags, hours=args.hours)
+    action = choose_action(briefing, tickers=tickers, tags=tags)
+    email = args.email
+    html, text = render_briefing_email_html(
+        briefing,
+        manage_url=build_briefing_manage_url(email),
+        unsubscribe_url=build_briefing_unsubscribe_url(email),
+        is_welcome=args.welcome,
+        signin_url=build_signin_url(email, action["next_path"]),
+        action=action,
+    )
+    print(f"action   {action['kind']}")
+    print(f"label    {action['label']}")
+    print(f"sublabel {action['sublabel']}")
+    print(f"next     {action['next_path']}")
+    out = args.out or "briefing-email.html"
+    pathlib.Path(out).write_text(html)
+    print(f"\nwrote {out}")
+    if args.text:
+        print("\n--- text part ---\n" + text)
+
+
 def cmd_setup_cron(_args):
     from .sync_crons import setup_briefing_tick_cron
     print(json.dumps(setup_briefing_tick_cron()))
@@ -118,6 +160,17 @@ def main():
     p_prev.add_argument("--out", default=None)
     p_prev.add_argument("--no-narrative", action="store_true", help="Skip Ollama tag narratives")
 
+    p_pe = sub.add_parser("preview-email",
+                          help="Render the email body + the one ask, without sending")
+    p_pe.add_argument("--tickers", default="", help="Comma-separated tickers")
+    p_pe.add_argument("--tags", default="", help="Comma-separated tags")
+    p_pe.add_argument("--hours", type=int, default=24)
+    p_pe.add_argument("--email", default="preview@example.com",
+                      help="Address the sign-in link is minted for")
+    p_pe.add_argument("--welcome", action="store_true")
+    p_pe.add_argument("--text", action="store_true", help="Also print the text part")
+    p_pe.add_argument("--out", default=None)
+
     sub.add_parser("setup-cron", help="Register the briefing-tick OpenClaw cron")
 
     args = parser.parse_args()
@@ -126,6 +179,7 @@ def main():
         "send": cmd_send,
         "send-daily": cmd_send_daily,
         "preview": cmd_preview,
+        "preview-email": cmd_preview_email,
         "setup-cron": cmd_setup_cron,
     }
     fn = dispatch.get(args.command)
