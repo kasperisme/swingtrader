@@ -653,7 +653,7 @@ export async function importLatestMarketScreeningResultForMe(
       user_id: userId,
     });
 
-  // 2. user_scan_runs — scan instance. Surfaces in /protected/screenings.
+  // 2. user_scan_runs — scan instance. Surfaces in /protected/workspace.
   const dataUsedWithSymbols: Record<string, unknown> = { ...dataUsed };
   if (!Array.isArray(dataUsedWithSymbols.symbols)) {
     dataUsedWithSymbols.symbols = rowPayloads.map((p) => p.rowData);
@@ -684,7 +684,7 @@ export async function importLatestMarketScreeningResultForMe(
   const runId = (runIns as { id: number }).id;
 
   // 3. user_scan_rows — per-ticker payload (dataset = script_key matches the
-  // /protected/screenings filter).
+  // /protected/workspace filter).
   let rowCount = 0;
   let insertedRows: { id: number }[] = [];
   if (rowPayloads.length > 0) {
@@ -909,7 +909,7 @@ export async function importLatestMarketScreeningResultForMe(
   });
 
   revalidatePath(`/marketscreenings/${screeningSlug}`);
-  revalidatePath("/protected/screenings");
+  revalidatePath("/protected/workspace");
 
   return {
     ok: true,

@@ -121,8 +121,8 @@ import { Check, DataCell } from "./screenings-data-cell";
 import { QuotesView } from "./screenings-quotes-view";
 import { ScreeningsRelationshipNetworkPanel } from "./screenings-relationship-panel";
 import { SentimentView } from "./screenings-sentiment-view";
-import { StockNewsTrendView } from "./screenings-news-trend-view";
 import { ScreeningsArticlesView } from "./screenings-articles-view";
+import { ScreeningsPricedInView } from "./screenings-priced-in-view";
 import { TradeMonitoringView } from "./screenings-trade-monitoring-view";
 import { buildScreeningsAiMessage } from "./screenings-build-ai-message";
 import { filterAndSortScreeningRows } from "./screenings-filter-rows";
@@ -1393,7 +1393,6 @@ export function ScreeningsUI({
   rows: incomingRows,
   selectedRunId,
   vectorTickers,
-  companyVectorDimensions,
   initialNotes = [],
   aiEnabled = true,
 }: {
@@ -1401,7 +1400,6 @@ export function ScreeningsUI({
   rows: ScreeningRow[];
   selectedRunId: number | null;
   vectorTickers: Set<string>;
-  companyVectorDimensions: Record<string, Record<string, number>>;
   initialNotes?: ScanRowNote[];
   /**
    * Whether the AI chat / customization is available. Observers (free tier) get
@@ -2350,7 +2348,7 @@ export function ScreeningsUI({
   const visibleMultiSymbolTabs = SCREENINGS_MULTI_SYMBOL_TABS;
 
   function selectRun(id: number) {
-    router.push(`/protected/screenings?run=${id}`);
+    router.push(`/protected/workspace?run=${id}`);
   }
 
   async function handleCreateScreening() {
@@ -2364,7 +2362,7 @@ export function ScreeningsUI({
         return;
       }
       setNewScreeningName("");
-      router.push(`/protected/screenings?run=${res.data.id}`);
+      router.push(`/protected/workspace?run=${res.data.id}`);
       router.refresh();
     } finally {
       setCreatingRun(false);
@@ -2451,9 +2449,9 @@ export function ScreeningsUI({
       const others = runs.filter((r) => r.id !== runId);
       if (wasSelected) {
         if (others[0]) {
-          router.push(`/protected/screenings?run=${others[0].id}`);
+          router.push(`/protected/workspace?run=${others[0].id}`);
         } else {
-          router.push("/protected/screenings");
+          router.push("/protected/workspace");
         }
       }
       router.refresh();
@@ -3658,20 +3656,9 @@ export function ScreeningsUI({
                     <ScreeningsArticlesView selectedTicker={selectedTicker} />
                   </div>
                 ) : (
-                  <StockNewsTrendView
-                    symbols={filteredSymbols}
-                    companyVectorDimensions={companyVectorDimensions}
-                    selectedTicker={selectedTicker}
-                    onSelect={setSelectedTicker}
-                    dismissed={dismissedSymbols}
-                    onDismiss={dismissTicker}
-                    onRestore={restoreTicker}
-                    getStatus={getTickerStatus}
-                    onSetStatus={setTickerStatus}
-                    hasComment={tickerHasComment}
-                    onEditComment={editTickerComment}
-                    getTickerMeta={getTickerMeta}
-                  />
+                  <div className="flex-1 min-h-0 flex flex-col overflow-y-auto">
+                    <ScreeningsPricedInView selectedTicker={selectedTicker} />
+                  </div>
                   )
                 ) : (
                   <div className="flex flex-1 items-center justify-center p-8 text-center text-sm text-muted-foreground">
@@ -3765,22 +3752,7 @@ export function ScreeningsUI({
             highlightedSymbols={highlightedSymbols}
             getStatus={getTickerStatus}
           />
-        ) : (
-          <StockNewsTrendView
-            symbols={filteredSymbols}
-            companyVectorDimensions={companyVectorDimensions}
-            selectedTicker={selectedTicker}
-            onSelect={setSelectedTicker}
-            dismissed={dismissedSymbols}
-            onDismiss={dismissTicker}
-            onRestore={restoreTicker}
-            getStatus={getTickerStatus}
-            onSetStatus={setTickerStatus}
-            hasComment={tickerHasComment}
-            onEditComment={editTickerComment}
-            getTickerMeta={getTickerMeta}
-          />
-        )}
+        ) : null}
       </div>
 
         {/* Desktop: collapsible AI chat toggle (always visible) */}

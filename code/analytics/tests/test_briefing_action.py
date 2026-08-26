@@ -42,8 +42,14 @@ def test_picks_the_tickers_that_actually_moved():
                  section("AMD", 3, -0.5))
     a = choose_action(b, tickers=["NVDA", "KO", "AMD"], tags=[])
     assert a["kind"] == "movers"
-    assert "NVDA" in a["label"] and "AMD" in a["label"]
-    assert "KO" not in a["label"], "a ticker with no news is not a mover"
+    # NVDA outranks AMD, and the link is one ticker per page now.
+    assert a["next_path"] == "/quote/NVDA"
+    assert "NVDA" in a["label"]
+    # 4 + 3, with KO contributing nothing to either the count or the copy.
+    assert "7 scored stories" in a["sublabel"], a["sublabel"]
+    assert "KO" not in f"{a['label']} {a['sublabel']} {a['next_path']}", (
+        "a ticker with no news is not a mover"
+    )
 
 
 def test_confidence_beats_a_single_loud_outlier():
@@ -76,9 +82,15 @@ def test_singular_grammar_for_one_story():
 
 
 def test_caps_at_two_movers():
+    """Four movers, but only two are ever reported on.
+
+    The cap used to be observable in the `?tickers=` list. The link is a single
+    quote page now, so the count in the sublabel is what shows it: 2 movers x 3
+    stories = 6, not all four tickers' 12.
+    """
     b = briefing(*[section(t, 3, -0.5) for t in ("A", "B", "C", "D")])
     a = choose_action(b, tickers=["A", "B", "C", "D"], tags=[])
-    assert len(a["next_path"].split("tickers=")[1].split(",")) == 2
+    assert "6 scored stories between them" in a["sublabel"], a["sublabel"]
 
 
 # ----------------------------------------------------------- quiet days ---
@@ -96,10 +108,14 @@ def test_a_quiet_day_does_not_manufacture_urgency():
 
 
 def test_tag_only_subscribers_get_the_trend_board():
-    """They have no symbol to open, so a chart deep link would be empty."""
+    """They have no symbol to open, so a chart deep link would be empty.
+
+    The trend board's dedicated page was removed; the same impact heatmap
+    renders inside screenings, which is where they go now.
+    """
     a = choose_action(briefing(), tickers=[], tags=["ai-chips", "tariffs"])
     assert a["kind"] == "themes"
-    assert a["next_path"] == "/protected/news-trends"
+    assert a["next_path"] == "/protected/workspace"
 
 
 def test_empty_subscription_still_returns_a_usable_action():
@@ -113,16 +129,25 @@ def test_empty_subscription_still_returns_a_usable_action():
     ([], ["ai-chips"]),
     ([], []),
 ])
-def test_every_action_lands_behind_the_auth_wall(tickers, tags):
-    """The whole point of the change.
+def test_every_action_lands_somewhere_the_account_is_worth_having(tickers, tags):
+    """The whole point of the change, restated for where the wall actually is.
 
-    `/quote/<symbol>` and `/marketscreenings` both render logged out, which is
-    why the previous CTAs converted nobody. If any branch here ever routes
-    somewhere public, the email goes back to asking for nothing.
+    This used to assert `/protected`, because the old CTAs were plain links and
+    a destination that renders logged out asked for nothing. Every action is now
+    wrapped by `build_signin_url`, so the reader passes through `/auth/briefing`
+    — the account is created and the session written before the destination is
+    honoured at all. The wall is the token route.
+
+    What the destination must still be is same-origin (so `isSafeNext` accepts
+    it) and a surface where the account does something: `/protected/*`, or a
+    quote page, which hosts the chart workspace that saves your levels and opens
+    the AI analyst. A link to `/pricing` would pass neither test.
     """
     b = briefing(section("NVDA", 3, 0.5)) if tickers else briefing()
     a = choose_action(b, tickers=tickers, tags=tags)
-    assert a["next_path"].startswith("/protected"), a
+    nxt = a["next_path"]
+    assert nxt.startswith("/") and not nxt.startswith("//"), a
+    assert nxt.startswith("/protected") or nxt.startswith("/quote/"), a
 
 
 def test_action_shape_is_complete():
@@ -142,12 +167,14 @@ def test_token_payload_matches_what_the_typescript_verifier_requires():
     os.environ["UNSUBSCRIBE_SECRET"] = "test-secret"
     from shared.email import sign_signin_token
 
-    token = sign_signin_token("Reader@Example.com", "/protected/charts?tickers=NVDA")
+    token = sign_signin_token("Reader@Example.com", "/quote/NVDA")
     body = token.split(".")[0]
     payload = json.loads(base64.urlsafe_b64decode(body + "=" * (-len(body) % 4)))
 
     assert payload["p"] == "signin"
-    assert payload["next"].startswith("/protected")
+    # The destination round-trips verbatim — the verifier redirects to exactly
+    # what was signed, so a mangled path here is a mangled landing.
+    assert payload["next"] == "/quote/NVDA"
     assert isinstance(payload["exp"], int)
     assert "@" in payload["email"]
 

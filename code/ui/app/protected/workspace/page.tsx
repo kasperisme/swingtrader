@@ -251,7 +251,6 @@ async function ScreeningsData({
         rows={[]}
         selectedRunId={null}
         vectorTickers={new Set()}
-        companyVectorDimensions={{}}
         initialNotes={[]}
         aiEnabled={false}
       />
@@ -265,7 +264,7 @@ async function ScreeningsData({
 
   const [
     runs,
-    { tickers: vectorTickers, dimensions: companyVectorDimensions },
+    { tickers: vectorTickers },
   ] = await Promise.all([fetchRuns(userId), fetchCompanyVectors()]);
 
   const runIds = new Set(runs.map((r) => Number(r.id)));
@@ -287,7 +286,6 @@ async function ScreeningsData({
       rows={rows}
       selectedRunId={effectiveRunId}
       vectorTickers={vectorTickers}
-      companyVectorDimensions={companyVectorDimensions}
       initialNotes={initialNotes}
       aiEnabled={aiEnabled}
     />

@@ -27,10 +27,6 @@ import {
   type PairStat,
   type RelationshipEdge,
 } from "@/app/actions/relationships";
-import {
-  fmpGetCompanyProfile,
-  type FmpCompanyProfile,
-} from "@/app/actions/fmp";
 import { TickerSearchCombobox } from "@/components/ticker-search-combobox";
 import { ChevronRight, Loader2, Network, Table as TableIcon, X } from "lucide-react";
 import type { ReactNode } from "react";
@@ -56,11 +52,9 @@ const REL_TYPES = [
   "subsidiary",
 ] as const;
 
-// The "vectors" tab was labelled "Company Profile", which collided with the
-// overview tab — the one that actually shows the FMP company profile. It renders
-// the company's dimension vectors, so it is named for that.
+// The "vectors" tab is named for what it renders — the company's dimension
+// vectors — not "Company Profile", which is what the quote page shows.
 const SIDE_TABS = [
-  { key: "overview", label: "Basic info" },
   { key: "details", label: "How it's linked" },
   { key: "vectors", label: "Dimensions" },
   { key: "sentiment", label: "Sentiment" },
@@ -581,19 +575,6 @@ function Metric({
   );
 }
 
-function formatCompactNumber(n: number | undefined): string {
-  if (n == null || !Number.isFinite(n)) return "—";
-  return new Intl.NumberFormat(undefined, {
-    notation: "compact",
-    maximumFractionDigits: 1,
-  }).format(n);
-}
-
-function formatFixed(n: number | undefined, digits: number): string {
-  if (n == null || !Number.isFinite(n)) return "—";
-  return n.toFixed(digits);
-}
-
 export function RelationshipNetworkExplorer(
   props: RelationshipNetworkExplorerProps,
 ) {
@@ -614,6 +595,12 @@ export function RelationshipNetworkExplorer(
     if (!el) return;
     const ro = new ResizeObserver(([entry]) => {
       const { width, height } = entry.contentRect;
+      // A hidden ancestor — a closed tab panel on a quote page — measures 0x0.
+      // Committing that gives the SVG viewBox="0 0 0 0": every node renders,
+      // none of them visible, and it never recovers unless the observer
+      // happens to fire again. Zero means "not laid out yet", not "no space",
+      // so hold the last good size (or the defaults) instead.
+      if (width < 1 || height < 1) return;
       setDynamicSize({ w: Math.round(width), h: Math.round(height) });
     });
     ro.observe(el);
@@ -623,8 +610,8 @@ export function RelationshipNetworkExplorer(
   const GW = dynamicSize?.w ?? 980;
   const GH = fillViewport ? (dynamicSize?.h ?? 560) : 560;
   const [sideTab, setSideTab] = useState<
-    "overview" | "details" | "vectors" | "sentiment"
-  >("overview");
+    "details" | "vectors" | "sentiment"
+  >("details");
   // Graph vs table are two reads of the SAME loaded neighbourhood — switching
   // never refetches and never changes the selection, only the presentation.
   const [viewMode, setViewMode] = useState<"graph" | "table">("graph");
@@ -672,23 +659,6 @@ export function RelationshipNetworkExplorer(
   const [manualPositions, setManualPositions] = useState<
     Record<string, { x: number; y: number }>
   >({});
-  const [fmpProfile, setFmpProfile] = useState<FmpCompanyProfile | null>(null);
-  const [fmpProfileLoading, setFmpProfileLoading] = useState(false);
-  const [fmpProfileError, setFmpProfileError] = useState<string | null>(null);
-  /** Ticker the current `fmpProfile` / `fmpProfileError` belongs to (after last completed request). */
-  const [fmpProfileForTicker, setFmpProfileForTicker] = useState<string | null>(
-    null,
-  );
-
-  const fmpOverviewBusy = useMemo(
-    () =>
-      Boolean(
-        selectedNode &&
-        (fmpProfileLoading ||
-          fmpProfileForTicker?.toUpperCase() !== selectedNode.toUpperCase()),
-      ),
-    [fmpProfileLoading, fmpProfileForTicker, selectedNode],
-  );
 
   const filteredEdges = useMemo(
     () => edges.filter((e) => selectedRelTypes.includes(e.rel_type)),
@@ -1112,35 +1082,6 @@ export function RelationshipNetworkExplorer(
   }, [selectedEdge]);
 
   useEffect(() => {
-    if (!selectedNode) {
-      setFmpProfile(null);
-      setFmpProfileError(null);
-      setFmpProfileLoading(false);
-      setFmpProfileForTicker(null);
-      return;
-    }
-    const ticker = selectedNode;
-    let cancelled = false;
-    setFmpProfileLoading(true);
-    setFmpProfileError(null);
-    fmpGetCompanyProfile(ticker).then((res) => {
-      if (cancelled) return;
-      setFmpProfileLoading(false);
-      setFmpProfileForTicker(ticker);
-      if (!res.ok) {
-        setFmpProfile(null);
-        setFmpProfileError(res.error);
-        return;
-      }
-      setFmpProfile(res.data);
-      setFmpProfileError(null);
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [selectedNode]);
-
-  useEffect(() => {
     setManualPositions((prev) => {
       const next: Record<string, { x: number; y: number }> = {};
       for (const id of nodes) {
@@ -1425,12 +1366,6 @@ export function RelationshipNetworkExplorer(
                         }`}
                       >
                         {tab.label}
-                        {tab.key === "overview" && selectedNode && fmpOverviewBusy ? (
-                          <span
-                            className="inline-block size-1.5 shrink-0 animate-pulse rounded-full bg-muted-foreground/80"
-                            aria-hidden
-                          />
-                        ) : null}
                       </button>
                     );
                   })}
@@ -1450,262 +1385,7 @@ export function RelationshipNetworkExplorer(
                   id="reltabpanel"
                   aria-labelledby={`reltab-${sideTab}`}
                 >
-                {sideTab === "overview" ? (
-                  <div className="p-2">
-                    {!selectedNode ? (
-                      <p className="text-sm text-muted-foreground">
-                        Select a node to load company profile from Financial
-                        Modeling Prep.
-                      </p>
-                    ) : fmpOverviewBusy ? (
-                      <div
-                        className="flex flex-col gap-3"
-                        aria-busy="true"
-                        aria-live="polite"
-                      >
-                        <p className="text-xs text-muted-foreground">
-                          Loading profile for{" "}
-                          <span className="font-mono text-foreground">
-                            {selectedNode}
-                          </span>
-                          …
-                        </p>
-                        <div className="flex gap-3 border-b border-border pb-3">
-                          <div className="h-12 w-12 shrink-0 animate-pulse rounded-md bg-muted" />
-                          <div className="min-w-0 flex-1 space-y-2 py-0.5">
-                            <div className="h-4 w-[min(100%,14rem)] animate-pulse rounded bg-muted" />
-                            <div className="h-3 w-24 animate-pulse rounded bg-muted" />
-                            <div className="h-3 w-16 animate-pulse rounded bg-muted" />
-                          </div>
-                        </div>
-                        <div className="grid grid-cols-2 gap-2">
-                          {Array.from({ length: 10 }).map((_, i) => (
-                            <div
-                              key={`sk-${i}`}
-                              className="h-3 animate-pulse rounded bg-muted/80"
-                            />
-                          ))}
-                        </div>
-                      </div>
-                    ) : fmpProfileError ? (
-                      // Plenty of graph nodes are entities, not listed symbols
-                      // (SAMSUNG, HUAWEI, OPENAI…). A failed profile lookup for
-                      // those is an expected state, not a fault, so it reads as
-                      // information and points at the tabs that do have data.
-                      <div className="text-xs text-muted-foreground">
-                        <p>
-                          No company profile for{" "}
-                          <span className="font-mono text-foreground">
-                            {selectedNode}
-                          </span>
-                          .
-                        </p>
-                        <p className="mt-1">
-                          Financial Modeling Prep only covers listed symbols — this
-                          node looks like an entity or private company. Its
-                          relationships, news and sentiment are still available on
-                          the other tabs.
-                        </p>
-                      </div>
-                    ) : fmpProfile ? (
-                      <div className="flex flex-col gap-3">
-                        <div className="flex gap-3 border-b border-border pb-3">
-                          {fmpProfile.image ? (
-                            <img
-                              src={fmpProfile.image}
-                              alt=""
-                              width={48}
-                              height={48}
-                              className="h-12 w-12 shrink-0 rounded-md border border-border bg-muted object-contain"
-                            />
-                          ) : (
-                            <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-md border border-border bg-muted font-mono text-xs font-semibold text-muted-foreground">
-                              {(fmpProfile.symbol ?? selectedNode).slice(0, 4)}
-                            </div>
-                          )}
-                          <div className="min-w-0 flex-1">
-                            <p className="text-sm font-semibold leading-tight text-foreground">
-                              {fmpProfile.companyName ?? selectedNode}
-                            </p>
-                            <p className="mt-0.5 font-mono text-xs text-muted-foreground">
-                              {fmpProfile.symbol ?? selectedNode}
-                              {fmpProfile.exchange
-                                ? ` · ${fmpProfile.exchange}`
-                                : ""}
-                            </p>
-                            {fmpProfile.website ? (
-                              <a
-                                href={fmpProfile.website}
-                                target="_blank"
-                                rel="noreferrer"
-                                className="mt-1 inline-block truncate text-xs font-medium text-foreground hover:underline"
-                              >
-                                Website
-                              </a>
-                            ) : null}
-                          </div>
-                        </div>
-
-                        <dl className="grid grid-cols-[minmax(0,1fr)_minmax(0,1.1fr)] gap-x-2 gap-y-1.5 text-xs">
-                          <dt className="text-muted-foreground">Price</dt>
-                          <dd className="text-right font-mono tabular-nums">
-                            {fmpProfile.price != null &&
-                            Number.isFinite(fmpProfile.price)
-                              ? `${formatFixed(fmpProfile.price, 2)}${fmpProfile.currency ? ` ${fmpProfile.currency}` : ""}`
-                              : "—"}
-                          </dd>
-                          <dt className="text-muted-foreground">Change</dt>
-                          <dd
-                            className={`text-right font-mono tabular-nums ${
-                              (fmpProfile.change ?? 0) > 0
-                                ? "text-emerald-600 dark:text-emerald-400"
-                                : (fmpProfile.change ?? 0) < 0
-                                  ? "text-rose-600 dark:text-rose-400"
-                                  : ""
-                            }`}
-                          >
-                            {fmpProfile.change != null &&
-                            Number.isFinite(fmpProfile.change)
-                              ? `${fmpProfile.change > 0 ? "+" : ""}${formatFixed(fmpProfile.change, 2)}`
-                              : "—"}
-                            {fmpProfile.changePercentage != null &&
-                            Number.isFinite(fmpProfile.changePercentage)
-                              ? ` (${fmpProfile.changePercentage > 0 ? "+" : ""}${formatFixed(fmpProfile.changePercentage, 2)}%)`
-                              : ""}
-                          </dd>
-                          <dt className="text-muted-foreground">Market cap</dt>
-                          <dd className="text-right font-mono tabular-nums">
-                            {formatCompactNumber(fmpProfile.marketCap)}
-                          </dd>
-                          <dt className="text-muted-foreground">52W range</dt>
-                          <dd className="text-right font-mono text-[11px] tabular-nums">
-                            {fmpProfile.range ?? "—"}
-                          </dd>
-                          <dt className="text-muted-foreground">Beta</dt>
-                          <dd className="text-right font-mono tabular-nums">
-                            {formatFixed(fmpProfile.beta, 3)}
-                          </dd>
-                          <dt className="text-muted-foreground">Volume</dt>
-                          <dd className="text-right font-mono tabular-nums">
-                            {formatCompactNumber(fmpProfile.volume)}
-                          </dd>
-                          <dt className="text-muted-foreground">Avg volume</dt>
-                          <dd className="text-right font-mono tabular-nums">
-                            {formatCompactNumber(fmpProfile.averageVolume)}
-                          </dd>
-                          <dt className="text-muted-foreground">
-                            Last dividend
-                          </dt>
-                          <dd className="text-right font-mono tabular-nums">
-                            {formatFixed(fmpProfile.lastDividend, 2)}
-                          </dd>
-                          <dt className="text-muted-foreground">Sector</dt>
-                          <dd className="text-right">
-                            {fmpProfile.sector ?? "—"}
-                          </dd>
-                          <dt className="text-muted-foreground">Industry</dt>
-                          <dd className="text-right">
-                            {fmpProfile.industry ?? "—"}
-                          </dd>
-                          <dt className="text-muted-foreground">CEO</dt>
-                          <dd className="text-right">
-                            {fmpProfile.ceo ?? "—"}
-                          </dd>
-                          <dt className="text-muted-foreground">Employees</dt>
-                          <dd className="text-right tabular-nums">
-                            {fmpProfile.fullTimeEmployees ?? "—"}
-                          </dd>
-                          <dt className="text-muted-foreground">IPO</dt>
-                          <dd className="text-right font-mono text-[11px]">
-                            {fmpProfile.ipoDate ?? "—"}
-                          </dd>
-                          <dt className="text-muted-foreground">Country</dt>
-                          <dd className="text-right">
-                            {fmpProfile.country ?? "—"}
-                          </dd>
-                          <dt className="text-muted-foreground">Exchange</dt>
-                          <dd className="text-right text-[11px] leading-snug">
-                            {fmpProfile.exchangeFullName ??
-                              fmpProfile.exchange ??
-                              "—"}
-                          </dd>
-                          <dt className="text-muted-foreground">CIK / ISIN</dt>
-                          <dd className="break-all text-right font-mono text-[11px]">
-                            {[fmpProfile.cik, fmpProfile.isin]
-                              .filter(Boolean)
-                              .join(" · ") || "—"}
-                          </dd>
-                        </dl>
-
-                        {fmpProfile.address ||
-                        fmpProfile.city ||
-                        fmpProfile.phone ? (
-                          <div className="border-t border-border pt-2 text-xs text-muted-foreground">
-                            {fmpProfile.address ? (
-                              <p>{fmpProfile.address}</p>
-                            ) : null}
-                            {fmpProfile.city ||
-                            fmpProfile.state ||
-                            fmpProfile.zip ? (
-                              <p>
-                                {[
-                                  fmpProfile.city,
-                                  fmpProfile.state,
-                                  fmpProfile.zip,
-                                ]
-                                  .filter(Boolean)
-                                  .join(", ")}
-                              </p>
-                            ) : null}
-                            {fmpProfile.phone ? (
-                              <p className="mt-1 font-mono">
-                                {fmpProfile.phone}
-                              </p>
-                            ) : null}
-                          </div>
-                        ) : null}
-
-                        <div className="flex flex-wrap gap-1.5 text-[11px] text-muted-foreground">
-                          {fmpProfile.isEtf ? (
-                            <span className="rounded border border-border px-1.5 py-0.5">
-                              ETF
-                            </span>
-                          ) : null}
-                          {fmpProfile.isFund ? (
-                            <span className="rounded border border-border px-1.5 py-0.5">
-                              Fund
-                            </span>
-                          ) : null}
-                          {fmpProfile.isAdr ? (
-                            <span className="rounded border border-border px-1.5 py-0.5">
-                              ADR
-                            </span>
-                          ) : null}
-                          {fmpProfile.isActivelyTrading === false ? (
-                            <span className="rounded border border-amber-500/50 px-1.5 py-0.5 text-amber-700 dark:text-amber-400">
-                              Not actively trading
-                            </span>
-                          ) : null}
-                        </div>
-
-                        {fmpProfile.description ? (
-                          <div>
-                            <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-                              Description
-                            </p>
-                            <p className="mt-1 max-h-48 overflow-y-auto text-xs leading-relaxed text-muted-foreground">
-                              {fmpProfile.description}
-                            </p>
-                          </div>
-                        ) : null}
-                      </div>
-                    ) : (
-                      <p className="text-xs text-muted-foreground">
-                        No profile returned for this symbol.
-                      </p>
-                    )}
-                  </div>
-                ) : sideTab === "vectors" ? (
+                {sideTab === "vectors" ? (
                   <div className="p-2">
                     {!selectedNode ? (
                       <p className="text-sm text-muted-foreground">

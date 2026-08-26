@@ -5,7 +5,7 @@ import {
   BarChart2,
   FileText,
   Gauge,
-  Newspaper,
+  Target,
   TrendingUp,
 } from "lucide-react";
 import type { ScreeningsPrimaryTabDef } from "./screenings-types";
@@ -37,13 +37,13 @@ export const SCREENINGS_DEEP_DIVE_TABS: ScreeningsPrimaryTabDef[] = [
     icon: <FileText className="w-3.5 h-3.5" />,
   },
   {
-    id: "news",
-    label: "News Trend",
-    icon: <Newspaper className="w-3.5 h-3.5" />,
-  },
-  {
     id: "relationship",
     label: "Relationships",
     icon: <Activity className="w-3.5 h-3.5" />,
+  },
+  {
+    id: "pricedIn",
+    label: "Priced in",
+    icon: <Target className="w-3.5 h-3.5" />,
   },
 ];

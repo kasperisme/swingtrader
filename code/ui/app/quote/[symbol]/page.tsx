@@ -15,6 +15,9 @@ import {
   type ChartEvent,
 } from "./_components/ticker-impact-chart";
 import { ArticleBriefingCTA } from "@/app/articles/[slug]/_components/article-briefing-cta";
+import { QuoteChartWorkspace } from "./_components/quote-chart-workspace";
+import { QuoteTabs } from "./_components/quote-tabs";
+import { QuoteRelationshipGraph } from "./_components/quote-relationship-graph";
 import { SITE_URL } from "@/lib/site";
 
 const SITE_BASE_URL = SITE_URL;
@@ -255,7 +258,7 @@ export default async function QuotePage({
   };
 
   return (
-    <div className="mx-auto flex w-full min-w-0 max-w-6xl flex-col gap-8 px-4 py-8 sm:px-6 lg:px-8">
+    <div className="mx-auto flex w-full min-w-0 max-w-7xl flex-col gap-8 px-4 py-8 sm:px-6 lg:px-8">
       <script
         type="application/ld+json"
         dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }}
@@ -310,127 +313,183 @@ export default async function QuotePage({
         </div>
       </header>
 
-      {/* ── HERO: impact-scored news on the chart ─────────────────── */}
-      <section className="grid gap-6 lg:grid-cols-[1.6fr_1fr]">
-        <div>
-          <h2 className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-            Price & news catalysts
-          </h2>
-          <TickerImpactChart symbol={symbol} bars={bars} events={chartEvents} />
+      <QuoteTabs
+        tabs={[
+          {
+            id: "overview",
+            label: "Overview",
+            panel: (
+              <section className="grid gap-6 lg:grid-cols-[1.6fr_1fr]">
+                <div>
+                  <h2 className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                    Price & news catalysts
+                  </h2>
+                  <TickerImpactChart symbol={symbol} bars={bars} events={chartEvents} />
 
-          {/* Key statistics — the numbers you read the chart against, so
-              they sit directly under it rather than further down. */}
-          <h2 className="mb-3 mt-6 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-            Key statistics
-          </h2>
-          <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 xl:grid-cols-4">
-            <Stat label="Market cap" value={fmtCompact(profile?.marketCap)} />
-            <Stat label="P/E" value={fmtFixed(qnum(quote, "pe"))} />
-            <Stat label="EPS" value={fmtFixed(qnum(quote, "eps"))} />
-            <Stat label="Beta" value={fmtFixed(profile?.beta, 2)} />
-            <Stat label="52W range" value={profile?.range ?? "—"} />
-            <Stat label="Day range" value={qnum(quote, "dayLow") != null ? `${fmtFixed(qnum(quote, "dayLow"))}–${fmtFixed(qnum(quote, "dayHigh"))}` : "—"} />
-            <Stat label="Open" value={fmtFixed(qnum(quote, "open"))} />
-            <Stat label="Prev close" value={fmtFixed(qnum(quote, "previousClose"))} />
-            <Stat label="Volume" value={fmtCompact(qnum(quote, "volume") ?? profile?.volume)} />
-            <Stat label="Avg volume" value={fmtCompact(qnum(quote, "avgVolume") ?? profile?.averageVolume)} />
-            <Stat label="Dividend" value={fmtFixed(profile?.lastDividend, 2)} />
-            <Stat label="IPO" value={profile?.ipoDate ?? "—"} />
-          </div>
-        </div>
-        <div>
-          <h2 className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-            What moved {symbol}
-          </h2>
-          {moved.length === 0 ? (
-            <p className="rounded-lg border border-border bg-card p-4 text-sm text-muted-foreground">
-              No scored catalysts in the window yet.
-            </p>
-          ) : (
-            <ol className="flex flex-col gap-2">
-              {moved.map((e, i) => (
-                <li key={e.articleId} className="rounded-lg border border-border bg-card p-3">
-                  <div className="flex items-start gap-2">
-                    <span className="mt-0.5 font-mono text-xs text-muted-foreground">{i + 1}</span>
-                    <div className="min-w-0 flex-1">
-                      <a
-                        href={e.url ?? "#"}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="line-clamp-2 text-sm font-medium text-foreground hover:underline"
-                      >
-                        {e.title}
-                      </a>
-                      <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px] text-muted-foreground">
-                        {e.sentiment != null ? (
-                          <span className={e.sentiment > 0 ? "text-emerald-500" : e.sentiment < 0 ? "text-rose-500" : ""}>
-                            {e.sentiment >= 0 ? "+" : ""}{e.sentiment.toFixed(2)}
-                          </span>
-                        ) : null}
-                        <span>impact {e.impactMagnitude.toFixed(1)}</span>
-                        {e.movePct != null ? (
-                          <span className={e.movePct >= 0 ? "text-emerald-500" : "text-rose-500"}>
-                            {e.movePct >= 0 ? "▲" : "▼"}{Math.abs(e.movePct).toFixed(1)}%
-                          </span>
-                        ) : null}
-                      </div>
-                    </div>
+                  {/* Key statistics — the numbers you read the chart against, so
+                      they sit directly under it rather than further down. */}
+                  <h2 className="mb-3 mt-6 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                    Key statistics
+                  </h2>
+                  <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 xl:grid-cols-4">
+                    <Stat label="Market cap" value={fmtCompact(profile?.marketCap)} />
+                    <Stat label="P/E" value={fmtFixed(qnum(quote, "pe"))} />
+                    <Stat label="EPS" value={fmtFixed(qnum(quote, "eps"))} />
+                    <Stat label="Beta" value={fmtFixed(profile?.beta, 2)} />
+                    <Stat label="52W range" value={profile?.range ?? "—"} />
+                    <Stat label="Day range" value={qnum(quote, "dayLow") != null ? `${fmtFixed(qnum(quote, "dayLow"))}–${fmtFixed(qnum(quote, "dayHigh"))}` : "—"} />
+                    <Stat label="Open" value={fmtFixed(qnum(quote, "open"))} />
+                    <Stat label="Prev close" value={fmtFixed(qnum(quote, "previousClose"))} />
+                    <Stat label="Volume" value={fmtCompact(qnum(quote, "volume") ?? profile?.volume)} />
+                    <Stat label="Avg volume" value={fmtCompact(qnum(quote, "avgVolume") ?? profile?.averageVolume)} />
+                    <Stat label="Dividend" value={fmtFixed(profile?.lastDividend, 2)} />
+                    <Stat label="IPO" value={profile?.ipoDate ?? "—"} />
                   </div>
-                </li>
-              ))}
-            </ol>
-          )}
+                </div>
+                <div>
+                  <h2 className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                    What moved {symbol}
+                  </h2>
+                  {moved.length === 0 ? (
+                    <p className="rounded-lg border border-border bg-card p-4 text-sm text-muted-foreground">
+                      No scored catalysts in the window yet.
+                    </p>
+                  ) : (
+                    <ol className="flex flex-col gap-2">
+                      {moved.map((e, i) => (
+                        <li key={e.articleId} className="rounded-lg border border-border bg-card p-3">
+                          <div className="flex items-start gap-2">
+                            <span className="mt-0.5 font-mono text-xs text-muted-foreground">{i + 1}</span>
+                            <div className="min-w-0 flex-1">
+                              <a
+                                href={e.url ?? "#"}
+                                target="_blank"
+                                rel="noreferrer"
+                                className="line-clamp-2 text-sm font-medium text-foreground hover:underline"
+                              >
+                                {e.title}
+                              </a>
+                              <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px] text-muted-foreground">
+                                {e.sentiment != null ? (
+                                  <span className={e.sentiment > 0 ? "text-emerald-500" : e.sentiment < 0 ? "text-rose-500" : ""}>
+                                    {e.sentiment >= 0 ? "+" : ""}{e.sentiment.toFixed(2)}
+                                  </span>
+                                ) : null}
+                                <span>impact {e.impactMagnitude.toFixed(1)}</span>
+                                {e.movePct != null ? (
+                                  <span className={e.movePct >= 0 ? "text-emerald-500" : "text-rose-500"}>
+                                    {e.movePct >= 0 ? "▲" : "▼"}{Math.abs(e.movePct).toFixed(1)}%
+                                  </span>
+                                ) : null}
+                              </div>
+                            </div>
+                          </div>
+                        </li>
+                      ))}
+                    </ol>
+                  )}
 
-          <Link
-            href={`/articles?tag=${encodeURIComponent(symbol)}`}
-            className="mt-3 inline-flex items-center gap-1 text-xs font-medium text-primary hover:underline"
-          >
-            Show more {symbol} articles →
-          </Link>
+                  <Link
+                    href={`/articles?tag=${encodeURIComponent(symbol)}`}
+                    className="mt-3 inline-flex items-center gap-1 text-xs font-medium text-primary hover:underline"
+                  >
+                    Show more {symbol} articles →
+                  </Link>
 
-          <div className="mt-6">
-            <h2 className="mb-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-              Profile
-            </h2>
-            <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1.5 text-xs">
-              <dt className="text-muted-foreground">Sector</dt>
-              <dd className="text-right">{profile?.sector ?? "—"}</dd>
-              <dt className="text-muted-foreground">Industry</dt>
-              <dd className="text-right">{profile?.industry ?? "—"}</dd>
-              <dt className="text-muted-foreground">CEO</dt>
-              <dd className="text-right">{profile?.ceo ?? "—"}</dd>
-              <dt className="text-muted-foreground">Employees</dt>
-              <dd className="text-right tabular-nums">{profile?.fullTimeEmployees ?? "—"}</dd>
-              <dt className="text-muted-foreground">Country</dt>
-              <dd className="text-right">{profile?.country ?? "—"}</dd>
-            </dl>
-            {profile?.website ? (
-              <a href={profile.website} target="_blank" rel="noreferrer" className="mt-2 inline-block text-xs font-medium text-primary hover:underline">
-                {profile.website.replace(/^https?:\/\//, "")}
-              </a>
-            ) : null}
-            {profile?.description ? (
-              <p className="mt-3 max-h-48 overflow-y-auto text-xs leading-relaxed text-muted-foreground">
-                {profile.description}
-              </p>
-            ) : null}
-          </div>
-        </div>
-      </section>
-
-      {pricedIn && (
-        <section>
-          <h2 className="mb-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-            What the price already reflects
-          </h2>
-          <p className="mb-3 max-w-[70ch] text-xs text-muted-foreground">
-            Analysts publish price targets on {symbol}, and they disagree. Where
-            the share price actually sits among them shows which of their
-            arguments the market is buying — and which it is ignoring.
-          </p>
-          <PricedInPanel vote={pricedIn} livePrice={price} />
-        </section>
-      )}
+                  <div className="mt-6">
+                    <h2 className="mb-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                      Profile
+                    </h2>
+                    <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1.5 text-xs">
+                      <dt className="text-muted-foreground">Sector</dt>
+                      <dd className="text-right">{profile?.sector ?? "—"}</dd>
+                      <dt className="text-muted-foreground">Industry</dt>
+                      <dd className="text-right">{profile?.industry ?? "—"}</dd>
+                      <dt className="text-muted-foreground">CEO</dt>
+                      <dd className="text-right">{profile?.ceo ?? "—"}</dd>
+                      <dt className="text-muted-foreground">Employees</dt>
+                      <dd className="text-right tabular-nums">{profile?.fullTimeEmployees ?? "—"}</dd>
+                      <dt className="text-muted-foreground">Country</dt>
+                      <dd className="text-right">{profile?.country ?? "—"}</dd>
+                    </dl>
+                    {profile?.website ? (
+                      <a href={profile.website} target="_blank" rel="noreferrer" className="mt-2 inline-block text-xs font-medium text-primary hover:underline">
+                        {profile.website.replace(/^https?:\/\//, "")}
+                      </a>
+                    ) : null}
+                    {profile?.description ? (
+                      <p className="mt-3 max-h-48 overflow-y-auto text-xs leading-relaxed text-muted-foreground">
+                        {profile.description}
+                      </p>
+                    ) : null}
+                  </div>
+                </div>
+              </section>
+            ),
+          },
+          // Only a tab when there is a vote to show — an empty tab reads as a
+          // broken one.
+          ...(pricedIn
+            ? [
+                {
+                  id: "priced-in",
+                  label: "Priced in",
+                  panel: (
+                    <section>
+                      <h2 className="mb-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                        What the price already reflects
+                      </h2>
+                      <p className="mb-3 max-w-[70ch] text-xs text-muted-foreground">
+                        Analysts publish price targets on {symbol}, and they
+                        disagree. Where the share price actually sits among them
+                        shows which of their arguments the market is buying —
+                        and which it is ignoring.
+                      </p>
+                      <PricedInPanel vote={pricedIn} livePrice={price} />
+                    </section>
+                  ),
+                },
+              ]
+            : []),
+          {
+            id: "chart",
+            label: "Chart",
+            wide: true,
+            panel: (
+              <section>
+                <h2 className="mb-1 px-4 text-xs font-semibold uppercase tracking-wide text-muted-foreground sm:px-6 lg:px-8">
+                  Chart {symbol} yourself
+                </h2>
+                <p className="mb-3 max-w-[70ch] px-4 text-xs text-muted-foreground sm:px-6 lg:px-8">
+                  Daily OHLCV with SMA overlays and session pivots. Draw your
+                  levels and trendlines on it, or ask the AI analyst what the
+                  price is reacting to.
+                </p>
+                <QuoteChartWorkspace symbol={symbol} />
+              </section>
+            ),
+          },
+          {
+            id: "network",
+            label: "Network",
+            wide: true,
+            panel: (
+              <section>
+                <h2 className="mb-1 px-4 text-xs font-semibold uppercase tracking-wide text-muted-foreground sm:px-6 lg:px-8">
+                  Who {symbol} is connected to
+                </h2>
+                <p className="mb-3 max-w-[70ch] px-4 text-xs text-muted-foreground sm:px-6 lg:px-8">
+                  Suppliers, customers, partners and competitors, derived from
+                  what the news actually says about {companyName} — not a sector
+                  bucket. Click an edge to see the articles that established the
+                  link.
+                </p>
+                <QuoteRelationshipGraph symbol={symbol} />
+              </section>
+            ),
+          },
+        ]}
+      />
 
       {/* ── Briefing CTA ──────────────────────────────────────────── */}
       <section>

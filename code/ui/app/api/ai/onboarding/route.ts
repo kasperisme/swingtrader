@@ -52,7 +52,7 @@ Examples:
 - Let the user skip any step ("we can do that later") and move on gracefully.
 - If a tool returns an error (e.g. plan limit, Telegram not configured), relay it plainly and offer the next best step.
 - Cron help: '0 7 * * 1-5' = weekdays 7am; '0 */4 * * *' = every 4 hours; '*/15 * * * *' = every 15 min. Never propose a schedule more frequent than the plan minimum from get_agent_limits.
-- Stay on setup. For market analysis or trade ideas, point them to the chart AI on /protected/charts.`;
+- Stay on setup. For market analysis or trade ideas, point them to the chart AI on that ticker's quote page, /quote/<SYMBOL>.`;
 
 // Deterministic opening the assistant "says" first, before any user input. The
 // model then proceeds straight to the first question (see flow rule 1).

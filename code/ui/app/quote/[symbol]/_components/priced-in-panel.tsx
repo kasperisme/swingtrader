@@ -1,6 +1,8 @@
 import { TrendingDown, TrendingUp, Minus } from "lucide-react";
-import type { PricedInVote } from "@/lib/quote/priced-in";
-import { injectPrice, STALE_AFTER_DAYS } from "@/lib/quote/priced-in";
+// From the client-safe half, not `priced-in.ts`: this panel is rendered from
+// the workspace's client-side tab switcher as well as from the quote page.
+import type { PricedInVote } from "@/lib/quote/priced-in-vote";
+import { injectPrice, STALE_AFTER_DAYS } from "@/lib/quote/priced-in-vote";
 
 /**
  * Where the price sits among the analyst models published about a company.

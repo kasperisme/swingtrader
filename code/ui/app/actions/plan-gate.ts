@@ -22,3 +22,29 @@ export async function getNewsTrendsGate(): Promise<TimeGate> {
   const tier = await getUserPlanTier();
   return computeNewsTrendsGate(tier);
 }
+
+/**
+ * Auth + AI entitlement in one round trip, for surfaces that resolve the gate
+ * on the client.
+ *
+ * The quote pages are public and statically prerendered, so they cannot read
+ * auth cookies during render without going dynamic and losing that. The chart
+ * workspace embedded there asks for this instead, after mount: the chart itself
+ * is public, only the saved annotations and the AI panel are gated.
+ *
+ * `signedIn` and `aiEnabled` are separate because the two failure states need
+ * different words — a logged-out reader needs an account, an Observer needs a
+ * plan — and `getUserPlanTier()` reports both as "observer".
+ */
+export async function getChartWorkspaceAccess(): Promise<{
+  signedIn: boolean;
+  aiEnabled: boolean;
+}> {
+  const supabase = await createClient();
+  const { data: claims } = await supabase.auth.getClaims();
+  const signedIn = Boolean(claims?.claims?.sub);
+  if (!signedIn) return { signedIn: false, aiEnabled: false };
+  if (PRELAUNCH_OPEN_ACCESS) return { signedIn: true, aiEnabled: true };
+  const tier = await getUserSubscriptionTier(supabase);
+  return { signedIn: true, aiEnabled: tier !== "observer" };
+}

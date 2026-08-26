@@ -39,26 +39,15 @@ export function SiteHeaderDesktopAuthedNav() {
         href="/protected"
         className="text-sm font-medium text-foreground transition-colors hover:text-amber-500 cursor-pointer"
       >
-        Portfolio
+        Overview
       </Link>
-      <details className="group relative" name="desktop-main-nav">
-        <summary className={navDropdownTriggerClass}>
-          <span>Research</span>
-          <ChevronDown className="ml-1 h-3.5 w-3.5 transition-transform duration-200 group-open:rotate-180" />
-        </summary>
-        <div className={navDropdownPanelClass}>
-          <NavDropLink href="/protected/news-trends">News Trends</NavDropLink>
-          <NavDropLink href="/protected/charts">Charts</NavDropLink>
-          <NavDropLink href="/protected/relations">Relations</NavDropLink>
-        </div>
-      </details>
       <details className="group relative" name="desktop-main-nav">
         <summary className={navDropdownTriggerClass}>
           <span>Operations</span>
           <ChevronDown className="ml-1 h-3.5 w-3.5 transition-transform duration-200 group-open:rotate-180" />
         </summary>
         <div className={navDropdownPanelClass}>
-          <NavDropLink href="/protected/screenings">Screenings</NavDropLink>
+          <NavDropLink href="/protected/workspace">Workspace</NavDropLink>
           <NavDropLink href="/protected/agents">Agents</NavDropLink>
           <NavDropLink href="/protected/trades">Trades</NavDropLink>
         </div>

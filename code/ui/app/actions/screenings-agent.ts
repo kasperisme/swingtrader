@@ -3,7 +3,7 @@
 import { createClient } from "@/lib/supabase/server";
 import { getUserPlanTier } from "./plan-gate";
 import { type PlanTier } from "@/lib/plans";
-import type { ScreeningsFilters } from "@/app/protected/screenings/screenings-filters-model";
+import type { ScreeningsFilters } from "@/app/protected/workspace/screenings-filters-model";
 import { captureServer } from "@/lib/analytics/server";
 import { PRELAUNCH_OPEN_ACCESS } from "@/lib/launch";
 import { getTelegramStatus } from "@/lib/telegram/link";

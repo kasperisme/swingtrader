@@ -25,9 +25,12 @@ Three consequences of that rule, all of them constraints rather than options:
   measured winners elsewhere in this product (screening detail at 22%) ask for
   exactly one thing, about the thing already on screen.
 
-* **The destination must need an account.** `/quote/<symbol>` is free and would
-  convert nobody, so the ask lands one step deeper — the charts workspace, where
-  opening a ticker means saving it. That is the wall, and it is worth stepping
+* **The destination must need an account.** Not to *reach* — every action link
+  goes through `/auth/briefing`, which creates the account and writes the
+  session before it honours the destination, so the rung is bought there. What
+  the page has to supply is the reason: `/quote/<SYMBOL>` now hosts the chart
+  workspace, and drawing a level on it or asking its AI analyst anything is
+  something only an account keeps. That is the wall, and it is worth stepping
   over because the thing behind it is theirs.
 
 Selection is deterministic and reads only what `gather_briefing` already
@@ -79,9 +82,19 @@ def choose_action(briefing: dict[str, Any], *, tickers: list[str],
                   tags: list[str]) -> dict[str, Any]:
     """The single account-requiring action for this send.
 
-    Returns ``{kind, label, sublabel, next_path}``. ``next_path`` is always a
-    path under `/protected`, because an action that resolves while logged out
-    cannot move anyone up a rung — that is the entire point of the change.
+    Returns ``{kind, label, sublabel, next_path}``.
+
+    ``next_path`` used to be constrained to `/protected`, on the reasoning that
+    a destination which renders logged out cannot move anyone up a rung. That
+    reasoning belonged to the old CTAs, which were plain links. Every action
+    here is wrapped by :func:`build_signin_url`, so the reader passes through
+    `/auth/briefing` — which creates the account and writes the session before
+    it honours the destination at all. The rung is bought by the token route,
+    not by the page.
+
+    What the destination still has to earn is the *reason* to be signed in.
+    `/quote/<SYMBOL>` does: the chart workspace there keeps the levels they
+    draw and opens the AI analyst, both only for an account.
     """
     movers = _movers(briefing)
 
@@ -107,11 +120,14 @@ def choose_action(briefing: dict[str, Any], *, tickers: list[str],
                        f"all leaning {next(iter(dirs))}.")
             else:
                 sub = f"{counts} scored stories between them in the last 24 hours."
+        # The chart is one ticker per page now, so the link lands on the
+        # strongest mover — `_movers` is already ranked — even when the email
+        # reports on two.
         return {
             "kind": "movers",
-            "label": f"Open {_join(names)} in your charts",
+            "label": f"Open {names[0]} in your charts",
             "sublabel": sub,
-            "next_path": "/protected/charts?tickers=" + ",".join(names),
+            "next_path": f"/quote/{names[0]}",
         }
 
     # Nothing moved. The honest ask is the watchlist itself rather than
@@ -122,24 +138,26 @@ def choose_action(briefing: dict[str, Any], *, tickers: list[str],
         named = watch[:2]
         return {
             "kind": "quiet",
-            "label": "Open your watchlist in charts",
+            "label": f"Open {watch[0]} in your charts",
             "sublabel": (
                 "A quiet 24 hours — worth a look at where "
                 f"{_join(named)} {'sit' if len(named) > 1 else 'sits'} "
                 "going into tomorrow."
             ),
-            "next_path": "/protected/charts?tickers=" + ",".join(watch),
+            "next_path": f"/quote/{watch[0]}",
         }
 
     # Tag-only subscribers have no symbol to open, so the equivalent surface is
-    # the trend board rather than a chart.
+    # the trend board rather than a chart. That board used to have its own page;
+    # it now lives inside screenings, which is also the best-converting surface
+    # in the product.
     if tags:
         return {
             "kind": "themes",
             "label": "Open the trend board for your themes",
             "sublabel": "See how "
                         f"{_join([t for t in tags][:2])} moved against everything else.",
-            "next_path": "/protected/news-trends",
+            "next_path": "/protected/workspace",
         }
 
     return {

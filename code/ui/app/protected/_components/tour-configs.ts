@@ -131,7 +131,9 @@ export const TOURS: Record<TourKey, TourConfig> = {
   news_trends: {
     key: "news_trends",
     label: "Tour news trends",
-    route: "/protected/news-trends",
+    // The dedicated page was a second copy of the impact heatmap that already
+    // renders inside screenings; screenings is now its only home.
+    route: "/protected/workspace",
     summary:
       "Cluster news themes by aggregate impact across a chosen time window — read the regime, not single headlines.",
     steps: [
@@ -174,7 +176,7 @@ export const TOURS: Record<TourKey, TourConfig> = {
   relations: {
     key: "relations",
     label: "Tour the relations graph",
-    route: "/protected/relations",
+    route: "/quote",
     summary:
       "Explore the ticker/entity relationship graph: who is exposed to whom, and which articles established the link.",
     steps: [
@@ -191,11 +193,11 @@ export const TOURS: Record<TourKey, TourConfig> = {
         side: "left",
       },
       {
-        selector: '[data-tour="relations-search"]',
-        title: "Start from a ticker",
+        selector: '[data-tour="relations-graph"]',
+        title: "Anchored on this ticker",
         description:
-          "Search any name to anchor the graph on it. The connected nodes are your second-order plays when news hits your anchor.",
-        side: "bottom",
+          "The graph is locked on the company whose quote page you're on — it is already the anchor. The connected nodes are your second-order plays when news hits it.",
+        side: "left",
       },
       {
         selector: '[data-tour="relations-edges"]',
@@ -217,9 +219,9 @@ export const TOURS: Record<TourKey, TourConfig> = {
   charts: {
     key: "charts",
     label: "Tour the chart workspace",
-    route: "/protected/charts",
+    route: "/quote",
     summary:
-      "Chart workspace: ticker search, candles + indicators, AI analyst panel, and the 'Add to screening' button.",
+      "Chart workspace: candles + indicators, AI analyst panel, and the 'Add to screening' button, on any ticker's quote page.",
     steps: [
       {
         title: "Pin news to candles",
@@ -227,11 +229,11 @@ export const TOURS: Record<TourKey, TourConfig> = {
           "Charts brings together price action, technical context, and an AI analyst that explains what the price is reacting to — using the same impact scores and dimensions you've now learned.",
       },
       {
-        selector: '[data-tour="chart-ticker-input"]',
-        title: "Pick a ticker",
+        selector: '[data-tour="chart-canvas"]',
+        title: "Scoped to this ticker",
         description:
-          "Type any symbol. The chart, indicators, and AI panel all retarget around it. Bookmarkable URL — share workspaces with one link.",
-        side: "bottom",
+          "The chart, indicators, and AI panel are all about the company whose quote page you're on. Every ticker has its own — bookmarkable, one link.",
+        side: "top",
       },
       {
         selector: '[data-tour="chart-canvas"]',
@@ -267,10 +269,10 @@ export const TOURS: Record<TourKey, TourConfig> = {
 
   screenings: {
     key: "screenings",
-    label: "Tour the screener",
-    route: "/protected/screenings",
+    label: "Tour the workspace",
+    route: "/protected/workspace",
     summary:
-      "The screener: create named screenings, switch between them, narrow with filters, and work the resulting list.",
+      "The workspace: create named screenings, switch between them, narrow with filters, and work the resulting list.",
     steps: [
       {
         title: "Turn the universe into a shortlist",
