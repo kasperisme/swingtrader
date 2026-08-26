@@ -211,11 +211,6 @@ export default async function QuotePage({
   const exchange = profile?.exchange ?? profile?.exchangeFullName ?? null;
   const tone = (change ?? 0) > 0 ? "up" : (change ?? 0) < 0 ? "down" : undefined;
 
-  const newsFeed = [...events]
-    .filter((e) => e.title)
-    .sort((a, b) => (b.publishedAt ?? "").localeCompare(a.publishedAt ?? ""))
-    .slice(0, 12);
-
   const canonicalUrl = `${SITE_BASE_URL}/quote/${symbol}`;
 
   // Structured data: the company as a tradable financial entity + a breadcrumb
@@ -322,6 +317,26 @@ export default async function QuotePage({
             Price & news catalysts
           </h2>
           <TickerImpactChart symbol={symbol} bars={bars} events={chartEvents} />
+
+          {/* Key statistics — the numbers you read the chart against, so
+              they sit directly under it rather than further down. */}
+          <h2 className="mb-3 mt-6 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+            Key statistics
+          </h2>
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 xl:grid-cols-4">
+            <Stat label="Market cap" value={fmtCompact(profile?.marketCap)} />
+            <Stat label="P/E" value={fmtFixed(qnum(quote, "pe"))} />
+            <Stat label="EPS" value={fmtFixed(qnum(quote, "eps"))} />
+            <Stat label="Beta" value={fmtFixed(profile?.beta, 2)} />
+            <Stat label="52W range" value={profile?.range ?? "—"} />
+            <Stat label="Day range" value={qnum(quote, "dayLow") != null ? `${fmtFixed(qnum(quote, "dayLow"))}–${fmtFixed(qnum(quote, "dayHigh"))}` : "—"} />
+            <Stat label="Open" value={fmtFixed(qnum(quote, "open"))} />
+            <Stat label="Prev close" value={fmtFixed(qnum(quote, "previousClose"))} />
+            <Stat label="Volume" value={fmtCompact(qnum(quote, "volume") ?? profile?.volume)} />
+            <Stat label="Avg volume" value={fmtCompact(qnum(quote, "avgVolume") ?? profile?.averageVolume)} />
+            <Stat label="Dividend" value={fmtFixed(profile?.lastDividend, 2)} />
+            <Stat label="IPO" value={profile?.ipoDate ?? "—"} />
+          </div>
         </div>
         <div>
           <h2 className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
@@ -365,78 +380,15 @@ export default async function QuotePage({
               ))}
             </ol>
           )}
-        </div>
-      </section>
 
-      {pricedIn && (
-        <section>
-          <h2 className="mb-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-            What the price already reflects
-          </h2>
-          <p className="mb-3 max-w-[70ch] text-xs text-muted-foreground">
-            Analysts publish price targets on {symbol}, and they disagree. Where
-            the share price actually sits among them shows which of their
-            arguments the market is buying — and which it is ignoring.
-          </p>
-          <PricedInPanel vote={pricedIn} livePrice={price} />
-        </section>
-      )}
+          <Link
+            href={`/articles?tag=${encodeURIComponent(symbol)}`}
+            className="mt-3 inline-flex items-center gap-1 text-xs font-medium text-primary hover:underline"
+          >
+            Show more {symbol} articles →
+          </Link>
 
-      {/* ── Key statistics ────────────────────────────────────────── */}
-      <section>
-        <h2 className="mb-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-          Key statistics
-        </h2>
-        <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-4">
-          <Stat label="Market cap" value={fmtCompact(profile?.marketCap)} />
-          <Stat label="P/E" value={fmtFixed(qnum(quote, "pe"))} />
-          <Stat label="EPS" value={fmtFixed(qnum(quote, "eps"))} />
-          <Stat label="Beta" value={fmtFixed(profile?.beta, 2)} />
-          <Stat label="52W range" value={profile?.range ?? "—"} />
-          <Stat label="Day range" value={qnum(quote, "dayLow") != null ? `${fmtFixed(qnum(quote, "dayLow"))}–${fmtFixed(qnum(quote, "dayHigh"))}` : "—"} />
-          <Stat label="Open" value={fmtFixed(qnum(quote, "open"))} />
-          <Stat label="Prev close" value={fmtFixed(qnum(quote, "previousClose"))} />
-          <Stat label="Volume" value={fmtCompact(qnum(quote, "volume") ?? profile?.volume)} />
-          <Stat label="Avg volume" value={fmtCompact(qnum(quote, "avgVolume") ?? profile?.averageVolume)} />
-          <Stat label="Dividend" value={fmtFixed(profile?.lastDividend, 2)} />
-          <Stat label="IPO" value={profile?.ipoDate ?? "—"} />
-        </div>
-      </section>
-
-      {/* ── News feed ─────────────────────────────────────────────── */}
-
-      <section className="grid gap-6 lg:grid-cols-[1.6fr_1fr]">
-        <div>
-          <h2 className="mb-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-            Latest {symbol} news
-          </h2>
-          {newsFeed.length === 0 ? (
-            <p className="text-sm text-muted-foreground">No recent tagged news.</p>
-          ) : (
-            <ul className="divide-y divide-border rounded-xl border border-border bg-card">
-              {newsFeed.map((e) => (
-                <li key={e.articleId} className="p-3">
-                  <a href={e.url ?? "#"} target="_blank" rel="noreferrer" className="text-sm font-medium text-foreground hover:underline">
-                    {e.title}
-                  </a>
-                  <p className="mt-0.5 text-[11px] text-muted-foreground">
-                    {e.source ?? "—"}
-                    {e.publishedAt ? ` · ${new Date(e.publishedAt).toLocaleDateString()}` : ""}
-                    {e.sentiment != null ? (
-                      <span className={`ml-2 ${e.sentiment > 0 ? "text-emerald-500" : e.sentiment < 0 ? "text-rose-500" : ""}`}>
-                        {e.sentiment >= 0 ? "+" : ""}{e.sentiment.toFixed(2)}
-                      </span>
-                    ) : null}
-                  </p>
-                </li>
-              ))}
-            </ul>
-          )}
-        </div>
-
-        {/* ── Profile + briefing CTA ─────────────────────────────── */}
-        <div className="flex flex-col gap-6">
-          <div>
+          <div className="mt-6">
             <h2 className="mb-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
               Profile
             </h2>
@@ -463,9 +415,26 @@ export default async function QuotePage({
               </p>
             ) : null}
           </div>
-
-          <ArticleBriefingCTA tickers={[symbol]} tags={[]} source="quote_page" />
         </div>
+      </section>
+
+      {pricedIn && (
+        <section>
+          <h2 className="mb-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+            What the price already reflects
+          </h2>
+          <p className="mb-3 max-w-[70ch] text-xs text-muted-foreground">
+            Analysts publish price targets on {symbol}, and they disagree. Where
+            the share price actually sits among them shows which of their
+            arguments the market is buying — and which it is ignoring.
+          </p>
+          <PricedInPanel vote={pricedIn} livePrice={price} />
+        </section>
+      )}
+
+      {/* ── Briefing CTA ──────────────────────────────────────────── */}
+      <section>
+        <ArticleBriefingCTA tickers={[symbol]} tags={[]} source="quote_page" />
       </section>
     </div>
   );
