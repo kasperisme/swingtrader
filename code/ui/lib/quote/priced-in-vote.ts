@@ -101,4 +101,155 @@ export type PricedInVote = {
    * UI must carry that distinction; see `priced-in-panel.tsx`.
    */
   drivers: PricedInDriver[];
+  /**
+   * The individual published models behind the distribution, reconstructed.
+   *
+   * The counts above say three models call the price too cheap; these say WHICH
+   * models, what each of them claims, and what the price's verdict on it is.
+   * Ordered by target, high to low, so the list reads down the same axis as the
+   * rail — a case's position in it is its position on the distribution.
+   */
+  cases: PricedInCase[];
 };
+
+/**
+ * One published analyst model, reconstructed against the news corpus.
+ *
+ * The generator (`strategylab/social/case.py`) picks a handful of the models
+ * behind the distribution — the consensus one the price is roughly paying, plus
+ * the most-rejected bull and bear — and reconstructs each: what the analyst must
+ * believe, the assumption it turns on, the counter-argument, and the one
+ * observable OUTSIDE financial news that would settle it.
+ *
+ * Two tiers are mixed here and the UI must keep them apart. `stance`, `target`
+ * and `impliedMove` are arithmetic on published numbers — the same grounded tier
+ * as the distribution above. Everything else is a language model's
+ * reconstruction, which is why it lives behind a disclosure rather than in the
+ * summary line.
+ */
+export type PricedInCase = {
+  firm: string;
+  /** Often absent — FMP names the firm far more reliably than the analyst. */
+  analyst: string | null;
+  target: number;
+  /** target / priceAtAsOf - 1. The whole verdict is a threshold on this. */
+  impliedMove: number | null;
+  stance: PricedInStance;
+  /** What the analyst must believe to reach the target. */
+  thesis: string | null;
+  /** The single assumption the case turns on. */
+  loadBearing: string | null;
+  /**
+   * For a rejected model, why a rational marginal buyer declines to pay it. For
+   * an endorsed one, the schema field carries what the consensus takes for
+   * granted instead — the same slot, a different question, so the label the UI
+   * puts on it has to follow `stance`.
+   */
+  objection: string | null;
+  /** The measurable that would settle it, deliberately outside financial news. */
+  observable: string | null;
+  /** Which wired data family the observable belongs to, e.g. `web_traffic`. */
+  dataSource: string | null;
+  evidenceFor: string[];
+  evidenceAgainst: string[];
+  confidence: "high" | "medium" | "low" | null;
+  nPassages: number;
+  /**
+   * False when the corpus was too thin for retrieval to discriminate — a top-k
+   * pull then returns most of what exists rather than a targeted set, so the
+   * evidence is the company's general coverage, not evidence about this case.
+   */
+  selective: boolean;
+  distinctArticles: number | null;
+  /** Headlines the reconstruction drew on. */
+  sources: string[];
+  /** A batch pass mixes backends, so the row says which model answered. */
+  model: string | null;
+};
+
+/** |move| <= 8% priced, >= 15% rejected, and the band between the two. */
+export type PricedInStance =
+  | "endorsed"
+  | "neutral"
+  | "rejected_bull"
+  | "rejected_bear";
+
+export const ENDORSED_BAND = 0.08;
+export const REJECTED_MIN_MOVE = 0.15;
+
+export type CaseVerdict = {
+  label: string;
+  /** What the label means, in the same voice as the rest of the panel. */
+  gloss: string;
+  /** Sequential emphasis, not polarity: a rejected model is not a bad model. */
+  dot: string;
+  text: string;
+};
+
+/**
+ * The verdict on one published model — and it is the PRICE's verdict, not ours.
+ *
+ * Every branch is a threshold on one number the market set, which is what makes
+ * this the grounded tier: no judgement of whether the analyst is right, only
+ * whether the market is paying them. The reconstruction below a card explains
+ * what the model claims; it never moves the verdict.
+ */
+export function caseVerdict(stance: PricedInStance): CaseVerdict {
+  switch (stance) {
+    case "endorsed":
+      return {
+        label: "Priced in",
+        gloss: "the market is paying about this number",
+        dot: "bg-muted-foreground/40",
+        text: "text-muted-foreground",
+      };
+    case "neutral":
+      return {
+        label: "Close to priced",
+        gloss: "near the price, but not the number it is paying",
+        dot: "bg-[#f59e0b] dark:bg-[#d97706]",
+        text: "text-muted-foreground",
+      };
+    case "rejected_bull":
+      return {
+        label: "Not paid for",
+        gloss: "published, and the market declines this upside",
+        dot: "bg-[#b45309] dark:bg-[#fbbf24]",
+        text: "text-[#b45309] dark:text-[#fbbf24]",
+      };
+    case "rejected_bear":
+      return {
+        label: "Not accepted",
+        gloss: "published, and the market declines this downside",
+        dot: "bg-[#b45309] dark:bg-[#fbbf24]",
+        text: "text-[#b45309] dark:text-[#fbbf24]",
+      };
+  }
+}
+
+/** The arithmetic behind the verdict, spelled out so it can be checked. */
+export function verdictReason(c: PricedInCase, priceAtAsOf: number | null): string {
+  const at =
+    priceAtAsOf != null && Number.isFinite(priceAtAsOf)
+      ? `the ${new Intl.NumberFormat(undefined, {
+          style: "currency",
+          currency: "USD",
+          maximumFractionDigits: priceAtAsOf >= 100 ? 0 : 2,
+        }).format(priceAtAsOf)} price this was computed at`
+      : "the price this was computed at";
+  const move =
+    c.impliedMove == null
+      ? null
+      : `${c.impliedMove > 0 ? "+" : ""}${(c.impliedMove * 100).toFixed(0)}%`;
+  if (move == null) return `Position against ${at} is unavailable.`;
+  switch (c.stance) {
+    case "endorsed":
+      return `This target is ${move} from ${at} — inside the ±8% band, so the market is paying roughly what this model says.`;
+    case "neutral":
+      return `This target is ${move} from ${at} — outside the ±8% band the price pays, but short of the 15% that counts as a model the market is refusing.`;
+    case "rejected_bull":
+      return `This target is ${move} above ${at}. It was published, so the market has seen it and declines to pay it — the argument is known and not believed.`;
+    case "rejected_bear":
+      return `This target is ${move} below ${at}. It was published, so the market has seen it and declines to accept it — the warning is known and not believed.`;
+  }
+}

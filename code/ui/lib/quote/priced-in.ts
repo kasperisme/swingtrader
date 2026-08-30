@@ -1,8 +1,10 @@
 import "server-only";
 import { createServiceClient } from "@/lib/supabase/service";
 import type {
+  PricedInCase,
   PricedInDriver,
   PricedInParts,
+  PricedInStance,
   PricedInVote,
 } from "./priced-in-vote";
 
@@ -10,10 +12,15 @@ import type {
 // re-exported here so `getPricedInVote`'s callers still get everything from one
 // import.
 export {
+  caseVerdict,
   injectPrice,
   STALE_AFTER_DAYS,
+  verdictReason,
+  type CaseVerdict,
+  type PricedInCase,
   type PricedInDriver,
   type PricedInParts,
+  type PricedInStance,
   type PricedInVote,
 } from "./priced-in-vote";
 
@@ -96,6 +103,79 @@ function num(v: unknown): number | null {
   return Number.isFinite(n) ? n : null;
 }
 
+function str(v: unknown): string | null {
+  return typeof v === "string" && v.trim() ? v.trim() : null;
+}
+
+const STANCES: PricedInStance[] = [
+  "endorsed",
+  "neutral",
+  "rejected_bull",
+  "rejected_bear",
+];
+
+/**
+ * The reconstructed analyst cases, matched to the distribution above.
+ *
+ * Two things are dropped rather than rendered. A case whose reconstruction
+ * failed carries its own failure in the `case` field — the generator writes
+ * "reconstruction failed: …" there and marks it `not_explicable` — and putting
+ * that on a public page shows the reader a broken pipeline instead of an
+ * analysis. A case with no firm or no target cannot be matched to a point on
+ * the rail, which is the whole reason it is here.
+ */
+function parseCases(raw: unknown): PricedInCase[] {
+  if (!Array.isArray(raw)) return [];
+  const out: PricedInCase[] = [];
+  for (const item of raw) {
+    if (!item || typeof item !== "object") continue;
+    const d = item as Record<string, unknown>;
+    const firm = str(d.firm);
+    const target = num(d.target);
+    const stance = STANCES.find((s) => s === d.stance);
+    const confidence = str(d.confidence);
+    if (!firm || target == null || !stance) continue;
+    if (confidence === "not_explicable") continue;
+    const thesis = str(d.case);
+    if (!thesis) continue;
+
+    const retrieval =
+      d.retrieval && typeof d.retrieval === "object" && !Array.isArray(d.retrieval)
+        ? (d.retrieval as Record<string, unknown>)
+        : {};
+
+    out.push({
+      firm,
+      analyst: str(d.analyst),
+      target,
+      impliedMove: num(d.implied_move),
+      stance,
+      thesis,
+      loadBearing: str(d.load_bearing),
+      objection: str(d.market_objection),
+      observable: str(d.observable),
+      dataSource: str(d.data_source),
+      evidenceFor: strList(d.evidence_for),
+      evidenceAgainst: strList(d.evidence_against),
+      confidence:
+        confidence === "high" || confidence === "medium" || confidence === "low"
+          ? confidence
+          : null,
+      nPassages: num(d.n_passages) ?? 0,
+      // Absent means nothing was recorded, and an unrecorded warning must not
+      // read as a clean bill of health — default to selective only when the
+      // generator said so.
+      selective: retrieval.selective !== false,
+      distinctArticles: num(retrieval.distinct_articles),
+      sources: strList(d.sources).slice(0, 6),
+      model: str(d.model),
+    });
+  }
+  // Highest target first, so the list reads top-to-bottom down the same axis as
+  // the distribution rail and a case's rank is its position on it.
+  return out.sort((a, b) => b.target - a.target).slice(0, 6);
+}
+
 /**
  * Latest published reconstruction for a ticker, or null.
  *
@@ -117,7 +197,7 @@ export async function getPricedInVote(
     .select(
       "ticker, as_of, price, n_targets, target_low, target_high, target_median, " +
         "median_gap, n_rejected_bull, n_rejected_bear, n_endorsed, summary, " +
-        "summary_json, drivers_json, published",
+        "summary_json, drivers_json, cases_json, published",
     )
     .eq("ticker", ticker)
     .eq("published", true)
@@ -177,5 +257,6 @@ export async function getPricedInVote(
       : null,
     drivers: parseDrivers(row.drivers_json),
     parts: parseParts(row.summary_json),
+    cases: parseCases(row.cases_json),
   };
 }

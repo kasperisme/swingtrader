@@ -1,8 +1,17 @@
-import { TrendingDown, TrendingUp, Minus } from "lucide-react";
+import { ChevronRight, TrendingDown, TrendingUp, Minus } from "lucide-react";
 // From the client-safe half, not `priced-in.ts`: this panel is rendered from
 // the workspace's client-side tab switcher as well as from the quote page.
-import type { PricedInVote } from "@/lib/quote/priced-in-vote";
-import { injectPrice, STALE_AFTER_DAYS } from "@/lib/quote/priced-in-vote";
+import type {
+  PricedInCase,
+  PricedInDriver,
+  PricedInVote,
+} from "@/lib/quote/priced-in-vote";
+import {
+  caseVerdict,
+  injectPrice,
+  STALE_AFTER_DAYS,
+  verdictReason,
+} from "@/lib/quote/priced-in-vote";
 
 /**
  * Where the price sits among the analyst models published about a company.
@@ -77,7 +86,10 @@ function money(n: number): string {
   return new Intl.NumberFormat(undefined, {
     style: "currency",
     currency: "USD",
-    maximumFractionDigits: n >= 100 ? 0 : 2,
+    // Cents only where there are cents. A column of targets reading $55.00
+    // beside $133 is ragged for no information — analysts publish round
+    // numbers, and the ".00" is noise in every one of them.
+    maximumFractionDigits: n >= 100 || Number.isInteger(n) ? 0 : 2,
   }).format(n);
 }
 
@@ -85,6 +97,363 @@ function money(n: number): string {
 function pct(value: number, low: number, high: number): number {
   if (!(high > low)) return 50;
   return Math.max(2, Math.min(98, ((value - low) / (high - low)) * 100));
+}
+
+/**
+ * Nudge overlapping label positions apart, keeping their order.
+ *
+ * Two reconstructed models often publish targets a couple of dollars apart, and
+ * two numbered chips stacked on the same pixel read as one. The chips move; the
+ * hairline ticks ON the rail stay at the true position, so the exact figure is
+ * never distorted — only its label is.
+ */
+function spreadOut(positions: number[], gap = 7): number[] {
+  const order = positions
+    .map((x, i) => ({ x, i }))
+    .sort((a, b) => a.x - b.x);
+  for (let k = 1; k < order.length; k++) {
+    if (order[k].x - order[k - 1].x < gap) order[k].x = order[k - 1].x + gap;
+  }
+  // The forward pass can push the last chip off the rail; walk back from the
+  // right edge so the crowding is absorbed on the side with room.
+  for (let k = order.length - 1; k >= 0; k--) {
+    order[k].x = Math.min(98, order[k].x);
+    if (k > 0 && order[k].x - order[k - 1].x < gap) {
+      order[k - 1].x = Math.max(2, order[k].x - gap);
+    }
+  }
+  const out = positions.slice();
+  for (const o of order) out[o.i] = o.x;
+  return out;
+}
+
+/** One labelled paragraph inside a case's deep dive. */
+function Field({
+  label,
+  children,
+}: {
+  label: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <div>
+      <p className="mb-1 text-[11px] uppercase tracking-wide text-muted-foreground">
+        {label}
+      </p>
+      <p className="max-w-[76ch] text-pretty text-[13px] leading-relaxed text-foreground/90">
+        {children}
+      </p>
+    </div>
+  );
+}
+
+/** Evidence the retrieval turned up, for or against. Bulleted, never prose. */
+function EvidenceList({ label, items }: { label: string; items: string[] }) {
+  if (items.length === 0) return null;
+  return (
+    <div>
+      <p className="mb-1.5 text-[11px] uppercase tracking-wide text-muted-foreground">
+        {label}
+      </p>
+      <ul className="flex flex-col gap-1.5">
+        {items.map((e, i) => (
+          <li
+            key={i}
+            className="flex gap-2 text-[13px] leading-snug text-foreground/90"
+          >
+            <span
+              className="mt-[7px] h-1 w-1 shrink-0 rounded-full bg-muted-foreground/50"
+              aria-hidden
+            />
+            <span className="max-w-[70ch]">{e}</span>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+/**
+ * One published model: the verdict on it, and the reconstruction behind it.
+ *
+ * The two tiers are separated by the disclosure, not by a footnote. Closed, the
+ * card shows only arithmetic — a firm, a target, and where the price sits
+ * against it. Open, it shows a language model's reconstruction of the argument,
+ * and the reader is told so before they read a word of it.
+ *
+ * `<details>` rather than state: the panel is server-rendered on the quote page
+ * and shipped to the client only by the workspace tab, so a disclosure that
+ * costs no JavaScript and works before hydration is the right one. It is also
+ * findable by the browser's own in-page search, which a hidden div is not.
+ */
+function CaseCard({
+  c,
+  index,
+  priceAtAsOf,
+}: {
+  c: PricedInCase;
+  index: number;
+  priceAtAsOf: number | null;
+}) {
+  const v = caseVerdict(c.stance);
+  const rejected =
+    c.stance === "rejected_bull" || c.stance === "rejected_bear";
+  const move =
+    c.impliedMove == null
+      ? null
+      : `${c.impliedMove > 0 ? "+" : ""}${(c.impliedMove * 100).toFixed(0)}%`;
+
+  return (
+    <li className="overflow-hidden rounded-lg border border-border">
+      <div className="flex items-start gap-3 p-3">
+        <span
+          className="mt-px flex h-[18px] w-[18px] shrink-0 items-center justify-center rounded-full border border-border bg-muted font-mono text-[10px] tabular-nums text-muted-foreground"
+          aria-hidden
+        >
+          {index}
+        </span>
+        <div className="min-w-0 flex-1">
+          <p className="text-sm leading-snug text-foreground">
+            <span className="font-medium">{c.firm}</span>
+            {c.analyst && (
+              <span className="text-muted-foreground"> · {c.analyst}</span>
+            )}
+          </p>
+          {/* Stacked narrow, one line wide: the gloss wraps to two lines on a
+              phone, which leaves the separator dangling at the end of the
+              verdict. */}
+          <p className="mt-1 flex flex-col gap-y-0.5 text-[11px] sm:flex-row sm:flex-wrap sm:items-center sm:gap-x-2">
+            <span className="flex items-center gap-1.5">
+              <span className={`h-2 w-2 rounded-full ${v.dot}`} aria-hidden />
+              <span className={`font-medium ${v.text}`}>{v.label}</span>
+            </span>
+            <span className="hidden text-muted-foreground/50 sm:inline">·</span>
+            <span className="text-muted-foreground">{v.gloss}</span>
+          </p>
+        </div>
+        <p className="shrink-0 text-right">
+          <span className="font-mono text-sm tabular-nums text-foreground">
+            {money(c.target)}
+          </span>
+          {move && (
+            <span className="block font-mono text-[11px] tabular-nums text-muted-foreground">
+              {move} from the price
+            </span>
+          )}
+        </p>
+      </div>
+
+      <details className="group border-t border-border">
+        <summary className="flex cursor-pointer list-none items-center gap-1.5 px-3 py-2 text-[11px] font-medium text-muted-foreground transition-colors hover:text-foreground [&::-webkit-details-marker]:hidden">
+          <ChevronRight
+            className="h-3 w-3 shrink-0 transition-transform group-open:rotate-90"
+            aria-hidden
+          />
+          Deep dive — why this verdict, and what the model claims
+        </summary>
+
+        <div className="space-y-4 border-t border-border bg-muted/20 px-3 py-3">
+          {/* The verdict is arithmetic, so it is stated as arithmetic, first
+              and before any reconstruction can colour it. */}
+          <div className="rounded-md border border-border/70 bg-card p-2.5">
+            <p className="mb-1 text-[11px] uppercase tracking-wide text-foreground/70">
+              Why this verdict
+            </p>
+            <p className="max-w-[76ch] text-pretty text-[13px] leading-relaxed text-foreground">
+              {verdictReason(c, priceAtAsOf)}
+            </p>
+          </div>
+
+          {c.thesis && <Field label="What this analyst must believe">{c.thesis}</Field>}
+          {c.loadBearing && (
+            <Field label="The assumption it turns on">{c.loadBearing}</Field>
+          )}
+          {c.objection && (
+            <Field
+              label={
+                rejected
+                  ? "Why the market declines it"
+                  : "What this consensus takes for granted"
+              }
+            >
+              {c.objection}
+            </Field>
+          )}
+
+          {(c.evidenceFor.length > 0 || c.evidenceAgainst.length > 0) && (
+            <div className="grid gap-4 sm:grid-cols-2">
+              <EvidenceList label="Coverage that supports it" items={c.evidenceFor} />
+              <EvidenceList
+                label="Coverage that cuts against it"
+                items={c.evidenceAgainst}
+              />
+            </div>
+          )}
+
+          {c.observable && (
+            <Field label="What would settle it">
+              {c.observable}
+              {c.dataSource && (
+                <span className="ml-1.5 whitespace-nowrap rounded border border-border bg-card px-1.5 py-px font-mono text-[10px] text-muted-foreground">
+                  {c.dataSource.replaceAll("_", " ")}
+                </span>
+              )}
+            </Field>
+          )}
+
+          {/* Provenance. The retrieval warning is the load-bearing part: a
+              reconstruction drawn from most of a thin corpus is evidence about
+              the company in general, not about this case. */}
+          <p className="border-t border-border/70 pt-2.5 text-[11px] leading-relaxed text-muted-foreground">
+            Reconstructed from {c.nPassages} passage
+            {c.nPassages === 1 ? "" : "s"} of news coverage
+            {c.confidence && <> · {c.confidence} confidence in the reconstruction</>}
+            {c.model && <> · {c.model}</>}
+            {!c.selective && (
+              <>
+                {" "}
+                — the corpus held only{" "}
+                {c.distinctArticles != null
+                  ? `${c.distinctArticles} articles`
+                  : "a handful of articles"}
+                , so this is most of what has been written about the company
+                rather than a targeted pull on this argument.
+              </>
+            )}
+          </p>
+
+          {c.sources.length > 0 && (
+            <div>
+              <p className="mb-1 text-[11px] uppercase tracking-wide text-muted-foreground">
+                Headlines it drew on
+              </p>
+              <ul className="flex flex-col gap-1">
+                {c.sources.map((t, i) => (
+                  <li
+                    key={i}
+                    className="max-w-[76ch] truncate text-[11px] leading-relaxed text-muted-foreground"
+                    title={t}
+                  >
+                    {t}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+        </div>
+      </details>
+    </li>
+  );
+}
+
+/**
+ * One assumption, in the same card grammar as a published model.
+ *
+ * The two are NOT paired. It is tempting to read the models and the assumptions
+ * as one list each way round — four of each is the most common shape — but the
+ * decomposition is drawn from the whole spread, not one driver per model: the
+ * counts disagree in roughly half of the published rows, and nothing in the data
+ * keys a driver to a firm. Pairing them would invent a correspondence, so they
+ * are two kinds of claim in one section rather than two halves of one table.
+ *
+ * The other difference the UI has to carry is weight. A model's verdict is
+ * arithmetic; an assumption's band is an unvalidated estimate. Same card, and
+ * the label above each group says which is which.
+ */
+function DriverCard({
+  d,
+  price,
+}: {
+  d: PricedInDriver;
+  price: number | null;
+}) {
+  const b = band(d.pricedInPct);
+  const worth =
+    d.valueIfTruePct != null && Math.abs(d.valueIfTruePct) >= 1
+      ? `${d.valueIfTruePct > 0 ? "+" : ""}${d.valueIfTruePct.toFixed(0)}%`
+      : null;
+
+  return (
+    <li className="overflow-hidden rounded-lg border border-border">
+      <div className="flex items-start gap-3 p-3">
+        <span
+          className={`mt-[7px] h-2 w-2 shrink-0 rounded-full ${b.dot}`}
+          aria-hidden
+        />
+        <div className="min-w-0 flex-1">
+          <p className="text-sm leading-snug text-foreground">{d.driver}</p>
+          <p className="mt-1 flex flex-col gap-y-0.5 text-[11px] sm:flex-row sm:flex-wrap sm:items-center sm:gap-x-2">
+            <span className={`font-medium ${b.text}`}>{b.label}</span>
+            {d.segment && (
+              <>
+                <span className="hidden text-muted-foreground/50 sm:inline">·</span>
+                <span className="text-muted-foreground">{d.segment}</span>
+              </>
+            )}
+            {!d.testable && (
+              <>
+                <span className="hidden text-muted-foreground/50 sm:inline">·</span>
+                <span className="text-muted-foreground">
+                  nothing wired can measure it
+                </span>
+              </>
+            )}
+          </p>
+        </div>
+        {worth && (
+          <p className="shrink-0 text-right">
+            <span className="font-mono text-sm tabular-nums text-foreground">
+              {worth}
+            </span>
+            <span className="block font-mono text-[11px] tabular-nums text-muted-foreground">
+              if it lands
+            </span>
+          </p>
+        )}
+      </div>
+
+      {(d.basis || d.observable) && (
+        <details className="group border-t border-border">
+          <summary className="flex cursor-pointer list-none items-center gap-1.5 px-3 py-2 text-[11px] font-medium text-muted-foreground transition-colors hover:text-foreground [&::-webkit-details-marker]:hidden">
+            <ChevronRight
+              className="h-3 w-3 shrink-0 transition-transform group-open:rotate-90"
+              aria-hidden
+            />
+            Deep dive — what this band rests on
+          </summary>
+          <div className="space-y-4 border-t border-border bg-muted/20 px-3 py-3">
+            {d.basis && (
+              <div className="rounded-md border border-border/70 bg-card p-2.5">
+                <p className="mb-1 text-[11px] uppercase tracking-wide text-foreground/70">
+                  Why this band
+                </p>
+                <p className="max-w-[76ch] text-pretty text-[13px] leading-relaxed text-foreground">
+                  {injectPrice(d.basis, price)}
+                </p>
+              </div>
+            )}
+            {worth && (
+              <Field label="What it is worth if it proves out">
+                {worth} of the current price — bounded by the published models,
+                not a point estimate: it is what the target resting on this
+                assumption implies, and no more.
+              </Field>
+            )}
+            <Field label="What would settle it">
+              {d.testable
+                ? "Measurable with the data already wired"
+                : "Nothing wired can measure this one, so it stays an argument"}
+              {d.observable && (
+                <span className="ml-1.5 whitespace-nowrap rounded border border-border bg-card px-1.5 py-px font-mono text-[10px] text-muted-foreground">
+                  {d.observable.replaceAll("_", " ")}
+                </span>
+              )}
+            </Field>
+          </div>
+        </details>
+      )}
+    </li>
+  );
 }
 
 export function PricedInPanel({
@@ -105,6 +474,13 @@ export function PricedInPanel({
     livePrice != null && priceAtAsOf != null && priceAtAsOf > 0
       ? livePrice / priceAtAsOf - 1
       : null;
+
+  // Where each reconstructed model sits on the rail. The tick is exact; the
+  // numbered chip above it may be nudged aside, and carries the number that
+  // matches its card below.
+  const cases = vote.cases;
+  const caseTicks = cases.map((c) => pct(c.target, low, high));
+  const caseChips = spreadOut(caseTicks);
 
   const gap = vote.medianGap;
   const leanIcon =
@@ -135,9 +511,32 @@ export function PricedInPanel({
         </p>
       </div>
 
-      {/* Distribution rail: low ─── median ─── high, with the price marked. */}
+      {/* Distribution rail: low ─── median ─── high, with the price marked,
+          and the reconstructed models numbered against it. */}
       <div className="mt-5 mb-2">
+        {cases.length > 0 && (
+          <div className="relative mb-1.5 h-[18px]">
+            {caseChips.map((x, i) => (
+              <span
+                key={i}
+                className="absolute top-0 flex h-[18px] w-[18px] -translate-x-1/2 items-center justify-center rounded-full border border-border bg-card font-mono text-[10px] tabular-nums text-muted-foreground"
+                style={{ left: `${x}%` }}
+                aria-hidden
+              >
+                {i + 1}
+              </span>
+            ))}
+          </div>
+        )}
         <div className="relative h-2 rounded-full bg-muted">
+          {caseTicks.map((x, i) => (
+            <div
+              key={i}
+              className="absolute top-0 h-2 w-px bg-foreground/40"
+              style={{ left: `${x}%` }}
+              aria-hidden
+            />
+          ))}
           <div
             className="absolute -top-1 h-4 w-px bg-muted-foreground/50"
             style={{ left: `${pct(median, low, high)}%` }}
@@ -277,76 +676,83 @@ export function PricedInPanel({
         </div>
       )}
 
-      {vote.drivers.length > 0 && (
+      {(cases.length > 0 || vote.drivers.length > 0) && (
         <div className="mt-4 border-t border-border pt-4">
           <p className="mb-1 text-[11px] uppercase tracking-wide text-muted-foreground">
-            Assumption by assumption
+            Claim by claim
+          </p>
+          <p className="mb-4 max-w-[78ch] text-[11px] leading-relaxed text-muted-foreground">
+            Two kinds of claim sit behind this price, and they do not carry the
+            same weight. Each one is labelled with the verdict on it; open a
+            deep dive for the reasoning behind that label.
           </p>
 
-          {/* The percentages are estimates and have failed two validation
-              attempts; the ORDER and the "can anything measure this" flag are
-              the parts that carry weight. Said once here rather than repeated
-              per row. */}
-          <p className="mb-2 max-w-[78ch] text-[11px] leading-relaxed text-muted-foreground">
-            How much of each assumption the price appears to reflect, least
-            reflected first — the top of this list is where the price is not
-            paying for something. These
-            bands are estimates, not measurements — two attempts to validate
-            them have failed and a third is unresolved until Dec 2026. Read the
-            ordering and the evidence, not the shade.
-          </p>
-          <ul className="mb-4 flex flex-wrap items-center gap-x-4 gap-y-1.5 text-[11px] text-muted-foreground">
-            {[0, 40, 70, 95].map((v) => {
-              const b = band(v);
-              return (
-                <li key={b.label} className="flex items-center gap-1.5">
-                  <span className={`h-2 w-2 rounded-full ${b.dot}`} aria-hidden />
-                  {b.label}
-                </li>
-              );
-            })}
-          </ul>
-          <ul className="grid gap-x-8 gap-y-4 lg:grid-cols-2">
-            {vote.drivers.map((d, i) => {
-              const b = band(d.pricedInPct);
-              return (
-                <li key={`${i}-${d.driver.slice(0, 24)}`} className="flex gap-3">
-                  <span
-                    className={`mt-[7px] h-2 w-2 shrink-0 rounded-full ${b.dot}`}
-                    aria-hidden
+          {cases.length > 0 && (
+            <>
+              <p className="mb-1 text-[11px] font-medium text-foreground/70">
+                The published models
+              </p>
+              <p className="mb-2.5 max-w-[78ch] text-[11px] leading-relaxed text-muted-foreground">
+                {cases.length} of the {vote.nTargets}{" "}
+                models, numbered on the rail above, highest target first. The
+                verdict on each is arithmetic — where its target sits against
+                the price, nothing more. What the analyst must believe, and the
+                coverage for and against it, is a language model&rsquo;s
+                reconstruction from the published note and the news.
+              </p>
+              <ul className="mb-5 flex flex-col gap-2">
+                {cases.map((c, i) => (
+                  <CaseCard
+                    key={`${c.firm}-${c.target}-${i}`}
+                    c={c}
+                    index={i + 1}
+                    priceAtAsOf={priceAtAsOf}
                   />
-                  <div className="min-w-0 flex-1">
-                    <p className="text-sm leading-snug text-foreground">
-                      {d.driver}
-                    </p>
-                    <p className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px]">
-                      <span className={`font-medium ${b.text}`}>{b.label}</span>
-                      {d.valueIfTruePct != null && Math.abs(d.valueIfTruePct) >= 1 && (
-                        <>
-                          <span className="text-muted-foreground/50">·</span>
-                          <span className="font-mono tabular-nums text-muted-foreground">
-                            worth {d.valueIfTruePct > 0 ? "+" : ""}
-                            {d.valueIfTruePct.toFixed(0)}% if it lands
-                          </span>
-                        </>
-                      )}
-                      {!d.testable && (
-                        <>
-                          <span className="text-muted-foreground/50">·</span>
-                          <span className="text-muted-foreground">not measurable</span>
-                        </>
-                      )}
-                    </p>
-                    {d.basis && (
-                      <p className="mt-1 text-[11px] leading-relaxed text-muted-foreground">
-                        {d.basis}
-                      </p>
-                    )}
-                  </div>
-                </li>
-              );
-            })}
-          </ul>
+                ))}
+              </ul>
+            </>
+          )}
+
+          {vote.drivers.length > 0 && (
+            <>
+              <p className="mb-1 text-[11px] font-medium text-foreground/70">
+                The assumptions underneath them
+              </p>
+              {/* The percentages are estimates and have failed two validation
+                  attempts; the ORDER and the "can anything measure this" flag
+                  are the parts that carry weight. Said once here rather than
+                  repeated per row. */}
+              <p className="mb-2.5 max-w-[78ch] text-[11px] leading-relaxed text-muted-foreground">
+                Decomposed from the whole spread rather than one per model, so
+                these do not pair off against the cards above. How much of each
+                the price appears to reflect, least reflected first — the top of
+                this list is where the price is not paying for something. These
+                bands are estimates, not measurements: two attempts to validate
+                them have failed and a third is unresolved until Dec 2026. Read
+                the ordering and the evidence, not the shade.
+              </p>
+              <ul className="mb-3 flex flex-wrap items-center gap-x-4 gap-y-1.5 text-[11px] text-muted-foreground">
+                {[0, 40, 70, 95].map((v) => {
+                  const b = band(v);
+                  return (
+                    <li key={b.label} className="flex items-center gap-1.5">
+                      <span className={`h-2 w-2 rounded-full ${b.dot}`} aria-hidden />
+                      {b.label}
+                    </li>
+                  );
+                })}
+              </ul>
+              <ul className="flex flex-col gap-2">
+                {vote.drivers.map((d, i) => (
+                  <DriverCard
+                    key={`${i}-${d.driver.slice(0, 24)}`}
+                    d={d}
+                    price={livePrice ?? priceAtAsOf}
+                  />
+                ))}
+              </ul>
+            </>
+          )}
         </div>
       )}
 
