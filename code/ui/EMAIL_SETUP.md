@@ -223,6 +223,13 @@ stops being true rather than letting it drift:
   is 0. The nightly batch can change that under you, so `loadHero()` throws and tells
   you to pick another hero rather than shipping the line stale.
 
+**The trial is Stripe's, and it needs a card.** `/api/stripe/checkout` runs in
+subscription mode with card collection plus `trial_period_days`, and
+`onboarding-plan-step.tsx` passes `trial=true` for paid plans — so the email says
+"card up front, no charge until it ends", matching the product's own wording. Do not
+write "no card": that describes the separate app-managed grace period in `lib/plans.ts`
+(`TRIAL_DAYS`/`TRIAL_TIER`), which is not what "lock in your rate" puts someone into.
+
 **The deadline is yours, not the pricing page's.** Phase 2 triggers on user count, not
 on a date, so the copy says *"I'm holding it for this list until <date>"* — a promise
 you control and can keep — never *"the price goes up on Monday"*, which would be false.

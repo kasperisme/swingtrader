@@ -4,6 +4,7 @@ import { useCallback, useEffect, useId, useState, useTransition } from "react";
 import { AlertTriangle, ArrowLeft, ArrowRight, Sparkles } from "lucide-react";
 
 import { markWelcomed } from "@/app/actions/onboarding";
+import { SUPPORT_EMAIL, SUPPORT_NAME, supportMailto } from "@/lib/support";
 import { track } from "@/lib/analytics/events";
 import { setPostWelcomeHighlight } from "./onboarding-highlight";
 import { SetupAssistantChat } from "@/components/setup-assistant";
@@ -278,6 +279,23 @@ export function WelcomeDialog({ displayName }: Props) {
                 onboarding agent takes over — it walks you through the rest of the
                 setup and builds your first one with you. Just answer along.
               </p>
+              {/* The invitation sits inside the letter, in the founder's voice,
+                  because that is what makes it credible — the same sentence in a
+                  grey support strip below reads as a ticket queue. */}
+              <p className="mt-3 text-[15px] leading-relaxed text-foreground">
+                And please write to me. If something is confusing, broken, or
+                missing — or you just want a feature — email me directly at{" "}
+                <a
+                  href={supportMailto(
+                    "News Impact Screener — feedback",
+                    "onboarding / welcome",
+                  )}
+                  className="font-medium text-amber-500 underline underline-offset-4 hover:text-amber-400"
+                >
+                  {SUPPORT_EMAIL}
+                </a>
+                . It comes straight to me and I read every one.
+              </p>
               <p className="mt-4 font-mono text-xs uppercase tracking-[0.2em] text-muted-foreground">
                 {FOUNDER_SIGNATURE}
               </p>
@@ -334,6 +352,23 @@ export function WelcomeDialog({ displayName }: Props) {
               surface="welcome"
               onProgress={handleProgress}
             />
+
+            {/* The step where people actually get stuck, so the human is offered
+                here too — the letter on step 1 has usually scrolled out of mind
+                by the time the agent misunderstands something. */}
+            <p className="shrink-0 text-xs leading-5 text-muted-foreground">
+              Agent not getting it, or something looks wrong?{" "}
+              <a
+                href={supportMailto(
+                  "News Impact Screener — help with setup",
+                  "onboarding / setup step",
+                )}
+                className="font-medium text-amber-500 underline underline-offset-4 hover:text-amber-400"
+              >
+                Email {SUPPORT_NAME} directly
+              </a>{" "}
+              — {SUPPORT_EMAIL}.
+            </p>
 
             {/* Advancing with nothing configured is leaving, not continuing —
                 so it isn't dressed as the primary action until the agent has

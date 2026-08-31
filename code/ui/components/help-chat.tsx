@@ -17,8 +17,9 @@ import {
   type FormEvent,
 } from "react";
 import { createPortal } from "react-dom";
-import { useRouter } from "next/navigation";
-import { Bot, Loader2, Send, Sparkles, X } from "lucide-react";
+import { usePathname, useRouter } from "next/navigation";
+import { Bot, Loader2, Mail, Send, Sparkles, X } from "lucide-react";
+import { SUPPORT_EMAIL, SUPPORT_NAME, supportMailto } from "@/lib/support";
 import { ChatMarkdown } from "@/components/chat-markdown";
 import {
   StatusChips,
@@ -126,6 +127,7 @@ export function HelpChatRoot() {
 
 function HelpChatPanel({ onClose }: { onClose: () => void }) {
   const router = useRouter();
+  const pathname = usePathname();
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
@@ -437,6 +439,24 @@ function HelpChatPanel({ onClose }: { onClose: () => void }) {
               ))}
             </ul>
             <div ref={bottomRef} />
+          </div>
+
+          {/* Human escape hatch. Persistent rather than empty-state-only: the
+              moment someone wants a person is the moment the assistant has just
+              failed them, which by definition is several messages in. */}
+          <div className="shrink-0 border-t border-border px-4 py-2.5">
+            <a
+              href={supportMailto("News Impact Screener — support", pathname)}
+              className="group inline-flex items-center gap-2 text-xs text-muted-foreground transition-colors hover:text-foreground"
+            >
+              <Mail className="h-3.5 w-3.5 shrink-0 text-amber-500" aria-hidden />
+              <span>
+                Rather ask a human? Email {SUPPORT_NAME} —{" "}
+                <span className="font-medium text-amber-500 underline underline-offset-4 group-hover:text-amber-400">
+                  {SUPPORT_EMAIL}
+                </span>
+              </span>
+            </a>
           </div>
 
           <form

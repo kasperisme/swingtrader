@@ -13,6 +13,7 @@ import { Button } from "@/components/ui/button";
 import { getScreeningLimits } from "@/app/actions/screenings-agent";
 import { track } from "@/lib/analytics/events";
 import type { PlanTier } from "@/lib/plans";
+import { currentAnnual, currentMonthly } from "@/lib/pricing";
 
 type Interval = "monthly" | "annual";
 
@@ -26,7 +27,10 @@ type PlanInfo = {
   features: string[];
 };
 
-// Phase-1 (early-access) pricing, mirroring /pricing.
+// Prices come from the shared phase table, never from literals. This list said
+// "mirroring /pricing" while holding its own copy of $9 / $19 — so when /pricing
+// moved to phase 2, the picker went on offering phase 1 to the same user who had
+// just been shown phase 2 on the way in.
 const PLANS: PlanInfo[] = [
   {
     id: "observer",
@@ -45,8 +49,8 @@ const PLANS: PlanInfo[] = [
     id: "investor",
     name: "Investor",
     tagline: "Best for your setup",
-    priceMonthly: 9,
-    priceAnnual: 99,
+    priceMonthly: currentMonthly("investor"),
+    priceAnnual: currentAnnual("investor"),
     paid: true,
     features: [
       "Real-time news impact on your holdings",
@@ -59,8 +63,8 @@ const PLANS: PlanInfo[] = [
     id: "trader",
     name: "Trader",
     tagline: "For active traders",
-    priceMonthly: 19,
-    priceAnnual: 199,
+    priceMonthly: currentMonthly("trader"),
+    priceAnnual: currentAnnual("trader"),
     paid: true,
     features: [
       "Everything in Investor",

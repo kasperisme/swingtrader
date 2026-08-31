@@ -25,6 +25,12 @@ import {
 import { createClient } from "@/lib/supabase/server";
 import { getNarrativeShowcase } from "@/lib/quote/priced-in";
 import {
+  currentAnnualLabel,
+  currentMonthly,
+  finalAnnual,
+  finalMonthly,
+} from "@/lib/pricing";
+import {
   NarrativeTradingPreviewCard,
   NarrativeTradingSection,
 } from "@/components/narrative-trading";
@@ -203,6 +209,12 @@ const DEFAULT_TICKER_THEMES = [
   "Dollar strength impact",
 ];
 
+// Every money value here is looked up from `lib/pricing.ts`, which tracks the
+// phase whose prices the live Stripe catalogue actually holds. Nothing in this
+// list is a literal, so the landing card cannot drift from /pricing, the
+// onboarding picker, or Checkout.
+//
+// `spotLimit` is the current phase's ceiling — phase 1's founder cohort is 100.
 const DEFAULT_PRICING_PLANS: LandingPricingPlan[] = [
   {
     name: "Observer",
@@ -223,16 +235,16 @@ const DEFAULT_PRICING_PLANS: LandingPricingPlan[] = [
   },
   {
     name: "Investor",
-    price: "$9",
+    price: `$${currentMonthly("investor")}`,
     billingNote: "/ month",
-    annualLabel: "$99/yr · lock in forever",
-    phase2Price: "$29",
-    phase2AnnualLabel: "$299/yr",
-    phase3Price: "$39",
-    phase3AnnualLabel: "$399/yr",
+    annualLabel: currentAnnualLabel("investor"),
+    phase2Price: null,
+    phase2AnnualLabel: null,
+    phase3Price: `$${finalMonthly("investor")}`,
+    phase3AnnualLabel: `$${finalAnnual("investor")}/yr`,
     description: "Real-time screening, locked at this price for life.",
     features: ["Real-time news impact screener", "Full impact score breakdown", "Sector & theme filters", "Watchlist alerts", "7-day history"],
-    ctaLabel: "Lock in $9/mo",
+    ctaLabel: `Lock in $${currentMonthly("investor")}/mo`,
     badge: "Early Access",
     isHighlighted: true,
     spotLimit: 100,
@@ -240,16 +252,16 @@ const DEFAULT_PRICING_PLANS: LandingPricingPlan[] = [
   },
   {
     name: "Trader",
-    price: "$19",
+    price: `$${currentMonthly("trader")}`,
     billingNote: "/ month",
-    annualLabel: "$199/yr · lock in forever",
-    phase2Price: "$49",
-    phase2AnnualLabel: "$499/yr",
-    phase3Price: "$69",
-    phase3AnnualLabel: "$699/yr",
+    annualLabel: currentAnnualLabel("trader"),
+    phase2Price: null,
+    phase2AnnualLabel: null,
+    phase3Price: `$${finalMonthly("trader")}`,
+    phase3AnnualLabel: `$${finalAnnual("trader")}/yr`,
     description: "Everything in Investor, plus advanced tools. Locked forever.",
     features: ["Everything in Investor", "Extended 30-day history", "AI stock summaries", "Portfolio impact view", "Priority support"],
-    ctaLabel: "Lock in $19/mo",
+    ctaLabel: `Lock in $${currentMonthly("trader")}/mo`,
     badge: "Early Access",
     isHighlighted: false,
     spotLimit: 100,

@@ -55,8 +55,34 @@ export interface PlanOption extends PlanSelection {
 }
 
 /**
+ * The configured price ids, in a stable order, for use as cache key parts.
+ *
+ * Read without throwing: this runs at module scope to build the cache key, and
+ * a missing env var must fail at the call site (`getPriceId`) with a message
+ * naming the variable — not by killing the import of every module that touches
+ * pricing.
+ */
+const PRICE_ID_KEY_PARTS = PLANS.flatMap((plan) =>
+  INTERVALS.map(
+    (interval) =>
+      process.env[`STRIPE_${plan.toUpperCase()}_${interval.toUpperCase()}_PRICE_ID`] ??
+      "unset",
+  ),
+);
+
+/**
  * The four purchasable prices, read live from Stripe so the UI can never drift
  * from the catalogue. Cached — prices change about once a launch phase.
+ *
+ * The price ids are part of the CACHE KEY, not just the payload. `unstable_cache`
+ * persists to `.next/cache`, which survives a server restart, so a key of just
+ * ["stripe-plan-options"] kept serving the old amounts for the full hour after
+ * the env vars were repointed at different prices — through restarts, with no
+ * way to tell from the UI that it was stale. Keying on the ids means changing
+ * one is self-invalidating: different id, different entry, immediate refetch.
+ *
+ * The `stripe-prices` tag is the manual escape hatch, for when the ids stay the
+ * same but the amounts behind them change.
  */
 export const getPlanOptions = unstable_cache(
   async (): Promise<PlanOption[]> => {
@@ -78,8 +104,8 @@ export const getPlanOptions = unstable_cache(
       }),
     );
   },
-  ["stripe-plan-options"],
-  { revalidate: 3600 },
+  ["stripe-plan-options", ...PRICE_ID_KEY_PARTS],
+  { revalidate: 3600, tags: ["stripe-prices"] },
 );
 
 /** Map a Stripe price id back to the plan/interval it represents, if it's one of ours. */

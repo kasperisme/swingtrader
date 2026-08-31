@@ -61,6 +61,40 @@ export async function createBroadcastDraft(
   return { ok: true, id: data.id };
 }
 
+/**
+ * Revise an existing DRAFT in place. Re-running `draft` after a copy or theme
+ * change should update the broadcast the user already has open, not leave a
+ * pile of near-identical drafts to pick between.
+ *
+ * Note the shape difference from create(): update takes replyTo as an array.
+ */
+export async function updateBroadcastDraft(
+  id: string,
+  input: Omit<CreateBroadcastInput, "segmentId"> & { segmentId?: string },
+): Promise<BroadcastResult> {
+  let resend;
+  try {
+    resend = getResend();
+  } catch (err) {
+    return { ok: false, error: (err as Error).message };
+  }
+
+  const replyTo = input.replyTo ?? EMAIL_REPLY_TO;
+  const { error } = await resend.broadcasts.update(id, {
+    ...(input.segmentId ? { segmentId: input.segmentId } : {}),
+    name: input.name,
+    subject: input.subject,
+    html: input.html,
+    text: input.text,
+    previewText: input.previewText,
+    from: input.from ?? EMAIL_FROM,
+    ...(replyTo ? { replyTo: [replyTo] } : {}),
+  });
+
+  if (error) return { ok: false, error: error.message };
+  return { ok: true, id };
+}
+
 /** Find a segment by exact name, or create it. Returns its id. */
 export async function ensureSegment(
   name: string,

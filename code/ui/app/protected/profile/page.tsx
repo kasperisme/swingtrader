@@ -24,6 +24,7 @@ import { getOnboardingProgress, getOnboardingTours } from "@/app/actions/onboard
 import { PageTour } from "@/app/protected/_components/page-tour";
 import { RestartOnboardingButton } from "@/app/protected/_components/restart-onboarding-button";
 import { SetupAssistantTrigger } from "@/components/setup-assistant";
+import { SUPPORT_EMAIL, supportMailto } from "@/lib/support";
 
 export const metadata = { title: "Profile" };
 
@@ -387,10 +388,10 @@ async function ProfileContent() {
                 />
                 <SettingsLink
                   external
-                  href={`mailto:k@newsimpactscreener.com?subject=${encodeURIComponent("News Impact Screener — feedback")}`}
+                  href={supportMailto("News Impact Screener — feedback")}
                   icon={<Mail className="h-4 w-4 text-amber-500" />}
                   title="Feedback & support"
-                  description="k@newsimpactscreener.com"
+                  description={SUPPORT_EMAIL}
                 />
                 <SettingsAction
                   icon={<Sparkles className="h-4 w-4 text-amber-500" />}

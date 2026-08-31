@@ -27,7 +27,11 @@ import { join } from "node:path";
 import { createServiceClient } from "../lib/supabase/service";
 import { getResend } from "../lib/email/client";
 import { addContactToSegments } from "../lib/email/segments";
-import { createBroadcastDraft, ensureSegment } from "../lib/email/broadcasts";
+import {
+  createBroadcastDraft,
+  ensureSegment,
+  updateBroadcastDraft,
+} from "../lib/email/broadcasts";
 import { sendEmail } from "../lib/email/send";
 import {
   renderNarrativeTradingBroadcast,
@@ -38,6 +42,13 @@ import { TRIAL_DAYS } from "../lib/plans";
 const SEGMENT_NAME = "Narrative Trading Launch";
 const BROADCAST_NAME = "Founding rate — first 100";
 const HERO_TICKER = process.env.BROADCAST_HERO_TICKER ?? "NVDA";
+/**
+ * Signed in the email and set as the broadcast's reply-to. The P.S. and the
+ * sign-off publish it, so it must be a mailbox that is actually read — not the
+ * noreply@ sender.
+ */
+const REPLY_EMAIL = process.env.BROADCAST_REPLY_EMAIL ?? "k@newsimpactscreener.com";
+
 const APP_URL =
   process.env.NEXT_PUBLIC_APP_URL ?? "https://newsimpactscreener.com";
 const OUT_DIR = join(process.cwd(), "output", "broadcasts");
@@ -92,11 +103,12 @@ async function loadAudience(): Promise<{
   recipients: Recipient[];
   suppressed: string[];
 }> {
-  const sb = createServiceClient().schema("swingtrader");
+  const client = createServiceClient();
+  const sb = client.schema("swingtrader");
   const byEmail = new Map<string, Recipient>();
   const suppressed = new Set<string>();
 
-  const add = (email: string | null, source: string) => {
+  const add = (email: string | null | undefined, source: string) => {
     if (!email) return;
     const key = email.trim().toLowerCase();
     if (!key.includes("@")) return;
@@ -134,8 +146,35 @@ async function loadAudience(): Promise<{
     else add(r.email, "briefing");
   }
 
+  // Registered accounts — the warmest names here, since creating an account is
+  // a stronger signal than dropping an email into a form. Most never joined a
+  // lead-magnet list, so the three tables above miss them entirely, and
+  // auth.users is only reachable through the admin API.
+  const { data: authData, error: e4 } = await client.auth.admin.listUsers({
+    page: 1,
+    perPage: 1000,
+  });
+  if (e4) throw new Error(`auth.users: ${e4.message}`);
+  for (const u of authData.users) add(u.email, "account");
+
+  // Never pitch a subscription to someone who already holds one. Zero rows
+  // today, but this script outlives that.
+  const { data: subs, error: e5 } = await sb
+    .from("user_subscriptions")
+    .select("user_id, status")
+    .limit(10_000);
+  if (e5) throw new Error(`user_subscriptions: ${e5.message}`);
+  const paying = new Set(
+    (subs ?? [])
+      .filter((r) => ["active", "trialing"].includes(String(r.status)))
+      .map((r) => String(r.user_id)),
+  );
+  for (const u of authData.users) {
+    if (u.email && paying.has(u.id)) suppressed.add(u.email.toLowerCase());
+  }
+
   // An opt-out anywhere wins over an opt-in anywhere else: these people all
-  // signed up for "email from News Impact Screener", not for a specific list.
+  // signed up for "email from News Impact Screener", not for one specific list.
   for (const email of suppressed) byEmail.delete(email);
 
   return {
@@ -144,6 +183,44 @@ async function loadAudience(): Promise<{
     ),
     suppressed: [...suppressed],
   };
+}
+
+/**
+ * Addresses that unsubscribed at the RESEND level — via the unsubscribe link on
+ * a previous send, which never writes back to Supabase.
+ *
+ * Without this the sync would resurrect them: addContactToSegments passes
+ * `unsubscribed: false`, so re-adding an opted-out contact silently flips them
+ * back on. Mailing someone who has unsubscribed is the one mistake this script
+ * must not make, so a failure to READ the list aborts the sync rather than
+ * proceeding blind.
+ */
+async function resendUnsubscribed(): Promise<Set<string>> {
+  const resend = getResend();
+  const out = new Set<string>();
+  // Page size caps at 100, so walk the cursor — a partial read would look like
+  // "nobody unsubscribed" and quietly mail people who did.
+  let after: string | undefined;
+  for (let page = 0; page < 100; page += 1) {
+    const res = await resend.contacts.list({
+      limit: 100,
+      ...(after ? { after } : {}),
+    } as never);
+    if (res.error) {
+      throw new Error(`Could not read Resend contacts: ${res.error.message}`);
+    }
+    const body = res.data as {
+      data?: { id: string; email: string; unsubscribed: boolean }[];
+      has_more?: boolean;
+    } | null;
+    const rows = body?.data ?? [];
+    for (const c of rows) {
+      if (c.unsubscribed) out.add(c.email.toLowerCase());
+    }
+    if (!body?.has_more || rows.length === 0) return out;
+    after = rows[rows.length - 1].id;
+  }
+  throw new Error("Resend contact pagination did not terminate");
 }
 
 // ── Hero data ───────────────────────────────────────────────────────────────
@@ -304,6 +381,7 @@ async function build() {
       impliedCagrPct: hero.impliedCagrPct,
       recentGrowthPct: hero.recentGrowthPct,
     },
+    replyEmail: REPLY_EMAIL,
     appUrl: APP_URL,
     utm: UTM,
   };
@@ -352,8 +430,22 @@ async function cmdAudience(dryRun: boolean) {
     console.log(`  ${String(n).padStart(4)}  ${s}`);
   }
 
+  // Resend-side opt-outs, which Supabase cannot see.
+  const optedOutAtResend = await resendUnsubscribed();
+  const sendable = recipients.filter((r) => !optedOutAtResend.has(r.email));
+  const blocked = recipients.length - sendable.length;
+  if (blocked > 0) {
+    console.log(
+      `\nHeld back ${blocked} already unsubscribed in Resend (invisible to Supabase):`,
+    );
+    for (const r of recipients) {
+      if (optedOutAtResend.has(r.email)) console.log(`  ${r.email}`);
+    }
+  }
+  console.log(`\nWill sync: ${sendable.length}`);
+
   if (dryRun) {
-    console.log(`\n--dry-run: nothing written to Resend.`);
+    console.log(`--dry-run: nothing written to Resend.`);
     return;
   }
 
@@ -367,7 +459,7 @@ async function cmdAudience(dryRun: boolean) {
 
   let added = 0;
   const failures: string[] = [];
-  for (const r of recipients) {
+  for (const r of sendable) {
     const res = await addContactToSegments({
       email: r.email,
       segmentIds: [seg.id],
@@ -375,7 +467,7 @@ async function cmdAudience(dryRun: boolean) {
     if (res.ok) added += 1;
     else failures.push(`${r.email}: ${res.error}`);
   }
-  console.log(`Synced ${added}/${recipients.length} contacts.`);
+  console.log(`Synced ${added}/${sendable.length} contacts.`);
   if (failures.length) {
     console.error(`\n${failures.length} failed:`);
     for (const f of failures.slice(0, 20)) console.error(`  ${f}`);
@@ -419,15 +511,42 @@ async function cmdDraft() {
 
   const { props, subject, html, text } = await build();
   const preview = `Founding rate held until ${props.deadlineLabel}: $${props.investorPrice} or $${props.traderPrice} a month, before it becomes $${props.nextInvestorPrice} and $${props.nextTraderPrice}.`;
-
-  const res = await createBroadcastDraft({
-    segmentId: id,
-    name: `${BROADCAST_NAME} — ${new Date().toISOString().slice(0, 10)}`,
+  const name = `${BROADCAST_NAME} — ${new Date().toISOString().slice(0, 10)}`;
+  const payload = {
+    name,
     subject,
     html,
     text,
     previewText: preview,
-  });
+    // Otherwise the broadcast replies to noreply@ while the sign-off invites
+    // a reply to REPLY_EMAIL.
+    replyTo: REPLY_EMAIL,
+  };
+
+  // Revise the draft we already made for this segment rather than stacking a
+  // second one. Only ever a draft — a broadcast that has been sent is left
+  // alone, since updating it would be editing history.
+  const existing = await resend.broadcasts.list();
+  const prior = (existing.data?.data ?? []).find(
+    (b) => b.name === name && b.status === "draft",
+  );
+
+  if (prior) {
+    const upd = await updateBroadcastDraft(prior.id, { ...payload, segmentId: id });
+    if (!upd.ok) {
+      console.error(`Update failed: ${upd.error}`);
+      process.exitCode = 1;
+      return;
+    }
+    console.log(`Draft updated: ${prior.id}`);
+    console.log(`Segment: ${seg.data?.name} (${id})`);
+    console.log(
+      `\nReview and send it at https://resend.com/broadcasts/${prior.id} — this script never sends.`,
+    );
+    return;
+  }
+
+  const res = await createBroadcastDraft({ segmentId: id, ...payload });
 
   if (!res.ok) {
     console.error(`Draft failed: ${res.error}`);

@@ -3,7 +3,8 @@
  *
  * Renders to an HTML *string* rather than a React component (react-email is not
  * installed), mirroring SubscriptionConfirmationEmail and the app's visual
- * language: near-black background, amber accent, monospace tickers.
+ * language: the warm cream light theme from globals.css `:root`, amber
+ * accent, monospace tickers.
  *
  * Offer-first and deliberately short. The proof that the product is worth
  * paying for sits in the P.S., not above the ask — this list has already been
@@ -21,6 +22,13 @@
  *    count, not on a date, so the copy says "I'm holding it until <date>" —
  *    a promise we control and can keep — never "the price changes on Monday",
  *    which would be false. Honour it, or the next deadline means nothing.
+ *
+ * On the trial: the one this email offers is the STRIPE trial — Checkout runs
+ * in subscription mode with card collection and trial_period_days (see
+ * app/api/stripe/checkout/route.ts, and onboarding-plan-step.tsx which passes
+ * trial=true for paid plans). A card is required. Do not describe it as
+ * "no card" — that is the separate app-managed grace period in lib/plans.ts,
+ * which is not what "lock in your rate" puts someone into.
  *
  * Sent as a Resend BROADCAST, so the footer uses Resend's
  * {{{RESEND_UNSUBSCRIBE_URL}}} merge tag rather than our own signed token.
@@ -48,6 +56,8 @@ export type NarrativeTradingBroadcastProps = {
     /** Most recent reported growth, for the contrast. Null drops the clause. */
     recentGrowthPct: number | null;
   };
+  /** Address in the sign-off, and the broadcast's reply-to. */
+  replyEmail: string;
   /** Absolute base URL, e.g. https://newsimpactscreener.com */
   appUrl: string;
   /** Appended to every link for attribution. */
@@ -62,12 +72,26 @@ function esc(s: string): string {
     .replace(/"/g, "&quot;");
 }
 
-const BG = "#0b0f17";
-const CARD = "#111620";
-const TEXT = "#e6e9ef";
-const MUTED = "#8b93a7";
-const BORDER = "#1e2533";
-const ACCENT = "#f5a623";
+/**
+ * The app's LIGHT tokens, resolved from app/globals.css `:root` — a warm cream
+ * theme, not stark white. Kept as literals because email clients cannot read
+ * CSS variables.
+ *
+ * Two ambers on purpose, exactly as the product does it: `--primary` #f59f0a
+ * fills the button (with dark text, per --primary-foreground), while small
+ * amber TEXT uses #b45309 — the same light-mode value
+ * app/quote/[symbol]/_components/priced-in-ui.tsx picks. Bright amber on cream
+ * fails contrast at 11-15px.
+ */
+const PAGE = "#f1ece4"; // --secondary, the ground behind the card
+const CARD = "#fefdfb"; // --card
+const PANEL = "#f2eee8"; // --muted, for boxes inside the card
+const TEXT = "#0f1729"; // --foreground
+const MUTED = "#546378"; // --muted-foreground
+const BORDER = "#dfd6cd"; // --border
+const ACCENT = "#f59f0a"; // --primary, button fill only
+const ACCENT_TEXT = "#b45309"; // amber that passes contrast on cream
+const ON_ACCENT = "#0f1729"; // --primary-foreground, text on the amber fill
 const MONO =
   "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', monospace";
 const SANS =
@@ -95,6 +119,7 @@ export function renderNarrativeTradingBroadcast(
     trialDays,
     universeCount,
     proof,
+    replyEmail,
     utm,
   } = props;
   const base = props.appUrl.replace(/\/$/, "");
@@ -133,7 +158,7 @@ export function renderNarrativeTradingBroadcast(
     ([name, detail]) => `
       <tr>
         <td style="padding:0 0 9px 0;font-family:${SANS};font-size:14px;line-height:1.55;color:${TEXT};">
-          <strong style="color:${ACCENT};">${name}</strong>
+          <strong style="color:${ACCENT_TEXT};">${name}</strong>
           <span style="color:${MUTED};"> &mdash; ${detail}</span>
         </td>
       </tr>`,
@@ -144,14 +169,15 @@ export function renderNarrativeTradingBroadcast(
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width,initial-scale=1" />
-    <meta name="color-scheme" content="dark" />
+    <meta name="color-scheme" content="light" />
+    <meta name="supported-color-schemes" content="light" />
     <title>${esc(subject)}</title>
   </head>
-  <body style="margin:0;padding:0;background:${BG};">
-    <div style="display:none;max-height:0;overflow:hidden;opacity:0;font-size:1px;line-height:1px;color:${BG};">
+  <body style="margin:0;padding:0;background:${PAGE};">
+    <div style="display:none;max-height:0;overflow:hidden;opacity:0;font-size:1px;line-height:1px;color:${PAGE};">
       ${esc(preheader)}
     </div>
-    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:${BG};padding:28px 12px;">
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:${PAGE};padding:28px 12px;">
       <tr>
         <td align="center">
           <table role="presentation" width="100%" cellpadding="0" cellspacing="0"
@@ -159,7 +185,7 @@ export function renderNarrativeTradingBroadcast(
 
             <tr>
               <td style="padding:26px 28px 0 28px;">
-                <p style="font-family:${MONO};font-size:11px;font-weight:600;letter-spacing:0.16em;text-transform:uppercase;color:${ACCENT};margin:0 0 18px 0;">
+                <p style="font-family:${MONO};font-size:11px;font-weight:600;letter-spacing:0.16em;text-transform:uppercase;color:${ACCENT_TEXT};margin:0 0 18px 0;">
                   News Impact Screener
                 </p>
 
@@ -176,7 +202,7 @@ export function renderNarrativeTradingBroadcast(
                 </p>
 
                 <p style="${P}">
-                  I'm holding it for this list until <strong style="color:${ACCENT};">${esc(deadlineLabel)}</strong>.
+                  I'm holding it for this list until <strong style="color:${ACCENT_TEXT};">${esc(deadlineLabel)}</strong>.
                 </p>
               </td>
             </tr>
@@ -184,7 +210,7 @@ export function renderNarrativeTradingBroadcast(
             <tr>
               <td style="padding:6px 28px 0 28px;">
                 <table role="presentation" width="100%" cellpadding="0" cellspacing="0"
-                       style="background:${BG};border:1px solid ${BORDER};border-radius:10px;">
+                       style="background:${PANEL};border:1px solid ${BORDER};border-radius:10px;">
                   <tr>
                     <td style="padding:16px 18px;">
                       <p style="font-family:${MONO};font-size:10px;font-weight:600;letter-spacing:0.12em;text-transform:uppercase;color:${MUTED};margin:0 0 12px 0;">
@@ -202,23 +228,26 @@ export function renderNarrativeTradingBroadcast(
             <tr>
               <td style="padding:20px 28px 0 28px;">
                 <a href="${signupUrl}"
-                   style="display:inline-block;font-family:${SANS};font-size:15px;font-weight:600;color:${BG};background:${ACCENT};padding:12px 24px;border-radius:8px;text-decoration:none;">
+                   style="display:inline-block;font-family:${SANS};font-size:15px;font-weight:600;color:${ON_ACCENT};background:${ACCENT};padding:12px 24px;border-radius:8px;text-decoration:none;">
                   Lock in your rate &rarr;
                 </a>
                 <p style="font-family:${SANS};font-size:13px;line-height:1.6;color:${MUTED};margin:12px 0 0 0;">
-                  Every account starts with ${trialDays} days of full access, no card. The rate
-                  locks when you pick a plan &mdash; cancel anytime, in two clicks.
+                  Either paid plan starts with a ${trialDays}-day trial &mdash; card up front, no
+                  charge until it ends, cancel anytime. Your rate locks the moment you start.
                 </p>
               </td>
             </tr>
 
             <tr>
               <td style="padding:22px 28px 0 28px;">
-                <p style="${P}margin-bottom:10px;">&mdash; Kasper</p>
+                <p style="${P}margin-bottom:10px;">
+                  &mdash; Kasper,
+                  <a href="mailto:${esc(replyEmail)}" style="color:${ACCENT_TEXT};text-decoration:none;">${esc(replyEmail)}</a>
+                </p>
                 <p style="font-family:${SANS};font-size:14px;line-height:1.6;color:${MUTED};margin:0;">
                   <strong style="color:${TEXT};">P.S.</strong> One example of what narrative trading
                   means: ${proof.nTargets} analysts have published price targets on
-                  <a href="${quoteUrl}" style="color:${ACCENT};text-decoration:none;font-weight:600;">${esc(proof.ticker)}</a>,
+                  <a href="${quoteUrl}" style="color:${ACCENT_TEXT};text-decoration:none;font-weight:600;">${esc(proof.ticker)}</a>,
                   and its price endorses none of them &mdash; it's paying for
                   ${proof.impliedCagrPct.toFixed(1)}% growth a year${growthClause}. That's on the site now.
                 </p>
@@ -265,10 +294,10 @@ export function renderNarrativeTradingBroadcast(
     "",
     `Lock in your rate: ${signupUrl}`,
     "",
-    `Every account starts with ${trialDays} days of full access, no card. The rate locks when`,
-    "you pick a plan — cancel anytime, in two clicks.",
+    `Either paid plan starts with a ${trialDays}-day trial — card up front, no charge until it`,
+    "ends, cancel anytime. Your rate locks the moment you start.",
     "",
-    "— Kasper",
+    `— Kasper, ${replyEmail}`,
     "",
     `P.S. One example of what narrative trading means: ${proof.nTargets} analysts have published`,
     `price targets on ${proof.ticker}, and its price endorses none of them — it's paying for`,

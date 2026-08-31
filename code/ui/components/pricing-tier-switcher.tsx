@@ -76,9 +76,11 @@ export function PricingTierSwitcher({
           <div className="mt-6">
             <div className="mb-2 flex items-center justify-between text-xs">
               <span className="font-semibold text-violet-300">
+                {/* "Founder" belonged to phase 1, which has closed — the seats
+                    this bar counts are the current phase's, whichever that is. */}
                 {spotsLeft === 0
                   ? "Phase full"
-                  : `${spotsLeft} founder spot${spotsLeft === 1 ? "" : "s"} remaining`}
+                  : `${spotsLeft} spot${spotsLeft === 1 ? "" : "s"} left at this rate`}
               </span>
               <span className="text-muted-foreground">
                 {signupCount} / {spotLimit} taken
