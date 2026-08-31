@@ -178,10 +178,10 @@ def cmd_l2(args) -> int:
           f"bar |t|>{res.bar:.2f}")
     print(f"  n (dev)        {res.n_obs}  over {res.detail.get('clusters', 0)} monthly clusters")
     print(f"  company placebo t {res.placebo_t:+.2f}   (must NOT match the product page)")
-    print(f"  shuffle 95th pct  {res.detail.get("shuffle_t", float("nan")):.2f}   perm p {res.detail.get("perm_p_value", float("nan")):.3f}")
+    print(f"  shuffle 95th pct  {res.detail.get('shuffle_t', float('nan')):.2f}   perm p {res.detail.get('perm_p_value', float('nan')):.3f}")
     print(f"  vault          effect {res.vault_effect:+.4f}  t {res.vault_t:+.2f} "
           f"(n={res.detail.get('n_vault', 0)})")
-    print(f"  announcement return t {res.detail.get("announcement_return_t", float("nan")):+.2f}  (corroboration, not a kill criterion)")
+    print(f"  announcement return t {res.detail.get('announcement_return_t', float('nan')):+.2f}  (corroboration, not a kill criterion)")
     print(f"  note           {res.note}")
     verdict, reason = SOCIAL_ARB_1.verdict(reg.results(SOCIAL_ARB_1.id))
     lab = reg.lab_trials(DISCOVER_DB)
