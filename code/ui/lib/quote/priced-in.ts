@@ -1,6 +1,10 @@
 import "server-only";
 import { createServiceClient } from "@/lib/supabase/service";
-import type { PricedInSource, PricedInVote } from "./priced-in-vote";
+import type {
+  PricedInParts,
+  PricedInSource,
+  PricedInVote,
+} from "./priced-in-vote";
 import {
   num,
   parseAnalystCases,
@@ -194,4 +198,190 @@ async function linkSources(
     if (r.title && r.slug && !bySlug.has(r.title)) bySlug.set(r.title, r.slug);
   }
   for (const s of missing) s.slug = bySlug.get(s.title) ?? null;
+}
+
+// ── Landing-page showcase ─────────────────────────────────────────────────────
+
+/**
+ * One published reconstruction, flattened for marketing use.
+ *
+ * Deliberately NOT a `PricedInVote`: the showcase never renders drivers,
+ * analyst cases or cited sources, and building those means parsing every case
+ * and running the source-slug lookup — a lot of work for a card that shows a
+ * rail and four bullets. The fields here are exactly what the landing page
+ * draws, so a landing render costs two small queries and no JSON walking
+ * beyond `summary_json`.
+ */
+export type PricedInHighlight = {
+  ticker: string;
+  asOf: string;
+  nTargets: number;
+  low: number;
+  high: number;
+  median: number;
+  priceAtAsOf: number | null;
+  medianGap: number | null;
+  nEndorsed: number;
+  nContestedBull: number;
+  nContestedBear: number;
+  parts: PricedInParts;
+};
+
+export type NarrativeShowcase = {
+  /** The reconstruction the landing page reads in full. Null when none qualify. */
+  featured: PricedInHighlight | null;
+  /** Other covered names, newest first — the "and 200 more" proof strip. */
+  others: string[];
+  /** Distinct tickers carrying a published reconstruction right now. */
+  totalCovered: number;
+};
+
+/**
+ * Names a visitor recognises without being told what they are.
+ *
+ * The featured card has to teach "narrative trading" in one read, and it cannot
+ * do that while the reader is still working out what the company sells. A
+ * household name spends none of the reader's attention on the ticker and all of
+ * it on the idea. Ordered by how widely held they are, and consulted only as a
+ * PREFERENCE — the newest qualifying row wins if none of these are covered.
+ */
+const SHOWCASE_PREFERRED = [
+  "AAPL", "NVDA", "MSFT", "TSLA", "AMZN", "GOOGL", "META", "NFLX",
+  "AMD", "DIS", "MCD", "NKE", "SBUX", "KO", "BA", "UBER", "PLTR", "RIVN",
+];
+
+/** Enough published models that the distribution is a vote, not a handful. */
+const SHOWCASE_MIN_TARGETS = 8;
+
+function toHighlight(row: Record<string, unknown>): PricedInHighlight | null {
+  const low = num(row.target_low);
+  const high = num(row.target_high);
+  const median = num(row.target_median);
+  const nTargets = num(row.n_targets) ?? 0;
+  if (low == null || high == null || median == null) return null;
+  if (!(high > low) || nTargets < SHOWCASE_MIN_TARGETS) return null;
+
+  // The showcase leads on the prose, so a row without it is worse than useless
+  // here — it would render a rail under a heading promising a narrative.
+  const parts = parseParts(row.summary_json);
+  if (!parts?.position || !parts.paysFor.length || !parts.declines.length) {
+    return null;
+  }
+
+  return {
+    ticker: String(row.ticker),
+    asOf: String(row.as_of),
+    nTargets,
+    low,
+    high,
+    median,
+    priceAtAsOf: num(row.price),
+    medianGap: num(row.median_gap),
+    nEndorsed: num(row.n_endorsed) ?? 0,
+    nContestedBull: num(row.n_rejected_bull) ?? 0,
+    nContestedBear: num(row.n_rejected_bear) ?? 0,
+    parts,
+  };
+}
+
+const SHOWCASE_COLUMNS =
+  "ticker, as_of, price, n_targets, target_low, target_high, target_median, " +
+  "median_gap, n_rejected_bull, n_rejected_bear, n_endorsed, summary_json";
+
+/**
+ * The live example the landing page markets "narrative trading" with.
+ *
+ * Read fresh rather than hardcoded, so the card on the marketing page is the
+ * same reconstruction a visitor lands on when they click through. A pinned
+ * ticker would drift from the batch within a week and start advertising a
+ * price that has since moved.
+ *
+ * Best-effort: every failure path returns an empty showcase, because the
+ * landing page must render for a visitor whether or not this table answers.
+ */
+export async function getNarrativeShowcase(): Promise<NarrativeShowcase> {
+  const empty: NarrativeShowcase = { featured: null, others: [], totalCovered: 0 };
+  try {
+    const supabase = createServiceClient();
+
+    const [preferredRes, coveredRes] = await Promise.all([
+      supabase
+        .schema(SCHEMA)
+        .from("research_priced_in")
+        .select(SHOWCASE_COLUMNS)
+        .eq("published", true)
+        .in("ticker", SHOWCASE_PREFERRED)
+        .order("as_of", { ascending: false })
+        .order("created_at", { ascending: false })
+        .limit(40),
+      // Every covered name, one column wide. `count: "exact"` would count ROWS,
+      // and a ticker holds several — a point-in-time run and a live one — so
+      // "204 names covered" would be an overstatement of a headline figure. The
+      // tickers are cheap enough to just fetch and count distinctly.
+      supabase
+        .schema(SCHEMA)
+        .from("research_priced_in")
+        .select("ticker, as_of")
+        .eq("published", true)
+        .order("as_of", { ascending: false })
+        .limit(1000),
+    ]);
+
+    if (preferredRes.error) throw preferredRes.error;
+    if (coveredRes.error) throw coveredRes.error;
+
+    const preferred = (preferredRes.data ?? []) as unknown as Record<string, unknown>[];
+    const covered = (coveredRes.data ?? []) as unknown as Record<string, unknown>[];
+
+    // Newest-first already, so the first sighting of a ticker is its latest row.
+    const seen = new Set<string>();
+    for (const row of covered) {
+      const t = String(row.ticker ?? "").toUpperCase();
+      if (t) seen.add(t);
+    }
+
+    // Preference order, not recency, decides which household name leads —
+    // otherwise the batch's run order picks the marketing example.
+    const byRank = [...preferred].sort(
+      (a, b) =>
+        SHOWCASE_PREFERRED.indexOf(String(a.ticker)) -
+        SHOWCASE_PREFERRED.indexOf(String(b.ticker)),
+    );
+
+    let featured: PricedInHighlight | null = null;
+    for (const row of byRank) {
+      featured = toHighlight(row);
+      if (featured) break;
+    }
+
+    // No household name qualified — fall back to the newest row that does. Costs
+    // a second full-column read, and only on the path where the first found
+    // nothing renderable.
+    if (!featured) {
+      const { data } = await supabase
+        .schema(SCHEMA)
+        .from("research_priced_in")
+        .select(SHOWCASE_COLUMNS)
+        .eq("published", true)
+        .order("as_of", { ascending: false })
+        .order("created_at", { ascending: false })
+        .limit(40);
+      for (const row of (data ?? []) as unknown as Record<string, unknown>[]) {
+        featured = toHighlight(row);
+        if (featured) break;
+      }
+    }
+
+    const others: string[] = [];
+    for (const row of covered) {
+      const t = String(row.ticker ?? "").toUpperCase();
+      if (t && t !== featured?.ticker && !others.includes(t)) others.push(t);
+      if (others.length >= 24) break;
+    }
+
+    return { featured, others, totalCovered: seen.size };
+  } catch (e) {
+    console.error("[priced-in] showcase query failed:", e);
+    return empty;
+  }
 }

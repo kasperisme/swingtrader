@@ -147,3 +147,91 @@ To preview a template, use Resend's dashboard preview — it renders the same te
 | `lib/email/welcome-user.ts`                       | Post-signup welcome dispatch with metadata-flag dedupe        |
 | `app/api/early-access/route.ts`                   | Sends waitlist welcome (template) + adds to segment           |
 | `app/auth/confirm/route.ts`                       | Fires `welcomeUserIfNeeded()` after OTP verify                |
+
+---
+
+## 8. Broadcasts — the "narrative trading" campaign
+
+Section 3 said programmatic broadcasts would need a `campaigns.ts`. They now live in
+[lib/email/broadcasts.ts](lib/email/broadcasts.ts), and the first campaign is wired end
+to end in [scripts/broadcast-narrative-trading.ts](scripts/broadcast-narrative-trading.ts).
+
+A broadcast differs from the transactional sends above in three ways: it targets a
+**Segment** instead of an address list, Resend appends its own unsubscribe handling
+(so the body uses the `{{{RESEND_UNSUBSCRIBE_URL}}}` merge tag, not our signed token),
+and creation is decoupled from sending. `createBroadcastDraft()` only ever creates a
+**draft** — there is deliberately no `send: true` path in the module, so pressing send
+is always a human click in the Resend dashboard.
+
+### The audience is rebuilt from Supabase, not trusted
+
+Only `/api/early-access` ever called `addToWaitlistSegment`, so the Resend segment has
+never held the screening or briefing subscribers. The script therefore reconstructs the
+reachable list from three tables:
+
+| Table | Contributes | Opt-out column |
+| ----- | ----------- | -------------- |
+| `early_access_signups` | the master list (other paths mirror into it) | — none |
+| `market_screening_email_subscriptions` | screening-results subscribers | `unsubscribed_at`, `status` |
+| `news_briefing_subscriptions` | daily-briefing subscribers | `unsubscribed_at`, `status` |
+
+An opt-out in *either* lead-magnet table suppresses the address everywhere — these
+people signed up for "email from News Impact Screener", not for one specific list.
+`early_access_signups` carries no unsubscribe state of its own, which is exactly why it
+cannot be used alone.
+
+### Running it
+
+```bash
+cd code/ui
+npx tsx --env-file=.env.local scripts/broadcast-narrative-trading.ts preview
+npx tsx --env-file=.env.local scripts/broadcast-narrative-trading.ts audience --dry-run
+npx tsx --env-file=.env.local scripts/broadcast-narrative-trading.ts audience
+npx tsx --env-file=.env.local scripts/broadcast-narrative-trading.ts test you@example.com
+npx tsx --env-file=.env.local scripts/broadcast-narrative-trading.ts draft
+```
+
+- **preview** — pulls the hero reconstruction live from `swingtrader.research_priced_in`,
+  renders, and writes `output/broadcasts/narrative-trading.{html,txt}` (gitignored).
+  Touches no API. Every number in the email comes from this query, so rebuilding the day
+  before you send picks up whatever the nightly batch last promoted.
+- **audience** — reports the reachable list by source, then upserts each address into the
+  `Narrative Trading Launch` segment, creating it if absent. Prints the segment id to put
+  in `RESEND_BROADCAST_SEGMENT_ID`.
+- **test** — sends the rendered email to one address as a normal transactional send.
+  The `{{{RESEND_UNSUBSCRIBE_URL}}}` tag will render literally; that is expected, only
+  a real broadcast substitutes it.
+- **draft** — creates the broadcast against the segment and prints its dashboard URL.
+
+Override the hero with `BROADCAST_HERO_TICKER=SHOP`. The script refuses any ticker whose
+published row lacks a crux, a `pays_for` list, or unpriced drivers, so a bad hero fails
+loudly at build time rather than shipping a hollow email.
+
+### What the email is allowed to claim
+
+The email is the product's own gate run end to end on one real ticker: the free half
+(the distribution, and what the price pays for) is shown, then the members-only half
+(what it declines to pay for) is handed over once, and the ask is "that is the product."
+
+Two guardrails, both inherited from the product rather than invented for the campaign:
+
+- **No raw `priced_in_pct`.** The quote panel renders it as one of four band words
+  (`Unpriced` / `Partly priced` / `Mostly priced` / `Fully priced`) because the number is
+  an unvalidated estimate, and `components/narrative-trading.tsx` excludes it from the
+  landing page for the same reason. `bandLabel()` in the template mirrors those
+  thresholds exactly. A percentage in an email would claim a precision neither surface
+  claims.
+- **Say which column is arithmetic.** The `worth if true` upside is today's price against
+  a published analyst target and can be checked. How priced a claim is, is an estimate.
+  The footnote under the table says so.
+
+### Before the first send
+
+- **Add a physical postal address** to the Resend broadcast footer (Resend →
+  Settings → Branding). CAN-SPAM requires one on commercial email and the template
+  does not carry it; the app has no business address anywhere in the codebase.
+- **Warm the domain.** `noreply@newsimpactscreener.com` has only sent transactional
+  volume. ~100 recipients in one shot is fine, but send the test first and check it
+  does not land in Promotions/Spam.
+- **Use a replyable From.** The P.S. asks people to reply. `RESEND_REPLY_TO` is unset,
+  and `noreply@` bins the replies the campaign is explicitly soliciting.
