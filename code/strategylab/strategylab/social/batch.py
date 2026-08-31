@@ -310,7 +310,8 @@ def reconstruct(ticker: str, *, lookback: int = 180, claims: int = 60,
         say("=" * 78)
         say(c.brief())
         if c.sources:
-            say(f"   sources        {', '.join(s[:46] for s in c.sources[:3])}")
+            say("   sources        "
+                + ", ".join(str(x.get("title", ""))[:46] for x in c.sources[:3]))
         say("")
 
     # Back into driver order, so the array reads the same way as `drivers_json`

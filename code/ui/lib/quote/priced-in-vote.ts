@@ -111,9 +111,20 @@ export type PricedInDriverCase = {
   /** False when the corpus was too thin for retrieval to discriminate. */
   selective: boolean;
   distinctArticles: number | null;
-  sources: string[];
+  /** Headlines the reading drew on, linked to the article page when known. */
+  sources: PricedInSource[];
   model: string | null;
 };
+
+/**
+ * One cited headline.
+ *
+ * `slug` is null on two paths: a row written before the generator carried
+ * slugs, and an article whose corpus row has none. The UI renders those as
+ * plain text — a citation you cannot follow is still a citation, and a link to
+ * nowhere is worse than no link.
+ */
+export type PricedInSource = { title: string; slug: string | null };
 
 export type PricedInParts = {
   /** One sentence: where the price sits versus the published models. */
@@ -233,7 +244,8 @@ export type PricedInAnalystCase = {
   selective: boolean;
   distinctArticles: number | null;
   /** Headlines the reconstruction drew on. */
-  sources: string[];
+  /** Headlines the reconstruction drew on, linked where the slug is known. */
+  sources: PricedInSource[];
   /** A batch pass mixes backends, so the row says which model answered. */
   model: string | null;
 };
@@ -457,11 +469,35 @@ export function parseDriverCases(raw: unknown): Map<number, PricedInDriverCase> 
       nPassages: num(d.n_passages) ?? 0,
       selective: retrieval ? retrieval.selective !== false : true,
       distinctArticles: retrieval ? num(retrieval.distinct_articles) : null,
-      sources: strList(d.sources).slice(0, 6),
+      sources: parseSources(d.sources),
       model: str(d.model),
     });
   }
   return out;
+}
+
+/**
+ * Cited headlines, in either shape the column holds.
+ *
+ * `priced-in/3` writes `{title, slug}`; everything before it wrote a bare
+ * title. Both are read here rather than migrating the stored rows, because the
+ * bare-title rows are still the ones on the page until the batch comes round
+ * again — and their slugs can be recovered by title at query time.
+ */
+export function parseSources(raw: unknown): PricedInSource[] {
+  if (!Array.isArray(raw)) return [];
+  const out: PricedInSource[] = [];
+  for (const item of raw) {
+    if (typeof item === "string") {
+      const title = item.trim();
+      if (title) out.push({ title, slug: null });
+      continue;
+    }
+    const o = obj(item);
+    const title = o ? str(o.title) : null;
+    if (title) out.push({ title, slug: o ? str(o.slug) : null });
+  }
+  return out.slice(0, 6);
 }
 
 /** A plain JSON object, or null — arrays and scalars are not one. */
@@ -540,7 +576,7 @@ export function parseAnalystCases(raw: unknown): PricedInAnalystCase[] {
       // generator said so.
       selective: retrieval.selective !== false,
       distinctArticles: num(retrieval.distinct_articles),
-      sources: strList(d.sources).slice(0, 6),
+      sources: parseSources(d.sources),
       model: str(d.model),
     });
   }

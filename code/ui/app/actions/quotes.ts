@@ -2,6 +2,7 @@
 
 import { getPricedInVote } from "@/lib/quote/priced-in";
 import type { PricedInVote } from "@/lib/quote/priced-in-vote";
+import { createClient } from "@/lib/supabase/server";
 import { createServiceClient } from "@/lib/supabase/service";
 
 /**
@@ -96,4 +97,27 @@ export async function quotesGetPricedInVote(
   const t = String(symbol ?? "").trim().toUpperCase();
   if (!t || !/^[A-Z0-9.\-]{1,12}$/.test(t)) return null;
   return getPricedInVote(t);
+}
+
+/**
+ * The members-only half of the priced-in panel, for the public quote page.
+ *
+ * The quote page is statically prerendered and cannot read auth cookies during
+ * render, so the gated half is not rendered there at all — it is fetched here,
+ * after mount, and only for a signed-in reader. Withholding the markup rather
+ * than hiding it is the point: content that ships in the HTML and is covered by
+ * a lock is not gated, and serving it to a crawler but not to the reader who
+ * clicks through is cloaking.
+ *
+ * The gate is the account, not a paid tier — quote pages are the site's organic
+ * front door, so the ask is a free signup (same gate as the chart workspace).
+ */
+export async function quotesGetPricedInMembers(symbol: string): Promise<{
+  signedIn: boolean;
+  vote: PricedInVote | null;
+}> {
+  const supabase = await createClient();
+  const { data: claims } = await supabase.auth.getClaims();
+  if (!claims?.claims?.sub) return { signedIn: false, vote: null };
+  return { signedIn: true, vote: await quotesGetPricedInVote(symbol) };
 }

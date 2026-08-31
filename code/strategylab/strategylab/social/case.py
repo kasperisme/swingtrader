@@ -145,6 +145,9 @@ class Case:
     confidence: str = ""
 
     n_passages: int = 0
+    # [{title, slug}]. The slug is what makes a cited headline a link to the
+    # article page; it is None when the corpus row has no slug, and the UI
+    # renders those as plain text rather than a broken link.
     sources: list = field(default_factory=list)
     retrieval: dict = field(default_factory=dict)
     # A batch pass mixes backends — a ticker retried after a chain failure can be
@@ -336,7 +339,9 @@ def build(driver: dict, index: int, space, business, implied_brief: str, vote,
     passages = space.retrieve(text, k=k, own_only=True)
     c.n_passages = len(passages)
     c.retrieval = space.retrieval_discrimination(k, own_only=True)
-    c.sources = sorted({t for t, _ in passages if t})[:8]
+    seen_titles = sorted({t for t, _ in passages if t})[:8]
+    slugs = getattr(space, "slug_by_title", {})
+    c.sources = [{"title": t, "slug": slugs.get(t)} for t in seen_titles]
 
     body = "\n\n".join(f"[{i + 1}] {t}\n{x.strip()[:1200]}"
                        for i, (t, x) in enumerate(passages))

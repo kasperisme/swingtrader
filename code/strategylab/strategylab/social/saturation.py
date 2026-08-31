@@ -287,7 +287,11 @@ class NarrativeSpace:
                            (a.search_tags && %s
                             OR EXISTS (SELECT 1 FROM {SCHEMA}.news_article_tickers n2
                                        WHERE n2.article_id = a.id
-                                         AND n2.ticker = %s)) AS is_own
+                                         AND n2.ticker = %s)) AS is_own,
+                           -- Appended, so every positional index above is
+                           -- untouched. It is what makes a cited headline a
+                           -- link to the article rather than a dead string.
+                           a.slug
                     FROM {SCHEMA}.news_article_embeddings e
                     JOIN {SCHEMA}.news_articles a ON a.id = e.article_id
                     WHERE e.article_id = ANY(%s)
@@ -331,6 +335,16 @@ class NarrativeSpace:
             bg = cur.fetchall()
 
         self.chunk_meta = [(r[0] or "", r[2] or "", str(r[3])) for r in rows]
+        # Title -> slug for everything retrievable from this corpus.
+        #
+        # Keyed on title because that is what `retrieve()` hands back, and
+        # changing its return shape would break `entail.py` and every other
+        # caller for a presentation concern. Duplicate titles across syndicated
+        # copies collapse to one slug, which is the right answer: they are the
+        # same story, and any of its copies is the article a reader wants.
+        self.slug_by_title = {
+            (r[2] or ""): r[5] for r in rows if (r[2] or "") and len(r) > 5 and r[5]
+        }
         # Which chunks are about THIS company rather than a peer.
         #
         # Being TAGGED with the ticker is not enough, which is the same

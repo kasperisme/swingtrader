@@ -19,6 +19,7 @@ import { describe, expect, it } from "vitest";
 import {
   parseAnalystCases,
   parseDrivers,
+  parseSources,
 } from "@/lib/quote/priced-in-vote";
 
 import fixture from "./fixtures/priced-in-driver-cases.json";
@@ -114,5 +115,42 @@ describe("legacy priced-in/2 rows", () => {
 
   it("does not read driver cases as analyst cases", () => {
     expect(parseAnalystCases(cases)).toHaveLength(0);
+  });
+});
+
+
+describe("cited headlines", () => {
+  it("reads the {title, slug} shape the generator writes", () => {
+    expect(
+      parseSources([{ title: "A headline", slug: "a-headline" }]),
+    ).toEqual([{ title: "A headline", slug: "a-headline" }]);
+  });
+
+  it("reads the bare titles every row before priced-in/3 stored", () => {
+    // These rows are the ones on the page until the batch regenerates them, so
+    // dropping them would have blanked the citations on every live quote.
+    expect(parseSources(["A headline"])).toEqual([
+      { title: "A headline", slug: null },
+    ]);
+  });
+
+  it("leaves an unresolvable source unlinked rather than guessing a slug", () => {
+    const [s] = parseSources([{ title: "A headline", slug: "" }]);
+    expect(s.slug).toBeNull();
+  });
+
+  it("drops entries with no title at all", () => {
+    expect(parseSources(["", "  ", { slug: "orphan" }, null, 7])).toEqual([]);
+  });
+
+  it("survives a malformed column", () => {
+    expect(parseSources(null)).toEqual([]);
+    expect(parseSources("not an array")).toEqual([]);
+  });
+
+  it("carries titles through the real payload", () => {
+    for (const d of parseDrivers(drivers, cases)) {
+      for (const s of d.case?.sources ?? []) expect(s.title).toBeTruthy();
+    }
   });
 });

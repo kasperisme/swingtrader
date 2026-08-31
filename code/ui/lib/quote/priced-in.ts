@@ -1,6 +1,6 @@
 import "server-only";
 import { createServiceClient } from "@/lib/supabase/service";
-import type { PricedInVote } from "./priced-in-vote";
+import type { PricedInSource, PricedInVote } from "./priced-in-vote";
 import {
   num,
   parseAnalystCases,
@@ -121,6 +121,13 @@ export async function getPricedInVote(
     Math.round((Date.now() - new Date(asOf + "T00:00:00Z").getTime()) / 86_400_000),
   );
 
+  const drivers = parseDrivers(row.drivers_json, row.cases_json);
+  const analystCases = parseAnalystCases(row.cases_json);
+  await linkSources(supabase, [
+    ...drivers.flatMap((d) => d.case?.sources ?? []),
+    ...analystCases.flatMap((c) => c.sources),
+  ]);
+
   return {
     ticker: String(row.ticker),
     asOf,
@@ -137,8 +144,54 @@ export async function getPricedInVote(
     summary: typeof row.summary === "string" && row.summary.trim()
       ? row.summary.trim()
       : null,
-    drivers: parseDrivers(row.drivers_json, row.cases_json),
+    drivers,
     parts: parseParts(row.summary_json),
-    analystCases: parseAnalystCases(row.cases_json),
+    analystCases,
   };
+}
+
+/**
+ * Fill in the slugs for cited headlines that were stored without one.
+ *
+ * The generator carries `{title, slug}` from `priced-in/3` onward, but every
+ * row written before that stored a bare title — and those are the rows on the
+ * page until the batch comes round again, which for the full universe is about
+ * a week. Rather than migrate the stored JSON, the titles are resolved here in
+ * one query, so a citation becomes a link the moment this ships.
+ *
+ * Mutates in place, deliberately: the sources are already the objects the
+ * caller is about to return, and rebuilding the driver tree to attach six
+ * strings would be a lot of copying for nothing.
+ *
+ * Best-effort throughout. A title that does not resolve keeps `slug: null` and
+ * renders as plain text, which is the same outcome as before this existed.
+ */
+async function linkSources(
+  supabase: ReturnType<typeof createServiceClient>,
+  sources: PricedInSource[],
+): Promise<void> {
+  const missing = sources.filter((s) => !s.slug);
+  if (missing.length === 0) return;
+  const titles = [...new Set(missing.map((s) => s.title))];
+
+  const { data, error } = await supabase
+    .schema(SCHEMA)
+    .from("news_articles")
+    .select("title, slug")
+    .in("title", titles);
+
+  if (error) {
+    // A citation that does not link is a smaller failure than a quote page
+    // that does not render, so this never throws.
+    console.error("[priced-in] source slug lookup failed:", error);
+    return;
+  }
+
+  const bySlug = new Map<string, string>();
+  for (const r of (data ?? []) as { title: string | null; slug: string | null }[]) {
+    // First wins: syndicated copies share a title, and any of them is the
+    // article the reader wants.
+    if (r.title && r.slug && !bySlug.has(r.title)) bySlug.set(r.title, r.slug);
+  }
+  for (const s of missing) s.slug = bySlug.get(s.title) ?? null;
 }
