@@ -43,7 +43,13 @@ from ..autonomous.publish import ResearchPublisher
 
 log = logging.getLogger(__name__)
 
-PIPELINE_VERSION = "priced-in/2"      # /2 = structured summary, {price} token
+# /2 = structured summary, {price} token
+# /3 = cases are per-DRIVER investigations (coverage read + wired measurement),
+#      not per-analyst reconstructions. The shape of `cases_json` changed, so the
+#      version has to move: (ticker, as_of, pipeline_version) is unique, which
+#      lets a /3 row sit beside the /2 one it supersedes instead of overwriting
+#      a row the UI still knows how to render.
+PIPELINE_VERSION = "priced-in/3"
 
 
 class PricedInPublisher(ResearchPublisher):

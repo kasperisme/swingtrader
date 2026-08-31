@@ -1,11 +1,11 @@
 import "server-only";
 import { createServiceClient } from "@/lib/supabase/service";
-import type {
-  PricedInCase,
-  PricedInDriver,
-  PricedInParts,
-  PricedInStance,
-  PricedInVote,
+import type { PricedInVote } from "./priced-in-vote";
+import {
+  num,
+  parseAnalystCases,
+  parseDrivers,
+  parseParts,
 } from "./priced-in-vote";
 
 // The vote's shape and its formatting helpers live in a client-safe module now;
@@ -16,8 +16,12 @@ export {
   injectPrice,
   STALE_AFTER_DAYS,
   verdictReason,
+  parseAnalystCases,
+  parseDrivers,
+  parseParts,
   type CaseVerdict,
-  type PricedInCase,
+  type PricedInAnalystCase,
+  type PricedInDriverCase,
   type PricedInDriver,
   type PricedInParts,
   type PricedInStance,
@@ -53,128 +57,6 @@ export {
 const SCHEMA = "swingtrader";
 /** Past this, the reconstruction describes a different price than today's. */
 
-function strList(v: unknown): string[] {
-  return Array.isArray(v)
-    ? v.filter((x): x is string => typeof x === "string" && x.trim().length > 0)
-    : [];
-}
-
-/** Null when the row predates the structured summary, so the UI can fall back. */
-function parseParts(raw: unknown): PricedInParts | null {
-  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
-  const d = raw as Record<string, unknown>;
-  const position = typeof d.position === "string" ? d.position.trim() : "";
-  const crux = typeof d.crux === "string" ? d.crux.trim() : "";
-  const paysFor = strList(d.pays_for);
-  const declines = strList(d.declines);
-  if (!position && !crux && !paysFor.length && !declines.length) return null;
-  return { position: position || null, paysFor, declines, crux: crux || null };
-}
-
-/** Tolerant of a missing or malformed array — a bad row yields no drivers, not a crash. */
-function parseDrivers(raw: unknown): PricedInDriver[] {
-  if (!Array.isArray(raw)) return [];
-  const out: PricedInDriver[] = [];
-  for (const item of raw) {
-    if (!item || typeof item !== "object") continue;
-    const d = item as Record<string, unknown>;
-    const label = typeof d.driver === "string" ? d.driver.trim() : "";
-    const pct = num(d.priced_in_pct);
-    if (!label || pct == null) continue;
-    out.push({
-      driver: label,
-      segment: typeof d.segment === "string" && d.segment.trim() ? d.segment.trim() : null,
-      pricedInPct: Math.max(0, Math.min(100, pct)),
-      valueIfTruePct: num(d.value_if_true_pct),
-      basis: typeof d.basis === "string" && d.basis.trim() ? d.basis.trim() : null,
-      testable: d.testable === true,
-      observable:
-        typeof d.observable === "string" && d.observable.trim()
-          ? d.observable.trim()
-          : null,
-    });
-  }
-  // Least-priced first: what the price does NOT reflect is the end worth reading.
-  return out.sort((a, b) => a.pricedInPct - b.pricedInPct);
-}
-
-function num(v: unknown): number | null {
-  const n = Number(v);
-  return Number.isFinite(n) ? n : null;
-}
-
-function str(v: unknown): string | null {
-  return typeof v === "string" && v.trim() ? v.trim() : null;
-}
-
-const STANCES: PricedInStance[] = [
-  "endorsed",
-  "neutral",
-  "rejected_bull",
-  "rejected_bear",
-];
-
-/**
- * The reconstructed analyst cases, matched to the distribution above.
- *
- * Two things are dropped rather than rendered. A case whose reconstruction
- * failed carries its own failure in the `case` field — the generator writes
- * "reconstruction failed: …" there and marks it `not_explicable` — and putting
- * that on a public page shows the reader a broken pipeline instead of an
- * analysis. A case with no firm or no target cannot be matched to a point on
- * the rail, which is the whole reason it is here.
- */
-function parseCases(raw: unknown): PricedInCase[] {
-  if (!Array.isArray(raw)) return [];
-  const out: PricedInCase[] = [];
-  for (const item of raw) {
-    if (!item || typeof item !== "object") continue;
-    const d = item as Record<string, unknown>;
-    const firm = str(d.firm);
-    const target = num(d.target);
-    const stance = STANCES.find((s) => s === d.stance);
-    const confidence = str(d.confidence);
-    if (!firm || target == null || !stance) continue;
-    if (confidence === "not_explicable") continue;
-    const thesis = str(d.case);
-    if (!thesis) continue;
-
-    const retrieval =
-      d.retrieval && typeof d.retrieval === "object" && !Array.isArray(d.retrieval)
-        ? (d.retrieval as Record<string, unknown>)
-        : {};
-
-    out.push({
-      firm,
-      analyst: str(d.analyst),
-      target,
-      impliedMove: num(d.implied_move),
-      stance,
-      thesis,
-      loadBearing: str(d.load_bearing),
-      objection: str(d.market_objection),
-      observable: str(d.observable),
-      dataSource: str(d.data_source),
-      evidenceFor: strList(d.evidence_for),
-      evidenceAgainst: strList(d.evidence_against),
-      confidence:
-        confidence === "high" || confidence === "medium" || confidence === "low"
-          ? confidence
-          : null,
-      nPassages: num(d.n_passages) ?? 0,
-      // Absent means nothing was recorded, and an unrecorded warning must not
-      // read as a clean bill of health — default to selective only when the
-      // generator said so.
-      selective: retrieval.selective !== false,
-      distinctArticles: num(retrieval.distinct_articles),
-      sources: strList(d.sources).slice(0, 6),
-      model: str(d.model),
-    });
-  }
-  // Highest target first, so the list reads top-to-bottom down the same axis as
-  // the distribution rail and a case's rank is its position on it.
-  return out.sort((a, b) => b.target - a.target).slice(0, 6);
-}
 
 /**
  * Latest published reconstruction for a ticker, or null.
@@ -255,8 +137,8 @@ export async function getPricedInVote(
     summary: typeof row.summary === "string" && row.summary.trim()
       ? row.summary.trim()
       : null,
-    drivers: parseDrivers(row.drivers_json),
+    drivers: parseDrivers(row.drivers_json, row.cases_json),
     parts: parseParts(row.summary_json),
-    cases: parseCases(row.cases_json),
+    analystCases: parseAnalystCases(row.cases_json),
   };
 }

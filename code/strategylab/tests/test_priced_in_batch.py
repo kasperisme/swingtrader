@@ -167,25 +167,47 @@ def test_missing_comparison_fields_do_not_force_a_republish():
 
 
 # ------------------------------------------------------------ the universe --
-def test_priority_is_coverage_first_not_size_first():
-    """The failure this weighting exists to prevent: a market-cap sort.
+def test_priority_is_coverage_first():
+    """The failure this weighting exists to prevent: ordering on anything else.
 
-    Mention counts span three orders of magnitude and market caps span six, so
-    on raw values one mega-cap outranks every well-covered mid-cap and the
-    queue degenerates. A heavily-covered $2bn name must outrank a $3tn name
-    nobody writes about.
+    Mention counts span three orders of magnitude, so on raw values one heavily
+    covered name would swamp every other consideration — hence the logs. A name
+    the press writes about constantly must outrank one with a deep analyst bench
+    that nobody covers, because the corpus is what the drivers are checked
+    against.
     """
-    covered_midcap = priority_of(mentions_180d=4000, market_cap=2_000_000_000)
-    quiet_megacap = priority_of(mentions_180d=25, market_cap=3_000_000_000_000)
-    assert covered_midcap > quiet_megacap
+    heavily_covered = priority_of(mentions_180d=4000, n_targets=6)
+    thinly_covered = priority_of(mentions_180d=25, n_targets=40)
+    assert heavily_covered > thinly_covered
 
 
-def test_priority_breaks_ties_on_size():
-    assert priority_of(500, 50_000_000_000) > priority_of(500, 500_000_000)
+def test_priority_breaks_ties_on_analyst_coverage():
+    assert priority_of(500, 30) > priority_of(500, 6)
+
+
+def test_size_is_no_longer_an_input_to_the_queue():
+    """Market cap left eligibility, so it must not come back in as an ordering.
+
+    A queue drained a few dozen names a night puts a small company behind every
+    large one; that is the floor it replaced, with extra steps. The only inputs
+    are the two the analysis actually needs — who writes about it and who models
+    it.
+    """
+    import inspect
+
+    from strategylab.social.universe import MIN_MARKET_CAP, MIN_PRICE, priority_of as p
+
+    assert "market_cap" not in inspect.signature(p).parameters
+    assert not MIN_MARKET_CAP and not MIN_PRICE, (
+        "the size floors are inert by default; a caller may still bound an "
+        "exploratory pass by hand")
 
 
 def test_priority_handles_missing_inputs():
     assert priority_of(None, None) >= 0.0
+    # An unchecked name is ordered on its coverage alone, never on a guessed
+    # target count.
+    assert priority_of(500, None) == priority_of(500, 0)
 
 
 def test_cooldown_backs_off_and_is_capped():

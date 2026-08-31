@@ -50,10 +50,28 @@ log = logging.getLogger(__name__)
 # find out. Changing this without changing the UI produces rows nothing renders.
 MIN_TARGETS = 5
 
-# Stage-1 floors. Not a view on what is investable — a statement about what the
-# corpus and the sell-side actually cover.
-MIN_MARKET_CAP = 300_000_000
-MIN_PRICE = 5.0
+# Stage-1 floor. Not a view on what is investable — a statement about what the
+# corpus and the sell-side actually cover, and that is now the ONLY thing the
+# floor measures.
+#
+# There were two size floors here as well: a $300m market cap and a $5 share
+# price. Both are gone, and the reason is that they answered a different
+# question from the one this programme asks. The whole construction reads a
+# price as a VOTE among published analyst models, checked against what the news
+# corpus says. A name qualifies for that if the sell-side has published enough
+# models to make a distribution and the press writes about it enough to check
+# them against — whether it is worth $200m or $2tn says nothing about either.
+#
+# The floors also cost more than they looked like they cost. They rejected 78
+# names that clear the coverage floor, among them CS Disco at 332 mentions over
+# 180 days, Amtech at 265 and Embecta at 126 — small companies the news demonstrably
+# cares about, which is the exact population this analysis is for. Dropping both
+# admits 1,110 stage-1 candidates where 1,032 got through before: 78 further FMP
+# calls, once, against a rate-limited stage that already budgets 250 a pass.
+#
+# Market cap is still recorded on the row. It is context for a reader, not a gate.
+MIN_MARKET_CAP = 0
+MIN_PRICE = 0.0
 
 # Calibrated against the fifteen names the programme was developed on, not
 # chosen. At 20 the floor excluded CROX — which has 19 mentions over 180 days
@@ -85,16 +103,27 @@ def cooldown_for(consecutive_failures: int) -> int:
     return COOLDOWN_DAYS[i]
 
 
-def priority_of(mentions_180d: int | None, market_cap: int | None) -> float:
-    """Rank the queue. Coverage first, size second, both logged.
+def priority_of(mentions_180d: int | None, n_targets: int | None = None) -> float:
+    """Rank the queue by who is paying attention: the press, then the sell-side.
 
-    Logs matter here: mention counts span three orders of magnitude across the
-    universe and market caps span six, so on raw values one mega-cap outranks
-    every mid-cap in the news, and the queue degenerates into a market-cap sort.
+    Size used to be the second term, at 0.5 x log10(market cap). Dropping it from
+    eligibility and leaving it in the ordering would have moved the same bias
+    rather than removed it — a queue drained a few dozen names a night puts a
+    small company behind every large one, which is a floor with extra steps.
+
+    Both terms are logged. Mention counts span three orders of magnitude across
+    the universe, so on raw values a single heavily-covered name would outrank
+    every other consideration. Analyst coverage is the lighter term because it
+    is close to binary in effect: the run needs MIN_TARGETS models and a name
+    with thirty is not three times more worth running than one with ten.
+
+    `n_targets` is unknown until stage 2 has made its FMP call, and None
+    contributes nothing — a name is ordered on its coverage until the sell-side
+    count is actually known, never on a guess at it.
     """
     m = math.log10(max(mentions_180d or 0, 1) + 1)
-    c = math.log10(max(market_cap or 0, 1) + 1)
-    return round(2.0 * m + 0.5 * c, 4)
+    t = math.log10(max(n_targets or 0, 1) + 1)
+    return round(2.0 * m + 0.5 * t, 4)
 
 
 # ----------------------------------------------------------------------
@@ -121,10 +150,17 @@ def seed(publisher, *, lookback_days: int = 180,
          min_mentions: int = MIN_MENTIONS_180D) -> dict:
     """Stage 1. Refresh the universe table from what Supabase already knows.
 
+    Coverage is the only thing this stage judges. `min_market_cap` and
+    `min_price` default to nothing and are kept as parameters so a caller can
+    still bound an exploratory pass by hand; the scheduled path passes neither.
+
     Names below the floor are written as `eligible = false` rather than left
     out, so the table is a complete account of the universe and its verdicts.
     A name that later crosses the floor is picked up on the next seed, because
-    the size and coverage figures are refreshed on every pass.
+    the coverage figures are refreshed on every pass — which is also how the
+    2,211 names currently carrying a market-cap rejection get their verdict
+    cleared: stage 1 re-seeds them with no reason, `checked_at IS NULL` sends
+    them back to NULL rather than a stale false, and stage 2 decides on targets.
     """
     schema = publisher.schema
     c = publisher._connect()
@@ -142,10 +178,12 @@ def seed(publisher, *, lookback_days: int = 180,
         else:
             stats["nyse"] += 1
         below = []
-        if (mcap or 0) < min_market_cap:
+        # Both size tests are inert at their defaults and stay only for a
+        # hand-bounded pass. Nothing scheduled passes them.
+        if min_market_cap and (mcap or 0) < min_market_cap:
             below.append(f"market cap ${(mcap or 0)/1e6:,.0f}m < "
                          f"${min_market_cap/1e6:,.0f}m")
-        if (price or 0) < min_price:
+        if min_price and (price or 0) < min_price:
             below.append(f"price ${price or 0:,.2f} < ${min_price:,.2f}")
         if (mentions or 0) < min_mentions:
             below.append(f"{mentions or 0} mentions in {lookback_days}d < "
@@ -157,7 +195,7 @@ def seed(publisher, *, lookback_days: int = 180,
         else:
             stats["candidates"] += 1
             payload.append((symbol, exchange, name, mcap, mentions, None, None,
-                            priority_of(mentions, mcap)))
+                            priority_of(mentions)))
 
     with c.cursor() as cur:
         for row in payload:
@@ -233,13 +271,13 @@ def check_eligibility(publisher, *, limit: int = 250,
     with c.cursor() as cur:
         if symbols:
             cur.execute(f"""
-                SELECT symbol, checked_at, eligible, n_targets
+                SELECT symbol, checked_at, eligible, n_targets, mentions_180d
                 FROM {schema}.research_priced_in_universe
                 WHERE symbol = ANY(%s)
             """, ([s.upper() for s in symbols],))
         else:
             cur.execute(f"""
-                SELECT symbol, checked_at, eligible, n_targets
+                SELECT symbol, checked_at, eligible, n_targets, mentions_180d
                 FROM {schema}.research_priced_in_universe
                 WHERE reason IS NULL OR eligible IS NOT FALSE
                    OR checked_at IS NOT NULL
@@ -256,7 +294,7 @@ def check_eligibility(publisher, *, limit: int = 250,
 
     out = {"considered": len(rows), "checked": 0, "eligible": 0,
            "ineligible": 0, "errors": 0}
-    for symbol, _checked, _elig, _n in due:
+    for symbol, _checked, _elig, _n, _mentions in due:
         try:
             n = len(fetch_targets(symbol))
         except Exception as exc:                              # noqa: BLE001
@@ -268,14 +306,19 @@ def check_eligibility(publisher, *, limit: int = 250,
                                 f"below the {min_targets} the model "
                                 f"distribution needs")
         with c.cursor() as cur:
+            # Priority is recomputed here because this is the moment the
+            # sell-side count stops being unknown. Leaving it at the seed's
+            # coverage-only value would order the queue on half the evidence for
+            # the rest of the quarter.
             cur.execute(f"""
                 UPDATE {schema}.research_priced_in_universe
                 SET eligible=%s, reason=%s, n_targets=%s, checked_at=now(),
-                    updated_at=now(),
+                    updated_at=now(), priority=%s,
                     last_run_status = CASE WHEN %s THEN last_run_status
                                            ELSE 'ineligible' END
                 WHERE symbol=%s
-            """, (ok, reason or None, n, ok, symbol))
+            """, (ok, reason or None, n,
+                  priority_of(_mentions, n), ok, symbol))
         c.commit()
         out["checked"] += 1
         out["eligible" if ok else "ineligible"] += 1

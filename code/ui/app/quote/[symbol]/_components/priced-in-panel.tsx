@@ -2,8 +2,9 @@ import { ChevronRight, TrendingDown, TrendingUp, Minus } from "lucide-react";
 // From the client-safe half, not `priced-in.ts`: this panel is rendered from
 // the workspace's client-side tab switcher as well as from the quote page.
 import type {
-  PricedInCase,
+  PricedInAnalystCase,
   PricedInDriver,
+  PricedInDriverCase,
   PricedInVote,
 } from "@/lib/quote/priced-in-vote";
 import {
@@ -174,7 +175,11 @@ function EvidenceList({ label, items }: { label: string; items: string[] }) {
 }
 
 /**
- * One published model: the verdict on it, and the reconstruction behind it.
+ * LEGACY (`priced-in/2` rows): one published model, and its reconstruction.
+ *
+ * Kept only so the rows published before the pipeline was inverted keep
+ * rendering until the batch regenerates them. New rows carry the evidence on
+ * the driver instead — see `DriverCard`.
  *
  * The two tiers are separated by the disclosure, not by a footnote. Closed, the
  * card shows only arithmetic — a firm, a target, and where the price sits
@@ -186,12 +191,12 @@ function EvidenceList({ label, items }: { label: string; items: string[] }) {
  * costs no JavaScript and works before hydration is the right one. It is also
  * findable by the browser's own in-page search, which a hidden div is not.
  */
-function CaseCard({
+function AnalystCaseCard({
   c,
   index,
   priceAtAsOf,
 }: {
-  c: PricedInCase;
+  c: PricedInAnalystCase;
   index: number;
   priceAtAsOf: number | null;
 }) {
@@ -372,73 +377,107 @@ function DriverCard({
     d.valueIfTruePct != null && Math.abs(d.valueIfTruePct) >= 1
       ? `${d.valueIfTruePct > 0 ? "+" : ""}${d.valueIfTruePct.toFixed(0)}%`
       : null;
+  const n = d.case?.narrative;
+  const expandable = Boolean(d.basis || d.observable || d.case);
+
+  // The row itself, used both as the disclosure trigger and — when there is
+  // nothing to open — as a plain row. A `<summary>` that wraps only its own
+  // label gives a ~28px tap target on a phone; the whole row clears 44px, which
+  // is the floor, and it removes a line of "Deep dive" chrome per assumption.
+  const row = (
+    <>
+      <ChevronRight
+        className={`mt-[3px] h-3.5 w-3.5 shrink-0 text-muted-foreground transition-transform motion-reduce:transition-none group-open:rotate-90 ${
+          expandable ? "" : "invisible"
+        }`}
+        aria-hidden
+      />
+      <span className={`mt-[7px] h-2 w-2 shrink-0 rounded-full ${b.dot}`} aria-hidden />
+      <span className="min-w-0 flex-1">
+        <span className="block text-sm leading-snug text-foreground">
+          {d.driver}
+        </span>
+        <span className="mt-1 flex flex-col gap-y-0.5 text-[11px] sm:flex-row sm:flex-wrap sm:items-center sm:gap-x-2">
+          <span className={`font-medium ${b.text}`}>{b.label}</span>
+          {d.segment && (
+            <>
+              <span className="hidden text-muted-foreground/50 sm:inline">·</span>
+              <span className="text-muted-foreground">{d.segment}</span>
+            </>
+          )}
+          {/* The measured coverage read, surfaced closed. It is the one piece of
+              evidence here that is counted rather than judged, and burying it
+              behind a click made the list scannable only on the estimate. No
+              colour: the band already owns the panel's single accent, and a
+              second scale for tone would compete with it. */}
+          {n && n.related > 0 && (
+            <>
+              <span className="hidden text-muted-foreground/50 sm:inline">·</span>
+              <span className="font-mono tabular-nums text-muted-foreground">
+                {n.related} claim{n.related === 1 ? "" : "s"}, tone{" "}
+                {n.netImpact > 0 ? "+" : ""}
+                {n.netImpact.toFixed(2)}
+              </span>
+            </>
+          )}
+          {!d.testable && (
+            <>
+              <span className="hidden text-muted-foreground/50 sm:inline">·</span>
+              <span className="text-muted-foreground">
+                nothing wired can measure it
+              </span>
+            </>
+          )}
+        </span>
+      </span>
+      {worth && (
+        <span className="shrink-0 text-right">
+          <span className="block font-mono text-sm tabular-nums text-foreground">
+            {worth}
+          </span>
+          {/* Not mono: it is a phrase, and monospacing prose to match the figure
+              above it is the tell of a table that stopped being a table. */}
+          <span className="block text-[11px] text-muted-foreground">
+            if it lands
+          </span>
+        </span>
+      )}
+    </>
+  );
+
+  if (!expandable) {
+    return (
+      <li className="flex items-start gap-3 px-3 py-3">{row}</li>
+    );
+  }
 
   return (
-    <li className="overflow-hidden rounded-lg border border-border">
-      <div className="flex items-start gap-3 p-3">
-        <span
-          className={`mt-[7px] h-2 w-2 shrink-0 rounded-full ${b.dot}`}
-          aria-hidden
-        />
-        <div className="min-w-0 flex-1">
-          <p className="text-sm leading-snug text-foreground">{d.driver}</p>
-          <p className="mt-1 flex flex-col gap-y-0.5 text-[11px] sm:flex-row sm:flex-wrap sm:items-center sm:gap-x-2">
-            <span className={`font-medium ${b.text}`}>{b.label}</span>
-            {d.segment && (
-              <>
-                <span className="hidden text-muted-foreground/50 sm:inline">·</span>
-                <span className="text-muted-foreground">{d.segment}</span>
-              </>
-            )}
-            {!d.testable && (
-              <>
-                <span className="hidden text-muted-foreground/50 sm:inline">·</span>
-                <span className="text-muted-foreground">
-                  nothing wired can measure it
-                </span>
-              </>
-            )}
-          </p>
-        </div>
-        {worth && (
-          <p className="shrink-0 text-right">
-            <span className="font-mono text-sm tabular-nums text-foreground">
-              {worth}
-            </span>
-            <span className="block font-mono text-[11px] tabular-nums text-muted-foreground">
-              if it lands
-            </span>
-          </p>
-        )}
-      </div>
+    <li>
+      <details className="group">
+        {/* Open, the row takes the same ground as its evidence, so the two read
+            as one block rather than a header floating above a tinted panel. */}
+        <summary className="flex cursor-pointer list-none items-start gap-3 px-3 py-3 transition-colors hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring motion-reduce:transition-none group-open:bg-muted/20 [&::-webkit-details-marker]:hidden">
+          {row}
+        </summary>
+        {/* Indented to the title's own x-position rather than boxed again: the
+            evidence belongs to the row above it, and a third nested card inside
+            a card inside the panel is how a dense page turns into a stack of
+            containers. */}
+        <div className="space-y-4 bg-muted/20 px-3 pb-4 pt-1 sm:pl-[3.25rem]">
+          {d.basis && (
+            <Field label="Why this band">{injectPrice(d.basis, price)}</Field>
+          )}
+          {worth && (
+            <Field label="What it is worth if it proves out">
+              {worth} of the current price — bounded by the published models,
+              not a point estimate: it is what the target resting on this
+              assumption implies, and no more.
+            </Field>
+          )}
 
-      {(d.basis || d.observable) && (
-        <details className="group border-t border-border">
-          <summary className="flex cursor-pointer list-none items-center gap-1.5 px-3 py-2 text-[11px] font-medium text-muted-foreground transition-colors hover:text-foreground [&::-webkit-details-marker]:hidden">
-            <ChevronRight
-              className="h-3 w-3 shrink-0 transition-transform group-open:rotate-90"
-              aria-hidden
-            />
-            Deep dive — what this band rests on
-          </summary>
-          <div className="space-y-4 border-t border-border bg-muted/20 px-3 py-3">
-            {d.basis && (
-              <div className="rounded-md border border-border/70 bg-card p-2.5">
-                <p className="mb-1 text-[11px] uppercase tracking-wide text-foreground/70">
-                  Why this band
-                </p>
-                <p className="max-w-[76ch] text-pretty text-[13px] leading-relaxed text-foreground">
-                  {injectPrice(d.basis, price)}
-                </p>
-              </div>
-            )}
-            {worth && (
-              <Field label="What it is worth if it proves out">
-                {worth} of the current price — bounded by the published models,
-                not a point estimate: it is what the target resting on this
-                assumption implies, and no more.
-              </Field>
-            )}
+          {d.case ? (
+            <CaseBody c={d.case} price={price} />
+          ) : (
             <Field label="What would settle it">
               {d.testable
                 ? "Measurable with the data already wired"
@@ -449,10 +488,139 @@ function DriverCard({
                 </span>
               )}
             </Field>
-          </div>
-        </details>
-      )}
+          )}
+        </div>
+      </details>
     </li>
+  );
+}
+
+/**
+ * The evidence behind one driver: what is known, and what could be measured.
+ *
+ * Ordered so the reader meets the three sources in the order of what they can
+ * bear. The coverage read comes first and is explicitly framed as evidence of
+ * being PRICED — a driver the press is loud about is one the market has heard,
+ * which is the case for the band above, not a case that the driver is true.
+ * The passages follow, because they are what the coverage actually says. The
+ * measurement comes last and is the only line that speaks to truth, which is
+ * why it says plainly when there is nothing to say.
+ */
+function CaseBody({
+  c,
+  price,
+}: {
+  c: PricedInDriverCase;
+  price: number | null;
+}) {
+  const n = c.narrative;
+  return (
+    <>
+      {c.whatCoverageSays && (
+        <div>
+          <p className="mb-1 text-[11px] uppercase tracking-wide text-muted-foreground">
+            What the coverage says
+          </p>
+          {n && n.scanned > 0 && (
+            <p className="mb-1.5 font-mono text-[11px] tabular-nums text-muted-foreground">
+              {n.related} of {n.scanned}{" "}
+              circulating claims speak to this
+              {n.related > 0 && (
+                <>
+                  {" · "}mean impact {n.netImpact > 0 ? "+" : ""}
+                  {n.netImpact.toFixed(2)}
+                  {" · "}
+                  {n.positive} positive / {n.negative} negative
+                </>
+              )}
+            </p>
+          )}
+          <p className="max-w-[76ch] text-pretty text-[13px] leading-relaxed text-foreground/90">
+            {injectPrice(c.whatCoverageSays, price)}
+          </p>
+          {/* The load-bearing caveat of this whole panel, said where the number
+              is rather than in a footnote nobody reaches. */}
+          <p className="mt-1.5 max-w-[76ch] text-[11px] leading-relaxed text-muted-foreground">
+            Coverage measures how well known this is, not whether it is true —
+            and what is known is what the price has already heard.
+          </p>
+        </div>
+      )}
+
+      {(c.evidenceFor.length > 0 || c.evidenceAgainst.length > 0) && (
+        <div className="grid gap-4 sm:grid-cols-2">
+          <EvidenceList label="Coverage that supports it" items={c.evidenceFor} />
+          <EvidenceList
+            label="Coverage that cuts against it"
+            items={c.evidenceAgainst}
+          />
+        </div>
+      )}
+
+      {c.whatTheDataShows && (
+        <div>
+          <p className="mb-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] uppercase tracking-wide text-muted-foreground">
+            What the data outside the news shows
+            {c.measurement?.ran && c.measurement.tool && (
+              <span className="whitespace-nowrap rounded border border-border bg-card px-1.5 py-px font-mono text-[10px] normal-case tracking-normal text-muted-foreground">
+                {c.measurement.tool.replaceAll("_", " ")}
+              </span>
+            )}
+            {c.measurement && !c.measurement.ran && (
+              <span className="whitespace-nowrap rounded border border-border bg-card px-1.5 py-px font-mono text-[10px] normal-case tracking-normal text-muted-foreground">
+                nothing wired
+              </span>
+            )}
+          </p>
+          <p className="max-w-[76ch] text-pretty text-[13px] leading-relaxed text-foreground/90">
+            {injectPrice(c.whatTheDataShows, price)}
+          </p>
+        </div>
+      )}
+
+      {c.stillNeeded && (
+        <Field label="What would still settle it">
+          {injectPrice(c.stillNeeded, price)}
+        </Field>
+      )}
+
+      <p className="border-t border-border/70 pt-2.5 text-[11px] leading-relaxed text-muted-foreground">
+        Read from {c.nPassages} passage{c.nPassages === 1 ? "" : "s"} of news
+        coverage
+        {c.confidence && <> · {c.confidence} confidence</>}
+        {c.model && <> · {c.model}</>}
+        {!c.selective && (
+          <>
+            {" "}
+            — the corpus held only{" "}
+            {c.distinctArticles != null
+              ? `${c.distinctArticles} articles`
+              : "a handful of articles"}
+            , so this is most of what has been written about the company rather
+            than a targeted pull on this assumption.
+          </>
+        )}
+      </p>
+
+      {c.sources.length > 0 && (
+        <div>
+          <p className="mb-1 text-[11px] uppercase tracking-wide text-muted-foreground">
+            Headlines it drew on
+          </p>
+          <ul className="flex flex-col gap-1">
+            {c.sources.map((t, i) => (
+              <li
+                key={i}
+                className="max-w-[76ch] truncate text-[11px] leading-relaxed text-muted-foreground"
+                title={t}
+              >
+                {t}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+    </>
   );
 }
 
@@ -475,11 +643,12 @@ export function PricedInPanel({
       ? livePrice / priceAtAsOf - 1
       : null;
 
-  // Where each reconstructed model sits on the rail. The tick is exact; the
-  // numbered chip above it may be nudged aside, and carries the number that
-  // matches its card below.
-  const cases = vote.cases;
-  const caseTicks = cases.map((c) => pct(c.target, low, high));
+  // LEGACY rows only. Where each reconstructed analyst model sits on the rail:
+  // the tick is exact, and the numbered chip above it may be nudged aside but
+  // carries the number that matches its card below. `priced-in/3` rows have no
+  // analyst cases, so the rail is just the distribution again.
+  const analystCases = vote.analystCases;
+  const caseTicks = analystCases.map((c) => pct(c.target, low, high));
   const caseChips = spreadOut(caseTicks);
 
   const gap = vote.medianGap;
@@ -514,7 +683,7 @@ export function PricedInPanel({
       {/* Distribution rail: low ─── median ─── high, with the price marked,
           and the reconstructed models numbered against it. */}
       <div className="mt-5 mb-2">
-        {cases.length > 0 && (
+        {analystCases.length > 0 && (
           <div className="relative mb-1.5 h-[18px]">
             {caseChips.map((x, i) => (
               <span
@@ -676,24 +845,36 @@ export function PricedInPanel({
         </div>
       )}
 
-      {(cases.length > 0 || vote.drivers.length > 0) && (
+      {(analystCases.length > 0 || vote.drivers.length > 0) && (
         <div className="mt-4 border-t border-border pt-4">
           <p className="mb-1 text-[11px] uppercase tracking-wide text-muted-foreground">
             Claim by claim
           </p>
           <p className="mb-4 max-w-[78ch] text-[11px] leading-relaxed text-muted-foreground">
-            Two kinds of claim sit behind this price, and they do not carry the
-            same weight. Each one is labelled with the verdict on it; open a
-            deep dive for the reasoning behind that label.
+            {analystCases.length > 0 ? (
+              <>
+                Two kinds of claim sit behind this price, and they do not carry
+                the same weight. Each one is labelled with the verdict on it;
+                open a deep dive for the reasoning behind that label.
+              </>
+            ) : (
+              <>
+                What the price pays for, broken into the assumptions underneath
+                it. Each is labelled with how much of it the price appears to
+                reflect; the deep dive is what is actually known about it — the
+                coverage in circulation, what that coverage asserts either way,
+                and whether anything outside the news can measure it.
+              </>
+            )}
           </p>
 
-          {cases.length > 0 && (
+          {analystCases.length > 0 && (
             <>
               <p className="mb-1 text-[11px] font-medium text-foreground/70">
                 The published models
               </p>
               <p className="mb-2.5 max-w-[78ch] text-[11px] leading-relaxed text-muted-foreground">
-                {cases.length} of the {vote.nTargets}{" "}
+                {analystCases.length} of the {vote.nTargets}{" "}
                 models, numbered on the rail above, highest target first. The
                 verdict on each is arithmetic — where its target sits against
                 the price, nothing more. What the analyst must believe, and the
@@ -701,8 +882,8 @@ export function PricedInPanel({
                 reconstruction from the published note and the news.
               </p>
               <ul className="mb-5 flex flex-col gap-2">
-                {cases.map((c, i) => (
-                  <CaseCard
+                {analystCases.map((c, i) => (
+                  <AnalystCaseCard
                     key={`${c.firm}-${c.target}-${i}`}
                     c={c}
                     index={i + 1}
@@ -716,20 +897,27 @@ export function PricedInPanel({
           {vote.drivers.length > 0 && (
             <>
               <p className="mb-1 text-[11px] font-medium text-foreground/70">
-                The assumptions underneath them
+                {analystCases.length > 0
+                  ? "The assumptions underneath them"
+                  : "The assumptions"}
               </p>
               {/* The percentages are estimates and have failed two validation
                   attempts; the ORDER and the "can anything measure this" flag
                   are the parts that carry weight. Said once here rather than
                   repeated per row. */}
               <p className="mb-2.5 max-w-[78ch] text-[11px] leading-relaxed text-muted-foreground">
-                Decomposed from the whole spread rather than one per model, so
-                these do not pair off against the cards above. How much of each
-                the price appears to reflect, least reflected first — the top of
-                this list is where the price is not paying for something. These
-                bands are estimates, not measurements: two attempts to validate
-                them have failed and a third is unresolved until Dec 2026. Read
-                the ordering and the evidence, not the shade.
+                {analystCases.length > 0 && (
+                  <>
+                    Decomposed from the whole spread rather than one per model,
+                    so these do not pair off against the cards above.{" "}
+                  </>
+                )}
+                How much of each the price appears to reflect, least reflected
+                first — the top of this list is where the price is not paying
+                for something. These bands are estimates, not measurements: two
+                attempts to validate them have failed and a third is unresolved
+                until Dec 2026. Read the ordering and the evidence, not the
+                shade.
               </p>
               <ul className="mb-3 flex flex-wrap items-center gap-x-4 gap-y-1.5 text-[11px] text-muted-foreground">
                 {[0, 40, 70, 95].map((v) => {
@@ -742,7 +930,7 @@ export function PricedInPanel({
                   );
                 })}
               </ul>
-              <ul className="flex flex-col gap-2">
+              <ul className="divide-y divide-border overflow-hidden rounded-lg border border-border">
                 {vote.drivers.map((d, i) => (
                   <DriverCard
                     key={`${i}-${d.driver.slice(0, 24)}`}

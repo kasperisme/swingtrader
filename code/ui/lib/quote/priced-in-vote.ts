@@ -45,6 +45,74 @@ export type PricedInDriver = {
   /** Whether any wired data source can actually settle it. Often false. */
   testable: boolean;
   observable: string | null;
+  /**
+   * The evidence behind this driver — one case per driver, or null.
+   *
+   * Null on two paths that must not be confused: a `priced-in/2` row predates
+   * per-driver cases entirely, and a `priced-in/3` row only investigates the
+   * least-priced N drivers, so a fully-priced one at the bottom of the list can
+   * legitimately have none. Either way the UI shows the driver without a deep
+   * dive rather than pretending the evidence is missing.
+   */
+  case: PricedInDriverCase | null;
+};
+
+/**
+ * What is known about one driver: the coverage on it, and the data outside it.
+ *
+ * Three sources that answer different questions, and the UI has to keep them
+ * apart exactly as `case.py` does:
+ *
+ *   `narrative`    how loudly the scored coverage speaks to this driver. This is
+ *                  evidence of being KNOWN — and known is, by this programme's
+ *                  governing assumption, already in the price. It is never
+ *                  evidence that the driver is true.
+ *   `evidenceFor` / `evidenceAgainst`  what the passages actually assert.
+ *   `measurement`  the non-news series wired for the driver's observable. The
+ *                  only source here that can speak to whether it is TRUE,
+ *                  because it is the only one the market has not read. Usually
+ *                  absent, and absence is stated rather than proxied.
+ */
+export type PricedInDriverCase = {
+  /** What the market has been told about this driver, and how settled it is. */
+  whatCoverageSays: string | null;
+  evidenceFor: string[];
+  evidenceAgainst: string[];
+  /** What the wired series establishes — or that nothing is wired. */
+  whatTheDataShows: string | null;
+  /** The observation that would move this from argued to observed. */
+  stillNeeded: string | null;
+  /** The measured coverage read. Deterministic, not a model's impression. */
+  narrative: {
+    /** Claims in circulation about the company that were scanned. */
+    scanned: number;
+    /** Of those, how many clear this corpus's own relatedness bar. */
+    related: number;
+    /** Mean signed impact of the related claims, [-1, +1]. */
+    netImpact: number;
+    positive: number;
+    negative: number;
+    /** Set when nothing cleared the bar — the coverage does not speak to it. */
+    note: string | null;
+  } | null;
+  /** Which series ran, or why none could. */
+  measurement: {
+    kind: string | null;
+    /** True when a wired series exists for this observable. */
+    testable: boolean;
+    tool: string | null;
+    /** Why it cannot be measured, when it cannot. */
+    note: string | null;
+    /** Whether the tool actually returned something. */
+    ran: boolean;
+  } | null;
+  confidence: "high" | "medium" | "low" | null;
+  nPassages: number;
+  /** False when the corpus was too thin for retrieval to discriminate. */
+  selective: boolean;
+  distinctArticles: number | null;
+  sources: string[];
+  model: string | null;
 };
 
 export type PricedInParts = {
@@ -102,18 +170,21 @@ export type PricedInVote = {
    */
   drivers: PricedInDriver[];
   /**
-   * The individual published models behind the distribution, reconstructed.
+   * LEGACY. The published analyst models, reconstructed one per firm.
    *
-   * The counts above say three models call the price too cheap; these say WHICH
-   * models, what each of them claims, and what the price's verdict on it is.
-   * Ordered by target, high to low, so the list reads down the same axis as the
-   * rail — a case's position in it is its position on the distribution.
+   * This is what a case WAS, up to `priced-in/2`. The pipeline was inverted at
+   * `priced-in/3`: the price is the vote, the drivers are what it decomposes
+   * into, and a case is now the evidence behind one driver — carried on
+   * `drivers[].case`, one each. These are kept only so the rows already
+   * published keep rendering until the batch regenerates them, and they are
+   * empty on every `/3` row.
    */
-  cases: PricedInCase[];
+  analystCases: PricedInAnalystCase[];
 };
 
 /**
- * One published analyst model, reconstructed against the news corpus.
+ * One published analyst model, reconstructed against the news corpus. LEGACY —
+ * see `PricedInVote.analystCases`.
  *
  * The generator (`strategylab/social/case.py`) picks a handful of the models
  * behind the distribution — the consensus one the price is roughly paying, plus
@@ -127,7 +198,7 @@ export type PricedInVote = {
  * reconstruction, which is why it lives behind a disclosure rather than in the
  * summary line.
  */
-export type PricedInCase = {
+export type PricedInAnalystCase = {
   firm: string;
   /** Often absent — FMP names the firm far more reliably than the analyst. */
   analyst: string | null;
@@ -228,7 +299,10 @@ export function caseVerdict(stance: PricedInStance): CaseVerdict {
 }
 
 /** The arithmetic behind the verdict, spelled out so it can be checked. */
-export function verdictReason(c: PricedInCase, priceAtAsOf: number | null): string {
+export function verdictReason(
+  c: PricedInAnalystCase,
+  priceAtAsOf: number | null,
+): string {
   const at =
     priceAtAsOf != null && Number.isFinite(priceAtAsOf)
       ? `the ${new Intl.NumberFormat(undefined, {
@@ -252,4 +326,225 @@ export function verdictReason(c: PricedInCase, priceAtAsOf: number | null): stri
     case "rejected_bear":
       return `This target is ${move} below ${at}. It was published, so the market has seen it and declines to accept it — the warning is known and not believed.`;
   }
+}
+
+// ---------------------------------------------------------------------------
+// Parsing.
+//
+// These live here rather than beside the query for the same reason the types
+// do: turning a stored jsonb row into the shape above is not a server concern,
+// and keeping it out of the `server-only` module is what lets it be tested
+// without a database. `priced-in.ts` imports them and does nothing but the
+// query and the arithmetic around it.
+// ---------------------------------------------------------------------------
+
+function strList(v: unknown): string[] {
+  return Array.isArray(v)
+    ? v.filter((x): x is string => typeof x === "string" && x.trim().length > 0)
+    : [];
+}
+
+/** Null when the row predates the structured summary, so the UI can fall back. */
+export function parseParts(raw: unknown): PricedInParts | null {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
+  const d = raw as Record<string, unknown>;
+  const position = typeof d.position === "string" ? d.position.trim() : "";
+  const crux = typeof d.crux === "string" ? d.crux.trim() : "";
+  const paysFor = strList(d.pays_for);
+  const declines = strList(d.declines);
+  if (!position && !crux && !paysFor.length && !declines.length) return null;
+  return { position: position || null, paysFor, declines, crux: crux || null };
+}
+
+/**
+ * The drivers, each carrying the case that investigated it.
+ *
+ * The join is `driver_index` — a position into THIS array as the generator
+ * emitted it — so the cases have to be attached before the array is reordered
+ * for display. Sorting first and matching afterwards would pair each case with
+ * whichever driver happened to land in its old slot, which is exactly the
+ * mispairing this rewrite exists to remove.
+ *
+ * Tolerant of a missing or malformed array — a bad row yields no drivers, not a
+ * crash.
+ */
+export function parseDrivers(raw: unknown, casesRaw: unknown): PricedInDriver[] {
+  if (!Array.isArray(raw)) return [];
+  const byIndex = parseDriverCases(casesRaw);
+  const out: PricedInDriver[] = [];
+  for (const [i, item] of raw.entries()) {
+    if (!item || typeof item !== "object") continue;
+    const d = item as Record<string, unknown>;
+    const label = typeof d.driver === "string" ? d.driver.trim() : "";
+    const pct = num(d.priced_in_pct);
+    if (!label || pct == null) continue;
+    out.push({
+      driver: label,
+      segment: typeof d.segment === "string" && d.segment.trim() ? d.segment.trim() : null,
+      pricedInPct: Math.max(0, Math.min(100, pct)),
+      valueIfTruePct: num(d.value_if_true_pct),
+      basis: typeof d.basis === "string" && d.basis.trim() ? d.basis.trim() : null,
+      testable: d.testable === true,
+      observable:
+        typeof d.observable === "string" && d.observable.trim()
+          ? d.observable.trim()
+          : null,
+      case: byIndex.get(i) ?? null,
+    });
+  }
+  // Least-priced first: what the price does NOT reflect is the end worth reading.
+  return out.sort((a, b) => a.pricedInPct - b.pricedInPct);
+}
+
+/**
+ * The per-driver cases (`priced-in/3`), keyed by the driver index they belong to.
+ *
+ * A case whose reading failed carries the failure in its own text — the
+ * generator writes "reading failed: …" and marks it `not_explicable` — so it is
+ * dropped rather than shown. Its deterministic halves are dropped with it: a
+ * coverage count with no reading around it is a number the reader cannot use.
+ */
+export function parseDriverCases(raw: unknown): Map<number, PricedInDriverCase> {
+  const out = new Map<number, PricedInDriverCase>();
+  if (!Array.isArray(raw)) return out;
+  for (const item of raw) {
+    if (!item || typeof item !== "object") continue;
+    const d = item as Record<string, unknown>;
+    const idx = num(d.driver_index);
+    // `firm` marks a legacy analyst case; those never belong to a driver.
+    if (idx == null || !Number.isInteger(idx) || idx < 0 || d.firm) continue;
+    const confidence = str(d.confidence);
+    if (confidence === "not_explicable") continue;
+    const says = str(d.what_coverage_says);
+    if (!says) continue;
+
+    const nar = obj(d.narrative);
+    const mes = obj(d.measurement);
+    const retrieval = obj(d.retrieval);
+
+    out.set(idx, {
+      whatCoverageSays: says,
+      evidenceFor: strList(d.evidence_for),
+      evidenceAgainst: strList(d.evidence_against),
+      whatTheDataShows: str(d.what_the_data_shows),
+      stillNeeded: str(d.still_needed),
+      narrative: nar
+        ? {
+            scanned: num(nar.n_claims_scanned) ?? 0,
+            related: num(nar.n_related) ?? 0,
+            netImpact: num(nar.net_impact) ?? 0,
+            positive: num(nar.positive) ?? 0,
+            negative: num(nar.negative) ?? 0,
+            note: str(nar.note),
+          }
+        : null,
+      measurement: mes
+        ? {
+            kind: str(mes.kind),
+            testable: mes.testable === true,
+            tool: str(mes.tool),
+            note: str(mes.error) ?? str(mes.note),
+            // `result` is the tool's own payload and is not rendered — the
+            // reading already says what it showed, and a raw series on a quote
+            // page is noise. What matters here is only whether one exists.
+            ran: mes.result != null,
+          }
+        : null,
+      confidence:
+        confidence === "high" || confidence === "medium" || confidence === "low"
+          ? confidence
+          : null,
+      nPassages: num(d.n_passages) ?? 0,
+      selective: retrieval ? retrieval.selective !== false : true,
+      distinctArticles: retrieval ? num(retrieval.distinct_articles) : null,
+      sources: strList(d.sources).slice(0, 6),
+      model: str(d.model),
+    });
+  }
+  return out;
+}
+
+/** A plain JSON object, or null — arrays and scalars are not one. */
+export function obj(v: unknown): Record<string, unknown> | null {
+  return v && typeof v === "object" && !Array.isArray(v)
+    ? (v as Record<string, unknown>)
+    : null;
+}
+
+export function num(v: unknown): number | null {
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
+}
+
+export function str(v: unknown): string | null {
+  return typeof v === "string" && v.trim() ? v.trim() : null;
+}
+
+const STANCES: PricedInStance[] = [
+  "endorsed",
+  "neutral",
+  "rejected_bull",
+  "rejected_bear",
+];
+
+/**
+ * LEGACY (`priced-in/2`): the reconstructed analyst cases.
+ *
+ * Two things are dropped rather than rendered. A case whose reconstruction
+ * failed carries its own failure in the `case` field — the generator writes
+ * "reconstruction failed: …" there and marks it `not_explicable` — and putting
+ * that on a public page shows the reader a broken pipeline instead of an
+ * analysis. A case with no firm or no target cannot be matched to a point on
+ * the rail, which is the whole reason it is here.
+ */
+export function parseAnalystCases(raw: unknown): PricedInAnalystCase[] {
+  if (!Array.isArray(raw)) return [];
+  const out: PricedInAnalystCase[] = [];
+  for (const item of raw) {
+    if (!item || typeof item !== "object") continue;
+    const d = item as Record<string, unknown>;
+    const firm = str(d.firm);
+    const target = num(d.target);
+    const stance = STANCES.find((s) => s === d.stance);
+    const confidence = str(d.confidence);
+    if (!firm || target == null || !stance) continue;
+    if (confidence === "not_explicable") continue;
+    const thesis = str(d.case);
+    if (!thesis) continue;
+
+    const retrieval =
+      d.retrieval && typeof d.retrieval === "object" && !Array.isArray(d.retrieval)
+        ? (d.retrieval as Record<string, unknown>)
+        : {};
+
+    out.push({
+      firm,
+      analyst: str(d.analyst),
+      target,
+      impliedMove: num(d.implied_move),
+      stance,
+      thesis,
+      loadBearing: str(d.load_bearing),
+      objection: str(d.market_objection),
+      observable: str(d.observable),
+      dataSource: str(d.data_source),
+      evidenceFor: strList(d.evidence_for),
+      evidenceAgainst: strList(d.evidence_against),
+      confidence:
+        confidence === "high" || confidence === "medium" || confidence === "low"
+          ? confidence
+          : null,
+      nPassages: num(d.n_passages) ?? 0,
+      // Absent means nothing was recorded, and an unrecorded warning must not
+      // read as a clean bill of health — default to selective only when the
+      // generator said so.
+      selective: retrieval.selective !== false,
+      distinctArticles: num(retrieval.distinct_articles),
+      sources: strList(d.sources).slice(0, 6),
+      model: str(d.model),
+    });
+  }
+  // Highest target first, so the list reads top-to-bottom down the same axis as
+  // the distribution rail and a case's rank is its position on it.
+  return out.sort((a, b) => b.target - a.target).slice(0, 6);
 }

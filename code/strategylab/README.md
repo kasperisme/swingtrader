@@ -330,8 +330,8 @@ arrives with its author's own question to management attached.
 | `social/implied.py` | Reverse DCF — the revenue path the price requires |
 | `social/analyst.py` | Target dispersion + earnings-call Q&A: the sell-side *argument* |
 | `social/vote.py` | Where the price sits among published models: endorsed vs rejected |
-| `social/case.py` | Each rejected model, reconstructed against article bodies |
 | `social/decompose.py` | Per driver: how much is priced in, and what it is worth |
+| `social/case.py` | Each **driver**, investigated: the scored coverage on it (how *known* it is, hence how priced), what the passages assert either way, and the non-news series wired for its observable — or the stated gap |
 | `social/entail.py` | The corpus veto — retrieve with embeddings, judge by reading |
 | `social/pit.py` | Point-in-time reconstruction; `leakage.py` measures model contamination |
 | `social/investigate.py` | The crux, investigated with NON-news tools: pre-registered checks, then an adversarial refutation pass in its own context |
@@ -340,7 +340,7 @@ arrives with its author's own question to management attached.
 | `social/persist.py` | Mirrors the record to `research_priced_in` / `research_predictions` |
 | `social/llm.py` | One JSON completion, two backends. Ollama (`glm-5.1:cloud`) or Anthropic — same prompts, same schemas, only the wire changes |
 | `social/ledger.py` | The sealed prediction ledger, with Supabase as the source of truth and the immutability trigger enforcing it server-side |
-| `social/universe.py` | Which of the 5,810 NYSE + NASDAQ names this can actually be run on: 1,038 clear size and coverage, **725** have the ≥5 published models the grounded tier needs |
+| `social/universe.py` | Which of the 5,810 NYSE + NASDAQ names this can actually be run on. Coverage is the only gate — 1,110 clear the mention floor, and of those the ones with the ≥5 published models the grounded tier needs qualify. Size is recorded, never tested: whether the sell-side and the press care is the question, and a $200m company they both cover qualifies over a $3tn one they do not |
 | `social/batch.py` | The scheduled pass — resumable, isolated per ticker, and the **publish gate** that decides what goes live |
 | `scripts/run_priced_in.sh` | The Mac Mini crontab wrapper: `resolve` daily, `batch` nightly, `universe` weekly |
 
