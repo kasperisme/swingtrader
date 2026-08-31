@@ -1,68 +1,53 @@
 /**
- * Marketing broadcast: "narrative trading" — the campaign that turns the
- * priced-in reconstruction into the reason to hold a paid plan.
+ * Marketing broadcast: the founding-rate offer to the first ~100 sign-ups.
  *
- * Like SubscriptionConfirmationEmail, this renders to an HTML *string* rather
- * than a React component (react-email is not installed) and mirrors the app's
- * visual language: near-black background, amber accent, monospace tickers.
+ * Renders to an HTML *string* rather than a React component (react-email is not
+ * installed), mirroring SubscriptionConfirmationEmail and the app's visual
+ * language: near-black background, amber accent, monospace tickers.
  *
- * Short on purpose. The email has one job — prove the reconstruction is worth
- * paying for by handing over one real ticker's members-only half — and then
- * ask. Every number is read live from swingtrader.research_priced_in by
- * scripts/broadcast-narrative-trading.ts; nothing here is hardcoded.
+ * Offer-first and deliberately short. The proof that the product is worth
+ * paying for sits in the P.S., not above the ask — this list has already been
+ * told what the product does, so the email's job is the price and the date.
  *
- * On the "first 100" framing: `listSize` is the ACTUAL reachable list, counted
- * at build time. It is used to tell recipients who they are — early — not to
- * imply seats are running out. There are no paying subscribers yet, so any
- * "X seats left" or "join N others" line would be false; the honest urgency is
- * the published price ladder in app/pricing/page.tsx, which really does step up
- * at Phase 2, and the grandfather promise, which is ours to keep.
+ * Three things here are load-bearing and must stay true:
+ *
+ *  - "one of the first 100" is a claim about the READER. It holds only while
+ *    the list is actually that small, so the script asserts listSize before
+ *    rendering rather than letting it quietly become false.
+ *  - The price step is $9/$19 -> $29/$49, straight off the Phase 2 column of
+ *    app/pricing/page.tsx. That is more than a doubling, so the email states
+ *    the four numbers instead of characterising them.
+ *  - The deadline is OURS, not the pricing page's. Phase 2 triggers on user
+ *    count, not on a date, so the copy says "I'm holding it until <date>" —
+ *    a promise we control and can keep — never "the price changes on Monday",
+ *    which would be false. Honour it, or the next deadline means nothing.
  *
  * Sent as a Resend BROADCAST, so the footer uses Resend's
  * {{{RESEND_UNSUBSCRIBE_URL}}} merge tag rather than our own signed token.
  */
 
-export type BroadcastDriver = {
-  /** The unpriced (or partly priced) claim, verbatim from drivers_json. */
-  driver: string;
-  /** 0–100: how much of this the price already contains. */
-  pricedInPct: number;
-  /** 0–100+: upside to the current price if it proves out. */
-  valueIfTruePct: number;
-};
-
 export type NarrativeTradingBroadcastProps = {
-  /** Hero ticker's reconstruction — the whole email is one worked example. */
-  hero: {
-    ticker: string;
-    price: number;
-    /** Reverse-DCF implied 10-year revenue CAGR, as a percent (18.4). */
-    impliedCagrPct: number;
-    /** Most recent reported growth, for the contrast — as a percent. Optional. */
-    recentGrowthPct: number | null;
-    /** Published analyst models considered. */
-    nTargets: number;
-    targetMedian: number;
-    /** Highest published target — the sharpest contrast with the price. */
-    targetHigh: number;
-    /** Models the price endorses vs rejects as too bullish. */
-    nEndorsed: number;
-    nRejectedBull: number;
-    /** The members-only half: what the price declines to pay for. */
-    drivers: BroadcastDriver[];
-  };
-  /** Total published reconstructions, e.g. 204. */
-  universeCount: number;
-  /** Actual size of the reachable list — the "first N" the reader is one of. */
-  listSize: number;
-  /** Full-access trial length in days. */
-  trialDays: number;
   /** Founding (Phase 1) monthly prices. */
   investorPrice: number;
   traderPrice: number;
-  /** The next phase's prices — what these rates become. */
+  /** Phase 2 prices — what they become for everyone after. */
   nextInvestorPrice: number;
   nextTraderPrice: number;
+  /** When we stop holding the rate, e.g. "Sunday night". */
+  deadlineLabel: string;
+  /** Full-access trial length in days. */
+  trialDays: number;
+  /** Published reconstructions, e.g. 204. */
+  universeCount: number;
+  /** One line of proof for the P.S. — the whole hero teardown, compressed. */
+  proof: {
+    ticker: string;
+    nTargets: number;
+    /** Reverse-DCF implied revenue CAGR, as a percent. */
+    impliedCagrPct: number;
+    /** Most recent reported growth, for the contrast. Null drops the clause. */
+    recentGrowthPct: number | null;
+  };
   /** Absolute base URL, e.g. https://newsimpactscreener.com */
   appUrl: string;
   /** Appended to every link for attribution. */
@@ -77,44 +62,18 @@ function esc(s: string): string {
     .replace(/"/g, "&quot;");
 }
 
-// Visual language, identical to SubscriptionConfirmationEmail.
 const BG = "#0b0f17";
 const CARD = "#111620";
 const TEXT = "#e6e9ef";
 const MUTED = "#8b93a7";
 const BORDER = "#1e2533";
 const ACCENT = "#f5a623";
-const GREEN = "#3fb950";
 const MONO =
   "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', monospace";
 const SANS =
   "'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif";
 
 const P = `font-family:${SANS};font-size:15px;line-height:1.6;color:${TEXT};margin:0 0 14px 0;`;
-
-/**
- * How much of a claim the price already contains, as the same four words the
- * quote panel uses (app/quote/[symbol]/_components/priced-in-ui.tsx `band`).
- *
- * The raw priced_in_pct is deliberately NOT printed. It is an unvalidated
- * estimate, the product shows the band word rather than the number for exactly
- * that reason, and the landing page excludes it outright.
- */
-function bandLabel(pricedInPct: number): string {
-  if (pricedInPct <= 25) return "Unpriced";
-  if (pricedInPct <= 55) return "Partly priced";
-  if (pricedInPct <= 84) return "Mostly priced";
-  return "Fully priced";
-}
-
-/** Cents only where there are cents — "$500.00" beside "$303.50" reads ragged. */
-function usd(n: number): string {
-  const places = Number.isInteger(n) ? 0 : 2;
-  return `$${n.toLocaleString("en-US", {
-    minimumFractionDigits: places,
-    maximumFractionDigits: places,
-  })}`;
-}
 
 function withUtm(url: string, utm?: Record<string, string>): string {
   if (!utm || Object.keys(utm).length === 0) return url;
@@ -128,60 +87,57 @@ export function renderNarrativeTradingBroadcast(
   props: NarrativeTradingBroadcastProps,
 ): { subject: string; html: string; text: string } {
   const {
-    hero,
-    universeCount,
-    listSize,
-    trialDays,
     investorPrice,
     traderPrice,
     nextInvestorPrice,
     nextTraderPrice,
+    deadlineLabel,
+    trialDays,
+    universeCount,
+    proof,
     utm,
   } = props;
   const base = props.appUrl.replace(/\/$/, "");
   const link = (path: string, content: string) =>
     withUtm(`${base}${path}`, { ...utm, utm_content: content });
 
-  const quoteUrl = link(`/quote/${hero.ticker}`, "hero_quote");
-  const trialUrl = link("/auth/sign-up", "trial");
+  // Straight to sign-up, not /pricing: the plan picker is a step in onboarding
+  // (components/onboarding-plan-step.tsx), so creating the account IS the path
+  // to locking the rate. A detour through the pricing page adds a click and a
+  // second chance to leave.
+  const signupUrl = link("/auth/sign-up", "founding_rate");
+  const quoteUrl = link(`/quote/${proof.ticker}`, "proof_quote");
 
-  const subject = `${hero.ticker} isn't priced for perfection. It's priced for a slowdown.`;
-  const preheader = `${hero.nTargets} analysts published targets. The price endorses none of them.`;
+  const subject = `Your $${investorPrice} rate, held until ${deadlineLabel}`;
+  const preheader = `You were one of the first 100 sign-ups. That locks $${investorPrice} or $${traderPrice} a month before it becomes $${nextInvestorPrice} and $${nextTraderPrice}.`;
 
-  const endorseLine =
-    hero.nEndorsed === 0
-      ? `The price endorses none of them.`
-      : `The price endorses ${hero.nEndorsed} and rejects ${hero.nRejectedBull} as too bullish.`;
+  const growthClause =
+    proof.recentGrowthPct != null
+      ? `, from a company that just posted ${proof.recentGrowthPct.toFixed(1)}%`
+      : "";
 
-  const growthContrast =
-    hero.recentGrowthPct != null
-      ? ` &mdash; from a company that just posted ${hero.recentGrowthPct.toFixed(1)}%.`
-      : `.`;
+  const FEATURES: [string, string][] = [
+    [
+      "Narrative trading",
+      `what a share price already pays for, and what it refuses to &mdash; reconstructed nightly across ${universeCount} companies`,
+    ],
+    ["News impact", "real-time scoring on the headlines hitting your holdings"],
+    [
+      "Agents",
+      "they watch your names and tell you when a headline actually lands",
+    ],
+    ["History", "up to 400 days of it, so you can check the pattern yourself"],
+  ];
 
-  const driverRows = hero.drivers
-    .map(
-      (d, i) => `
+  const featureRows = FEATURES.map(
+    ([name, detail]) => `
       <tr>
-        <td style="padding:${i === 0 ? "0" : "9px"} 12px 9px 0;border-top:${
-          i === 0 ? "none" : `1px solid ${BORDER}`
-        };font-family:${SANS};font-size:13px;line-height:1.45;color:${TEXT};">
-          ${esc(d.driver)}
-        </td>
-        <td style="padding:${i === 0 ? "0" : "9px"} 10px 9px 0;border-top:${
-          i === 0 ? "none" : `1px solid ${BORDER}`
-        };font-family:${SANS};font-size:12px;color:${
-          d.pricedInPct <= 55 ? ACCENT : MUTED
-        };text-align:right;white-space:nowrap;">
-          ${esc(bandLabel(d.pricedInPct))}
-        </td>
-        <td style="padding:${i === 0 ? "0" : "9px"} 0 9px 0;border-top:${
-          i === 0 ? "none" : `1px solid ${BORDER}`
-        };font-family:${MONO};font-size:13px;font-weight:700;color:${GREEN};text-align:right;white-space:nowrap;">
-          +${Math.round(d.valueIfTruePct)}%
+        <td style="padding:0 0 9px 0;font-family:${SANS};font-size:14px;line-height:1.55;color:${TEXT};">
+          <strong style="color:${ACCENT};">${name}</strong>
+          <span style="color:${MUTED};"> &mdash; ${detail}</span>
         </td>
       </tr>`,
-    )
-    .join("");
+  ).join("");
 
   const html = `<!doctype html>
 <html lang="en">
@@ -199,82 +155,43 @@ export function renderNarrativeTradingBroadcast(
       <tr>
         <td align="center">
           <table role="presentation" width="100%" cellpadding="0" cellspacing="0"
-                 style="max-width:560px;background:${CARD};border:1px solid ${BORDER};border-radius:14px;overflow:hidden;">
+                 style="max-width:540px;background:${CARD};border:1px solid ${BORDER};border-radius:14px;overflow:hidden;">
 
             <tr>
-              <td style="padding:24px 28px 0 28px;">
+              <td style="padding:26px 28px 0 28px;">
                 <p style="font-family:${MONO};font-size:11px;font-weight:600;letter-spacing:0.16em;text-transform:uppercase;color:${ACCENT};margin:0 0 18px 0;">
                   News Impact Screener
                 </p>
 
-                <h1 style="font-family:${SANS};font-size:23px;line-height:1.3;font-weight:700;color:${TEXT};margin:0 0 16px 0;">
-                  You're one of the first ${listSize}.
+                <h1 style="font-family:${SANS};font-size:22px;line-height:1.35;font-weight:700;color:${TEXT};margin:0 0 16px 0;">
+                  You were one of the first 100 to sign up.
                 </h1>
 
                 <p style="${P}">
-                  That's the whole list right now. Which is why you get this before anyone
-                  else &mdash; and why you get it cheapest, permanently. First, the thing itself.
+                  That gets you the founding rate &mdash;
+                  <strong style="color:${TEXT};">$${investorPrice}</strong> or
+                  <strong style="color:${TEXT};">$${traderPrice}</strong> a month, locked for as
+                  long as you stay. For everyone who comes after you, it's
+                  $${nextInvestorPrice} and $${nextTraderPrice}.
                 </p>
 
                 <p style="${P}">
-                  A share price is a bet on a story. We reconstruct <em style="font-style:normal;font-weight:600;color:${TEXT};">which</em>
-                  story &mdash; what the price already pays for, and what it flatly refuses to.
-                  It runs nightly on ${universeCount} companies.
+                  I'm holding it for this list until <strong style="color:${ACCENT};">${esc(deadlineLabel)}</strong>.
                 </p>
               </td>
             </tr>
 
-            <!-- The proof, in one card -->
             <tr>
-              <td style="padding:4px 28px 0 28px;">
+              <td style="padding:6px 28px 0 28px;">
                 <table role="presentation" width="100%" cellpadding="0" cellspacing="0"
                        style="background:${BG};border:1px solid ${BORDER};border-radius:10px;">
                   <tr>
                     <td style="padding:16px 18px;">
-                      <p style="font-family:${MONO};font-size:15px;font-weight:700;color:${ACCENT};margin:0 0 10px 0;">
-                        ${esc(hero.ticker)} &middot; ${usd(hero.price)}
+                      <p style="font-family:${MONO};font-size:10px;font-weight:600;letter-spacing:0.12em;text-transform:uppercase;color:${MUTED};margin:0 0 12px 0;">
+                        What it gets you
                       </p>
-                      <p style="font-family:${SANS};font-size:14px;line-height:1.6;color:${TEXT};margin:0;">
-                        ${hero.nTargets} analysts have published targets. Median ${usd(hero.targetMedian)}.
-                        <strong>${endorseLine}</strong> It's paying for revenue compounding at
-                        ${hero.impliedCagrPct.toFixed(1)}% a year${growthContrast}
-                      </p>
-                    </td>
-                  </tr>
-                </table>
-              </td>
-            </tr>
-
-            <tr>
-              <td style="padding:18px 28px 0 28px;">
-                <p style="${P}">
-                  That's not &ldquo;priced for perfection.&rdquo; That's a price braced for a
-                  slowdown while the sell side writes targets up to ${usd(hero.targetHigh)}. Which turns an
-                  unanswerable question &mdash; is ${esc(hero.ticker)} expensive? &mdash; into a watchlist:
-                </p>
-              </td>
-            </tr>
-
-            <!-- The gated half -->
-            <tr>
-              <td style="padding:0 28px 0 28px;">
-                <table role="presentation" width="100%" cellpadding="0" cellspacing="0"
-                       style="background:${BG};border:1px solid ${BORDER};border-radius:10px;">
-                  <tr>
-                    <td style="padding:15px 18px;">
                       <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
-                        <tr>
-                          <td style="padding:0 12px 9px 0;font-family:${MONO};font-size:10px;font-weight:600;letter-spacing:0.1em;text-transform:uppercase;color:${MUTED};">
-                            What it won't pay for
-                          </td>
-                          <td style="padding:0 10px 9px 0;font-family:${MONO};font-size:10px;font-weight:600;letter-spacing:0.1em;text-transform:uppercase;color:${MUTED};text-align:right;white-space:nowrap;">
-                            How&nbsp;priced
-                          </td>
-                          <td style="padding:0 0 9px 0;font-family:${MONO};font-size:10px;font-weight:600;letter-spacing:0.1em;text-transform:uppercase;color:${MUTED};text-align:right;white-space:nowrap;">
-                            If&nbsp;true
-                          </td>
-                        </tr>
-                        ${driverRows}
+                        ${featureRows}
                       </table>
                     </td>
                   </tr>
@@ -283,51 +200,27 @@ export function renderNarrativeTradingBroadcast(
             </tr>
 
             <tr>
-              <td style="padding:16px 28px 0 28px;">
-                <p style="${P}">
-                  Free on the site: the distribution, and what the price pays for. Members: what
-                  it <em style="font-style:normal;font-weight:600;color:${TEXT};">won't</em>, and the
-                  evidence under every claim. You just read ${esc(hero.ticker)}'s locked half.
-                </p>
-                <a href="${quoteUrl}"
-                   style="display:inline-block;font-family:${SANS};font-size:14px;font-weight:600;color:${ACCENT};text-decoration:none;border-bottom:1px solid ${ACCENT};padding-bottom:1px;">
-                  See the whole reconstruction &rarr;
-                </a>
-              </td>
-            </tr>
-
-            <!-- The offer -->
-            <tr>
-              <td style="padding:24px 28px 0 28px;">
-                <table role="presentation" width="100%" cellpadding="0" cellspacing="0"
-                       style="background:${BG};border:1px solid ${BORDER};border-radius:10px;">
-                  <tr>
-                    <td style="padding:18px;">
-                      <p style="font-family:${SANS};font-size:16px;font-weight:700;color:${TEXT};margin:0 0 10px 0;">
-                        Your price, for good
-                      </p>
-                      <p style="font-family:${SANS};font-size:14px;line-height:1.6;color:${TEXT};margin:0 0 14px 0;">
-                        ${trialDays} days of the full Trader tier first, no card. After that it's
-                        <strong>$${investorPrice}</strong> or <strong>$${traderPrice}</strong> a month &mdash;
-                        the rate for the first hundred people here. It becomes $${nextInvestorPrice} and
-                        $${nextTraderPrice} as this grows. Yours doesn't, for as long as you stay.
-                      </p>
-                      <a href="${trialUrl}"
-                         style="display:inline-block;font-family:${SANS};font-size:14px;font-weight:600;color:${BG};background:${ACCENT};padding:11px 20px;border-radius:8px;text-decoration:none;">
-                        Start the ${trialDays} days &rarr;
-                      </a>
-                    </td>
-                  </tr>
-                </table>
-              </td>
-            </tr>
-
-            <tr>
               <td style="padding:20px 28px 0 28px;">
+                <a href="${signupUrl}"
+                   style="display:inline-block;font-family:${SANS};font-size:15px;font-weight:600;color:${BG};background:${ACCENT};padding:12px 24px;border-radius:8px;text-decoration:none;">
+                  Lock in your rate &rarr;
+                </a>
+                <p style="font-family:${SANS};font-size:13px;line-height:1.6;color:${MUTED};margin:12px 0 0 0;">
+                  Every account starts with ${trialDays} days of full access, no card. The rate
+                  locks when you pick a plan &mdash; cancel anytime, in two clicks.
+                </p>
+              </td>
+            </tr>
+
+            <tr>
+              <td style="padding:22px 28px 0 28px;">
                 <p style="${P}margin-bottom:10px;">&mdash; Kasper</p>
                 <p style="font-family:${SANS};font-size:14px;line-height:1.6;color:${MUTED};margin:0;">
-                  <strong style="color:${TEXT};">P.S.</strong> Reply with one ticker and I'll send
-                  back what its price is paying for.
+                  <strong style="color:${TEXT};">P.S.</strong> One example of what narrative trading
+                  means: ${proof.nTargets} analysts have published price targets on
+                  <a href="${quoteUrl}" style="color:${ACCENT};text-decoration:none;font-weight:600;">${esc(proof.ticker)}</a>,
+                  and its price endorses none of them &mdash; it's paying for
+                  ${proof.impliedCagrPct.toFixed(1)}% growth a year${growthClause}. That's on the site now.
                 </p>
               </td>
             </tr>
@@ -338,8 +231,7 @@ export function renderNarrativeTradingBroadcast(
                   <tr>
                     <td style="border-top:1px solid ${BORDER};padding-top:14px;">
                       <p style="font-family:${SANS};font-size:11px;line-height:1.7;color:${MUTED};margin:0 0 6px 0;">
-                        Upside is arithmetic on published analyst targets; how priced a claim is, is an
-                        estimate. Research, not investment advice &mdash; and it can be wrong.
+                        Research and data, not investment advice.
                       </p>
                       <p style="font-family:${SANS};font-size:11px;line-height:1.7;color:${MUTED};margin:0;">
                         You signed up at newsimpactscreener.com.
@@ -359,51 +251,36 @@ export function renderNarrativeTradingBroadcast(
 </html>`;
 
   const text = [
-    `You're one of the first ${listSize}.`,
+    "You were one of the first 100 to sign up.",
     "",
-    "That's the whole list right now. Which is why you get this before anyone else — and",
-    "why you get it cheapest, permanently. First, the thing itself.",
+    `That gets you the founding rate — $${investorPrice} or $${traderPrice} a month, locked for as long as`,
+    `you stay. For everyone who comes after you, it's $${nextInvestorPrice} and $${nextTraderPrice}.`,
     "",
-    "A share price is a bet on a story. We reconstruct WHICH story — what the price",
-    `already pays for, and what it flatly refuses to. It runs nightly on ${universeCount} companies.`,
+    `I'm holding it for this list until ${deadlineLabel}.`,
     "",
-    `${hero.ticker} · ${usd(hero.price)}`,
-    `${hero.nTargets} analysts have published targets. Median ${usd(hero.targetMedian)}. ${endorseLine}`,
-    `It's paying for revenue compounding at ${hero.impliedCagrPct.toFixed(1)}% a year${
-      hero.recentGrowthPct != null
-        ? ` — from a company that just posted ${hero.recentGrowthPct.toFixed(1)}%.`
-        : "."
-    }`,
-    "",
-    `That's not "priced for perfection." That's a price braced for a slowdown while the`,
-    `sell side writes targets up to ${usd(hero.targetHigh)}. Which turns an unanswerable question — is`,
-    `${hero.ticker} expensive? — into a watchlist:`,
-    "",
-    "WHAT IT WON'T PAY FOR",
-    ...hero.drivers.map(
-      (d) =>
-        `  - ${d.driver} — ${bandLabel(d.pricedInPct).toLowerCase()}, +${Math.round(d.valueIfTruePct)}% if true`,
+    "WHAT IT GETS YOU",
+    ...FEATURES.map(
+      ([name, detail]) => `  ${name} — ${detail.replace(/&mdash;/g, "—")}`,
     ),
     "",
-    "Free on the site: the distribution, and what the price pays for. Members: what it",
-    `WON'T, and the evidence under every claim. You just read ${hero.ticker}'s locked half.`,
+    `Lock in your rate: ${signupUrl}`,
     "",
-    `See the whole reconstruction: ${quoteUrl}`,
-    "",
-    "YOUR PRICE, FOR GOOD",
-    `${trialDays} days of the full Trader tier first, no card. After that it's $${investorPrice} or $${traderPrice} a`,
-    `month — the rate for the first hundred people here. It becomes $${nextInvestorPrice} and $${nextTraderPrice} as`,
-    "this grows. Yours doesn't, for as long as you stay.",
-    "",
-    `Start the ${trialDays} days: ${trialUrl}`,
+    `Every account starts with ${trialDays} days of full access, no card. The rate locks when`,
+    "you pick a plan — cancel anytime, in two clicks.",
     "",
     "— Kasper",
     "",
-    "P.S. Reply with one ticker and I'll send back what its price is paying for.",
+    `P.S. One example of what narrative trading means: ${proof.nTargets} analysts have published`,
+    `price targets on ${proof.ticker}, and its price endorses none of them — it's paying for`,
+    `${proof.impliedCagrPct.toFixed(1)}% growth a year${
+      proof.recentGrowthPct != null
+        ? `, from a company that just posted ${proof.recentGrowthPct.toFixed(1)}%`
+        : ""
+    }. That's on the site now:`,
+    quoteUrl,
     "",
     "---",
-    "Upside is arithmetic on published analyst targets; how priced a claim is, is an",
-    "estimate. Research, not investment advice — and it can be wrong.",
+    "Research and data, not investment advice.",
     "You signed up at newsimpactscreener.com.",
     "Unsubscribe: {{{RESEND_UNSUBSCRIBE_URL}}}",
   ].join("\n");

@@ -36,7 +36,7 @@ import {
 import { TRIAL_DAYS } from "../lib/plans";
 
 const SEGMENT_NAME = "Narrative Trading Launch";
-const BROADCAST_NAME = "Narrative trading — launch (priced-in)";
+const BROADCAST_NAME = "Founding rate — first 100";
 const HERO_TICKER = process.env.BROADCAST_HERO_TICKER ?? "NVDA";
 const APP_URL =
   process.env.NEXT_PUBLIC_APP_URL ?? "https://newsimpactscreener.com";
@@ -48,6 +48,26 @@ const TRADER_PRICE = 19;
 /** Phase 2 column of app/pricing/page.tsx — what the founding rates become. */
 const NEXT_INVESTOR_PRICE = 29;
 const NEXT_TRADER_PRICE = 49;
+
+/**
+ * The headline claims the reader is "one of the first 100". That is a claim
+ * about them, not a slogan, so refuse to render once the list has outgrown it
+ * rather than letting it quietly become false. Slack over 100 because the
+ * reachable list excludes opt-outs while "sign-ups" counts everyone.
+ */
+const FIRST_N_CLAIM_CEILING = 115;
+
+/**
+ * How long we hold the founding rate. This is OUR deadline, not the pricing
+ * page's — Phase 2 triggers on user count, not on a date — so it is ours to
+ * pick and ours to honour. Defaults to the coming Sunday.
+ */
+function comingSunday(): string {
+  const d = new Date();
+  d.setDate(d.getDate() + ((7 - d.getDay()) % 7 || 7));
+  return `Sunday, ${d.toLocaleDateString("en-US", { month: "long", day: "numeric" })}`;
+}
+const DEADLINE_LABEL = process.env.BROADCAST_DEADLINE ?? comingSunday();
 
 const UTM = {
   utm_source: "resend",
@@ -151,8 +171,20 @@ type PricedInRow = {
  * the template is hardcoded, so a rebuild the day before sending picks up
  * whatever the nightly batch last promoted.
  */
+type HeroReconstruction = {
+  ticker: string;
+  price: number;
+  impliedCagrPct: number;
+  recentGrowthPct: number | null;
+  nTargets: number;
+  targetMedian: number;
+  targetHigh: number;
+  nEndorsed: number;
+  nRejectedBull: number;
+};
+
 async function loadHero(ticker: string): Promise<{
-  hero: NarrativeTradingBroadcastProps["hero"];
+  hero: HeroReconstruction;
   universeCount: number;
   row: PricedInRow;
 }> {
@@ -186,20 +218,20 @@ async function loadHero(ticker: string): Promise<{
     throw new Error(`${ticker} has no pays_for — pick another hero`);
   }
 
-  const rawDrivers = Array.isArray(row.drivers_json) ? row.drivers_json : [];
-  const drivers = rawDrivers
-    .map((d) => d as Record<string, unknown>)
-    .filter((d) => Number(d.value_if_true_pct) > 0)
-    .map((d) => ({
-      driver: String(d.driver ?? ""),
-      pricedInPct: Math.round(Number(d.priced_in_pct ?? 0)),
-      valueIfTruePct: Number(d.value_if_true_pct ?? 0),
-    }))
-    .filter((d) => d.driver.length > 0)
-    .sort((a, b) => b.valueIfTruePct - a.valueIfTruePct)
-    .slice(0, 3);
-  if (drivers.length === 0) {
-    throw new Error(`${ticker} has no unpriced drivers — pick another hero`);
+  // The P.S. asserts the price "endorses none of them", which is only true
+  // while n_endorsed is 0. It is a claim about a live row that the nightly
+  // batch can change under us, so fail loudly rather than ship it stale.
+  const nEndorsed = Number(row.n_endorsed ?? 0);
+  if (nEndorsed !== 0) {
+    throw new Error(
+      `${ticker} now endorses ${nEndorsed} model(s) — the "endorses none of them" ` +
+        `line is no longer true. Pick another hero via BROADCAST_HERO_TICKER.`,
+    );
+  }
+
+  const nTargets = Number(row.n_targets ?? 0);
+  if (nTargets < 5) {
+    throw new Error(`${ticker} has only ${nTargets} targets — too thin to cite`);
   }
 
   return {
@@ -209,12 +241,11 @@ async function loadHero(ticker: string): Promise<{
       price: Number(row.price),
       impliedCagrPct: Number(row.implied_revenue_cagr ?? 0) * 100,
       recentGrowthPct: extractRecentGrowthPct(paysFor),
-      nTargets: Number(row.n_targets ?? 0),
+      nTargets,
       targetMedian: Number(row.target_median ?? 0),
       targetHigh: Number(row.target_high ?? 0),
-      nEndorsed: Number(row.n_endorsed ?? 0),
+      nEndorsed,
       nRejectedBull: Number(row.n_rejected_bull ?? 0),
-      drivers,
     },
     universeCount: count ?? 0,
   };
@@ -247,64 +278,63 @@ function extractRecentGrowthPct(paysFor: string[]): number | null {
 }
 
 async function build() {
-  // The "first N" in the subject line is the real reachable list, counted now —
-  // not a round number. If it drifts before send, rebuilding fixes it.
-  const [{ hero, universeCount, row }, { recipients }] = await Promise.all([
+  const [{ hero, universeCount }, { recipients }] = await Promise.all([
     loadHero(HERO_TICKER),
     loadAudience(),
   ]);
+
+  if (recipients.length > FIRST_N_CLAIM_CEILING) {
+    throw new Error(
+      `List is ${recipients.length} — too big for the "first 100" headline. ` +
+        `Rewrite the claim or raise FIRST_N_CLAIM_CEILING deliberately.`,
+    );
+  }
+
   const props: NarrativeTradingBroadcastProps = {
-    hero,
-    universeCount,
-    listSize: recipients.length,
-    trialDays: TRIAL_DAYS,
     investorPrice: INVESTOR_PRICE,
     traderPrice: TRADER_PRICE,
     nextInvestorPrice: NEXT_INVESTOR_PRICE,
     nextTraderPrice: NEXT_TRADER_PRICE,
+    deadlineLabel: DEADLINE_LABEL,
+    trialDays: TRIAL_DAYS,
+    universeCount,
+    proof: {
+      ticker: hero.ticker,
+      nTargets: hero.nTargets,
+      impliedCagrPct: hero.impliedCagrPct,
+      recentGrowthPct: hero.recentGrowthPct,
+    },
     appUrl: APP_URL,
     utm: UTM,
   };
   const rendered = renderNarrativeTradingBroadcast(props);
-  return { props, row, ...rendered };
+  return { props, listSize: recipients.length, ...rendered };
 }
 
 // ── Commands ────────────────────────────────────────────────────────────────
 
 async function cmdPreview() {
-  const { props, subject, html, text } = await build();
+  const { props, listSize, subject, html, text } = await build();
   mkdirSync(OUT_DIR, { recursive: true });
   const stem = join(OUT_DIR, "narrative-trading");
   writeFileSync(`${stem}.html`, html, "utf8");
   writeFileSync(`${stem}.txt`, text, "utf8");
 
-  const h = props.hero;
-  console.log(`Subject: ${subject}\n`);
-  console.log(`List      ${props.listSize} reachable — "one of the first ${props.listSize}"`);
-  console.log(`Hero      ${h.ticker} $${h.price}`);
+  console.log(`Subject:  ${subject}\n`);
+  console.log(`List      ${listSize} reachable (claim ceiling ${FIRST_N_CLAIM_CEILING})`);
   console.log(
-    `Models    ${h.nTargets} targets · median $${h.targetMedian} · ${h.nEndorsed} endorsed / ${h.nRejectedBull} rejected bull`,
+    `Offer     $${props.investorPrice}/$${props.traderPrice} now → $${props.nextInvestorPrice}/$${props.nextTraderPrice} after`,
   );
+  console.log(`Deadline  ${props.deadlineLabel}`);
   console.log(
-    `Implied   ${h.impliedCagrPct.toFixed(1)}% CAGR${
-      h.recentGrowthPct != null ? ` vs ${h.recentGrowthPct}% just reported` : " (no recent-growth contrast found)"
+    `Proof     ${props.proof.ticker}: ${props.proof.nTargets} targets, ${props.proof.impliedCagrPct.toFixed(
+      1,
+    )}% implied${
+      props.proof.recentGrowthPct != null
+        ? ` vs ${props.proof.recentGrowthPct}% reported`
+        : ""
     }`,
   );
-  console.log(`Universe  ${props.universeCount} published reconstructions`);
-  console.log(`\nWhat it won't pay for:`);
-  for (const d of h.drivers) {
-    const band =
-      d.pricedInPct <= 25
-        ? "unpriced"
-        : d.pricedInPct <= 55
-          ? "partly priced"
-          : d.pricedInPct <= 84
-            ? "mostly priced"
-            : "fully priced";
-    console.log(
-      `  ${band.padEnd(14)} · +${String(Math.round(d.valueIfTruePct)).padStart(4)}%  ${d.driver}`,
-    );
-  }
   console.log(`\nWrote ${stem}.html and ${stem}.txt`);
 }
 
@@ -388,11 +418,11 @@ async function cmdDraft() {
   }
 
   const { props, subject, html, text } = await build();
-  const preview = `${props.hero.nTargets} analysts published targets. The price endorses none of them.`;
+  const preview = `Founding rate held until ${props.deadlineLabel}: $${props.investorPrice} or $${props.traderPrice} a month, before it becomes $${props.nextInvestorPrice} and $${props.nextTraderPrice}.`;
 
   const res = await createBroadcastDraft({
     segmentId: id,
-    name: `${BROADCAST_NAME} — ${props.hero.ticker} ${new Date().toISOString().slice(0, 10)}`,
+    name: `${BROADCAST_NAME} — ${new Date().toISOString().slice(0, 10)}`,
     subject,
     html,
     text,

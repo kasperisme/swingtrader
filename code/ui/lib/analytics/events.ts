@@ -95,6 +95,14 @@ type EventMap = {
     step_index: number;
     step_count: number;
   };
+  // The user tried to leave onboarding and was asked to confirm. Pairs with
+  // `onboarding_skip_cancelled` (backed out, stayed) and `onboarding_completed`
+  // with `skipped: true` (confirmed, left) — the two together give the prompt's
+  // recovery rate. Before this existed the first click simply closed the
+  // dialog, so a stray Escape was indistinguishable from a decision.
+  onboarding_skip_prompted: { step: "welcome" | "setup" | "plan" };
+  // Dismissed the skip prompt without leaving — the prompt did its job.
+  onboarding_skip_cancelled: { step: "welcome" | "setup" | "plan" };
   onboarding_step_clicked: { step: string };
   onboarding_dismissed: { completed_steps: number; total_steps: number };
   onboarding_collapsed_toggled: { collapsed: boolean };

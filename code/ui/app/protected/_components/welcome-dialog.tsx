@@ -39,6 +39,64 @@ const STEP_LABELS: Record<(typeof STEP_ORDER)[number], string> = {
 };
 
 /**
+ * The stacked confirmation both leave-paths share.
+ *
+ * Rendered as a SIBLING of the welcome dialog, never nested inside it: a Dialog
+ * mounted within an open Dialog inherits the outer focus trap, and the confirm's
+ * own buttons then can't be reached from the keyboard.
+ *
+ * `primary` is always the action that keeps the user in onboarding, and it is
+ * the only one styled as such — the ghost button is the way out. Both are real
+ * buttons: a prompt that can only be answered one way is a wall, not a prompt.
+ */
+function ConfirmLeaveDialog({
+  open,
+  onOpenChange,
+  title,
+  children,
+  dismissLabel,
+  onDismiss,
+  primaryLabel,
+  onPrimary,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  title: string;
+  children: React.ReactNode;
+  dismissLabel: string;
+  onDismiss: () => void;
+  primaryLabel: string;
+  onPrimary: () => void;
+}) {
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      {/* Stacked on the welcome dialog, which already dims the page — a second
+          full-strength scrim would double the darkening. */}
+      <DialogContent
+        className="sm:max-w-md"
+        overlayClassName="bg-black/25 backdrop-blur-none"
+      >
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <AlertTriangle className="h-5 w-5 shrink-0 text-amber-500" aria-hidden />
+            {title}
+          </DialogTitle>
+          <DialogDescription className="pt-2">{children}</DialogDescription>
+        </DialogHeader>
+        <DialogFooter className="gap-2 sm:gap-2">
+          <Button variant="ghost" className="min-h-11" onClick={onDismiss}>
+            {dismissLabel}
+          </Button>
+          <Button className="min-h-11" onClick={onPrimary}>
+            {primaryLabel}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+/**
  * Three dots + a label, so an open-ended AI interview doesn't feel like an
  * unbounded commitment — the user can see it's three steps and where they are.
  */
@@ -74,6 +132,7 @@ export function WelcomeDialog({ displayName }: Props) {
   const [open, setOpen] = useState(true);
   const [step, setStep] = useState<"welcome" | "setup" | "plan">("welcome");
   const [confirmingExit, setConfirmingExit] = useState(false);
+  const [confirmingSkip, setConfirmingSkip] = useState(false);
   const [isPending, startTransition] = useTransition();
   // How many of the agent's 5 setup tasks have actually landed. Drives whether
   // advancing to billing reads as "continue" or as "skip".
@@ -102,9 +161,20 @@ export function WelcomeDialog({ displayName }: Props) {
     });
   }
 
+  // Asking to leave at the welcome note. Every later step already warns before
+  // it closes; this one used to be the single exit that took the user at their
+  // word on the first click — including a stray Escape or a click on the scrim,
+  // neither of which is a decision. It now confirms like the rest.
+  function requestSkip() {
+    track("onboarding_skip_prompted", { step });
+    setConfirmingSkip(true);
+  }
+
   // Skip onboarding entirely — close and highlight the Ask AI buttons.
+  // Only ever reached through `requestSkip`'s confirmation.
   function skip() {
     track("onboarding_completed", { skipped: true });
+    setConfirmingSkip(false);
     setPostWelcomeHighlight();
     persistWelcomed();
     setOpen(false);
@@ -115,8 +185,17 @@ export function WelcomeDialog({ displayName }: Props) {
   // used to fire here, which made the funnel report ~100% completion.
   function startSetup() {
     track("onboarding_welcome_accepted", {});
+    setConfirmingSkip(false);
     persistWelcomed();
     setStep("setup");
+  }
+
+  // Backed out of the skip prompt without choosing the agent — they stay on the
+  // welcome note. Tracked separately from `startSetup` so the funnel can tell a
+  // prompt that recovered someone from one they simply dismissed.
+  function cancelSkip() {
+    track("onboarding_skip_cancelled", { step });
+    setConfirmingSkip(false);
   }
 
   // Setup → billing. Records how much the agent actually configured, so the
@@ -146,9 +225,10 @@ export function WelcomeDialog({ displayName }: Props) {
 
   function handleOpenChange(next: boolean) {
     if (next) return;
-    // Skipping at the welcome note is fine — nothing has been configured yet.
+    // Nothing is configured yet at the welcome note, so there is nothing to
+    // lose but the setup itself — which is the whole reason to ask.
     if (step === "welcome") {
-      skip();
+      requestSkip();
       return;
     }
     // They've built a setup but haven't set up billing. Warn before leaving:
@@ -224,7 +304,7 @@ export function WelcomeDialog({ displayName }: Props) {
               <Button
                 variant="ghost"
                 className="min-h-11"
-                onClick={skip}
+                onClick={requestSkip}
                 disabled={isPending}
               >
                 Skip for now
@@ -300,42 +380,45 @@ export function WelcomeDialog({ displayName }: Props) {
       </DialogContent>
     </Dialog>
 
+      {/* Skip-the-setup confirmation — the welcome note's only exit. */}
+      <ConfirmLeaveDialog
+        open={confirmingSkip}
+        onOpenChange={(o) => {
+          if (!o) cancelSkip();
+        }}
+        title="Skip the setup?"
+        dismissLabel="Skip anyway"
+        onDismiss={skip}
+        primaryLabel="Set up my account"
+        onPrimary={startSetup}
+      >
+        It takes a couple of minutes: the agent configures your{" "}
+        <span className="font-medium text-foreground">
+          strategy, screenings, Telegram alerts, holdings and your first agent
+        </span>{" "}
+        by asking you a few questions. Skip and you start from an empty account
+        and set each one up by hand. You can restart it any time from the Ask AI
+        banner.
+      </ConfirmLeaveDialog>
+
       {/* Exit-without-billing confirmation */}
-      <Dialog
+      <ConfirmLeaveDialog
         open={confirmingExit}
         onOpenChange={(o) => {
           if (!o) setConfirmingExit(false);
         }}
+        title="Leave without setting up billing?"
+        dismissLabel="Leave anyway"
+        onDismiss={leaveAnyway}
+        primaryLabel="Set up billing"
+        onPrimary={goToBilling}
       >
-        {/* Stacked on the welcome dialog, which already dims the page — a
-            second full-strength scrim would double the darkening. */}
-        <DialogContent
-          className="sm:max-w-md"
-          overlayClassName="bg-black/25 backdrop-blur-none"
-        >
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <AlertTriangle className="h-5 w-5 shrink-0 text-amber-500" aria-hidden />
-              Leave without setting up billing?
-            </DialogTitle>
-            <DialogDescription className="pt-2">
-              Without an active plan your scheduled agents won&apos;t run — they&apos;ll
-              only send a reminder to set up billing — and you&apos;ll be limited to
-              the free <span className="font-medium text-foreground">Observer</span>{" "}
-              tier. Set up billing now to keep everything you just configured. You
-              can always do it later from your profile.
-            </DialogDescription>
-          </DialogHeader>
-          <DialogFooter className="gap-2 sm:gap-2">
-            <Button variant="ghost" className="min-h-11" onClick={leaveAnyway}>
-              Leave anyway
-            </Button>
-            <Button className="min-h-11" onClick={goToBilling}>
-              Set up billing
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+        Without an active plan your scheduled agents won&apos;t run — they&apos;ll
+        only send a reminder to set up billing — and you&apos;ll be limited to the
+        free <span className="font-medium text-foreground">Observer</span> tier.
+        Set up billing now to keep everything you just configured. You can always
+        do it later from your profile.
+      </ConfirmLeaveDialog>
     </>
   );
 }

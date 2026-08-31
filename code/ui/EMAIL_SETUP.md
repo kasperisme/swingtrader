@@ -209,21 +209,25 @@ loudly at build time rather than shipping a hollow email.
 
 ### What the email is allowed to claim
 
-The email is the product's own gate run end to end on one real ticker: the free half
-(the distribution, and what the price pays for) is shown, then the members-only half
-(what it declines to pay for) is handed over once, and the ask is "that is the product."
+It is an offer email: you were early, that earns the founding rate, the rate is held
+until a date. Three claims are load-bearing, and the script refuses to render if any
+stops being true rather than letting it drift:
 
-Two guardrails, both inherited from the product rather than invented for the campaign:
+- **"One of the first 100."** A claim about the reader, not a slogan. `build()` throws
+  once the reachable list passes `FIRST_N_CLAIM_CEILING` (115 — slack because the
+  reachable list excludes opt-outs while "sign-ups" counts everyone).
+- **"$9/$19 → $29/$49."** Straight off the Phase 1 and Phase 2 columns of
+  `app/pricing/page.tsx`. That is more than a doubling, so the email prints the four
+  numbers rather than characterising the jump.
+- **"Its price endorses none of them."** True only while the hero row's `n_endorsed`
+  is 0. The nightly batch can change that under you, so `loadHero()` throws and tells
+  you to pick another hero rather than shipping the line stale.
 
-- **No raw `priced_in_pct`.** The quote panel renders it as one of four band words
-  (`Unpriced` / `Partly priced` / `Mostly priced` / `Fully priced`) because the number is
-  an unvalidated estimate, and `components/narrative-trading.tsx` excludes it from the
-  landing page for the same reason. `bandLabel()` in the template mirrors those
-  thresholds exactly. A percentage in an email would claim a precision neither surface
-  claims.
-- **Say which column is arithmetic.** The `worth if true` upside is today's price against
-  a published analyst target and can be checked. How priced a claim is, is an estimate.
-  The footnote under the table says so.
+**The deadline is yours, not the pricing page's.** Phase 2 triggers on user count, not
+on a date, so the copy says *"I'm holding it for this list until <date>"* — a promise
+you control and can keep — never *"the price goes up on Monday"*, which would be false.
+Defaults to the coming Sunday; override with `BROADCAST_DEADLINE="Friday, September 4"`.
+Honour it, or the next deadline you set means nothing.
 
 ### Before the first send
 
