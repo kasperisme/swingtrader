@@ -4,7 +4,7 @@ import {
 import {
   collectAllRowDataKeys,
   orderedDataColumnKeys,
-} from "@/app/protected/screenings/screenings-row-data";
+} from "@/app/protected/workspace/screenings-row-data";
 
 function csvCell(value: unknown): string {
   if (value === null || value === undefined) return "";

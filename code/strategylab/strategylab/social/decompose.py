@@ -6,9 +6,17 @@ the current price already pay for, and how much is each unpriced piece worth?**
     implied.py   the arithmetic — what revenue path the price requires
     analyst.py   the articulated views, and what their authors press on
     vote.py      where the price sits among them: endorsed vs rejected
-    case.py      what each rejected model assumes, checked against article bodies
+    narrative.py the propositions in circulation, each with its scored impact
     tools.py     non-news measurement, where any exists
     -> here      per driver: how much of it is in the price, and what it is worth
+    case.py      then investigates EACH driver this produces, one case per driver
+
+Note the order, because it was the other way round and the inversion is the
+point. `case.py` used to run first and reconstruct published analyst models,
+which this module consumed. That made the decomposition downstream of a
+firm-by-firm view and left the two outputs unjoinable — drivers keyed to
+assumptions, cases keyed to banks. The price is the vote, so the drivers come
+first and a case is now the evidence behind one of them.
 
 **Why the value of an unpriced driver is measurable at all.** The published
 models bracket the price. If a bank at $163 reaches that number largely on one
@@ -34,6 +42,8 @@ from __future__ import annotations
 import logging
 from dataclasses import asdict, dataclass, field
 
+from .tools import OBSERVABLE_COVERAGE
+
 log = logging.getLogger(__name__)
 
 SYSTEM = """You decompose a share price into what it already pays for and what it does not.
@@ -44,9 +54,14 @@ already in the price?**
 
 You are given: the business and its segments; the reverse-DCF path the price
 requires; the full spread of published analyst models with where the price sits
-among them; reconstructions of the models the price declines to pay for,
-including what each assumes and the evidence for and against; and a statement of
-which observables can actually be measured with the data available.
+among them; the propositions currently circulating in the news about this
+company, each with the signed market impact its coverage carried; and a
+statement of which observables can actually be measured with the data
+available.
+
+The circulating propositions are what the market has already been told, which by
+assumption is what the price has already absorbed. Use them to decide what is
+PRICED, never as evidence that something is TRUE.
 
 **Write for an intelligent non-specialist, not for a sell-side desk.** This is
 read on a public quote page. The reasoning must stay exact, but the language
@@ -91,6 +106,10 @@ For each driver, give:
    spread does not support.
  - BASIS: the specific evidence for the priced_in figure. Cite the arithmetic,
    the model spread, or a passage. An unsourced percentage is worthless here.
+ - OBSERVABLE: the kind of measurement that would settle this driver, chosen
+   from the observable kinds listed below and written with that exact key. Each
+   driver is investigated separately afterwards and the measurement is dispatched
+   off this key, so an invented one silently costs that driver its evidence.
  - TESTABLE: whether the supplied tool coverage can actually measure this
    driver's observable. Say false when it cannot; do not substitute a proxy.
 
@@ -139,7 +158,13 @@ SCHEMA = {
                     "value_if_true_pct": {"type": "number"},
                     "basis": {"type": "string"},
                     "testable": {"type": "boolean"},
-                    "observable": {"type": "string"},
+                    # Closed, not free text. `case.py` looks this key up in
+                    # tools.OBSERVABLE_COVERAGE to decide which series to run,
+                    # so a driver whose observable is invented gets no
+                    # measurement at all — silently, which is the worst way to
+                    # lose evidence.
+                    "observable": {"type": "string",
+                                   "enum": list(OBSERVABLE_COVERAGE)},
                 }}},
         "unpriced_total_pct": {"type": "number"},
         "confidence": {"type": "string", "enum": ["high", "medium", "low"]},
@@ -200,9 +225,16 @@ class Decomposition:
         return "\n".join(out)
 
 
-def build(business, implied_brief: str, vote, cases: list, tool_coverage: dict,
+def build(business, implied_brief: str, vote, claims: list, tool_coverage: dict,
           model: str | None = None, effort: str = "medium") -> Decomposition | None:
-    """Decompose the price into paid-for and not-paid-for."""
+    """Decompose the price into paid-for and not-paid-for.
+
+    `claims` are `narrative.Claim`s — the propositions in circulation with their
+    signed impact. They replaced a block of reconstructed analyst models, which
+    used to be this call's evidence. The models were a second description of the
+    same price keyed to firms; the claims are what the market has actually been
+    told, which is the thing the drivers are a decomposition OF.
+    """
     from .llm import available as _llm_available, complete_json
 
     ok, why = _llm_available()
@@ -210,21 +242,19 @@ def build(business, implied_brief: str, vote, cases: list, tool_coverage: dict,
         log.warning("decomposition skipped: %s", why)
         return None
 
-    case_block = "\n\n".join(
-        f"MODEL THE PRICE DECLINES — {c.firm} ${c.target:,.0f} "
-        f"({c.implied_move:+.0%}):\n"
-        f"  case: {c.case}\n  load-bearing: {c.load_bearing}\n"
-        f"  market's objection: {c.market_objection}\n"
-        f"  evidence for: {'; '.join(c.evidence_for[:3])}\n"
-        f"  evidence against: {'; '.join(c.evidence_against[:3])}\n"
-        f"  observable: {c.observable} [{c.data_source}]"
-        for c in cases)
+    top = sorted(claims, key=lambda c: -getattr(c, "weight", 0.0))[:24]
+    claim_block = ("PROPOSITIONS IN CIRCULATION (signed market impact, most "
+                   "weighted first):\n" +
+                   "\n".join(f"  [{c.impact:+.2f}] {c.published}  {c.text[:240]}"
+                             for c in top)) if top else (
+        "PROPOSITIONS IN CIRCULATION: none scored in the window — the coverage "
+        "is too thin to say what the market has been told.")
 
     cov = "\n".join(f"  {k}: {'MEASURABLE via ' + v['tool'] if v['testable'] else 'NOT MEASURABLE — ' + v['note']}"
                     for k, v in tool_coverage.items())
 
     user = (f"{business.brief()}\n\n{implied_brief}\n\n{vote.brief()}\n\n"
-            f"{case_block}\n\n"
+            f"{claim_block}\n\n"
             f"WHAT THE AVAILABLE DATA CAN AND CANNOT MEASURE:\n{cov}\n\n"
             f"Decompose the current price (write it as the token {{price}}, never "
             f"as a figure — it is ${vote.price:,.2f} today): which drivers does it already "

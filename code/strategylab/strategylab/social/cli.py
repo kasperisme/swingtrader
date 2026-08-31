@@ -504,13 +504,13 @@ def _as_of(args):
 
 
 def cmd_cases(args) -> int:
-    """The price-as-vote pipeline: whose model is the market declining to pay?
+    """The price-as-vote pipeline: what does this price pay for, and what is known?
 
-    Replaces LLM-invented counterfactuals with published ones. The generator
-    could not be original — its priors ARE consensus, which is why 12/12 of its
-    theses turned out to be already written up. Rejected analyst models do not
-    have that problem: each is a real model, by someone paid to hold it, that
-    the market has seen and declined.
+    The price is the vote. `implied.py` says what it arithmetically requires,
+    `vote.py` where it sits among the published models, `decompose.py` breaks it
+    into drivers, and `case.py` then investigates each driver — the scored
+    coverage on it, what the passages assert for and against, and whatever
+    non-news series is wired for its observable.
 
     The pipeline itself now lives in `batch.reconstruct`, so this command and
     the scheduled pass run the same code. What stays here is the printing.
@@ -528,9 +528,12 @@ def cmd_cases(args) -> int:
     out = OUTPUT_ROOT / "social" / T
     out.mkdir(parents=True, exist_ok=True)
     (out / "cases.json").write_text(json.dumps(payload, indent=1, default=str))
-    print("\nEach case is KNOWN (published) and NOT BELIEVED (the price declines "
-          "it). The decomposition bounds what each unpriced driver is worth using "
-          "the published model spread — it does not claim any of them will happen.")
+    print("\nEach case is the evidence behind ONE driver: how loudly the scored "
+          "coverage speaks to it (which is evidence of being PRICED, never of "
+          "being true), what the passages assert either way, and what the wired "
+          "series can measure — usually nothing, which is stated rather than "
+          "proxied. The decomposition bounds what each unpriced driver is worth "
+          "using the published model spread; it does not claim any will happen.")
     print(f"\nwrote {out / 'cases.json'}")
     return 0
 
@@ -812,11 +815,13 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--effort", default="medium")
     p.set_defaults(func=cmd_theses)
 
-    p = sub.add_parser("cases", help="price-as-vote: reconstruct rejected models")
+    p = sub.add_parser("cases", help="price-as-vote: decompose the price, then "
+                                     "investigate each driver")
     p.add_argument("ticker")
     p.add_argument("--lookback", type=int, default=180)
     p.add_argument("--claims", type=int, default=60)
-    p.add_argument("--top", type=int, default=3, help="how many rejected models")
+    p.add_argument("--top", type=int, default=6,
+                   help="how many drivers to investigate, least-priced first")
     p.add_argument("--passages", type=int, default=12)
     p.add_argument("--effort", default="medium")
     p.add_argument("--as-of", dest="as_of", default=None,
@@ -849,10 +854,15 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--due-days", dest="due_days", type=int, default=7)
     p.add_argument("--tickers", default="",
                    help="check: comma-separated symbols to check by hand")
+    # Both default to 0 — off. Eligibility is coverage only: enough published
+    # analyst models to make a distribution, and enough press to check them
+    # against. These stay for bounding an exploratory pass by hand.
     p.add_argument("--min-market-cap", dest="min_market_cap", type=int,
-                   default=universe.MIN_MARKET_CAP)
+                   default=universe.MIN_MARKET_CAP,
+                   help="off by default; size is not an eligibility test")
     p.add_argument("--min-price", dest="min_price", type=float,
-                   default=universe.MIN_PRICE)
+                   default=universe.MIN_PRICE,
+                   help="off by default; size is not an eligibility test")
     p.add_argument("--min-mentions", dest="min_mentions", type=int,
                    default=universe.MIN_MENTIONS_180D)
     p.set_defaults(func=cmd_universe)
@@ -864,7 +874,8 @@ def main(argv: list[str] | None = None) -> int:
                    help="skip names run more recently than this")
     p.add_argument("--tickers", default="",
                    help="run these symbols instead of taking the queue")
-    p.add_argument("--top", type=int, default=3)
+    p.add_argument("--top", type=int, default=6,
+                   help="how many drivers to investigate, least-priced first")
     p.add_argument("--effort", default="medium")
     p.add_argument("--stale-days", dest="stale_days", type=int,
                    default=batch.STALE_DAYS,

@@ -52,16 +52,48 @@ export async function getTickerImpactNews(
   symbol: string,
   opts: { days?: number; limit?: number; perBucket?: number } = {},
 ): Promise<ScoredNewsEvent[]> {
+  return (await getTickerImpactNewsResult(symbol, opts)).events;
+}
+
+/**
+ * The same read, but it says whether it actually succeeded.
+ *
+ * The plain version swallows every failure into an empty array, and on a
+ * heavily-covered ticker this RPC does sometimes trip the REST role's 8s
+ * statement timeout (`57014`) on a cold cache. Indistinguishable from "this
+ * company had no news" at the call site — so the quote page would prerender a
+ * catalyst-less copy of itself, cache it, and (now that indexability depends on
+ * having catalysts) ask Google not to index it. Callers that make decisions
+ * from emptiness must be able to tell the two apart and fail open.
+ */
+export async function getTickerImpactNewsResult(
+  symbol: string,
+  opts: { days?: number; limit?: number; perBucket?: number } = {},
+): Promise<{ ok: boolean; events: ScoredNewsEvent[] }> {
   const ticker = symbol.trim().toUpperCase();
-  if (!ticker) return [];
+  if (!ticker) return { ok: true, events: [] };
   const supabase = createServiceClient();
-  const { data, error } = await supabase.schema(SCHEMA).rpc("get_ticker_impact_news", {
+  const args = {
     p_ticker: ticker,
     p_days: clamp(opts.days ?? 365, 1, 400),
     p_limit: clamp(opts.limit ?? 150, 1, 400),
     p_per_bucket: clamp(opts.perBucket ?? 2, 1, 10),
-  });
-  if (error || !Array.isArray(data)) return [];
+  };
+
+  // One retry: the timeout is a cold-cache effect, and the second call on the
+  // same plan lands in well under a second.
+  let data: unknown = null;
+  let error: unknown = null;
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const res = await supabase.schema(SCHEMA).rpc("get_ticker_impact_news", args);
+    data = res.data;
+    error = res.error;
+    if (!error) break;
+  }
+  if (error || !Array.isArray(data)) {
+    if (error) console.warn("[quote/ticker-impact] RPC failed", ticker, error);
+    return { ok: false, events: [] };
+  }
 
   const events: ScoredNewsEvent[] = [];
   for (const row of data as Record<string, unknown>[]) {
@@ -83,5 +115,5 @@ export async function getTickerImpactNews(
       topDimensions: topDimsFrom(row.top_dimensions),
     });
   }
-  return events;
+  return { ok: true, events };
 }

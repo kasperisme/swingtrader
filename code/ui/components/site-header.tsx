@@ -8,6 +8,7 @@ import { SiteHeaderDesktopAuthedNav } from "@/components/site-header-desktop-aut
 import { CavemanToggle } from "@/components/caveman-toggle";
 import { HelpChatTrigger } from "@/components/help-chat";
 import { SiteHeaderPublicNav } from "@/components/site-header-public-nav";
+import { SiteHeaderNavDismiss } from "@/components/site-header-nav-dismiss";
 
 function Logo() {
   return (
@@ -31,6 +32,7 @@ const navLinkClass =
 function HeaderShell({ children }: { children: React.ReactNode }) {
   return (
     <header className="site-header sticky top-0 z-50 px-4 pt-4 pb-2">
+      <SiteHeaderNavDismiss />
       <div className="mx-auto flex h-14 w-full max-w-7xl items-center justify-between rounded-2xl border border-border bg-background/80 px-4 shadow-lg backdrop-blur-md lg:px-6">
         {children}
       </div>

@@ -1,6 +1,19 @@
 import { TrendingDown, TrendingUp, Minus } from "lucide-react";
-import type { PricedInVote } from "@/lib/quote/priced-in";
-import { injectPrice, STALE_AFTER_DAYS } from "@/lib/quote/priced-in";
+// From the client-safe half, not `priced-in.ts`: this panel is rendered from
+// the workspace's client-side tab switcher as well as from the quote page.
+import type { PricedInVote } from "@/lib/quote/priced-in-vote";
+import { injectPrice, STALE_AFTER_DAYS } from "@/lib/quote/priced-in-vote";
+import {
+  hasClaimByClaim,
+  PricedInClaimByClaim,
+  PricedInDeclines,
+} from "./priced-in-deep-dive";
+import {
+  MembersClaimByClaimSlot,
+  MembersDeclinesSlot,
+  PricedInMembersProvider,
+} from "./priced-in-members";
+import { FIELD_LABEL, money, PartsColumn, SECTION_LABEL } from "./priced-in-ui";
 
 /**
  * Where the price sits among the analyst models published about a company.
@@ -17,67 +30,14 @@ import { injectPrice, STALE_AFTER_DAYS } from "@/lib/quote/priced-in";
  * What IS shown is arithmetic on other people's published targets: the spread,
  * the median, and where the market is actually paying relative to both. No model
  * judgement anywhere in it.
+ *
+ * On the public quote page (`membersOnly`) the panel stops after "The price pays
+ * for": what the price declines to pay for and the claim-by-claim evidence
+ * underneath it are fetched by `PricedInMembersProvider` for a signed-in reader
+ * and never rendered here, so the markup does not ship to anyone else. Inside
+ * the workspace, where the reader is already signed in, the same components
+ * render inline.
  */
-
-/**
- * How much of an assumption the price already reflects, as an ORDINAL band.
- *
- * Bands rather than the raw percentage, for two reasons that happen to agree.
- * Design: a bare "15%" next to a "70%" invites a precision the reader cannot
- * act on. Honesty: the underlying figure is an unvalidated estimate — two
- * attempts to validate it failed — so a decimal asserts more than the number
- * can carry. A four-step band says what it knows and no more.
- *
- * Encoded as a SEQUENTIAL one-hue ramp (amber, dark→light), not a
- * red/green diverging scale: this is magnitude, not polarity. "Unpriced" is
- * not good and "fully priced" is not bad — the ramp marks where there is
- * something left to find, so intensity fades to a plain neutral once the price
- * already reflects it.
- *
- * The steps are validated, not eyeballed — one hue (21 deg spread), monotone
- * lightness, adjacent gaps >= 0.06 L, and the lightest step clears 2:1 against
- * the surface in both modes.
- *
- * Colour is never the only channel: every band ships its own word. WCAG 1.4.1,
- * and it is also what makes the column scannable in greyscale.
- */
-type Band = { label: string; dot: string; text: string };
-
-function band(pricedInPct: number): Band {
-  if (pricedInPct <= 25)
-    return {
-      label: "Unpriced",
-      dot: "bg-[#b45309] dark:bg-[#fbbf24]",
-      text: "text-[#b45309] dark:text-[#fbbf24]",
-    };
-  if (pricedInPct <= 55)
-    return {
-      label: "Partly priced",
-      dot: "bg-[#d97706] dark:bg-[#f59e0b]",
-      text: "text-[#d97706] dark:text-[#f59e0b]",
-    };
-  if (pricedInPct <= 84)
-    return {
-      label: "Mostly priced",
-      dot: "bg-[#f59e0b] dark:bg-[#d97706]",
-      text: "text-muted-foreground",
-    };
-  // Fully priced sits outside the ramp on purpose: the market already reflects
-  // it, so there is nothing here to draw the eye to.
-  return {
-    label: "Fully priced",
-    dot: "bg-muted-foreground/40",
-    text: "text-muted-foreground",
-  };
-}
-
-function money(n: number): string {
-  return new Intl.NumberFormat(undefined, {
-    style: "currency",
-    currency: "USD",
-    maximumFractionDigits: n >= 100 ? 0 : 2,
-  }).format(n);
-}
 
 /** Position along the low..high axis, clamped so a marker never leaves the rail. */
 function pct(value: number, low: number, high: number): number {
@@ -85,12 +45,46 @@ function pct(value: number, low: number, high: number): number {
   return Math.max(2, Math.min(98, ((value - low) / (high - low)) * 100));
 }
 
+/**
+ * Nudge overlapping label positions apart, keeping their order.
+ *
+ * Two reconstructed models often publish targets a couple of dollars apart, and
+ * two numbered chips stacked on the same pixel read as one. The chips move; the
+ * hairline ticks ON the rail stay at the true position, so the exact figure is
+ * never distorted — only its label is.
+ */
+function spreadOut(positions: number[], gap = 7): number[] {
+  const order = positions
+    .map((x, i) => ({ x, i }))
+    .sort((a, b) => a.x - b.x);
+  for (let k = 1; k < order.length; k++) {
+    if (order[k].x - order[k - 1].x < gap) order[k].x = order[k - 1].x + gap;
+  }
+  // The forward pass can push the last chip off the rail; walk back from the
+  // right edge so the crowding is absorbed on the side with room.
+  for (let k = order.length - 1; k >= 0; k--) {
+    order[k].x = Math.min(98, order[k].x);
+    if (k > 0 && order[k].x - order[k - 1].x < gap) {
+      order[k - 1].x = Math.max(2, order[k].x - gap);
+    }
+  }
+  const out = positions.slice();
+  for (const o of order) out[o.i] = o.x;
+  return out;
+}
+
 export function PricedInPanel({
   vote,
   livePrice,
+  membersOnly = false,
 }: {
   vote: PricedInVote;
   livePrice: number | null;
+  /**
+   * Put everything after "The price pays for" behind the account wall. Set on
+   * the public quote page; left off inside the signed-in workspace.
+   */
+  membersOnly?: boolean;
 }) {
   const { low, high, median, priceAtAsOf } = vote;
   const anchor = priceAtAsOf ?? median;
@@ -103,6 +97,14 @@ export function PricedInPanel({
     livePrice != null && priceAtAsOf != null && priceAtAsOf > 0
       ? livePrice / priceAtAsOf - 1
       : null;
+
+  // LEGACY rows only. Where each reconstructed analyst model sits on the rail:
+  // the tick is exact, and the numbered chip above it may be nudged aside but
+  // carries the number that matches its card below. `priced-in/3` rows have no
+  // analyst cases, so the rail is just the distribution again.
+  const analystCases = vote.analystCases;
+  const caseTicks = analystCases.map((c) => pct(c.target, low, high));
+  const caseChips = spreadOut(caseTicks);
 
   const gap = vote.medianGap;
   const leanIcon =
@@ -117,7 +119,7 @@ export function PricedInPanel({
           ? `${Math.abs(gap * 100).toFixed(0)}% below the median target — more cautious than the analysts`
           : `${(gap * 100).toFixed(0)}% above the median target — more optimistic than the analysts`;
 
-  return (
+  const body = (
     <div className="rounded-xl border border-border bg-card p-4">
       <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
         <p className="text-sm text-foreground">
@@ -133,9 +135,32 @@ export function PricedInPanel({
         </p>
       </div>
 
-      {/* Distribution rail: low ─── median ─── high, with the price marked. */}
+      {/* Distribution rail: low ─── median ─── high, with the price marked,
+          and the reconstructed models numbered against it. */}
       <div className="mt-5 mb-2">
+        {analystCases.length > 0 && (
+          <div className="relative mb-1.5 h-[18px]">
+            {caseChips.map((x, i) => (
+              <span
+                key={i}
+                className="absolute top-0 flex h-[18px] w-[18px] -translate-x-1/2 items-center justify-center rounded-full border border-border bg-card font-mono text-[10px] tabular-nums text-muted-foreground"
+                style={{ left: `${x}%` }}
+                aria-hidden
+              >
+                {i + 1}
+              </span>
+            ))}
+          </div>
+        )}
         <div className="relative h-2 rounded-full bg-muted">
+          {caseTicks.map((x, i) => (
+            <div
+              key={i}
+              className="absolute top-0 h-2 w-px bg-foreground/40"
+              style={{ left: `${x}%` }}
+              aria-hidden
+            />
+          ))}
           <div
             className="absolute -top-1 h-4 w-px bg-muted-foreground/50"
             style={{ left: `${pct(median, low, high)}%` }}
@@ -202,7 +227,7 @@ export function PricedInPanel({
 
       {(vote.parts || vote.summary) && (
         <div className="mt-4 border-t border-border pt-4">
-          <p className="mb-2 text-[11px] uppercase tracking-wide text-muted-foreground">
+          <p className={`mb-2 ${SECTION_LABEL}`}>
             The reconstruction
           </p>
 
@@ -219,43 +244,35 @@ export function PricedInPanel({
               that is true this line is the whole disagreement, and reading it
               after two columns of bullets buries the finding. */}
           {vote.parts?.crux && (
-            <div className="mt-4 rounded-lg border border-border bg-muted/40 p-3">
-              <p className="mb-1 text-[11px] font-medium uppercase tracking-wide text-foreground/70">
+            <div className="mt-4 border-l-2 border-border pl-3">
+              <p className={`mb-1 ${FIELD_LABEL}`}>
                 What the disagreement turns on
               </p>
-              <p className="max-w-[74ch] text-pretty text-[13px] leading-relaxed text-foreground">
+              <p className="max-w-[74ch] text-pretty text-sm leading-relaxed text-foreground">
                 {injectPrice(vote.parts.crux, livePrice ?? priceAtAsOf)}
               </p>
             </div>
           )}
 
+          {/* The wall starts inside this grid: what the price pays for is free,
+              the column beside it is not. The presence of each column is known
+              from the row itself, so the layout is decided here even when the
+              text on the right is fetched later. */}
           {(vote.parts?.paysFor?.length || vote.parts?.declines?.length) && (
             <div className="mt-4 grid gap-4 sm:grid-cols-2">
-              {[
-                { label: "The price pays for", items: vote.parts?.paysFor ?? [] },
-                { label: "It declines to pay for", items: vote.parts?.declines ?? [] },
-              ]
-                .filter((c) => c.items.length > 0)
-                .map((col) => (
-                  <div key={col.label}>
-                    <p className="mb-1.5 text-[11px] uppercase tracking-wide text-muted-foreground">
-                      {col.label}
-                    </p>
-                    <ul className="flex flex-col gap-1.5">
-                      {col.items.map((item, i) => (
-                        <li
-                          key={i}
-                          className="flex gap-2 text-[13px] leading-snug text-foreground/90"
-                        >
-                          <span
-                            className="mt-[7px] h-1 w-1 shrink-0 rounded-full bg-muted-foreground/50"
-                            aria-hidden
-                          />
-                          <span>{injectPrice(item, livePrice ?? priceAtAsOf)}</span>
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
+              <PartsColumn
+                label="The price pays for"
+                items={vote.parts?.paysFor ?? []}
+                price={livePrice ?? priceAtAsOf}
+              />
+              {(vote.parts?.declines?.length ?? 0) > 0 &&
+                (membersOnly ? (
+                  <MembersDeclinesSlot price={livePrice ?? priceAtAsOf} />
+                ) : (
+                  <PricedInDeclines
+                    vote={vote}
+                    price={livePrice ?? priceAtAsOf}
+                  />
                 ))}
             </div>
           )}
@@ -275,78 +292,20 @@ export function PricedInPanel({
         </div>
       )}
 
-      {vote.drivers.length > 0 && (
-        <div className="mt-4 border-t border-border pt-4">
-          <p className="mb-1 text-[11px] uppercase tracking-wide text-muted-foreground">
-            Assumption by assumption
-          </p>
-
-          {/* The percentages are estimates and have failed two validation
-              attempts; the ORDER and the "can anything measure this" flag are
-              the parts that carry weight. Said once here rather than repeated
-              per row. */}
-          <p className="mb-2 max-w-[78ch] text-[11px] leading-relaxed text-muted-foreground">
-            How much of each assumption the price appears to reflect, least
-            reflected first — the top of this list is where the price is not
-            paying for something. These
-            bands are estimates, not measurements — two attempts to validate
-            them have failed and a third is unresolved until Dec 2026. Read the
-            ordering and the evidence, not the shade.
-          </p>
-          <ul className="mb-4 flex flex-wrap items-center gap-x-4 gap-y-1.5 text-[11px] text-muted-foreground">
-            {[0, 40, 70, 95].map((v) => {
-              const b = band(v);
-              return (
-                <li key={b.label} className="flex items-center gap-1.5">
-                  <span className={`h-2 w-2 rounded-full ${b.dot}`} aria-hidden />
-                  {b.label}
-                </li>
-              );
-            })}
-          </ul>
-          <ul className="grid gap-x-8 gap-y-4 lg:grid-cols-2">
-            {vote.drivers.map((d, i) => {
-              const b = band(d.pricedInPct);
-              return (
-                <li key={`${i}-${d.driver.slice(0, 24)}`} className="flex gap-3">
-                  <span
-                    className={`mt-[7px] h-2 w-2 shrink-0 rounded-full ${b.dot}`}
-                    aria-hidden
-                  />
-                  <div className="min-w-0 flex-1">
-                    <p className="text-sm leading-snug text-foreground">
-                      {d.driver}
-                    </p>
-                    <p className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px]">
-                      <span className={`font-medium ${b.text}`}>{b.label}</span>
-                      {d.valueIfTruePct != null && Math.abs(d.valueIfTruePct) >= 1 && (
-                        <>
-                          <span className="text-muted-foreground/50">·</span>
-                          <span className="font-mono tabular-nums text-muted-foreground">
-                            worth {d.valueIfTruePct > 0 ? "+" : ""}
-                            {d.valueIfTruePct.toFixed(0)}% if it lands
-                          </span>
-                        </>
-                      )}
-                      {!d.testable && (
-                        <>
-                          <span className="text-muted-foreground/50">·</span>
-                          <span className="text-muted-foreground">not measurable</span>
-                        </>
-                      )}
-                    </p>
-                    {d.basis && (
-                      <p className="mt-1 text-[11px] leading-relaxed text-muted-foreground">
-                        {d.basis}
-                      </p>
-                    )}
-                  </div>
-                </li>
-              );
-            })}
-          </ul>
-        </div>
-      )}
+      {hasClaimByClaim(vote) &&
+        (membersOnly ? (
+          <MembersClaimByClaimSlot
+            symbol={vote.ticker}
+            price={livePrice ?? priceAtAsOf}
+            priceAtAsOf={priceAtAsOf}
+          />
+        ) : (
+          <PricedInClaimByClaim
+            vote={vote}
+            price={livePrice ?? priceAtAsOf}
+            priceAtAsOf={priceAtAsOf}
+          />
+        ))}
 
       {(stale || (drift != null && Math.abs(drift) >= 0.05)) && (
         <p className="mt-3 border-t border-border pt-3 text-xs text-muted-foreground">
@@ -365,5 +324,13 @@ export function PricedInPanel({
         </p>
       )}
     </div>
+  );
+
+  // One provider around the whole panel, not one per slot: the wall has two
+  // openings in different places and they should cost a single round trip.
+  return membersOnly ? (
+    <PricedInMembersProvider symbol={vote.ticker}>{body}</PricedInMembersProvider>
+  ) : (
+    body
   );
 }

@@ -1,5 +1,32 @@
 import "server-only";
 import { createServiceClient } from "@/lib/supabase/service";
+import type { PricedInSource, PricedInVote } from "./priced-in-vote";
+import {
+  num,
+  parseAnalystCases,
+  parseDrivers,
+  parseParts,
+} from "./priced-in-vote";
+
+// The vote's shape and its formatting helpers live in a client-safe module now;
+// re-exported here so `getPricedInVote`'s callers still get everything from one
+// import.
+export {
+  caseVerdict,
+  injectPrice,
+  STALE_AFTER_DAYS,
+  verdictReason,
+  parseAnalystCases,
+  parseDrivers,
+  parseParts,
+  type CaseVerdict,
+  type PricedInAnalystCase,
+  type PricedInDriverCase,
+  type PricedInDriver,
+  type PricedInParts,
+  type PricedInStance,
+  type PricedInVote,
+} from "./priced-in-vote";
 
 /**
  * Where a stock's price sits among the analyst models published about it.
@@ -27,151 +54,9 @@ import { createServiceClient } from "@/lib/supabase/service";
  * where it would read as analysis.
  */
 
-/**
- * Substitute the `{price}` token the generator writes in place of a literal
- * share price. Baking the price into prose makes it wrong the next day, and it
- * is the one figure already shown accurately elsewhere on the page.
- */
-export function injectPrice(text: string, price: number | null): string {
-  if (!text.includes("{price}")) return text;
-  const shown =
-    price != null && Number.isFinite(price)
-      ? new Intl.NumberFormat(undefined, {
-          style: "currency",
-          currency: "USD",
-          maximumFractionDigits: price >= 100 ? 0 : 2,
-        }).format(price)
-      : "the current price";
-  return text.replaceAll("{price}", shown);
-}
-
-export type PricedInDriver = {
-  /** The assumption itself — what the price does or does not underwrite. */
-  driver: string;
-  segment: string | null;
-  /**
-   * 0-100. How much of this driver's plausible value the price already
-   * reflects. THIS IS AN UNVALIDATED ESTIMATE — see the note on the type below.
-   */
-  pricedInPct: number;
-  /** What it is worth as a % of price if it proves out, bounded by the model spread. */
-  valueIfTruePct: number | null;
-  /** The evidence the estimate rests on — a number from the arithmetic or a passage. */
-  basis: string | null;
-  /** Whether any wired data source can actually settle it. Often false. */
-  testable: boolean;
-  observable: string | null;
-};
-
-export type PricedInParts = {
-  /** One sentence: where the price sits versus the published models. */
-  position: string | null;
-  paysFor: string[];
-  declines: string[];
-  /** The single investigable question, and whether anything wired settles it. */
-  crux: string | null;
-};
-
-export type PricedInVote = {
-  ticker: string;
-  /** Date the reconstruction was computed — NOT necessarily today. */
-  asOf: string;
-  /** The price it was computed at. Compare with the live quote before trusting it. */
-  priceAtAsOf: number | null;
-  nTargets: number;
-  low: number;
-  high: number;
-  median: number;
-  /** priceAtAsOf / median - 1. Negative = the market pays below the median model. */
-  medianGap: number | null;
-  /** Published models implying >= +15% that the price declines to pay. */
-  nContestedBull: number;
-  /** Published models implying <= -15% that the price declines to accept. */
-  nContestedBear: number;
-  /** Models within +/-8% of the price — what it is roughly paying. */
-  nEndorsed: number;
-  /** Days between asOf and now. The panel says so when this is large. */
-  ageDays: number;
-  /**
-   * The written reconstruction: what the price pays for, what it declines, and
-   * which of the open questions can actually be measured. Grounded in the
-   * arithmetic above and in the published models — but written by a language
-   * model, so the panel attributes it rather than presenting it as house view.
-   */
-  summary: string | null;
-  /** The same reconstruction split into its four parts, when the row has them. */
-  parts: PricedInParts | null;
-  /**
-   * Per-assumption estimates of how much the price already reflects.
-   *
-   * These are the JUDGED tier and they are unvalidated — not merely untested.
-   * Two attempts to validate them failed: implied-CAGR as a signal came back
-   * negative over 188 observations, and testing the percentages against the
-   * size of the price reaction when matching news arrived produced a
-   * correlation that changed sign across parameter settings and sat inside its
-   * own placebo null. A third test — locked forward predictions — is open and
-   * does not resolve until Dec 2026.
-   *
-   * They are exposed because the structure (which assumptions, and which of
-   * them anything can measure) is useful even where the percentage is not. The
-   * UI must carry that distinction; see `priced-in-panel.tsx`.
-   */
-  drivers: PricedInDriver[];
-};
-
 const SCHEMA = "swingtrader";
 /** Past this, the reconstruction describes a different price than today's. */
-export const STALE_AFTER_DAYS = 45;
 
-function strList(v: unknown): string[] {
-  return Array.isArray(v)
-    ? v.filter((x): x is string => typeof x === "string" && x.trim().length > 0)
-    : [];
-}
-
-/** Null when the row predates the structured summary, so the UI can fall back. */
-function parseParts(raw: unknown): PricedInParts | null {
-  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
-  const d = raw as Record<string, unknown>;
-  const position = typeof d.position === "string" ? d.position.trim() : "";
-  const crux = typeof d.crux === "string" ? d.crux.trim() : "";
-  const paysFor = strList(d.pays_for);
-  const declines = strList(d.declines);
-  if (!position && !crux && !paysFor.length && !declines.length) return null;
-  return { position: position || null, paysFor, declines, crux: crux || null };
-}
-
-/** Tolerant of a missing or malformed array — a bad row yields no drivers, not a crash. */
-function parseDrivers(raw: unknown): PricedInDriver[] {
-  if (!Array.isArray(raw)) return [];
-  const out: PricedInDriver[] = [];
-  for (const item of raw) {
-    if (!item || typeof item !== "object") continue;
-    const d = item as Record<string, unknown>;
-    const label = typeof d.driver === "string" ? d.driver.trim() : "";
-    const pct = num(d.priced_in_pct);
-    if (!label || pct == null) continue;
-    out.push({
-      driver: label,
-      segment: typeof d.segment === "string" && d.segment.trim() ? d.segment.trim() : null,
-      pricedInPct: Math.max(0, Math.min(100, pct)),
-      valueIfTruePct: num(d.value_if_true_pct),
-      basis: typeof d.basis === "string" && d.basis.trim() ? d.basis.trim() : null,
-      testable: d.testable === true,
-      observable:
-        typeof d.observable === "string" && d.observable.trim()
-          ? d.observable.trim()
-          : null,
-    });
-  }
-  // Least-priced first: what the price does NOT reflect is the end worth reading.
-  return out.sort((a, b) => a.pricedInPct - b.pricedInPct);
-}
-
-function num(v: unknown): number | null {
-  const n = Number(v);
-  return Number.isFinite(n) ? n : null;
-}
 
 /**
  * Latest published reconstruction for a ticker, or null.
@@ -194,7 +79,7 @@ export async function getPricedInVote(
     .select(
       "ticker, as_of, price, n_targets, target_low, target_high, target_median, " +
         "median_gap, n_rejected_bull, n_rejected_bear, n_endorsed, summary, " +
-        "summary_json, drivers_json, published",
+        "summary_json, drivers_json, cases_json, published",
     )
     .eq("ticker", ticker)
     .eq("published", true)
@@ -236,6 +121,13 @@ export async function getPricedInVote(
     Math.round((Date.now() - new Date(asOf + "T00:00:00Z").getTime()) / 86_400_000),
   );
 
+  const drivers = parseDrivers(row.drivers_json, row.cases_json);
+  const analystCases = parseAnalystCases(row.cases_json);
+  await linkSources(supabase, [
+    ...drivers.flatMap((d) => d.case?.sources ?? []),
+    ...analystCases.flatMap((c) => c.sources),
+  ]);
+
   return {
     ticker: String(row.ticker),
     asOf,
@@ -252,7 +144,54 @@ export async function getPricedInVote(
     summary: typeof row.summary === "string" && row.summary.trim()
       ? row.summary.trim()
       : null,
-    drivers: parseDrivers(row.drivers_json),
+    drivers,
     parts: parseParts(row.summary_json),
+    analystCases,
   };
+}
+
+/**
+ * Fill in the slugs for cited headlines that were stored without one.
+ *
+ * The generator carries `{title, slug}` from `priced-in/3` onward, but every
+ * row written before that stored a bare title — and those are the rows on the
+ * page until the batch comes round again, which for the full universe is about
+ * a week. Rather than migrate the stored JSON, the titles are resolved here in
+ * one query, so a citation becomes a link the moment this ships.
+ *
+ * Mutates in place, deliberately: the sources are already the objects the
+ * caller is about to return, and rebuilding the driver tree to attach six
+ * strings would be a lot of copying for nothing.
+ *
+ * Best-effort throughout. A title that does not resolve keeps `slug: null` and
+ * renders as plain text, which is the same outcome as before this existed.
+ */
+async function linkSources(
+  supabase: ReturnType<typeof createServiceClient>,
+  sources: PricedInSource[],
+): Promise<void> {
+  const missing = sources.filter((s) => !s.slug);
+  if (missing.length === 0) return;
+  const titles = [...new Set(missing.map((s) => s.title))];
+
+  const { data, error } = await supabase
+    .schema(SCHEMA)
+    .from("news_articles")
+    .select("title, slug")
+    .in("title", titles);
+
+  if (error) {
+    // A citation that does not link is a smaller failure than a quote page
+    // that does not render, so this never throws.
+    console.error("[priced-in] source slug lookup failed:", error);
+    return;
+  }
+
+  const bySlug = new Map<string, string>();
+  for (const r of (data ?? []) as { title: string | null; slug: string | null }[]) {
+    // First wins: syndicated copies share a title, and any of them is the
+    // article the reader wants.
+    if (r.title && r.slug && !bySlug.has(r.title)) bySlug.set(r.title, r.slug);
+  }
+  for (const s of missing) s.slug = bySlug.get(s.title) ?? null;
 }

@@ -38,8 +38,8 @@ import {
   type ScreeningsFilters,
   DEFAULT_SCREENINGS_FILTERS,
   countScreeningsFilterRules,
-} from "@/app/protected/screenings/screenings-filters-model";
-import { ScreeningsFilterBar, AddFilterWidget } from "@/app/protected/screenings/screenings-filter-bar";
+} from "@/app/protected/workspace/screenings-filters-model";
+import { ScreeningsFilterBar, AddFilterWidget } from "@/app/protected/workspace/screenings-filter-bar";
 import {
   collectAllRowDataKeys,
   orderedDataColumnKeys,
@@ -47,8 +47,8 @@ import {
   inferNumericFilterKeys,
   uniqueStringValuesForKey,
   MAX_CATEGORICAL_STRING_OPTIONS,
-} from "@/app/protected/screenings/screenings-row-data";
-import { applyRowDataFilters } from "@/app/protected/screenings/apply-row-data-filters";
+} from "@/app/protected/workspace/screenings-row-data";
+import { applyRowDataFilters } from "@/app/protected/workspace/apply-row-data-filters";
 
 type Props = {
   screenings: ScheduledScreening[];

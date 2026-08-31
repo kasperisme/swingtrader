@@ -206,7 +206,7 @@ def set_published(publisher, priced_in_id: int) -> None:
 
 # ----------------------------------------------------------------------
 def reconstruct(ticker: str, *, lookback: int = 180, claims: int = 60,
-                top: int = 3, passages: int = 12, effort: str = "medium",
+                top: int = 6, passages: int = 12, effort: str = "medium",
                 as_of: date | None = None, emit=None) -> dict:
     """The `cases` pipeline as a function. Returns the payload it would write.
 
@@ -223,7 +223,7 @@ def reconstruct(ticker: str, *, lookback: int = 180, claims: int = 60,
     from .implied import fetch_financials, implied
     from .narrative import narrative
     from .saturation import NarrativeSpace
-    from .tools import coverage_report
+    from .tools import OBSERVABLE_COVERAGE, coverage_report
     from .vote import build as vote_build
 
     say = emit or (lambda *_a, **_k: None)
@@ -264,62 +264,63 @@ def reconstruct(ticker: str, *, lookback: int = 180, claims: int = 60,
     say(f"\ncorpus: {getattr(space, 'n_articles', 0)} articles, "
         f"{len(space.chunks)} usable body chunks")
 
-    # Pick across STANCES, not just by size of move. Ranking Crocs' rejected set
-    # by |implied move| returned two bulls making substantially the same
-    # re-rating argument and skipped the bear entirely. The bear is not a weaker
-    # version of the same idea; it is the mirror trade, and where the bull and
-    # bear disagree is the crux worth testing.
-    bulls = sorted([p for p in vote.rejected if p.stance == "rejected_bull"],
-                   key=lambda p: -p.implied_move)
-    bears = sorted([p for p in vote.rejected if p.stance == "rejected_bear"],
-                   key=lambda p: p.implied_move)
-    picks, seen = [], set()
-    for grp in (bulls[:1], bears[:1]):
-        for p_ in grp:
-            picks.append(p_)
-            seen.add((p_.firm, p_.target))
-    for p_ in sorted(vote.rejected, key=lambda x: -abs(x.implied_move)):
-        if len(picks) >= top:
-            break
-        if (p_.firm, p_.target) not in seen:
-            picks.append(p_)
-            seen.add((p_.firm, p_.target))
-    picks = picks[:top]
-    # The CONSENSUS model leads: the rejected ones say what the price is NOT
-    # paying for; the endorsed one says what it IS.
-    cons = vote.consensus_position
-    if cons is not None:
-        picks = [cons] + picks
-    n_b = sum(1 for p_ in picks if p_.stance == "rejected_bull")
-    n_e = sum(1 for p_ in picks if p_.stance in ("endorsed", "neutral"))
-    say(f"\npicked {n_e} consensus / {n_b} bull / {len(picks)-n_b-n_e} bear  "
-        f"(from {len(vote.endorsed)} endorsed, {len(bulls)} rejected bull, "
-        f"{len(bears)} rejected bear)")
-    say(f"\nreconstructing the {len(picks)} most-rejected model(s) against the "
-        f"corpus...\n")
+    # The decomposition runs FIRST now, and the cases are built from what it
+    # produces. It used to be the other way round: a handful of published models
+    # were reconstructed and the decomposition consumed them. That put a
+    # firm-by-firm view upstream of the drivers and left the two unjoinable —
+    # drivers keyed to assumptions, cases keyed to banks, and across the
+    # published set only 6% of rows even had one of each that lined up. The
+    # price is the vote; the drivers are what it decomposes into; a case is the
+    # evidence behind one driver.
+    #
+    # The whole coverage map goes in, not the subset some earlier stage happened
+    # to name. The decomposer picks each driver's observable from these keys, and
+    # knowing up front which are reachable is what makes `testable` a fact rather
+    # than a guess.
+    cov = {k: coverage_report(k) for k in OBSERVABLE_COVERAGE}
+    own_claims = [c for c in sorted(n.claims, key=lambda c: -c.weight)
+                  if c.ticker == T]
 
-    cases = []
-    for pos in picks:
-        c = case_build(pos, space, bp, imp.brief(), k=passages, effort=effort)
-        cases.append(c)
-        say("=" * 78)
-        say(c.brief())
-        if c.sources:
-            say(f"   sources        {', '.join(s[:46] for s in c.sources[:3])}")
-        say("")
-
-    kinds = sorted({c.data_source for c in cases if c.data_source})
-    cov = {k: coverage_report(k) for k in kinds} or {
-        "consumer_attention": coverage_report("consumer_attention")}
-    dec = decompose_build(bp, imp.brief(), vote, cases, cov, effort=effort)
+    say(f"\ndecomposing the price against {len(own_claims)} circulating "
+        f"claims...\n")
+    dec = decompose_build(bp, imp.brief(), vote, own_claims, cov, effort=effort)
     if dec:
         say("=" * 78)
         say(dec.brief())
         say("=" * 78)
+    if not dec:
+        return {"implied": imp.to_dict(), "vote": vote.to_dict(), "cases": [],
+                "decomposition": None, "tool_coverage": cov,
+                "as_of": (as_of or date.today()).isoformat()}
+
+    # Least-priced first, so a cap drops the fully-priced drivers rather than the
+    # ones with something left to find. `top` bounds the LLM calls; every driver
+    # above it still ships, just without a case behind it.
+    order = sorted(range(len(dec.drivers)),
+                   key=lambda i: dec.drivers[i].get("priced_in_pct", 100))
+    brand = (brands[0] if brands else bp.company or T)
+    say(f"\ninvestigating {min(top, len(order))} of {len(dec.drivers)} "
+        f"drivers against the corpus and the wired series...\n")
+
+    cases = []
+    for i in order[:top]:
+        c = case_build(dec.drivers[i], i, space, bp, imp.brief(), vote,
+                       own_claims, k=passages, effort=effort, entity=brand)
+        cases.append(c)
+        say("=" * 78)
+        say(c.brief())
+        if c.sources:
+            say("   sources        "
+                + ", ".join(str(x.get("title", ""))[:46] for x in c.sources[:3]))
+        say("")
+
+    # Back into driver order, so the array reads the same way as `drivers_json`
+    # and a reader pairing them by eye is not fighting the ordering.
+    cases.sort(key=lambda c: c.driver_index)
 
     return {"implied": imp.to_dict(), "vote": vote.to_dict(),
             "cases": [c.to_dict() for c in cases],
-            "decomposition": dec.to_dict() if dec else None,
+            "decomposition": dec.to_dict(),
             "tool_coverage": cov,
             "as_of": (as_of or date.today()).isoformat()}
 
@@ -349,7 +350,7 @@ def _entities_for(ticker: str, net: dict) -> list[str]:
 
 # ----------------------------------------------------------------------
 def run_ticker(publisher, ticker: str, *, effort: str = "medium",
-               top: int = 3, lookback: int = 180, passages: int = 12,
+               top: int = 6, lookback: int = 180, passages: int = 12,
                publish: bool = True, stale_days: int = STALE_DAYS,
                predict: bool = False, horizon: int = 120,
                ledger=None, write_disk: bool = True,
@@ -459,7 +460,7 @@ def _register_predictions(ledger, ticker: str, dec: dict, price, *,
 # ----------------------------------------------------------------------
 def run_batch(publisher, *, limit: int = 25, due_days: int = 7,
               symbols: list[str] | None = None, effort: str = "medium",
-              top: int = 3, publish: bool = True, stale_days: int = STALE_DAYS,
+              top: int = 6, publish: bool = True, stale_days: int = STALE_DAYS,
               predict: bool = False, horizon: int = 120,
               max_seconds: float | None = None, dry_run: bool = False,
               verbose: bool = False, emit=print) -> dict:

@@ -2,13 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import {
-  Loader2,
-  ArrowRight,
-  TrendingUp,
-  BarChart3,
-  Network,
-} from "lucide-react";
+import { Loader2 } from "lucide-react";
 import { buildPortfolioFromTrades, type PortfolioPosition } from "@/app/protected/trades/portfolio-from-trades";
 import { fmpGetQuote } from "@/app/actions/fmp";
 import { PortfolioValueChart } from "./portfolio-value-chart";
@@ -135,7 +129,6 @@ function PortfolioTable({ trades }: { trades: UserTradeRow[] }) {
   if (positions.length === 0) {
     return (
       <div className="border-b border-border pb-4">
-        <p className="text-xs font-semibold uppercase tracking-widest text-muted-foreground/50 mb-1">Portfolio</p>
         <p className="text-sm text-muted-foreground">
           No open positions.{" "}
           <Link href="/protected/trades" className="text-foreground underline underline-offset-4 hover:text-amber-500 transition-colors">
@@ -152,15 +145,12 @@ function PortfolioTable({ trades }: { trades: UserTradeRow[] }) {
 
   return (
     <div className="space-y-2">
-      <div className="flex items-center justify-between">
-        <p className="text-xs font-semibold uppercase tracking-widest text-muted-foreground/50">Portfolio</p>
-        {marksLoading && (
-          <span className="inline-flex items-center gap-1 text-xs text-muted-foreground/50">
-            <Loader2 className="h-3 w-3 animate-spin" />
-            updating
-          </span>
-        )}
-      </div>
+      {marksLoading && (
+        <span className="inline-flex items-center gap-1 text-xs text-muted-foreground/50">
+          <Loader2 className="h-3 w-3 animate-spin" />
+          updating
+        </span>
+      )}
 
       {/* Mobile: position cards */}
       <div className="flex flex-col divide-y divide-border md:hidden">
@@ -273,49 +263,15 @@ function PortfolioTable({ trades }: { trades: UserTradeRow[] }) {
   );
 }
 
-const quickLinks = [
-  {
-    href: "/protected/news-trends",
-    label: "News Trends",
-    description: "Track trending topics and sentiment shifts",
-    icon: TrendingUp,
-  },
-  {
-    href: "/protected/screenings",
-    label: "Screenings",
-    description: "Trend template and fundamental scans",
-    icon: BarChart3,
-  },
-  {
-    href: "/protected/relations",
-    label: "Network Graph",
-    description: "Explore entity relationships and connections",
-    icon: Network,
-  },
-];
 
 export function OpsCenterUI({ initialTrades }: { initialTrades: UserTradeRow[] }) {
+  // The quick-links row that used to sit under the chart was replaced by the
+  // dashboard's summary cards, which link to the same places and say something
+  // about each one on the way.
   return (
     <div className="space-y-6">
       <PortfolioTable trades={initialTrades} />
       <PortfolioValueChart trades={initialTrades} />
-
-      <div className="flex flex-col divide-y divide-border/60 sm:flex-row sm:divide-x sm:divide-y-0">
-        {quickLinks.map(({ href, label, description, icon: Icon }) => (
-          <Link
-            key={href}
-            href={href}
-            className="group flex items-center gap-3 py-3 pr-6 text-sm transition-colors hover:text-amber-500 sm:pl-6 first:pl-0"
-          >
-            <Icon className="h-4 w-4 shrink-0 text-muted-foreground/50 transition-colors group-hover:text-amber-500" aria-hidden />
-            <div className="min-w-0">
-              <span className="font-medium">{label}</span>
-              <p className="text-xs text-muted-foreground truncate">{description}</p>
-            </div>
-            <ArrowRight className="ml-auto h-3.5 w-3.5 shrink-0 text-muted-foreground/30 transition-colors group-hover:text-amber-500" />
-          </Link>
-        ))}
-      </div>
     </div>
   );
 }

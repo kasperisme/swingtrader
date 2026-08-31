@@ -14,19 +14,11 @@ import {
 } from "@/components/site-header-public-nav";
 
 const portfolioLinks = [
-  { href: "/protected", label: "Portfolio" },
-] as const;
-
-// The authed-only research tools. The public research hubs (articles / topics /
-// quotes) live in the shared Insights group so both navs stay in step.
-const researchLinks = [
-  { href: "/protected/news-trends", label: "News Trends" },
-  { href: "/protected/charts", label: "Charts" },
-  { href: "/protected/relations", label: "Relations" },
+  { href: "/protected", label: "Overview" },
 ] as const;
 
 const operationsLinks = [
-  { href: "/protected/screenings", label: "Screenings" },
+  { href: "/protected/workspace", label: "Workspace" },
   { href: "/protected/agents", label: "Agents" },
   { href: "/protected/trades", label: "Trades" },
 ] as const;
@@ -194,15 +186,6 @@ export function SiteHeaderMobileNav({ isAuthed, userEmail }: Props) {
                     <p className={sectionLabelClass}>Free services</p>
                     <ul className="space-y-0.5">
                       {FREE_SERVICE_LINKS.map(({ href, label }) => (
-                        <NavLink key={href} href={href} label={label} onClick={close} />
-                      ))}
-                    </ul>
-                  </div>
-
-                  <div>
-                    <p className={sectionLabelClass}>Research</p>
-                    <ul className="space-y-0.5">
-                      {researchLinks.map(({ href, label }) => (
                         <NavLink key={href} href={href} label={label} onClick={close} />
                       ))}
                     </ul>

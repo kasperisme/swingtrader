@@ -705,10 +705,6 @@ function KeyPointsList({
   );
 }
 
-function relationsHref(ticker: string): string {
-  return `/protected/relations?ticker=${encodeURIComponent(ticker)}`;
-}
-
 /** Public, crawlable ticker page. Every ticker an article names links here —
  *  articles are the only URLs on the site with any organic history, and until
  *  now the only ticker links they carried pointed at /protected/relations,
@@ -746,7 +742,7 @@ function TickerRelationshipList({
           <div className="flex items-baseline justify-between gap-3">
             <div className="flex min-w-0 items-baseline gap-2">
               <Link
-                href={relationsHref(row.from)}
+                href={quoteHref(row.from)}
                 title={`Explore relationships for ${row.from}`}
                 className="font-semibold tracking-tight text-foreground transition-colors hover:text-amber-400"
               >
@@ -756,7 +752,7 @@ function TickerRelationshipList({
                 →
               </span>
               <Link
-                href={relationsHref(row.to)}
+                href={quoteHref(row.to)}
                 title={`Explore relationships for ${row.to}`}
                 className="font-semibold tracking-tight text-foreground transition-colors hover:text-amber-400"
               >

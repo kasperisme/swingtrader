@@ -20,7 +20,7 @@ import {
   isBooleanColumn,
   isNumericColumn,
   orderedDataColumnKeys,
-} from "@/app/protected/screenings/screenings-row-data";
+} from "@/app/protected/workspace/screenings-row-data";
 import { LlmAnalysisCell, isLlmAnalysis } from "@/components/llm-analysis-cell";
 
 /**

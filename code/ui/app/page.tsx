@@ -39,7 +39,7 @@ export const metadata: Metadata = {
 import {
   collectAllRowDataKeys,
   orderedDataColumnKeys,
-} from "@/app/protected/screenings/screenings-row-data";
+} from "@/app/protected/workspace/screenings-row-data";
 
 // Sample briefing PDF served from /public — offered as a direct download in
 // the hero so visitors can grab a real example without signing up.
