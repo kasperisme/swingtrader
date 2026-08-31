@@ -2886,7 +2886,7 @@ export function ScreeningsUI({
   const renderChatBody = (variant: "desktop" | "mobile") => {
     // Observers (free tier) keep the full breakdown + data, but the AI chat /
     // customization is gated behind a paid plan (or the active trial).
-    if (!aiEnabled) return <AiChatLocked />;
+    if (!aiEnabled) return <AiChatLocked surface="workspace_screenings" />;
     if (chatMode === "bulk") {
       return (
         <BulkAiPanel

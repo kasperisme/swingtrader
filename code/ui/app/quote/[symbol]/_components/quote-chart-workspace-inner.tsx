@@ -142,7 +142,7 @@ export function QuoteChartWorkspaceInner({ symbol }: { symbol: string }) {
   const sidePanel = !access ? null : !access.signedIn ? (
     <ChartWorkspaceSignedOut symbol={symbol} />
   ) : !access.aiEnabled ? (
-    <AiChatLocked />
+    <AiChatLocked surface="quote_chart" />
   ) : (
     <ChartAiChat
       key={symbol}
@@ -232,7 +232,7 @@ export function QuoteChartWorkspaceInner({ symbol }: { symbol: string }) {
           {!access ? null : !access.signedIn ? (
             <ChartWorkspaceSignedOut symbol={symbol} />
           ) : !access.aiEnabled ? (
-            <AiChatLocked />
+            <AiChatLocked surface="quote_chart_mobile" />
           ) : (
             <ChartAiChat
               key={`mobile-${symbol}`}

@@ -225,7 +225,7 @@ export function TradeReviewView({
             autoStart={initialMessages.length === 0}
           />
         ) : (
-          <AiChatLocked />
+          <AiChatLocked surface="trade_review" />
         )}
       </div>
     </div>
