@@ -26,6 +26,12 @@ from .screening_writes import (
     set_screening_ticker_status,
     set_screening_ticker_note,
 )
+from .priced_in import (
+    get_priced_in,
+    get_priced_in_drivers,
+    get_priced_in_case,
+    search_priced_in_drivers,
+)
 
 # ── Tool schemas (Ollama-compatible function-calling format) ─────────────────
 
@@ -259,6 +265,127 @@ TOOL_SCHEMAS: list[dict] = [
             },
         },
     },
+    # ── Priced-in: what a price already contains ─────────────────────────────
+    #
+    # Every description below repeats that priced_in_pct is the UNVALIDATED
+    # judged tier. That is not redundancy: the schema is the only part of this
+    # module a model reads before deciding how to phrase the answer, and the
+    # number is one an agent will otherwise report as measured fact.
+    {
+        "type": "function",
+        "function": {
+            "name": "get_priced_in",
+            "description": (
+                "What a share price already contains, reconstructed for these tickers: "
+                "the spread of published analyst targets and where the price sits in it "
+                "(grounded arithmetic), the reverse-DCF growth path it implies "
+                "(assumption-sensitive), and the drivers it is resting on with the "
+                "investigation of each attached. priced_in_pct is the UNVALIDATED judged "
+                "tier — attribute it to the model, never state it as fact."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "tickers": {"type": "array", "items": {"type": "string"}},
+                    "include_cases": {
+                        "type": "boolean",
+                        "description": "Attach each driver's evidence. False for the numbers only.",
+                        "default": True,
+                    },
+                    "include_analyst_cases": {
+                        "type": "boolean",
+                        "description": (
+                            "Also return the legacy per-analyst case bodies "
+                            "(firm-by-firm bull/bear reconstructions) on older rows. "
+                            "Long; analyst_cases_available says how many exist."
+                        ),
+                        "default": False,
+                    },
+                },
+                "required": ["tickers"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_priced_in_drivers",
+            "description": (
+                "The assumptions behind these tickers' prices, without the evidence "
+                "bodies: what each driver is, its segment, how much of it the price "
+                "already appears to pay for, what it is worth if it proves out, and "
+                "whether anything can measure it. Use max_priced_in_pct to keep only "
+                "what the price has NOT absorbed. priced_in_pct is UNVALIDATED."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "tickers": {"type": "array", "items": {"type": "string"}},
+                    "max_priced_in_pct": {
+                        "type": "number",
+                        "description": "Keep only drivers at or below this priced-in percentage.",
+                    },
+                    "testable_only": {
+                        "type": "boolean",
+                        "description": "Keep only drivers with an observable that could settle them.",
+                        "default": False,
+                    },
+                },
+                "required": ["tickers"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_priced_in_case",
+            "description": (
+                "The investigation behind one ticker's drivers: what the scored news "
+                "coverage says about each assumption, the passages for and against with "
+                "their source articles, the non-news measurement wired to it or the "
+                "stated absence of one, and what is still needed to settle it. Pass "
+                "driver_index for a single driver. Loud coverage means the driver is "
+                "WIDELY KNOWN and so already in the price — it is never evidence the "
+                "driver is true; only the measurement speaks to that."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "ticker": {"type": "string"},
+                    "driver_index": {
+                        "type": "integer",
+                        "description": "Position in the ticker's driver list. Omit for all of them.",
+                    },
+                },
+                "required": ["ticker"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "search_priced_in_drivers",
+            "description": (
+                "Search the drivers of every ticker the priced-in programme has "
+                "published for ones matching a phrase — the cross-ticker question, e.g. "
+                "which names carry a datacenter-power driver the price has not yet paid "
+                "for. Literal keyword matching over driver text, segment and observable, "
+                "not semantic. priced_in_pct is UNVALIDATED."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string", "description": "Words to match in the driver text."},
+                    "limit": {"type": "integer", "default": 20},
+                    "max_priced_in_pct": {
+                        "type": "number",
+                        "description": "Keep only drivers at or below this priced-in percentage.",
+                    },
+                },
+                "required": ["query"],
+            },
+        },
+    },
     {
         "type": "function",
         "function": {
@@ -288,6 +415,10 @@ def get_market_tools() -> dict[str, Callable]:
         "get_ticker_news": get_ticker_news,
         "get_news_by_tag": get_news_by_tag,
         "search_news": search_news,
+        "get_priced_in": get_priced_in,
+        "get_priced_in_drivers": get_priced_in_drivers,
+        "get_priced_in_case": get_priced_in_case,
+        "search_priced_in_drivers": search_priced_in_drivers,
     }
 
 

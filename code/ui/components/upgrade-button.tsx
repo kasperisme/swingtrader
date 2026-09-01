@@ -4,6 +4,8 @@ import Link from "next/link";
 import { useState } from "react";
 import { CreditCard } from "lucide-react";
 import { track } from "@/lib/analytics/events";
+import { getAttribution } from "@/lib/attribution";
+import { getMetaClickIds, trackInitiateCheckout } from "@/lib/pixels";
 import type { PlanTier } from "@/lib/plans";
 
 type Interval = "monthly" | "annual";
@@ -21,11 +23,20 @@ export function useStripeCheckout(surface: string) {
     if (plan === "observer") return;
     setBusy(plan);
     track("upgrade_clicked", { from_plan: "observer", to_plan: plan, surface });
+    trackInitiateCheckout({ plan, interval });
     try {
       const res = await fetch("/api/stripe/checkout", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ plan, interval }),
+        // The ad click that produced this checkout is only knowable in the
+        // browser; the webhook that records the sale runs hours later with no
+        // cookies. Send both along so the sale can be attributed to the ad.
+        body: JSON.stringify({
+          plan,
+          interval,
+          attribution: getAttribution(),
+          ...getMetaClickIds(),
+        }),
       });
       if (res.status === 401) {
         window.location.href = `/auth/sign-up?plan=${plan}`;

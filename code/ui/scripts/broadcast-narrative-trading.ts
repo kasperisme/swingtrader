@@ -511,7 +511,10 @@ async function cmdDraft() {
 
   const { props, subject, html, text } = await build();
   const preview = `Founding rate held until ${props.deadlineLabel}: $${props.investorPrice} or $${props.traderPrice} a month, before it becomes $${props.nextInvestorPrice} and $${props.nextTraderPrice}.`;
-  const name = `${BROADCAST_NAME} — ${new Date().toISOString().slice(0, 10)}`;
+  // Stable, date-free: the name is the key `update` matches on, so stamping it
+  // with today's date meant a rebuild the next morning silently created a
+  // second draft instead of revising the one already open.
+  const name = BROADCAST_NAME;
   const payload = {
     name,
     subject,

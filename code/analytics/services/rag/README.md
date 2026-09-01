@@ -38,6 +38,12 @@ Before `rag/`, every LLM-driven service redefined its own queries against Supaba
               ─ get_linked_scan_run_    ─ CLUSTERS, CLUSTER_ID_TO_   ─ CompanyScore
                 context                   LABEL, DIM_KEY_TO_LABEL    ─ score_companies (lazy import; pulls numpy/pandas)
 
+              priced_in.py
+              ─ get_priced_in
+              ─ get_priced_in_drivers
+              ─ get_priced_in_case
+              ─ search_priced_in_drivers
+
                                        tools.py
                                        ─ TOOL_SCHEMAS (Ollama function-call schemas for all of the above)
                                        ─ get_market_tools() → name → fn
@@ -61,6 +67,7 @@ All exports are surfaced from `services/rag/__init__.py` — import `from servic
 | `portfolio.py` | `user_trades`, `user_alerts`, `user_scan_row_notes`, `user_settings` | Per-user portfolio context. Each fn takes `user_id` as the first arg. |
 | `screening.py` | `user_scan_runs`, `user_scan_rows` | Filter the rows of a scan run by column-level criteria; resolve filtered ticker lists for use as agent input. |
 | `context.py` | `user_scan_runs` (latest) | Render a "linked scan context" string for the agent's system prompt — the active screening's results in compact form. |
+| `priced_in.py` | `research_priced_in` | The priced-in programme's reconstruction of what a share price already contains: the analyst-target spread, the reverse-DCF path, the **drivers** the price rests on, and the per-driver **case** investigating each. |
 
 ### Schemas + taxonomy
 
@@ -112,6 +119,13 @@ from services.rag import (
     apply_scan_filters, get_filtered_tickers_from_scan,
     get_linked_scan_run_context,
 
+    # priced-in (drivers + per-driver cases)
+    get_priced_in,               # (tickers, include_cases) → reconstruction w/ drivers+cases
+    get_priced_in_drivers,       # (tickers, max_priced_in_pct, testable_only) → drivers only
+    get_priced_in_case,          # (ticker, driver_index) → the evidence behind a driver
+    search_priced_in_drivers,    # (query, limit, max_priced_in_pct) → cross-ticker driver search
+    PRICED_IN_CAVEAT, PRICED_IN_STALE_AFTER_DAYS,
+
     # taxonomy
     CLUSTERS, CLUSTER_ID_TO_LABEL, DIM_KEY_TO_LABEL,
 
@@ -122,12 +136,55 @@ from services.rag import (
 
 ---
 
+## Priced-in: three tiers, one of them unvalidated
+
+`priced_in.py` is the only module here whose data carries a health warning, and
+it is worth repeating wherever the numbers travel. The programme
+(`code/strategylab/social/`, written up in `research/PRICED-IN-FINDINGS.md`)
+produces three tiers and they are not equally solid:
+
+| Tier | Fields | Status |
+|---|---|---|
+| grounded | `vote.*` — target spread, median, where the price sits in it | Arithmetic over other people's published targets. No model judgement. |
+| assumption-sensitive | `implied.*` — reverse-DCF growth path | Correct arithmetic, fragile inputs: one company's implied CAGR moved nine points across three dates purely on which year's FCF margin anchored it. |
+| judged | `priced_in_pct`, `value_if_true_pct` | **UNVALIDATED.** Two attempts to validate failed, the second producing three believable numbers in a row that were all measurement artefacts. |
+
+The public quote page exposes only the first. This module exposes all three
+because an agent reasoning about a name needs the decomposition — so every
+payload carries `caveat` (`PRICED_IN_CAVEAT`) and every tool description in
+`tools.py` repeats it. The schema text is the only part a model reads before
+choosing its phrasing, which is why the warning lives there and not just here.
+
+Three further things the shape will not tell you:
+
+- **A case is one of two different objects.** Under `priced-in/3` it is a
+  per-DRIVER investigation carrying `driver_index`, which is what joins it back
+  to the decomposition. Under `priced-in/2` it was a per-ANALYST reconstruction
+  keyed to a firm — the shape the programme abandoned precisely because it could
+  not be joined to anything. Most tickers' newest published row is still `/2`.
+  Both are surfaced and tagged with `case_kind`; only driver cases are ever
+  attached to a driver, and the legacy bodies come back only on
+  `include_analyst_cases=True` (they average more bytes than the entire rest of
+  the record).
+- **Loud coverage is not evidence a driver is true.** `case.coverage` measures
+  how KNOWN a driver is, and by the programme's governing assumption known is
+  already priced. Only `case.measurement` — the non-news series wired to the
+  driver's observable — speaks to truth, and most drivers have none. The honest
+  output there is the stated gap, not a proxy.
+- **`passages` is ordered, `sources` is not.** The passage list is kept in the
+  order it was numbered for the model, which is the only thing that resolves a
+  "(Passage 4)" citation in the prose to its article. `sources` is deduplicated
+  and sorted by title and cannot do that job.
+
+---
+
 ## Consumers
 
 | Service | What it imports |
 |---|---|
 | `services.agent_core` | `TOOL_SCHEMAS`, `get_market_tools()`, `get_user_tools()` — the base market registry is built from these. |
-| `services.agent.engine` | `get_user_trading_strategy`, scan-filter helpers, linked-context helper. |
+| `services.agent.engine` | `get_user_trading_strategy`, scan-filter helpers, linked-context helper. The single-ticker agentic loop reaches the priced-in tools through the market registry and documents them in its system prompt. |
+| `services.agent.skills` | `get_priced_in_drivers` in the `news_impact` skill's hardcoded `tool_plan` — a skill's plan is literal, so a tool being in the registry is not enough to reach it. |
 | `services.podcast.research_agent` | The base market registry (transitively, via `agent_core.build_market_registry`). |
 | `services.news.narrative.narrative_generator` | Most of the data-access surface (positions, alerts, ticker news, expansions, semantic search). |
 | `scripts/generate_blog_post.py` | Indirectly, via `services.news.embeddings.semantic_retrieval` (which delegates to `rag.search_news`). |

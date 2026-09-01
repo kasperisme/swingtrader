@@ -26,6 +26,60 @@ export function trackLead(params: LeadParams = {}): void {
   }
 }
 
+/**
+ * Meta's own first-party cookies, written by the base pixel: `_fbc` is the ad
+ * CLICK id (set when a visitor arrives with ?fbclid=…), `_fbp` the browser id.
+ *
+ * These are the difference between a server event Meta can attribute to a
+ * specific ad and one it can only fuzzy-match on a hashed email. The Subscribe
+ * event in the Stripe webhook fires long after the browser is gone, so the ids
+ * have to be collected here, at checkout, and carried through Stripe metadata.
+ */
+export function getMetaClickIds(): { fbc?: string; fbp?: string } {
+  if (typeof document === "undefined") return {};
+  const out: { fbc?: string; fbp?: string } = {};
+  for (const c of document.cookie.split("; ")) {
+    if (c.startsWith("_fbc=")) out.fbc = decodeURIComponent(c.slice(5)).slice(0, 400);
+    else if (c.startsWith("_fbp=")) out.fbp = decodeURIComponent(c.slice(5)).slice(0, 400);
+  }
+  return out;
+}
+
+type CheckoutParams = {
+  plan?: string;
+  interval?: string;
+  value?: number;
+  currency?: string;
+  trial?: boolean;
+};
+
+/**
+ * Someone reached Stripe Checkout. This is the mid-funnel signal a paid campaign
+ * actually optimizes on: `Subscribe` is the goal, but at a handful of sales a
+ * week Meta can never exit the learning phase on it (it wants ~50/week), whereas
+ * InitiateCheckout fires often enough to teach delivery who is worth showing the
+ * ad to. Fired from the browser, so it carries the pixel's own cookies.
+ */
+export function trackInitiateCheckout(params: CheckoutParams = {}): void {
+  const data: Record<string, unknown> = {
+    currency: params.currency ?? "USD",
+    content_category: "subscription",
+  };
+  if (params.plan) data.content_name = params.plan;
+  if (params.value != null) data.value = params.value;
+  if (params.interval) data.content_type = params.interval;
+  try {
+    window.fbq?.("track", "InitiateCheckout", data);
+  } catch {
+    /* pixel not loaded */
+  }
+  try {
+    window.ttq?.track("InitiateCheckout", data);
+  } catch {
+    /* pixel not loaded */
+  }
+}
+
 type ScreeningDownloadParams = {
   content_name?: string; // screening name or slug
   format?: "csv" | "json";

@@ -255,14 +255,6 @@ function RelationshipExplainer({
         {REL_MEANING[relType] ??
           "The two companies are linked, but this link type has no plain-language description yet."}
       </p>
-      <p className="rounded-md border border-border bg-muted/30 p-2 text-xs leading-relaxed text-muted-foreground">
-        Nobody typed this in. Each time a news article describes these two
-        companies this way, the link is recorded and its confidence re-scored —
-        so the numbers below summarise what the coverage actually said, and the
-        articles underneath are the receipts. Direction is stored as the articles
-        put it ({edge.from_ticker} → {edge.to_ticker}); it is not a claim about
-        who depends on whom.
-      </p>
       {detail ? (
         <>
           <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">

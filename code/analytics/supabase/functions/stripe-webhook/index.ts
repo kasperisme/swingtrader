@@ -44,6 +44,8 @@ async function sendMetaSubscribe(opts: {
   eventId: string;
   predictedLtv?: number | null;
   sourceUrl?: string;
+  fbc?: string;
+  fbp?: string;
 }): Promise<void> {
   if (!META_PIXEL_ID || !META_CAPI_TOKEN) {
     console.warn("META_PIXEL_ID/META_CAPI_TOKEN not set — skipping Meta Subscribe");
@@ -62,7 +64,15 @@ async function sendMetaSubscribe(opts: {
           action_source: "website",
           event_id: opts.eventId,
           ...(opts.sourceUrl ? { event_source_url: opts.sourceUrl } : {}),
-          user_data: { em: [await sha256Hex(opts.email)] },
+          // A hashed email alone leaves Meta guessing which click this was.
+          // `fbc` (the ad click id) and `fbp` (browser id) are what let it match
+          // the sale to a specific ad — they come from the browser at checkout
+          // and ride through Stripe metadata to get here.
+          user_data: {
+            em: [await sha256Hex(opts.email)],
+            ...(opts.fbc ? { fbc: opts.fbc } : {}),
+            ...(opts.fbp ? { fbp: opts.fbp } : {}),
+          },
           custom_data: customData,
         },
       ],
@@ -150,6 +160,18 @@ serve(async (req: Request) => {
         const plan = session.metadata?.plan;
         const billingInterval = session.metadata?.billing_interval;
         const phase = session.metadata?.phase ?? "phase1";
+        // Written by app/api/stripe/checkout/route.ts from the first-touch
+        // attribution cookie. Parsed defensively: a malformed blob must never
+        // cost us the subscription row itself.
+        let attribution: Record<string, string> = {};
+        try {
+          const raw = session.metadata?.attribution;
+          if (raw) attribution = JSON.parse(raw) as Record<string, string>;
+        } catch {
+          console.warn("unparseable attribution metadata on session", session.id);
+        }
+        const fbc = session.metadata?.fbc ?? "";
+        const fbp = session.metadata?.fbp ?? "";
 
         if (!email || !plan || !billingInterval) {
           console.error("Missing metadata in checkout session:", session.id);
@@ -192,6 +214,7 @@ serve(async (req: Request) => {
           billing_interval: billingInterval,
           phase,
           grandfathered: true,
+          attribution,
           current_period_end: periodEnd
             ? new Date(periodEnd * 1000).toISOString()
             : null,
@@ -229,6 +252,8 @@ serve(async (req: Request) => {
           predictedLtv,
           eventId: subscriptionId,
           sourceUrl: `${APP_BASE_URL}/pricing`,
+          fbc,
+          fbp,
         });
 
         break;

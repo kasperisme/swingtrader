@@ -208,6 +208,46 @@ def create_campaign(name: str, special: list[str], objective: str) -> str:
         raise
 
 
+def resolve_targeting(base: dict, override: dict | None) -> dict:
+    """Merge an ad.json `targeting` block over the campaign-wide default.
+
+    The campaign default is cold + geo/age only. A retargeting ad set is not a
+    different creative, it is a different AUDIENCE — so the audience belongs in
+    the spec next to the creative it runs with, versioned in git, rather than in
+    a shell variable that is right once and then forgotten.
+
+    Recognised keys (all optional): `countries`, `age_min`, `age_max`,
+    `custom_audiences`, `excluded_custom_audiences`. Audience ids are the
+    numeric ids from Ads Manager → Audiences; Meta rejects unknown ones at
+    create time, which is the check we want (fail loudly, roll back).
+    """
+    out = json.loads(json.dumps(base))  # deep copy — never mutate the caller's dict
+    if not override:
+        return out
+    if override.get("countries"):
+        out["geo_locations"] = {"countries": [str(c).upper() for c in override["countries"]]}
+    for k in ("age_min", "age_max"):
+        if override.get(k) is not None:
+            out[k] = int(override[k])
+    for key, field in (("custom_audiences", "custom_audiences"),
+                       ("excluded_custom_audiences", "excluded_custom_audiences")):
+        ids = [str(a) for a in (override.get(key) or []) if str(a).strip()]
+        if ids:
+            out[field] = [{"id": i} for i in ids]
+    return out
+
+
+def describe_targeting(t: dict) -> str:
+    """One-line human summary of a resolved targeting dict, for the dry-run."""
+    geo = ",".join(t.get("geo_locations", {}).get("countries", [])) or "—"
+    s = f"{geo} {t.get('age_min')}–{t.get('age_max')}"
+    if t.get("custom_audiences"):
+        s += f" · audience {','.join(a['id'] for a in t['custom_audiences'])}"
+    if t.get("excluded_custom_audiences"):
+        s += f" · excl {','.join(a['id'] for a in t['excluded_custom_audiences'])}"
+    return s
+
+
 def create_adset(name, campaign_id, budget_minor, targeting, dsa,
                  optimization_goal, promoted_object=None) -> str:
     body = {
@@ -412,13 +452,9 @@ def build_drafts(slugs: list[str], budget_dkk: float, dry_run: bool,
     pixel = os.environ.get("META_PIXEL_ID", "").strip()
     targeting = {"geo_locations": {"countries": countries}, "age_min": age_min, "age_max": age_max}
 
-    promoted_object = None
-    if opt_goal == "OFFSITE_CONVERSIONS":
-        if not pixel:
-            raise MetaError(
-                "lead optimization (OFFSITE_CONVERSIONS) needs a pixel — set META_PIXEL_ID in .env "
-                "(your web Pixel id), or set META_OPTIMIZATION_GOAL=LINK_CLICKS to optimize for clicks.")
-        promoted_object = {"pixel_id": pixel, "custom_event_type": conv_event}
+    # The pixel check now lives in `_resolve` below, per ad set — an ad set that
+    # overrides its goal to LINK_CLICKS must not be blocked by a missing pixel it
+    # never uses.
 
     # DSA beneficiary/payor is EU-only — sending it on a non-EU geo can error, so
     # only attach it when the audience actually includes an EU country.
@@ -431,13 +467,46 @@ def build_drafts(slugs: list[str], budget_dkk: float, dry_run: bool,
         return {"video": "video reel", "single": "single image"}.get(
             media["kind"], f"carousel · {len(media.get('images', []))} cards")
 
-    geo_str = ",".join(countries)
+    def _resolve(spec: dict) -> tuple[dict, str, dict | None]:
+        """Per-ad-set targeting + optimization, spec overriding the campaign default.
+
+        Optimizing for an event the ad set's landing page cannot fire is the
+        quietest way to waste a budget: Meta never leaves the learning phase and
+        delivery stays expensive. A proof-first ad set landing on /quote and a
+        direct-ask ad set landing on /pricing legitimately need different events,
+        so the event lives with the creative that determines it.
+        """
+        tgt = spec.get("targeting") or {}
+        t = resolve_targeting(targeting, tgt)
+        # A retargeting ad set with no audience attached is not a cheap warm ad set —
+        # it is a COLD ad set wearing warm copy ("you already read us free"), spending
+        # the same money against strangers. Refuse rather than let that ship quietly.
+        if tgt.get("require_custom_audience") and not t.get("custom_audiences"):
+            raise MetaError(
+                f"{spec.get('slug', '?')}: targeting.require_custom_audience is set but no "
+                "custom_audiences were given — this ad set would run COLD with warm copy.\n"
+                "  → run `python -m services.meta_ads.cli audiences` for the ids, create them in "
+                "Ads Manager → Audiences if the list is empty, then fill "
+                "targeting.custom_audiences in the ad.json.")
+        o = spec.get("optimization") or {}
+        goal = str(o.get("goal") or opt_goal).strip()
+        event = str(o.get("event") or conv_event).strip()
+        po = None
+        if goal == "OFFSITE_CONVERSIONS":
+            if not pixel:
+                raise MetaError(
+                    "conversion optimization (OFFSITE_CONVERSIONS) needs a pixel — set META_PIXEL_ID "
+                    "in .env, or set optimization.goal to LINK_CLICKS in the ad.json.")
+            po = {"pixel_id": pixel, "custom_event_type": event}
+        return t, goal, po
+
     print(f"\nCAMPAIGN  “{campaign_name}”  ·  {objective}  ·  special={special or 'none'}  ·  PAUSED")
     for slug, label, spec, medias in specs:
         ad = spec.get("ad", {})
-        goal_str = (f"optimize {conv_event} conversions (pixel {pixel})"
-                    if promoted_object else f"optimize {opt_goal}")
-        print(f"  AD SET  {label}  ·  {budget_dkk:.0f} DKK/day  ·  {geo_str} {age_min}–{age_max}  ·  "
+        t, goal, po = _resolve(spec)
+        goal_str = (f"optimize {po['custom_event_type']} conversions (pixel {pixel})"
+                    if po else f"optimize {goal}")
+        print(f"  AD SET  {label}  ·  {budget_dkk:.0f} DKK/day  ·  {describe_targeting(t)}  ·  "
               f"{goal_str}  ·  PAUSED")
         for media in medias:
             print(f"    AD    {_kind_label(media)}  ·  cta={ad.get('cta_label')}")
@@ -463,8 +532,8 @@ def build_drafts(slugs: list[str], budget_dkk: float, dry_run: bool,
             clean_link, url_tags = _split_utm(ad["destination"])
             # ONE ad set per lead magnet (that's the A/B axis + the isolated budget);
             # each of its creatives becomes an ad inside it.
-            adset = create_adset(label, campaign_id, budget_minor, targeting, dsa_eff,
-                                 opt_goal, promoted_object)
+            t, goal, po = _resolve(spec)
+            adset = create_adset(label, campaign_id, budget_minor, t, dsa_eff, goal, po)
             for media in medias:
                 kind = media["kind"]
                 suffix = "video" if kind == "video" else "image"
@@ -529,3 +598,29 @@ def _write_manifest(campaign_name: str, rows: list[dict]) -> None:
             prior = []
     dest.write_text(json.dumps(prior + rows, indent=2))
     print(f"  ↳ launch manifest → {dest}")
+
+
+def list_audiences() -> int:
+    """List the ad account's Custom Audiences — read-only.
+
+    `targeting.custom_audiences` in an ad.json needs numeric audience ids, and
+    guessing one either fails at create time or, worse, silently targets the
+    wrong people. This prints the ids to paste.
+    """
+    rows = client.paginate(client.get(
+        f"{client.account()}/customaudiences",
+        {"fields": "id,name,subtype,approximate_count_lower_bound,delivery_status", "limit": 100}))
+    if not rows:
+        print("\nNo custom audiences on this ad account yet.\n"
+              "  Create them in Ads Manager → Audiences:\n"
+              "    · Website visitors (Pixel, last 180 days) — the biggest warm pool\n"
+              "    · Customer list — upload the lead-magnet + early-access emails\n"
+              "  Then put their ids in the ad.json `targeting.custom_audiences`.")
+        return 0
+    print(f"\nCustom audiences on {client.account()}:\n")
+    print(f"  {'id':<20} {'size':>10}  {'subtype':<14} name")
+    for r in rows:
+        size = r.get("approximate_count_lower_bound")
+        size = f"≥{size:,}" if isinstance(size, int) and size >= 0 else "—"
+        print(f"  {r['id']:<20} {size:>10}  {str(r.get('subtype','')):<14} {r.get('name','')}")
+    return 0

@@ -30,6 +30,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from dataclasses import dataclass, field
 from typing import Any, Callable
 
@@ -90,6 +91,10 @@ _INTERNAL_TOOLS = frozenset(
         "get_user_screening_notes",
         "get_user_screening_note_details",
         "get_ticker_chat_history",
+        "get_priced_in",
+        "get_priced_in_drivers",
+        "get_priced_in_case",
+        "search_priced_in_drivers",
     }
 )
 
@@ -340,13 +345,186 @@ class ScreeningSkill:
 # ── Analytics implementations ────────────────────────────────────────────────
 
 
+# ── Priced-in overlap ───────────────────────────────────────────────────────
+#
+# The priced-in decomposition (`services.rag.priced_in`) answers the question
+# that decides whether a headline is worth acting on: is this catalyst already
+# IN the price? Its governing assumption is that being written up is the
+# definition of known, and known is priced — so a loud headline about a driver
+# the price already pays for is noise, while the same headline on a driver at
+# 10% priced is the whole signal. That is exactly the judgement `news_impact`
+# exists to make, which is why the drivers ride along with the news.
+
+# Words too generic to establish that a headline and a driver are about the same
+# thing. Without this list "growth", "revenue" and "quarter" match nearly every
+# pair and the overlap becomes noise that argues for itself.
+_OVERLAP_STOPWORDS = frozenset({
+    "the", "and", "for", "with", "from", "that", "this", "its", "has", "have",
+    "will", "are", "was", "were", "been", "into", "over", "after", "before",
+    "amid", "says", "said", "new", "more", "than", "but", "not", "why", "how",
+    "what", "who", "can", "could", "would", "should", "may", "might",
+    # Finance-generic: true of almost every driver and every headline.
+    "stock", "stocks", "share", "shares", "price", "prices", "market",
+    "markets", "revenue", "revenues", "growth", "earnings", "quarter",
+    "quarterly", "annual", "guidance", "outlook", "company", "companies",
+    "business", "segment", "segments", "margin", "margins", "sales",
+    "results", "report", "reports", "analyst", "analysts", "target", "targets",
+    "buy", "sell", "hold", "rating", "upgrade", "downgrade", "estimate",
+    "estimates", "year", "years", "million", "billion", "percent",
+})
+
+# Two shared content words. One is a coincidence — "capacity" appears in a
+# datacenter driver and in an airline headline — and this matcher only points
+# the evaluator at a driver; it never decides anything on its own.
+_OVERLAP_MIN_TOKENS = 2
+
+# How many tied drivers to name for one headline. Beyond a couple the pairing
+# is saying "this headline is about the company", which the evaluator knows.
+_OVERLAP_MAX_DRIVERS = 3
+
+
+def _content_tokens(text: str) -> set[str]:
+    return {
+        t for t in re.findall(r"[a-z][a-z0-9\-]{2,}", str(text or "").lower())
+        if t not in _OVERLAP_STOPWORDS
+    }
+
+
+def _priced_in_rows(data: dict[str, Any]) -> list[dict]:
+    """Driver rows from a per-ticker ``get_priced_in_drivers`` result.
+
+    Empty for most tickers: the programme runs the universe on a schedule and
+    has published a few hundred names, so an absent row means "not reached yet",
+    not "nothing to say". Callers must degrade quietly rather than treat the
+    absence as a finding.
+    """
+    return [r for r in _as_list(data.get("get_priced_in_drivers")) if isinstance(r, dict)]
+
+
+def _headline_driver_overlap(ticker: str, news: list[dict],
+                             drivers: list[dict]) -> list[dict]:
+    """Coarse lexical pairing of headlines to the drivers they may speak to.
+
+    Deliberately lexical and deliberately not a verdict. The priced-in programme
+    already learned this lesson in `entail.py`: similarity answers "same
+    subject" where the real question is "asserted or not", and only a reader
+    settles the second. So this hands the evaluator a candidate pairing and the
+    driver's priced-in share, and the LLM decides whether the headline actually
+    bears on the driver.
+
+    Every driver tying at the best overlap is returned, not one of them. Two
+    drivers on the same theme routinely tie — a company's spin-off of a segment
+    and that segment's growth share every content word — and picking one would
+    be decided by list order, which is sorted least-priced-first. That would
+    quietly bias every tie toward the lowest priced-in share, i.e. toward
+    calling a known story a catalyst, which is the exact error this pairing
+    exists to prevent. Showing both leaves the choice where it belongs.
+    """
+    if not news or not drivers:
+        return []
+    # The company's own name is not evidence that a headline and a driver are
+    # about the same thing — it is in both by construction.
+    ignore = {str(ticker or "").lower().strip()}
+    prepared = [
+        (d, _content_tokens(f"{d.get('driver', '')} {d.get('segment', '')}") - ignore)
+        for d in drivers
+    ]
+    out: list[dict] = []
+    for item in news:
+        title = str(item.get("title") or "").strip()
+        if not title:
+            continue
+        htokens = _content_tokens(title) - ignore
+        if not htokens:
+            continue
+        scored = [(len(htokens & dt), d) for d, dt in prepared]
+        best = max((n for n, _ in scored), default=0)
+        if best < _OVERLAP_MIN_TOKENS:
+            continue
+        matched = [d for n, d in scored if n == best]
+        out.append({
+            "headline": title[:90],
+            "shared_tokens": best,
+            "drivers": [
+                {"driver": str(d.get("driver") or "")[:70],
+                 "priced_in_pct": d.get("priced_in_pct")}
+                for d in matched[:_OVERLAP_MAX_DRIVERS]
+            ],
+            "ambiguous": len(matched) > 1,
+        })
+    return out
+
+
+def _priced_in_facts(ticker: str, news: list[dict],
+                     data: dict[str, Any]) -> tuple[str, dict[str, Any]]:
+    """One prose line + scalar metrics on what the price already contains.
+
+    Returns ("", {}) when the ticker has no published reconstruction, which is
+    the common case — the news read must not change shape because a name has not
+    been through the programme yet.
+    """
+    drivers = _priced_in_rows(data)
+    if not drivers:
+        return "", {}
+
+    # `get_priced_in_drivers` returns least-priced-first, which is the end of
+    # the distribution a catalyst question is about.
+    pcts = [d.get("priced_in_pct") for d in drivers
+            if isinstance(d.get("priced_in_pct"), (int, float))]
+    metrics: dict[str, Any] = {"priced_in_drivers": len(drivers)}
+    if pcts:
+        metrics["min_priced_in_pct"] = min(pcts)
+
+    parts = [f"Priced-in: {len(drivers)} drivers"]
+    cheapest = drivers[0]
+    if isinstance(cheapest.get("priced_in_pct"), (int, float)):
+        parts.append(
+            f"least-priced '{str(cheapest.get('driver') or '')[:60]}' at "
+            f"{cheapest['priced_in_pct']:.0f}%"
+        )
+    if any(d.get("stale") for d in drivers):
+        parts.append("reconstruction is STALE")
+        metrics["priced_in_stale"] = True
+
+    overlap = _headline_driver_overlap(ticker, news, drivers)
+    metrics["headlines_on_known_drivers"] = len(overlap)
+
+    # The span of priced-in shares across every driver a headline touched. Both
+    # ends are reported because they carry opposite conclusions and this layer
+    # is not entitled to pick: the low end says the news may be a real catalyst,
+    # the high end says the story is already in the price.
+    matched_pcts = [
+        m["priced_in_pct"] for hit in overlap for m in hit["drivers"]
+        if isinstance(m.get("priced_in_pct"), (int, float))
+    ]
+    if matched_pcts:
+        metrics["matched_driver_priced_in_range"] = (
+            f"{min(matched_pcts):.0f}-{max(matched_pcts):.0f}%"
+        )
+
+    for hit in overlap[:2]:
+        named = ", ".join(
+            f"'{m['driver'][:45]}'"
+            + (f" ({m['priced_in_pct']:.0f}% priced)"
+               if isinstance(m.get("priced_in_pct"), (int, float)) else "")
+            for m in hit["drivers"]
+        )
+        lead = "may bear on either of" if hit["ambiguous"] else "may bear on"
+        parts.append(f"'{hit['headline'][:60]}' {lead} {named}")
+
+    return "; ".join(parts) + ".", metrics
+
+
 def _analytics_news_impact(ticker: str, data: dict[str, Any]) -> TickerSignal:
     news = _news_items(data)
-    metrics = {
+    metrics: dict[str, Any] = {
         "article_count": len(news),
         "mean_sentiment": round(_mean_sentiment(news), 3),
     }
     if not news:
+        # No headlines settles it regardless of what the price contains, so the
+        # priced-in read is not consulted: it describes the standing price, not
+        # a change to it, and cannot make a quiet window into a catalyst.
         return TickerSignal.decided(
             ticker,
             triggered=False,
@@ -357,14 +535,18 @@ def _analytics_news_impact(ticker: str, data: dict[str, Any]) -> TickerSignal:
     # Whether a headline is materially impactful is a qualitative call — escalate
     # to the LLM, but hand it the computed aggregates + the actual top headlines.
     top = "; ".join(str(i.get("title") or "").strip()[:90] for i in news[:3])
-    return TickerSignal.escalate(
-        ticker,
-        facts=(
-            f"{len(news)} articles, mean sentiment "
-            f"{metrics['mean_sentiment']:+.2f}. Top: {top}"
-        ),
-        metrics=metrics,
+    facts = (
+        f"{len(news)} articles, mean sentiment "
+        f"{metrics['mean_sentiment']:+.2f}. Top: {top}"
     )
+    # What the price already contains, where the programme has reached this
+    # name. Never escalates or decides on its own — it only gives the evaluator
+    # the grounds to separate a catalyst from a re-run of a known story.
+    priced_facts, priced_metrics = _priced_in_facts(ticker, news, data)
+    if priced_facts:
+        facts = f"{facts} {priced_facts}"
+        metrics.update(priced_metrics)
+    return TickerSignal.escalate(ticker, facts=facts, metrics=metrics)
 
 
 def _tag_articles(data: dict[str, Any]) -> list[dict]:
@@ -619,16 +801,39 @@ SKILLS: list[ScreeningSkill] = [
             {"name": "get_ticker_sentiment", "args": {"tickers": [_TICKER_PLACEHOLDER], "hours": 48}},
             {"name": "get_company_vectors", "args": {"tickers": [_TICKER_PLACEHOLDER]}},
             {"name": "get_ticker_relationships", "args": {"ticker": _TICKER_PLACEHOLDER, "hops": 1}},
+            # What the price already contains. Enrichment, not a floor: the
+            # programme has published a few hundred names out of the universe,
+            # so this comes back empty for most tickers and the read must stand
+            # without it. Kept out of `requires` for that reason.
+            {"name": "get_priced_in_drivers", "args": {"tickers": [_TICKER_PLACEHOLDER]}},
         ],
         analytics=_analytics_news_impact,
         eval_focus=(
             "Focus: does the news materially move the thesis for this ticker? "
             "Weigh sentiment magnitude, headline substance (earnings, guidance, "
             "M&A, regulatory) over noise, and the company factor profile. "
-            "triggered_for_ticker=true only on a concrete, market-moving catalyst."
+            "triggered_for_ticker=true only on a concrete, market-moving catalyst.\n"
+            "PRICED-IN: where the COMPUTED METRICS carry a priced-in read, a "
+            "headline is only a catalyst to the extent the price does NOT already "
+            "contain it. A loud headline restating a driver already ~80-100% "
+            "priced is confirmation, not news — do not trigger on it. A headline "
+            "that bears on a driver at a LOW priced-in share is the strongest "
+            "kind of trigger, so say which driver and its share. The pairing you "
+            "are given is a coarse word overlap: decide yourself whether the "
+            "headline actually asserts anything about that driver, and ignore it "
+            "when it does not. These percentages are one model\'s UNVALIDATED "
+            "allocation of a price — attribute them (\'the decomposition puts "
+            "this at ~20% priced\'), never state them as measured fact, and never "
+            "trigger on the percentage alone with no fresh headline behind it. "
+            "Tickers with no priced-in read are judged on the news alone; their "
+            "absence is not a negative signal."
         ),
         requires=("get_ticker_news", "get_ticker_sentiment"),
-        conclude_hint="Lead with the tickers carrying the strongest fresh catalysts.",
+        conclude_hint=(
+            "Lead with the tickers carrying the strongest fresh catalysts — and "
+            "where a priced-in read exists, prefer the catalyst the price has "
+            "not already absorbed over the louder one it has."
+        ),
     ),
     ScreeningSkill(
         id="news_briefing",

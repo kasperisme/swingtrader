@@ -117,6 +117,37 @@ get_news_by_tag(tags: list[str], hours: int = 720, limit: int = 20)
   {article_id, title, url, source, slug, published_at, snippet}. Use to compile \
   a news briefing/digest scoped to specific tags.
 
+get_priced_in_drivers(tickers: list[str], max_priced_in_pct: float | None = None, testable_only: bool = False)
+  What a share price ALREADY CONTAINS, broken into the assumptions it rests \
+  on. Each row: {ticker, driver, segment, basis, priced_in_pct, \
+  value_if_true_pct, observable, testable, as_of, stale}. Use this to judge \
+  whether a headline is actually NEW to the price: a story restating a driver \
+  already ~80-100% priced is confirmation, not a catalyst, while a story \
+  bearing on a driver at a low priced-in share is the strongest kind of \
+  signal. Pass max_priced_in_pct to see only what the price has not absorbed. \
+  Returns nothing for most tickers — the programme has published a few hundred \
+  names, so an empty result means "not analysed yet", NOT "nothing priced in".
+
+get_priced_in(tickers: list[str], include_cases: bool = True)
+  The full reconstruction behind those drivers: the spread of published \
+  analyst targets and where the price sits in it, the reverse-DCF growth path \
+  the price implies, a prose summary of what it pays for and declines to pay \
+  for, and each driver with its investigation attached. Long — prefer \
+  get_priced_in_drivers unless the argument itself is needed.
+
+get_priced_in_case(ticker: str, driver_index: int | None = None)
+  The evidence behind one driver: what the scored news coverage says about it, \
+  passages for and against with their source articles, and either the wired \
+  non-news measurement or a statement that none exists. Note the asymmetry — \
+  loud coverage shows the driver is WIDELY KNOWN (and so already in the price); \
+  only the measurement speaks to whether it is TRUE.
+
+search_priced_in_drivers(query: str, limit: int = 20, max_priced_in_pct: float | None = None)
+  Search every analysed ticker's drivers for a phrase — "which names carry a \
+  datacenter-power driver the price has not yet paid for". Keyword matching, \
+  not semantic; for meaning-level search use search_news first, then bring its \
+  tickers here.
+
 fetch_url(url: str)
   Fetch the full text content of a URL. Use to read article body when the \
   title/snippet is not enough to evaluate a screening condition. \
@@ -156,6 +187,13 @@ get_user_screening_note_details(tickers: list[str] | None = None, statuses: list
 - A score with |value| < 0.1 is essentially neutral.
 - Call the minimum number of tools needed to evaluate the prompt.
 - Never fabricate data — only use what the tools return.
+- priced_in_pct and value_if_true_pct are ONE MODEL'S UNVALIDATED estimate, not \
+  measured fact. Attribute them when you use them ("the decomposition puts this \
+  at ~20% priced"), and never trigger on a priced-in percentage alone — a \
+  screening fires on something that HAPPENED, and the decomposition describes \
+  the standing price, not a change to it. The target spread returned alongside \
+  them (target_low/median/high) is ordinary arithmetic over published analyst \
+  targets and needs no such hedging.
 - If the prompt is a request for a rundown, summary, or overview (e.g. contains \
   "rundown", "summary", "overview", "show me", "give me", "what's happening"), \
   always set triggered=true and provide a comprehensive summary of what was found, \

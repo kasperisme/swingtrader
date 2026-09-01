@@ -47,7 +47,7 @@ Python service packages for the swingtrader analytics backend. Each subdirectory
 | [`bulk_analysis/`](bulk_analysis/README.md) | Per-ticker technical-analysis worker. UI inserts a job row → cron tick dispatches a subprocess that fetches OHLCV, runs LLM analysis, writes to chat workspace. | `python -m services.bulk_analysis.cli {tick,run}` |
 | [`news/`](news/README.md) | News ingestion + impact scoring + embeddings + daily narrative. The factor-scoring core that feeds every other service. | `score_cli`, `embeddings_cli`, `narrative_generator` |
 | [`podcast/`](podcast/README.md) | Daily audio digest: LLM script → ElevenLabs → MP3 → RSS. Telegram approval gate. | `python scripts/run_podcast.py` |
-| [`rag/`](rag/README.md) | Read-only data access layer. Wraps Supabase queries (clusters, dimensions, ticker sentiment, semantic search). Defines the canonical LLM tool schemas. | Imported as a library |
+| [`rag/`](rag/README.md) | Read-only data access layer. Wraps Supabase queries (clusters, dimensions, ticker sentiment, semantic search, the priced-in drivers + per-driver cases). Defines the canonical LLM tool schemas. | Imported as a library |
 | [`screener/`](screener/README.md) | Full-market scan (NYSE + NASDAQ) using Minervini's trend template. Persists to `scan_jobs` + the screenings HTTP API. | `services.screener.engine.run` |
 
 ---
@@ -91,7 +91,7 @@ When in doubt about where a helper belongs: if **two or more services** would ne
 
 - **Async-first for I/O.** LLM calls, HTTP fetches, Supabase writes that go in batches — all `async`. Use `asyncio.to_thread` to wrap sync DB calls inside an event loop.
 - **No direct Ollama calls in new code.** Use `services.agent_core.simple_chat` (one-shot) or `run_tool_loop` (tool-calling). The package handles streaming + retry + heartbeat. See [`agent_core/README.md`](agent_core/README.md).
-- **Read-only data access goes through `rag/`.** If you need cluster trends, ticker sentiment, top articles, semantic news search, or company vectors, import from `services.rag` rather than re-querying Supabase.
+- **Read-only data access goes through `rag/`.** If you need cluster trends, ticker sentiment, top articles, semantic news search, company vectors, or the priced-in decomposition (what a price already contains, driver by driver), import from `services.rag` rather than re-querying Supabase.
 - **One CLI per service, exposed via `python -m services.{name}.cli`.** Subcommands like `tick` (cron tick) and `run <id>` (one job) are the standard pattern.
 - **Cron tick + subprocess dispatch is the standard scheduler shape.** See `services/agent/scheduler.py`, `services/market_screenings/scheduler.py`, and `services/bulk_analysis/scheduler.py` — same skeleton (cleanup stuck jobs, count running, dispatch subprocesses up to a concurrency cap).
 

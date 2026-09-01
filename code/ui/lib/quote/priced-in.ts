@@ -127,8 +127,14 @@ export async function getPricedInVote(
 
   const drivers = parseDrivers(row.drivers_json, row.cases_json);
   const analystCases = parseAnalystCases(row.cases_json);
+  // The numbered passages go through the same lookup as the headline list:
+  // an inline "(Passage 4)" is only a link when that passage has a slug, and
+  // the generator recorded none for a corpus row that had none of its own.
   await linkSources(supabase, [
-    ...drivers.flatMap((d) => d.case?.sources ?? []),
+    ...drivers.flatMap((d) => [
+      ...(d.case?.sources ?? []),
+      ...(d.case?.passages ?? []),
+    ]),
     ...analystCases.flatMap((c) => c.sources),
   ]);
 

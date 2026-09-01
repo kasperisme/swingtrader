@@ -2,9 +2,15 @@
 
 ``build_market_registry()`` returns the default set of market-wide RAG
 tools (cluster/dimension trends, ticker sentiment, top articles,
-relationships, company vectors, semantic news search, ticker news, plus a
-generic ``fetch_url`` helper). Every agent in the codebase starts here and
+relationships, company vectors, semantic news search, ticker news, the
+priced-in decomposition and its per-driver cases, plus a generic
+``fetch_url`` helper). Every agent in the codebase starts here and
 extends with task-specific tools.
+
+Nothing here enumerates tools by hand: the registry is built from
+``services.rag.get_market_tools()`` matched against ``TOOL_SCHEMAS``, so a
+tool added in ``services/rag/tools.py`` is mounted on every agent without a
+change to this file.
 
 ``build_user_registry(user_id)`` returns a registry of user-scoped RAG
 tools (positions, alerts, screening notes) with the user_id pre-bound so

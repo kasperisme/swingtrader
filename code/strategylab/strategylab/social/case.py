@@ -97,6 +97,12 @@ shorthand — no "de-rate", "re-rate", "multiple compression", "run-rate", "TAM"
 "bps", "the print". Never write the company's current share price as a figure:
 write the token {price} and it is substituted at render time.
 
+Cite a passage by the number it is given below, in the form (Passage 4) or
+(Passages 4, 7) — that exact form, never "Passage [4]" and never a range. Those
+numbers are rendered as links to the article the passage came from, so a number
+outside the range you were given points the reader at nothing. Cite wherever you
+lean on a passage, in every field.
+
 If the evidence is too thin to say anything specific, say so rather than
 inventing a narrative."""
 
@@ -149,6 +155,16 @@ class Case:
     # article page; it is None when the corpus row has no slug, and the UI
     # renders those as plain text rather than a broken link.
     sources: list = field(default_factory=list)
+    # [{n, title, slug}] — the retrieved passages IN THE ORDER THEY WERE
+    # NUMBERED FOR THE MODEL, which is what makes a "(Passage 4)" citation in
+    # the reading resolvable to the article it came out of.
+    #
+    # `sources` cannot do that job and must not be used for it: it is
+    # deduplicated and sorted by title, so passage 4 of twelve is not its
+    # fourth entry and usually is not even in the same position. Linking a
+    # citation through `sources` would attribute a sentence to the wrong
+    # article, which is worse than leaving it unlinked.
+    passages: list = field(default_factory=list)
     retrieval: dict = field(default_factory=dict)
     # A batch pass mixes backends — a ticker retried after a chain failure can be
     # answered by a different model than its neighbours — so the row says, not
@@ -339,11 +355,17 @@ def build(driver: dict, index: int, space, business, implied_brief: str, vote,
     passages = space.retrieve(text, k=k, own_only=True)
     c.n_passages = len(passages)
     c.retrieval = space.retrieval_discrimination(k, own_only=True)
-    seen_titles = sorted({t for t, _ in passages if t})[:8]
     slugs = getattr(space, "slug_by_title", {})
+    seen_titles = sorted({t for t, _ in passages if t})[:8]
     c.sources = [{"title": t, "slug": slugs.get(t)} for t in seen_titles]
+    # Numbered exactly as `body` below numbers them for the model, so a
+    # citation it writes can be turned back into a link.
+    c.passages = [{"n": i + 1, "title": t, "slug": slugs.get(t)}
+                  for i, (t, _) in enumerate(passages)]
 
-    body = "\n\n".join(f"[{i + 1}] {t}\n{x.strip()[:1200]}"
+    # Labelled "Passage 4" rather than "[4]" so the header reads as the citation
+    # the model is asked to write. Numbered exactly as `c.passages` above.
+    body = "\n\n".join(f"Passage {i + 1} — {t}\n{x.strip()[:1200]}"
                        for i, (t, x) in enumerate(passages))
     user = (f"{business.brief()}\n\n{implied_brief}\n\n"
             f"WHERE THE PRICE SITS: {vote.n_targets} published models "

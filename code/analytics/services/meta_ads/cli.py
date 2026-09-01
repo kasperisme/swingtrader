@@ -128,6 +128,37 @@ def _db_leads_by_utm(since: str) -> dict[str, int]:
     return out
 
 
+def _db_customers_by_utm(since: str) -> tuple[dict[str, int], dict[str, float]]:
+    """Real PAYING customers per utm_content, from user_subscriptions.attribution.
+
+    Returns (count, monthly recurring value) keyed by utm_content. Only
+    active/trialing rows count — a canceled or incomplete subscription is not a
+    customer, and counting it would flatter exactly the number this exists to
+    keep honest. Trialing counts because a card is attached (Stripe trial), but
+    it is reported separately by the caller's header so it can't pass for revenue.
+    """
+    from shared.db import get_supabase_client
+    c = get_supabase_client()
+    rows = (c.schema("swingtrader").table("user_subscriptions")
+            .select("attribution,status,plan,billing_interval,created_at")
+            .gte("created_at", since).limit(5000).execute().data or [])
+    # Phase-1 list prices; the monthly-equivalent of an annual plan is /12.
+    monthly = {"investor": 9.0, "trader": 19.0}
+    annual = {"investor": 99.0, "trader": 199.0}
+    n: dict[str, int] = {}
+    mrr: dict[str, float] = {}
+    for r in rows:
+        if str(r.get("status")) not in ("active", "trialing"):
+            continue
+        uc = (r.get("attribution") or {}).get("utm_content") or "— organic —"
+        plan = str(r.get("plan") or "")
+        v = (annual.get(plan, 0.0) / 12 if r.get("billing_interval") == "annual"
+             else monthly.get(plan, 0.0))
+        n[uc] = n.get(uc, 0) + 1
+        mrr[uc] = mrr.get(uc, 0.0) + v
+    return n, mrr
+
+
 def cmd_reconcile(args) -> int:
     since = _time_range(args.since)["since"]
     meta = _ad_insights(args.since)
@@ -147,12 +178,35 @@ def cmd_reconcile(args) -> int:
         cpl = s / lg if lg else 0
         print(f"  {f[:20]:<22}{s:>10.2f}{int(cl):>12}{lg:>10}{(cpl if cpl else 0):>9.2f}")
     print("\n(db leads come from the pixel-independent Supabase capture — the source of truth.)")
+
+    # The paid half. A free-email lead is a proxy; a subscription is the outcome
+    # the spend is actually for, so it gets its own table rather than a column
+    # buried next to leads.
+    cust, mrr = _db_customers_by_utm(since)
+    print(f"\nMeta spend vs REAL PAYING customers — since {since}:\n")
+    print(f"  {'feature':<22}{'spend':>10}{'db leads':>10}{'customers':>11}"
+          f"{'$MRR':>8}{f'{cur}/customer':>14}")
+    for f in sorted(set(spend) | set(cust), key=lambda f: -(spend.get(f, 0))):
+        s, n, m = spend.get(f, 0), cust.get(f, 0), mrr.get(f, 0.0)
+        cpa = s / n if n else 0
+        print(f"  {f[:20]:<22}{s:>10.2f}{db.get(f, 0):>10}{n:>11}{m:>8.0f}"
+              f"{(cpa if cpa else 0):>14.2f}")
+    total_c = sum(cust.values())
+    if total_c == 0:
+        print("\n  ⚠ zero paying customers attributed in this window. If subscriptions exist but\n"
+              "    show as '— organic —', the attribution chain is not wired end-to-end: check\n"
+              "    that checkout is sending `attribution` and the webhook is persisting it.")
     return 0
 
 
 def cmd_preflight(_args) -> int:
     from . import campaigns
     return 1 if campaigns.preflight() else 0
+
+
+def cmd_audiences(_args) -> int:
+    from . import campaigns
+    return campaigns.list_audiences()
 
 
 def cmd_draft(args) -> int:
@@ -384,6 +438,7 @@ def main(argv=None) -> int:
     sub = ap.add_subparsers(dest="cmd", required=True)
     sub.add_parser("verify").set_defaults(func=cmd_verify)
     sub.add_parser("preflight", help="check every gate before `draft --go`").set_defaults(func=cmd_preflight)
+    sub.add_parser("audiences", help="list Custom Audience ids for ad.json targeting").set_defaults(func=cmd_audiences)
     pi = sub.add_parser("insights"); pi.add_argument("--since"); pi.set_defaults(func=cmd_insights)
     pr = sub.add_parser("reconcile"); pr.add_argument("--since"); pr.set_defaults(func=cmd_reconcile)
     pg = sub.add_parser("design", help="join performance ↔ ad design genome (what drives engagement)")

@@ -36,6 +36,14 @@ from .screening_writes import (
     set_screening_ticker_note,
 )
 from .context import get_linked_scan_run_context
+from .priced_in import (
+    get_priced_in,
+    get_priced_in_drivers,
+    get_priced_in_case,
+    search_priced_in_drivers,
+    STALE_AFTER_DAYS as PRICED_IN_STALE_AFTER_DAYS,
+    CAVEAT as PRICED_IN_CAVEAT,
+)
 from .taxonomy import CLUSTERS, CLUSTER_ID_TO_LABEL, DIM_KEY_TO_LABEL
 from .tools import (
     TOOL_SCHEMAS,
@@ -65,6 +73,10 @@ __all__ = [
     "apply_scan_filters", "get_filtered_tickers_from_scan",
     "add_ticker_to_screening", "set_screening_ticker_status",
     "set_screening_ticker_note",
+    # priced-in (drivers + per-driver cases)
+    "get_priced_in", "get_priced_in_drivers", "get_priced_in_case",
+    "search_priced_in_drivers",
+    "PRICED_IN_STALE_AFTER_DAYS", "PRICED_IN_CAVEAT",
     # context assembly
     "get_linked_scan_run_context",
     # taxonomy

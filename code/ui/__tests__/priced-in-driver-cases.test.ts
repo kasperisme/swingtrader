@@ -19,7 +19,9 @@ import { describe, expect, it } from "vitest";
 import {
   parseAnalystCases,
   parseDrivers,
+  parsePassages,
   parseSources,
+  splitCitations,
 } from "@/lib/quote/priced-in-vote";
 
 import fixture from "./fixtures/priced-in-driver-cases.json";
@@ -151,6 +153,75 @@ describe("cited headlines", () => {
   it("carries titles through the real payload", () => {
     for (const d of parseDrivers(drivers, cases)) {
       for (const s of d.case?.sources ?? []) expect(s.title).toBeTruthy();
+    }
+  });
+});
+
+/**
+ * The citation → article link.
+ *
+ * The reading cites its evidence as "(Passage 4)", and the number is only
+ * resolvable through the numbered passage list the generator now records.
+ * `sources` looks like it would do the job and must never be used for it: it is
+ * deduplicated and sorted by title, so its fourth entry is not passage four and
+ * linking through it would attribute the sentence to the wrong headline.
+ */
+describe("passage citations", () => {
+  const passages = [
+    { n: 1, title: "First headline", slug: "first-headline" },
+    { n: 4, title: "Fourth headline", slug: "fourth-headline" },
+  ];
+
+  const cited = (text: string) =>
+    splitCitations(text)
+      .filter((t) => t.passage != null)
+      .map((t) => t.passage);
+
+  it("reads the numbered map the generator writes", () => {
+    expect(parsePassages(passages)).toEqual(passages);
+  });
+
+  it("keys on the stored number, never on array position", () => {
+    // Passage 4 is the second entry here — reading it positionally would point
+    // a "(Passage 4)" citation at the first headline.
+    const parsed = parsePassages(passages);
+    expect(parsed.find((p) => p.n === 4)?.slug).toBe("fourth-headline");
+  });
+
+  it("is empty for every row written before the map existed", () => {
+    expect(parsePassages(undefined)).toEqual([]);
+    expect(parsePassages("not an array")).toEqual([]);
+    expect(parsePassages([{ title: "No number" }, { n: 0 }, null])).toEqual([]);
+  });
+
+  it("finds the form the generator is now told to write", () => {
+    expect(cited("Margins expand (Passage 4).")).toEqual([4]);
+    expect(cited("Both say so (Passages 1, 4).")).toEqual([1, 4]);
+    expect(cited("Both say so (Passages 1 and 4).")).toEqual([1, 4]);
+  });
+
+  it("finds the bracketed forms already stored on published rows", () => {
+    expect(cited("Passage [4] notes the backlog.")).toEqual([4]);
+    expect(cited("Passages [2], [3], and [10] agree.")).toEqual([2, 3, 10]);
+    expect(cited("Passage [1] and [4] both say so.")).toEqual([1, 4]);
+    expect(cited("...established in passages [1], [4].")).toEqual([1, 4]);
+  });
+
+  it("leaves figures alone — only a number after the word is a citation", () => {
+    expect(cited("Revenue grew 12% over 4 quarters.")).toEqual([]);
+    expect(cited("The 12 retrieved passages are generic.")).toEqual([]);
+    // The run ends where the citation does; the next sentence's number is not
+    // swept into it.
+    expect(cited("(Passage 4). 12% of revenue.")).toEqual([4]);
+  });
+
+  it("reassembles the prose verbatim, brackets and punctuation included", () => {
+    for (const text of [
+      "Margins expand (Passage 4), per the note.",
+      "Passages [2], [3], and [10] agree — passage [1] does not.",
+      "Nothing cited here at all.",
+    ]) {
+      expect(splitCitations(text).map((t) => t.text).join("")).toBe(text);
     }
   });
 });

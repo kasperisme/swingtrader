@@ -3,6 +3,7 @@ import { getStripe } from "@/lib/stripe/client";
 import { getPriceId, type Plan, type BillingInterval } from "@/lib/stripe/prices";
 import { createClient } from "@/lib/supabase/server";
 import { captureServer } from "@/lib/analytics/server";
+import { cleanAttribution } from "@/lib/attribution-server";
 
 const VALID_PLANS: Plan[] = ["investor", "trader"];
 const VALID_INTERVALS: BillingInterval[] = ["monthly", "annual"];
@@ -34,6 +35,21 @@ export async function POST(req: NextRequest) {
     const priceId = getPriceId(plan, interval);
     const stripe = getStripe();
 
+    // Ad attribution rides through Stripe so the webhook — which runs with no
+    // cookies, minutes to days later — can record WHICH ad produced the sale and
+    // hand Meta the click ids it needs to match the conversion back to it.
+    // Stripe caps a metadata value at 500 chars, so the blob is serialised once
+    // and truncated rather than spread across keys.
+    const attribution = cleanAttribution(body.attribution);
+    const fbc = typeof body.fbc === "string" ? body.fbc.slice(0, 400) : "";
+    const fbp = typeof body.fbp === "string" ? body.fbp.slice(0, 400) : "";
+    const attrJson = JSON.stringify(attribution).slice(0, 500);
+
+    const trackingMeta: Record<string, string> = {};
+    if (attrJson !== "{}") trackingMeta.attribution = attrJson;
+    if (fbc) trackingMeta.fbc = fbc;
+    if (fbp) trackingMeta.fbp = fbp;
+
     const origin = req.headers.get("origin") ?? process.env.NEXT_PUBLIC_SITE_URL ?? "http://localhost:3000";
 
     const session = await stripe.checkout.sessions.create({
@@ -51,6 +67,7 @@ export async function POST(req: NextRequest) {
         plan,
         billing_interval: interval,
         phase: "phase1",
+        ...trackingMeta,
       },
       subscription_data: {
         ...(trial ? { trial_period_days: TRIAL_DAYS } : {}),
@@ -61,11 +78,15 @@ export async function POST(req: NextRequest) {
           billing_interval: interval,
           phase: "phase1",
           trial: trial ? "true" : "false",
+          ...trackingMeta,
         },
       },
     });
 
-    captureServer(user.id, "checkout_initiated", { plan, interval, trial, session_id: session.id });
+    captureServer(user.id, "checkout_initiated", {
+      plan, interval, trial, session_id: session.id,
+      utm_content: attribution.utm_content, utm_campaign: attribution.utm_campaign,
+    });
 
     return NextResponse.json({ url: session.url });
   } catch (err) {

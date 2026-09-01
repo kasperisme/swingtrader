@@ -64,6 +64,149 @@ def test_news_impact_with_news_escalates_with_metrics():
     assert sig.metrics["mean_sentiment"] == 0.5
 
 
+# ── 2b. Priced-in enrichment of the news read ───────────────────────────────
+
+
+def _pi(driver, pct, segment="Seg", **kw):
+    row = {"ticker": "AAPL", "driver": driver, "segment": segment,
+           "priced_in_pct": pct, "value_if_true_pct": 10, "observable": "units",
+           "testable": True, "as_of": "2026-09-01", "stale": False}
+    row.update(kw)
+    return row
+
+
+def _news(*titles):
+    return [{"ticker": "AAPL", "title": t, "sentiment_score": 0.5} for t in titles]
+
+
+def test_priced_in_tools_are_on_the_internal_floor():
+    """Anything not in _INTERNAL_TOOLS is treated as an FMP call and probed."""
+    skill = get_skill("news_impact")
+    assert "get_priced_in_drivers" in [t["name"] for t in skill.tool_plan]
+    assert skill.fmp_tools() == []
+
+
+def test_priced_in_is_not_required_so_unanalysed_tickers_still_screen():
+    """The programme has published a few hundred names out of the universe."""
+    assert "get_priced_in_drivers" not in get_skill("news_impact").requires
+
+
+def test_news_read_is_unchanged_when_the_ticker_has_no_reconstruction():
+    plain = skills._analytics_news_impact("AAPL", {"get_ticker_news": _news("Apple beats")})
+    assert "Priced-in" not in plain.facts
+    assert "priced_in_drivers" not in plain.metrics
+    assert plain.needs_llm is True
+
+
+def test_priced_in_facts_are_appended_when_a_reconstruction_exists():
+    sig = skills._analytics_news_impact("AAPL", {
+        "get_ticker_news": _news("Apple beats earnings"),
+        "get_priced_in_drivers": [_pi("Services attach rate", 20)],
+    })
+    assert "Priced-in: 1 drivers" in sig.facts
+    assert sig.metrics["priced_in_drivers"] == 1
+    assert sig.metrics["min_priced_in_pct"] == 20
+
+
+def test_no_news_does_not_consult_the_priced_in_read():
+    """The decomposition describes the standing price, not a change to it."""
+    sig = skills._analytics_news_impact("AAPL", {
+        "get_ticker_news": [],
+        "get_priced_in_drivers": [_pi("Services attach rate", 20)],
+    })
+    assert sig.verdict == "not"
+    assert "Priced-in" not in sig.facts
+
+
+def test_headline_pairs_to_the_driver_it_shares_words_with():
+    hits = skills._headline_driver_overlap(
+        "AAPL",
+        _news("Vision Pro headset shipments accelerate in China"),
+        [_pi("Vision Pro headset volume ramp", 15),
+         _pi("Advertising take rate expansion", 70)])
+    assert len(hits) == 1
+    assert hits[0]["drivers"][0]["driver"] == "Vision Pro headset volume ramp"
+    assert hits[0]["ambiguous"] is False
+
+
+def test_a_single_shared_word_is_not_a_pairing():
+    """One shared token is a coincidence, not evidence of the same subject."""
+    assert skills._headline_driver_overlap(
+        "AAPL", _news("Airline capacity cuts hit summer schedules"),
+        [_pi("Datacenter capacity expansion", 10)]) == []
+
+
+def test_generic_finance_words_do_not_create_a_pairing():
+    assert skills._headline_driver_overlap(
+        "AAPL", _news("Analysts raise price target after strong quarterly revenue"),
+        [_pi("Datacenter capacity expansion", 10)]) == []
+
+
+def test_the_company_name_alone_is_not_a_pairing():
+    """The ticker is in both by construction, so it cannot be evidence."""
+    assert skills._headline_driver_overlap(
+        "FLEX", _news("Flex names a new chief financial officer"),
+        [_pi("Flex datacenter buildout", 10, segment="Flex Agility")]) == []
+
+
+def test_tied_drivers_are_all_reported_rather_than_resolved_by_order():
+    """Order is least-priced-first, so silently picking one biases every tie
+    toward the lowest share — i.e. toward calling a known story a catalyst."""
+    hits = skills._headline_driver_overlap(
+        "AAPL",
+        _news("Cloud power infrastructure momentum continues"),
+        [_pi("Spin-off of cloud power infrastructure", 20),
+         _pi("Cloud power infrastructure acceleration", 80)])
+    assert len(hits) == 1
+    assert hits[0]["ambiguous"] is True
+    assert {d["priced_in_pct"] for d in hits[0]["drivers"]} == {20, 80}
+
+
+def test_matched_range_reports_both_ends_of_an_ambiguous_pairing():
+    sig = skills._analytics_news_impact("AAPL", {
+        "get_ticker_news": _news("Cloud power infrastructure momentum continues"),
+        "get_priced_in_drivers": [_pi("Spin-off of cloud power infrastructure", 20),
+                                  _pi("Cloud power infrastructure acceleration", 80)],
+    })
+    assert sig.metrics["matched_driver_priced_in_range"] == "20-80%"
+    assert sig.metrics["headlines_on_known_drivers"] == 1
+    assert "either of" in sig.facts
+
+
+def test_stale_reconstruction_is_flagged():
+    sig = skills._analytics_news_impact("AAPL", {
+        "get_ticker_news": _news("Apple beats"),
+        "get_priced_in_drivers": [_pi("Services attach rate", 20, stale=True)],
+    })
+    assert sig.metrics["priced_in_stale"] is True
+    assert "STALE" in sig.facts
+
+
+def test_priced_in_tool_error_degrades_to_the_plain_news_read():
+    sig = skills._analytics_news_impact("AAPL", {
+        "get_ticker_news": _news("Apple beats"),
+        "get_priced_in_drivers": {"error": "supabase down"},
+    })
+    assert sig.needs_llm is True
+    assert "Priced-in" not in sig.facts
+
+
+def test_driver_without_a_percentage_does_not_crash_the_read():
+    sig = skills._analytics_news_impact("AAPL", {
+        "get_ticker_news": _news("Vision Pro headset shipments accelerate"),
+        "get_priced_in_drivers": [_pi("Vision Pro headset ramp", None)],
+    })
+    assert sig.metrics["priced_in_drivers"] == 1
+    assert "min_priced_in_pct" not in sig.metrics
+    assert "matched_driver_priced_in_range" not in sig.metrics
+
+
+def test_eval_focus_tells_the_judge_the_percentages_are_unvalidated():
+    focus = get_skill("news_impact").eval_focus
+    assert "UNVALIDATED" in focus
+    assert "PRICED-IN" in focus
+
+
 def _dated_bars(prices, volumes):
     """Build FMP-shaped EOD bars (newest-first, like the real endpoint)."""
     n = len(prices)

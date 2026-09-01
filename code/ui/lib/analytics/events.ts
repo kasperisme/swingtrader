@@ -5,7 +5,13 @@ import { getPosthog } from "./posthog";
 
 type EventMap = {
   signup_completed: { method: "email" | "oauth"; plan?: string };
-  login: { method: "email" | "oauth" };
+  // "email" = password, "oauth" = Google, "otp" = passwordless email code.
+  login: { method: "email" | "oauth" | "otp" };
+  // Passwordless code requested. Pairs with `login {method:"otp"}` to give the
+  // request → verify completion rate; a gap between them means codes are not
+  // arriving (template misconfigured, spam folder) rather than being rejected.
+  otp_requested: { resend: boolean };
+  otp_failed: { reason: "invalid" | "expired" | "unknown" };
   logout: Record<string, never>;
   upgrade_clicked: { from_plan: string; to_plan: string; surface: string };
   upgrade_completed: { plan: string };

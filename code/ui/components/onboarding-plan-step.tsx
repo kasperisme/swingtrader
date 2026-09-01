@@ -12,6 +12,8 @@ import { AlertCircle, ArrowLeft, Check, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { getScreeningLimits } from "@/app/actions/screenings-agent";
 import { track } from "@/lib/analytics/events";
+import { getAttribution } from "@/lib/attribution";
+import { getMetaClickIds, trackInitiateCheckout } from "@/lib/pixels";
 import type { PlanTier } from "@/lib/plans";
 import { currentAnnual, currentMonthly } from "@/lib/pricing";
 
@@ -133,11 +135,20 @@ export function OnboardingPlanStep({
       to_plan: plan,
       surface: trial ? "onboarding_trial" : "onboarding",
     });
+    trackInitiateCheckout({ plan, interval, trial });
     try {
       const res = await fetch("/api/stripe/checkout", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ plan, interval, trial }),
+        // See upgrade-button.tsx: the ad click is only visible in the browser,
+        // and the webhook that records the sale runs with no cookies.
+        body: JSON.stringify({
+          plan,
+          interval,
+          trial,
+          attribution: getAttribution(),
+          ...getMetaClickIds(),
+        }),
       });
       const data = (await res.json()) as { url?: string; error?: string };
       if (data.url) {

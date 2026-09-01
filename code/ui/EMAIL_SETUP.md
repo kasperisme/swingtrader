@@ -120,7 +120,45 @@ This is **dashboard-only** — no code change required. In the Supabase project 
 
 **Authentication → Rate Limits** — bump "Emails per hour" if you expect signup bursts. Resend's free tier permits 100/day, 3000/month; paid tiers are higher.
 
-**Authentication → Emails → Templates** — optionally edit the **Confirm signup**, **Reset password**, and **Magic Link** templates so they match the app's tone. Supabase substitutes `{{ .ConfirmationURL }}`, `{{ .Token }}`, `{{ .Email }}`.
+**Authentication → Emails → Templates** — paste the generated templates:
+
+```bash
+cd code/ui && npx tsx scripts/build-supabase-auth-emails.ts
+```
+
+Writes six templates plus a README to `output/supabase-auth/` (gitignored). Source is
+[emails/supabase-auth.ts](emails/supabase-auth.ts); they share `emails/theme.ts` with
+everything else we send, so the palette stays in one place.
+
+**They do not use `{{ .ConfirmationURL }}`.** That points at Supabase's verify endpoint,
+which then bounces to the app. This app already ships
+[app/auth/confirm/route.ts](app/auth/confirm/route.ts), which reads `token_hash` + `type`
+and calls `verifyOtp` itself, so every link goes straight there:
+
+```
+{{ .SiteURL }}/auth/confirm?token_hash={{ .TokenHash }}&type=<type>&next=<path>
+```
+
+The click stays on our domain, and the route primes the subscription tier and fires the
+welcome email before redirecting. `type` and `next` differ per template and are **not**
+interchangeable — a wrong `type` fails `verifyOtp` with an opaque error:
+
+| Template | `type` | `next` | Why that path |
+| -------- | ------ | ------ | ------------- |
+| Confirm signup | `signup` | `/protected` | matches `sign-up-form.tsx` `emailRedirectTo` |
+| Reset Password | `recovery` | `/auth/update-password` | `update-password-form.tsx` needs the session this route establishes |
+| Magic Link | `magiclink` | `/protected` | |
+| Change Email Address | `email_change` | `/protected` | also renders `{{ .NewEmail }}` |
+| Invite user | `invite` | `/protected` | |
+| Reauthentication | — | — | 6-digit `{{ .Token }}`, no link |
+
+Three settings have to line up or the links break: **Site URL** must be the public origin
+(every link is built from `{{ .SiteURL }}`), **Redirect URLs** must allow
+`https://newsimpactscreener.com/**`, and **Email OTP Expiration** must match the expiry
+the copy states — rebuild with `SUPABASE_OTP_EXPIRY_MINUTES=<n>` if you change it.
+
+Only Reauthentication prints `{{ .Token }}`. Supabase offers it everywhere, but the app
+ships no code-entry UI, so showing a code nobody can redeem is worse than showing nothing.
 
 After saving, send a test signup from a fresh email and confirm:
 - The email arrives from `noreply@newsimpactscreener.com`.

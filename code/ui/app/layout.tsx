@@ -15,6 +15,7 @@ import { SiteHeader, SiteHeaderFallback } from "@/components/site-header";
 import { CavemanModeProvider } from "@/lib/caveman-mode";
 import { AnalyticsProvider } from "@/lib/analytics/AnalyticsProvider";
 import { Pixels } from "@/components/pixels";
+import { AttributionCapture } from "@/components/attribution-capture";
 import {
   METADATA_BASE,
   SITE_URL,
@@ -141,6 +142,7 @@ export default function RootLayout({
         <Pixels />
       </head>
       <body className={`${jakartaSans.className} antialiased`}>
+        <AttributionCapture />
         <script
           type="application/ld+json"
           dangerouslySetInnerHTML={{ __html: JSON.stringify(siteJsonLd) }}

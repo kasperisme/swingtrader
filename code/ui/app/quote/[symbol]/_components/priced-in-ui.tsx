@@ -6,7 +6,9 @@
  * members gate — the free panel, the gated deep dive and the client gate all
  * render the same labels, and none of the three should own them.
  */
-import { injectPrice } from "@/lib/quote/priced-in-vote";
+import Link from "next/link";
+import { injectPrice, splitCitations } from "@/lib/quote/priced-in-vote";
+import type { PricedInPassage } from "@/lib/quote/priced-in-vote";
 
 /**
  * How much of an assumption the price already reflects, as an ORDINAL band.
@@ -85,6 +87,81 @@ export const SECTION_LABEL =
   "text-[11px] uppercase tracking-wide text-muted-foreground";
 export const FIELD_LABEL = "text-[11px] font-medium text-foreground/70";
 
+/**
+ * Generated prose with its "(Passage 4)" citations turned into article links.
+ *
+ * The reading cites the passages it was given by number, and until this existed
+ * the number was a dead end: the only way to reach the article was to scroll to
+ * the "Headlines it drew on" list at the foot of the card — which is sorted by
+ * title and deduplicated, so it does not even say WHICH headline passage four
+ * was. The number is the citation, so the number is the link.
+ *
+ * A citation is linked only when the row carries the numbered passage map and
+ * that passage has a slug. Rows written before the generator recorded the map
+ * render exactly as before, plain: guessing the article from `sources` would
+ * put a confident link on the wrong headline, and a wrong citation is worse
+ * than an unlinked one.
+ *
+ * Opens in a new tab, unlike the headline list below it. The citation sits
+ * mid-sentence inside a `<details>` the reader opened themselves, and a
+ * same-tab navigation costs them that state — every disclosure on the panel is
+ * closed again when they come back.
+ */
+/*
+ * No colour: the band ramp owns this panel's only accent, so a citation is
+ * marked typographically instead — a dotted rule reads as a footnote, and it
+ * stays the same underline idiom as the headline list at the foot of the card
+ * rather than introducing a second kind of link inside one card.
+ */
+const CITATION_LINK =
+  "rounded-sm font-medium underline decoration-muted-foreground/70 " +
+  "decoration-dotted underline-offset-2 transition-colors hover:text-foreground " +
+  "hover:decoration-foreground focus-visible:outline-none focus-visible:ring-2 " +
+  "focus-visible:ring-ring";
+
+export function CitedText({
+  text,
+  passages,
+}: {
+  text: string;
+  passages?: PricedInPassage[];
+}) {
+  if (!passages?.length) return <>{text}</>;
+  const byNumber = new Map(passages.map((p) => [p.n, p]));
+
+  return (
+    <>
+      {splitCitations(text).map((tok, i) => {
+        const p = tok.passage == null ? undefined : byNumber.get(tok.passage);
+        if (!p) return <span key={i}>{tok.text}</span>;
+        // Hover and the accessible name both carry the headline, so the reader
+        // knows where a bare number goes before they spend a click on it.
+        const label = `Passage ${p.n}: ${p.title}`;
+        if (!p.slug) {
+          return (
+            <span key={i} title={label} className="cursor-help">
+              {tok.text}
+            </span>
+          );
+        }
+        return (
+          <Link
+            key={i}
+            href={`/articles/${p.slug}`}
+            target="_blank"
+            rel="noopener"
+            title={label}
+            aria-label={label}
+            className={CITATION_LINK}
+          >
+            {tok.text}
+          </Link>
+        );
+      })}
+    </>
+  );
+}
+
 /** One labelled paragraph inside a row's evidence. */
 export function Field({
   label,
@@ -104,7 +181,15 @@ export function Field({
 }
 
 /** Evidence the retrieval turned up, for or against. Bulleted, never prose. */
-export function EvidenceList({ label, items }: { label: string; items: string[] }) {
+export function EvidenceList({
+  label,
+  items,
+  passages,
+}: {
+  label: string;
+  items: string[];
+  passages?: PricedInPassage[];
+}) {
   if (items.length === 0) return null;
   return (
     <div>
@@ -119,7 +204,9 @@ export function EvidenceList({ label, items }: { label: string; items: string[] 
               className="mt-[7px] h-1 w-1 shrink-0 rounded-full bg-muted-foreground/50"
               aria-hidden
             />
-            <span className="max-w-[70ch]">{e}</span>
+            <span className="max-w-[70ch]">
+              <CitedText text={e} passages={passages} />
+            </span>
           </li>
         ))}
       </ul>

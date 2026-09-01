@@ -169,8 +169,8 @@ best-effort — unknown/access-denied FMP tools are dropped and analytics degrad
 to escalation. When no skill fits (classifier → `NONE`) or a skill's required
 internal tools are missing, the run **diverts** to the unchanged dynamic planner.
 
-Current skills: `news_impact`, `breakout`, `portfolio_rundown`,
-`relationship_contagion`. Inspect/repair them with:
+Current skills: `news_impact`, `news_briefing`, `breakout`,
+`portfolio_rundown`, `relationship_contagion`. Inspect/repair them with:
 
 ```bash
 python -m services.agent.cli validate-skills [--user-id <uuid>] [--probe] [--ticker AAPL]
@@ -180,6 +180,50 @@ python -m services.agent.cli classify "which names are breaking out?"
 `validate-skills` checks each skill's `requires` against a live registry, reports
 which FMP tools resolve, and (with `--probe`) calls them to confirm API-plan
 availability. Run `validate-skills --probe` after an FMP plan change.
+
+#### News-impact skill — is the headline already in the price?
+
+`news_impact` fetches the priced-in decomposition alongside the news
+(`get_priced_in_drivers`, from `services.rag.priced_in`), because the question
+that decides whether a headline is worth firing on is not "how loud is it" but
+**"is this already in the price?"** The priced-in programme's governing
+assumption is that being written up is the definition of known, and known is
+priced — so a story restating a driver already ~85% priced is confirmation,
+while the same story on a driver at 15% is the signal.
+
+The COMPUTE layer (`_priced_in_facts`) pairs each headline to the drivers it
+shares content words with and hands the evaluator the driver text plus its
+priced-in share. The pairing is **coarse and lexical on purpose**: it points at
+a driver, it never decides. That is the lesson the priced-in programme already
+learned in `entail.py` — similarity answers "same subject" where the question is
+"asserted or not", and only a reader settles the second. Two guards matter:
+
+- A single shared word is not a pairing (`_OVERLAP_MIN_TOKENS = 2`), generic
+  finance vocabulary is stopworded out, and the company's own name is ignored —
+  it is in both the headline and the driver by construction.
+- **Every driver tying at the best overlap is reported, not one of them.** Driver
+  rows arrive least-priced-first, so silently taking the first of a tie would
+  bias every ambiguous pairing toward the lowest share — toward calling a known
+  story a catalyst, the exact error the pairing exists to prevent.
+
+Real example, two tickers with the same superficial headline burst:
+
+```
+PRCT  5 law-firm deadline headlines, sentiment -0.96
+      → pairs to 'Class action lawsuit alleging artificial reve…' (85% priced)
+GDDY  3 law-firm deadline headlines, sentiment -0.87
+      → pairs to 'Securities class action lawsuit damages…'      (15% priced)
+```
+
+A sentiment-only read triggers on both. The priced-in read separates them.
+
+Enrichment, not a floor: the programme has published a few hundred names out of
+the universe, so `get_priced_in_drivers` is deliberately **not** in `requires`
+and returns nothing for most tickers — the news read then stands exactly as it
+did before, and the absence is never treated as a signal. `priced_in_pct` is the
+programme's UNVALIDATED judged tier; `eval_focus` says so, and says the agent
+must never trigger on a percentage with no fresh headline behind it (the
+decomposition describes the standing price, not a change to it).
 
 #### Breakout skill — fully deterministic, multi-timeframe
 

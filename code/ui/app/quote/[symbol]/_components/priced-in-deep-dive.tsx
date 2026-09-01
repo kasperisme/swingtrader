@@ -13,6 +13,7 @@ import {
 } from "@/lib/quote/priced-in-vote";
 import {
   band,
+  CitedText,
   EvidenceList,
   FIELD_LABEL,
   Field,
@@ -399,7 +400,10 @@ function CaseBody({
             </p>
           )}
           <p className="max-w-[76ch] text-pretty text-sm leading-relaxed text-foreground/90">
-            {injectPrice(c.whatCoverageSays, price)}
+            <CitedText
+              text={injectPrice(c.whatCoverageSays, price)}
+              passages={c.passages}
+            />
           </p>
           {/* The load-bearing caveat of this whole panel, said where the number
               is rather than in a footnote nobody reaches. */}
@@ -412,10 +416,15 @@ function CaseBody({
 
       {(c.evidenceFor.length > 0 || c.evidenceAgainst.length > 0) && (
         <div className="grid gap-4 sm:grid-cols-2">
-          <EvidenceList label="Coverage that supports it" items={c.evidenceFor} />
+          <EvidenceList
+            label="Coverage that supports it"
+            items={c.evidenceFor}
+            passages={c.passages}
+          />
           <EvidenceList
             label="Coverage that cuts against it"
             items={c.evidenceAgainst}
+            passages={c.passages}
           />
         </div>
       )}
@@ -436,14 +445,20 @@ function CaseBody({
             )}
           </p>
           <p className="max-w-[76ch] text-pretty text-sm leading-relaxed text-foreground/90">
-            {injectPrice(c.whatTheDataShows, price)}
+            <CitedText
+              text={injectPrice(c.whatTheDataShows, price)}
+              passages={c.passages}
+            />
           </p>
         </div>
       )}
 
       {c.stillNeeded && (
         <Field label="What would still settle it">
-          {injectPrice(c.stillNeeded, price)}
+          <CitedText
+            text={injectPrice(c.stillNeeded, price)}
+            passages={c.passages}
+          />
         </Field>
       )}
 

@@ -44,3 +44,4 @@ next-env.d.ts
 
 # Rendered email campaign artifacts
 /output/broadcasts/
+/output/supabase-auth/

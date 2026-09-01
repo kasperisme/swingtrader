@@ -113,8 +113,24 @@ export type PricedInDriverCase = {
   distinctArticles: number | null;
   /** Headlines the reading drew on, linked to the article page when known. */
   sources: PricedInSource[];
+  /**
+   * The retrieved passages in the order the model was given them, so a
+   * "(Passage 4)" written into the prose above resolves to the article it came
+   * from. Empty on every row generated before the generator carried it.
+   */
+  passages: PricedInPassage[];
   model: string | null;
 };
+
+/**
+ * One numbered passage, as the reading's citations refer to it.
+ *
+ * `n` is the number the model saw and wrote, NOT a position in `sources`:
+ * sources is deduplicated and sorted by title, so resolving a citation through
+ * it would attribute the sentence to whichever headline happened to sort into
+ * that slot. This is the only mapping that may be used for a citation link.
+ */
+export type PricedInPassage = PricedInSource & { n: number };
 
 /**
  * One cited headline.
@@ -470,9 +486,84 @@ export function parseDriverCases(raw: unknown): Map<number, PricedInDriverCase> 
       selective: retrieval ? retrieval.selective !== false : true,
       distinctArticles: retrieval ? num(retrieval.distinct_articles) : null,
       sources: parseSources(d.sources),
+      passages: parsePassages(d.passages),
       model: str(d.model),
     });
   }
+  return out;
+}
+
+/**
+ * The numbered passage list, or empty when the row predates it.
+ *
+ * Keyed on the stored `n` rather than array position: the generator writes them
+ * in order, but a citation is only worth rendering as a link if the number in
+ * the prose and the number on the passage are the same number, and reading it
+ * off the array would quietly substitute one for the other.
+ */
+export function parsePassages(raw: unknown): PricedInPassage[] {
+  if (!Array.isArray(raw)) return [];
+  const out: PricedInPassage[] = [];
+  for (const item of raw) {
+    const o = obj(item);
+    const title = o ? str(o.title) : null;
+    const n = o ? num(o.n) : null;
+    if (!title || n == null || !Number.isInteger(n) || n < 1) continue;
+    out.push({ n, title, slug: o ? str(o.slug) : null });
+  }
+  return out;
+}
+
+/** A run of prose, or the one number in it that is a passage citation. */
+export type CitationToken = {
+  text: string;
+  /** The passage number, when this token is a citation. */
+  passage: number | null;
+};
+
+/**
+ * "Passage 4", and the forms of it already sitting in published rows.
+ *
+ * A number counts only where it follows the word itself: bare figures are
+ * everywhere in this prose, and "4 quarters" is not a reference to passage
+ * four. Subsequent numbers join the same citation only through a comma or an
+ * "and", so a run stops at the sentence's next figure.
+ */
+const CITATION =
+  /\b(?:passages?)\s+\[?\d{1,3}\]?(?:(?:\s*,\s*and\s+|\s*,\s*|\s+and\s+|\s*&\s*)\[?\d{1,3}\]?)*/gi;
+
+/**
+ * Split generated prose on its passage citations, so the UI can link them.
+ *
+ * The generator is now told to write "(Passage 4)" / "(Passages 4, 7)", but the
+ * rows already published — which is most of what is on the page — also carry
+ * "Passage [4]", "Passages [2], [11]", "Passage [7] and [9]" and a lowercase
+ * variant of each, so all of them are read here.
+ *
+ * Everything that is not a citation number comes back verbatim, punctuation
+ * and brackets included: the renderer reassembles the sentence out of these
+ * tokens, and linking a citation must not quietly rewrite the model's prose
+ * around it.
+ */
+export function splitCitations(text: string): CitationToken[] {
+  const out: CitationToken[] = [];
+  let last = 0;
+  const push = (t: string, passage: number | null) => {
+    if (t) out.push({ text: t, passage });
+  };
+  for (const m of text.matchAll(CITATION)) {
+    const start = m.index ?? 0;
+    push(text.slice(last, start), null);
+    // The word ("Passage", "Passages") stays plain text: a run cites several
+    // numbers and the word belongs to all of them, so it cannot live inside
+    // any one link.
+    for (const piece of m[0].split(/(\[\d{1,3}\]|\d{1,3})/)) {
+      const digits = piece.match(/\d{1,3}/);
+      push(piece, digits ? Number(digits[0]) : null);
+    }
+    last = start + m[0].length;
+  }
+  push(text.slice(last), null);
   return out;
 }
 

@@ -64,40 +64,21 @@ export type NarrativeTradingBroadcastProps = {
   utm?: Record<string, string>;
 };
 
-function esc(s: string): string {
-  return s
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;");
-}
-
-/**
- * The app's LIGHT tokens, resolved from app/globals.css `:root` — a warm cream
- * theme, not stark white. Kept as literals because email clients cannot read
- * CSS variables.
- *
- * Two ambers on purpose, exactly as the product does it: `--primary` #f59f0a
- * fills the button (with dark text, per --primary-foreground), while small
- * amber TEXT uses #b45309 — the same light-mode value
- * app/quote/[symbol]/_components/priced-in-ui.tsx picks. Bright amber on cream
- * fails contrast at 11-15px.
- */
-const PAGE = "#f1ece4"; // --secondary, the ground behind the card
-const CARD = "#fefdfb"; // --card
-const PANEL = "#f2eee8"; // --muted, for boxes inside the card
-const TEXT = "#0f1729"; // --foreground
-const MUTED = "#546378"; // --muted-foreground
-const BORDER = "#dfd6cd"; // --border
-const ACCENT = "#f59f0a"; // --primary, button fill only
-const ACCENT_TEXT = "#b45309"; // amber that passes contrast on cream
-const ON_ACCENT = "#0f1729"; // --primary-foreground, text on the amber fill
-const MONO =
-  "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', monospace";
-const SANS =
-  "'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif";
-
-const P = `font-family:${SANS};font-size:15px;line-height:1.6;color:${TEXT};margin:0 0 14px 0;`;
+import {
+  ACCENT,
+  ACCENT_TEXT,
+  BORDER,
+  CARD,
+  esc,
+  MONO,
+  MUTED,
+  ON_ACCENT,
+  P,
+  PAGE,
+  PANEL,
+  SANS,
+  TEXT,
+} from "./theme";
 
 function withUtm(url: string, utm?: Record<string, string>): string {
   if (!utm || Object.keys(utm).length === 0) return url;
