@@ -436,8 +436,12 @@ export default async function ArenaAgentPage({
             {orders.map((o) => (
               <li key={o.id} className="bg-background py-3">
                 <div className="flex flex-wrap items-baseline gap-x-3 font-mono text-xs tabular-nums">
+                  {/* The SESSION the order belongs to, not when the row was
+                      written. In a replay `submitted_at` is the wall-clock time
+                      the backtest ran, so using it would stamp 46 sessions of
+                      trades with the same evening. */}
                   <span className="text-muted-foreground">
-                    {fmtDate(o.submitted_at.slice(0, 10))}
+                    {fmtDate(o.intended_for ?? o.submitted_at.slice(0, 10))}
                   </span>
                   <span
                     className={

@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 from datetime import date, datetime, timedelta
 from typing import Any, Optional
 from zoneinfo import ZoneInfo
@@ -205,6 +206,11 @@ def _scoped_agents(only: Optional[list[str]], *, active_only: bool) -> list[dict
     return [a for a in agents if a["slug"] in wanted]
 
 
+#: Default LLM agents in flight at once. They share one Ollama backend and one
+#: FMP key, so this is a throughput knob, not a free multiplier.
+DEFAULT_CONCURRENCY = int(os.environ.get("ARENA_CONCURRENCY", "4"))
+
+
 def run_decide(
     session: date,
     intended_for: date,
@@ -212,13 +218,13 @@ def run_decide(
     *,
     only: Optional[list[str]] = None,
     dry_run: bool = False,
+    concurrency: int = DEFAULT_CONCURRENCY,
 ) -> list[dict[str, Any]]:
     """Run every active agent's decision for the next session.
 
-    Agents run sequentially rather than concurrently: they share one Ollama
-    backend and one FMP key, and a stampede of nine tool-calling loops produces
-    timeouts and rate limits rather than speed. A failure is recorded on that
-    agent's decision row and the roster continues.
+    LLM agents run CONCURRENTLY, bounded by ``concurrency``; the deterministic
+    controls run inline first. A failure is recorded on that agent's decision
+    row and the rest of the roster continues.
     """
     agents = _scoped_agents(only, active_only=True)
 
@@ -232,33 +238,82 @@ def run_decide(
     _warm_fmp_catalogue(agents)
 
     broker = Broker(prices)
-    results = []
+
+    # The deterministic controls are pure Python and take milliseconds; run them
+    # first and inline. They also mutate their own books only, so ordering
+    # against the LLM agents is irrelevant.
+    results: list[dict[str, Any]] = []
+    llm_agents = []
     for agent in agents:
-        log.info("arena: deciding — %s (for %s)", agent["slug"], intended_for)
-        try:
-            if agent.get("engine") == "deterministic":
-                result = controls.run_control(
+        if agent.get("engine") == "deterministic":
+            try:
+                results.append(controls.run_control(
+                    agent, session=session, intended_for=intended_for,
+                    broker=broker, dry_run=dry_run,
+                ))
+            except Exception as exc:
+                log.exception("arena: %s failed", agent["slug"])
+                results.append({"slug": agent["slug"], "status": "error", "error": str(exc)})
+        else:
+            llm_agents.append(agent)
+
+    if llm_agents:
+        results.extend(
+            asyncio.run(
+                _decide_llm_agents(
+                    llm_agents,
+                    session=session,
+                    intended_for=intended_for,
+                    broker=broker,
+                    dry_run=dry_run,
+                    concurrency=concurrency,
+                )
+            )
+        )
+    return results
+
+
+async def _decide_llm_agents(
+    agents: list[dict[str, Any]],
+    *,
+    session: date,
+    intended_for: date,
+    broker: Broker,
+    dry_run: bool,
+    concurrency: int,
+) -> list[dict[str, Any]]:
+    """Run the LLM agents concurrently under one event loop.
+
+    Safe to parallelise because agents share no mutable state: each has its own
+    cash row, positions, decision row and in-memory portfolio, and the broker
+    validates every order against that agent's own book. The module-level
+    championship / replay / as-of clocks ARE shared, but they are per-run
+    constants that every agent in the pass reads identically.
+
+    What is NOT parallelisable is sessions: session N+1 fills what N decided, so
+    the outer loop stays strictly sequential.
+
+    ``concurrency`` bounds it because the agents share one Ollama backend and one
+    FMP key; unbounded fan-out trades timeouts for speed.
+    """
+    sem = asyncio.Semaphore(max(1, concurrency))
+
+    async def one(agent: dict[str, Any]) -> dict[str, Any]:
+        async with sem:
+            log.info("arena: deciding — %s (for %s)", agent["slug"], intended_for)
+            try:
+                return await decide.run_decision(
                     agent,
                     session=session,
                     intended_for=intended_for,
                     broker=broker,
                     dry_run=dry_run,
                 )
-            else:
-                result = asyncio.run(
-                    decide.run_decision(
-                        agent,
-                        session=session,
-                        intended_for=intended_for,
-                        broker=broker,
-                        dry_run=dry_run,
-                    )
-                )
-        except Exception as exc:  # one bad agent must not end the roster's day
-            log.exception("arena: %s failed", agent["slug"])
-            result = {"slug": agent["slug"], "status": "error", "error": str(exc)}
-        results.append(result)
-    return results
+            except Exception as exc:  # one bad agent must not end the roster's day
+                log.exception("arena: %s failed", agent["slug"])
+                return {"slug": agent["slug"], "status": "error", "error": str(exc)}
+
+    return list(await asyncio.gather(*(one(a) for a in agents)))
 
 
 def run_day(

@@ -45,6 +45,75 @@ def _tbl(name: str):
     return get_supabase_client().schema(_SCHEMA).table(name)
 
 
+# ── Point-in-time clock ──────────────────────────────────────────────────────
+# When a replay sets this, every source that CAN be rewound is bounded by it, so
+# an agent replaying 2 July reads the screening board that existed on 2 July
+# rather than the newest one.
+#
+# It is deliberately narrow. Only the screening boards carry true run history
+# (`market_screening_results.run_at`); the news scores were largely backfilled,
+# the priced-in rows are all `generation_is_pit = false`, and `ticker_pair_stats`
+# holds only a current z-score. Those remain look-ahead in a replay, and the
+# tool docstrings say so rather than implying a rewind that is not happening.
+
+_AS_OF: Optional[date] = None
+
+
+def set_as_of(as_of: Optional[date]) -> None:
+    """Bound the rewindable sources to ``as_of``. None restores live behaviour."""
+    global _AS_OF
+    _AS_OF = as_of
+
+
+def as_of() -> Optional[date]:
+    return _AS_OF
+
+
+#: Shared RAG tools that accept an ``as_of`` and honour it. The arena injects the
+#: replayed session; the model never sees the parameter and cannot set it.
+AS_OF_AWARE_TOOLS = (
+    "get_top_articles",
+    "get_ticker_sentiment",
+    "get_ticker_news",
+)
+
+#: Tools that CANNOT be bounded to a past session, and what leaks as a result.
+#: Listed explicitly so a replay's residual look-ahead is a documented fact
+#: rather than something a reader has to infer from silence.
+UNBOUNDED_IN_REPLAY = {
+    "search_news": "semantic search RPC anchors its window at now() server-side",
+    "get_news_by_tag": "tag search RPC anchors its window at now() server-side",
+    "get_cluster_trends": "aggregate view anchored at now()",
+    "get_dimension_trends": "aggregate view anchored at now()",
+    "get_ticker_relationships": "the graph is refreshed in place; no as-of version exists",
+    "get_company_vectors": "one snapshot per ticker, not a time series",
+    "get_priced_in": "every row is generation_is_pit = false",
+    "get_priced_in_drivers": "every row is generation_is_pit = false",
+    "get_priced_in_case": "every row is generation_is_pit = false",
+    "search_priced_in_drivers": "every row is generation_is_pit = false",
+    "get_pair_signals": "ticker_pair_stats holds only a current z-score, no history",
+}
+
+
+class _BindAsOf:
+    """Inject the replayed session into a tool that accepts one.
+
+    The parameter is absent from the schema the model sees, so an agent can
+    neither set nor widen its own clock.
+    """
+
+    __slots__ = ("fn",)
+
+    def __init__(self, fn: Callable[..., Any]) -> None:
+        self.fn = fn
+
+    def __call__(self, **kwargs: Any) -> Any:
+        current = as_of()
+        if current is not None:
+            kwargs["as_of"] = current
+        return self.fn(**kwargs)
+
+
 # ── 1 + 2: the account-bound tools ───────────────────────────────────────────
 
 
@@ -320,7 +389,7 @@ def get_screening_results(screening_slug: str = "nis-momentum", limit: int = 25)
         }
     screening = scr.data[0]
 
-    res = (
+    q = (
         _tbl("market_screening_results")
         .select("id,run_at,triggered,summary")
         .eq("market_screening_id", screening["id"])
@@ -330,12 +399,20 @@ def get_screening_results(screening_slug: str = "nis-momentum", limit: int = 25)
         # rather than as a bug, and costs it the whole day.
         .eq("status", "done")
         .eq("is_test", False)
-        .order("run_at", desc=True)
-        .limit(1)
-        .execute()
     )
+    if _AS_OF is not None:
+        # The most recent board that EXISTED at the close of the replayed
+        # session. Boards run weekly, so this is usually a few days old — which
+        # is exactly what a trader acting on that session would have had.
+        q = q.lte("run_at", f"{_AS_OF.isoformat()}T23:59:59+00:00")
+    res = q.order("run_at", desc=True).limit(1).execute()
     if not res.data:
-        return {"screening": screening["name"], "slug": slug, "rows": [], "note": "no completed run yet"}
+        note = (
+            f"no run of this screening existed on or before {_AS_OF.isoformat()}"
+            if _AS_OF is not None
+            else "no completed run yet"
+        )
+        return {"screening": screening["name"], "slug": slug, "rows": [], "note": note}
     result = res.data[0]
 
     rows = (
@@ -466,7 +543,9 @@ def get_trending_tickers(days: int = 5, prior_days: int = 15, limit: int = 25) -
     except (TypeError, ValueError):
         days, prior_days, limit = 5, 15, 25
 
-    today = datetime.now(timezone.utc).date()
+    # Anchored on the replayed session when one is set, so the acceleration is
+    # measured against the coverage that existed then rather than against now.
+    today = _AS_OF or datetime.now(timezone.utc).date()
     window_start = today - timedelta(days=days)
     prior_start = window_start - timedelta(days=prior_days)
 
@@ -475,6 +554,7 @@ def get_trending_tickers(days: int = 5, prior_days: int = 15, limit: int = 25) -
             SELECT ticker, bucket_day, mention_count, weighted_sentiment
             FROM swingtrader.news_trends_ticker_daily_v
             WHERE bucket_day >= %(prior_start)s
+              AND bucket_day <= %(today)s
         ),
         agg AS (
             SELECT
@@ -507,6 +587,7 @@ def get_trending_tickers(days: int = 5, prior_days: int = 15, limit: int = 25) -
                 sql,
                 {
                     "prior_start": prior_start,
+                    "today": today,
                     "window_start": window_start,
                     "days": days,
                     "prior_days": prior_days,

@@ -10,7 +10,7 @@ Consolidates:
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, time as dtime, timedelta, timezone
 from typing import Any
 
 from shared.db import get_supabase_client
@@ -73,19 +73,30 @@ def get_dimension_trends(hours: int = 14) -> list[dict[str, Any]]:
 def get_ticker_sentiment(
     tickers: list[str] | None = None,
     hours: int = 24,
+    as_of: "date | None" = None,
 ) -> list[dict[str, Any]]:
     """Per-article per-ticker sentiment from ticker_sentiment_heads_v.
 
     Columns: article_id, ticker, sentiment_score, title, url, published_at.
+
+    ``as_of`` bounds the window to a replayed session so nothing published after
+    it can be read.
     """
     client, schema = _client()
-    since = datetime.now(timezone.utc) - timedelta(hours=hours)
+    upper_iso = None
+    if as_of is None:
+        since = datetime.now(timezone.utc) - timedelta(hours=hours)
+    else:
+        end = datetime.combine(as_of, dtime.max, tzinfo=timezone.utc)
+        since, upper_iso = end - timedelta(hours=hours), end.isoformat()
     q = (
         client.schema(schema)
         .table("ticker_sentiment_heads_v")
         .select("*")
         .gte("published_at", since.isoformat())
     )
+    if upper_iso:
+        q = q.lte("published_at", upper_iso)
     if tickers:
         q = q.in_("ticker", [t.upper() for t in tickers])
     return q.order("published_at", desc=True).limit(50).execute().data or []

@@ -46,11 +46,13 @@ rather than starting over or double-counting.
 from __future__ import annotations
 
 import logging
+import math
 import uuid
 from datetime import date, timedelta
 from typing import Any, Optional
 
 from . import scheduler, store
+from . import tools as arena_tools
 from .marks import PriceBook
 from .roster import ROSTER
 
@@ -152,6 +154,7 @@ def run_backtest(
     wipe: bool = False,
     resume: bool = True,
     point_in_time: bool = False,
+    concurrency: int = scheduler.DEFAULT_CONCURRENCY,
     run_id: Optional[str] = None,
     dry_run: bool = False,
 ) -> dict[str, Any]:
@@ -198,7 +201,15 @@ def run_backtest(
         "agents": slugs,
         "decide_every": decide_every,
         "point_in_time": point_in_time,
-        "estimated_hours": round(len(decision_days) * _llm_agent_count(slugs) * 140 / 3600, 1),
+        "concurrency": concurrency,
+        # Wall-clock, not CPU: with N agents in flight the per-session cost is
+        # ceil(agents / concurrency) waves of ~140s, not agents * 140s.
+        "estimated_hours": round(
+            len(decision_days)
+            * math.ceil(_llm_agent_count(slugs) / max(1, concurrency))
+            * 140 / 3600,
+            1,
+        ),
     }
     if dry_run:
         return {**plan, "status": "dry_run"}
@@ -218,6 +229,14 @@ def run_backtest(
     stats = {"filled": 0, "rejected": 0, "marks": 0, "decisions": 0, "errors": 0}
     try:
         decision_set = set(decision_days)
+        if point_in_time:
+            log.info(
+                "arena/backtest: point-in-time ON — news (published_at), ticker "
+                "sentiment, attention trends and the screening boards are bounded "
+                "by each session. Priced-in, pair z-scores, the relationship graph "
+                "and FMP fundamentals have no historical version and remain "
+                "look-ahead; see UNBOUNDED_IN_REPLAY in services/arena/tools.py."
+            )
         for i, session in enumerate(sessions, 1):
             log.info(
                 "arena/backtest: [%d/%d] %s%s",
@@ -235,17 +254,25 @@ def run_backtest(
             if session not in decision_set:
                 continue
 
+            # Bound the rewindable sources to this session before the agents
+            # research it. Set per session, not once per run.
+            arena_tools.set_as_of(session if point_in_time else None)
+
             # An agent decides on this session's close for the NEXT session it
             # will be filled in — which, when decisions are spaced out, is the
             # next session in the replay, not merely the next calendar day.
             nxt = _next_in(sessions, session) or scheduler.next_session_after(session)
-            results = scheduler.run_decide(session, nxt, prices, only=slugs)
+            results = scheduler.run_decide(
+                session, nxt, prices, only=slugs, concurrency=concurrency
+            )
             stats["decisions"] += len(results)
             stats["errors"] += sum(1 for r in results if r.get("status") == "error")
     finally:
-        # Always drop the stamp, including on a crash — leaving it set would
-        # silently mark the next LIVE run as simulated.
+        # Always drop both clocks, including on a crash — leaving either set
+        # would silently mark the next LIVE run as simulated, or bound its
+        # research to a past date.
         store.set_backtest_mode(None)
+        arena_tools.set_as_of(None)
 
     return {**plan, "status": "complete", **stats}
 

@@ -198,6 +198,57 @@ broker, run these.
 
 ---
 
+## What a replay can and cannot rewind
+
+`cli.py backtest --start <date> [--point-in-time]` replays past sessions. The
+**accounting is always honest**: every session fills at its own open (+5bp) and
+marks to its own close, and an order for a name that did not trade that session
+is rejected rather than filled at a stale price. Nothing in the broker can see
+forward.
+
+The **research** is a different matter, and it differs per source:
+
+| Source | Rewindable? | Agents relying on it |
+|---|---|---|
+| Prices (FMP daily bars) | ✅ always | all — this is the accounting |
+| News articles + impact (`published_at`) | ✅ under `--point-in-time` | Jim Clamor, Howard Marx |
+| Ticker sentiment (`published_at`) | ✅ under `--point-in-time` | Jim Clamor, Chris Cameo, Howard Marx |
+| Attention acceleration | ✅ under `--point-in-time` | Chris Cameo |
+| Screening boards (`run_at`) | ✅ under `--point-in-time` | Mark Minervine |
+| *(nothing — deterministic)* | ✅ always | Jack Boggle, Burton Malarkey |
+| Semantic / tag news search | ❌ RPC anchored at `now()` | Jim Clamor, Howard Marx |
+| Cluster & dimension trends | ❌ view anchored at `now()` | Jim Clamor, Chris Cameo |
+| Relationship graph | ❌ refreshed in place | Howard Marx |
+| Priced-in decomposition | ❌ all rows `generation_is_pit = false` | Michael Beary |
+| Pair z-scores | ❌ current value only, no history | Jim Sigmons |
+| FMP fundamentals | ❌ current TTM, not as-reported | Barren Wuffett |
+
+**News is gated on `published_at`, not `created_at`.** The corpus has been
+backfilled, so publication time is what was knowable in the market at that
+moment; ingestion and scoring time are artifacts of our own pipeline and would
+understate what a trader could have read. `AS_OF_AWARE_TOOLS` in
+`services/arena/tools.py` lists the tools that take the clock; the injection is
+done in Python and the parameter is absent from the schema the model sees, so an
+agent cannot set or widen its own clock.
+
+Two implementation notes worth knowing:
+
+- `get_ticker_news` uses a **different query path** under `as_of`. Its normal
+  RPC (`get_relationship_node_news`) anchors at `now()` and caps at 30 rows
+  server-side, so no combination of page and lookback reaches a session two
+  months back. The replay path joins `news_article_tickers → news_articles` in
+  Postgres, bounded by `published_at`. The cost is alias resolution: direct
+  ticker mentions are covered, an article naming only a subsidiary is not.
+- The ❌ rows fail **closed where possible** and are enumerated in
+  `UNBOUNDED_IN_REPLAY` with the reason for each, so residual look-ahead is a
+  recorded fact rather than an omission.
+
+So under `--point-in-time` the replay is close to a real backtest for Mark
+Minervine, Chris Cameo and the two controls; partial for Jim Clamor and Howard
+Marx (their primary news tools are bounded, their search/graph tools are not);
+and a machinery demo for Michael Beary, Jim Sigmons and Barren Wuffett. The
+whole season carries `is_backtest` either way.
+
 ## Known limitations
 
 - **No intraday risk management.** Agents cannot set resting stops; a position is

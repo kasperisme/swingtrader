@@ -11,7 +11,7 @@ from __future__ import annotations
 import logging
 import re
 from collections import defaultdict
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, time as dtime, timedelta, timezone
 from typing import Any
 
 from shared.db import get_supabase_client, _as_json
@@ -106,23 +106,37 @@ def get_top_articles(
     tickers: list[str] | None = None,
     hours: int = 14,
     limit: int = 10,
+    as_of: "date | None" = None,
 ) -> list[dict[str, Any]]:
     """Top-scored articles sorted by impact magnitude.
 
     Returns: title, url, source, published_at, impact_json, top_dimensions, magnitude.
+
+    ``as_of`` replays a past session: the window is anchored to that date and
+    bounded above by it, on ``published_at`` rather than ``created_at``. The
+    corpus has been backfilled, so publication time is what was knowable at the
+    time; ingestion time is an artifact of our own pipeline.
     """
     client, schema = _client()
-    since = datetime.now(timezone.utc) - timedelta(hours=hours)
-    since_iso = since.isoformat()
+
+    if as_of is None:
+        since_iso = (datetime.now(timezone.utc) - timedelta(hours=hours)).isoformat()
+        time_col, upper_iso = "created_at", None
+    else:
+        end = datetime.combine(as_of, dtime.max, tzinfo=timezone.utc)
+        since_iso = (end - timedelta(hours=hours)).isoformat()
+        time_col, upper_iso = "published_at", end.isoformat()
 
     q = (
         client.schema(schema)
         .table("news_articles")
         .select("id, title, url, source, created_at, published_at")
-        .gte("created_at", since_iso)
-        .order("created_at", desc=True)
+        .gte(time_col, since_iso)
+        .order(time_col, desc=True)
         .limit(limit * 3)
     )
+    if upper_iso:
+        q = q.lte(time_col, upper_iso)
 
     if tickers:
         tick_res = (
@@ -187,10 +201,82 @@ def fetch_tickers_for_articles(article_ids: list[int]) -> dict[int, list[str]]:
     return out
 
 
+def _ticker_articles_as_of(
+    client, schema: str, tickers: list[str], *, hours: int,
+    per_ticker_limit: int, as_of: "date",
+) -> list[tuple[str, int, str, str, str | None]]:
+    """Per-ticker articles published within ``hours`` of the end of ``as_of``.
+
+    Runs as one indexed join in Postgres rather than over PostgREST. Fetching
+    the ticker links first would pull every article ever associated with a
+    mega-cap and then need thousands of ids in an IN clause; the date bound has
+    to be applied in the same query as the join, not after it.
+    """
+    end_ts = datetime.combine(as_of, dtime.max, tzinfo=timezone.utc)
+    start_ts = end_ts - timedelta(hours=max(hours, 24))
+
+    sql = f"""
+        SELECT ticker, article_id, title, url, published_at
+        FROM (
+            SELECT t.ticker,
+                   a.id AS article_id,
+                   a.title,
+                   a.url,
+                   a.published_at,
+                   ROW_NUMBER() OVER (
+                       PARTITION BY t.ticker ORDER BY a.published_at DESC
+                   ) AS rn
+            FROM {schema}.news_article_tickers t
+            JOIN {schema}.news_articles a ON a.id = t.article_id
+            WHERE t.ticker = ANY(%(tickers)s)
+              AND a.published_at >= %(start)s
+              AND a.published_at <= %(end)s
+        ) ranked
+        WHERE rn <= %(per_ticker)s
+        ORDER BY published_at DESC
+    """
+    from shared.db import get_pg_connection
+
+    conn = get_pg_connection()
+    try:
+        with conn, conn.cursor() as cur:
+            cur.execute(sql, {
+                "tickers": tickers,
+                "start": start_ts,
+                "end": end_ts,
+                "per_ticker": per_ticker_limit,
+            })
+            rows = cur.fetchall()
+    finally:
+        conn.close()
+
+    return [
+        (str(r[0]).upper().strip(), int(r[1]), r[2] or "", r[3] or "",
+         r[4].isoformat() if hasattr(r[4], "isoformat") else r[4])
+        for r in rows
+    ]
+
+
+def _bound_by_as_of(
+    rows: list[dict[str, Any]], as_of: "date | None", key: str = "published_at"
+) -> list[dict[str, Any]]:
+    """Drop anything published after a replayed session.
+
+    Post-filtering can only REMOVE rows, never invent them, so the worst case is
+    a thin result rather than a leaked one — which is the correct direction to
+    fail in.
+    """
+    if as_of is None:
+        return rows
+    cutoff = as_of.isoformat()
+    return [r for r in rows if str(r.get(key) or "")[:10] <= cutoff]
+
+
 def get_ticker_news(
     tickers: list[str],
     hours: int = 24,
     per_ticker_limit: int = 5,
+    as_of: "date | None" = None,
 ) -> list[dict[str, Any]]:
     """Per-ticker articles with sentiment scores and relationship annotations.
 
@@ -208,28 +294,52 @@ def get_ticker_news(
 
     client, schema = _client()
     days_lookback = max(1, -(-hours // 24))
-
+    # The RPC anchors its lookback at now() server-side, so a replay has to
+    # reach BACK far enough to cover the session and then discard anything
+    # published after it. Widening changes which rows the RPC ranks highest, so
+    # this is a faithful bound on the content, not a faithful reconstruction of
+    # the ordering — noted in the arena README.
     article_rows: list[tuple[str, int, str, str, str | None]] = []
     seen_ids: set[tuple[str, int]] = set()
-    for ticker in normalized:
-        res = client.schema(schema).rpc("get_relationship_node_news", {
-            "p_ticker": ticker,
-            "p_page": 1,
-            "p_page_size": per_ticker_limit,
-            "p_days_lookback": days_lookback,
-        }).execute()
-        for r in (res.data or []):
-            canonical = (r.get("canonical_ticker") or ticker).upper().strip()
-            article_id = int(r["article_id"])
-            key = (canonical, article_id)
-            if key in seen_ids:
-                continue
-            seen_ids.add(key)
-            article_rows.append((
-                canonical, article_id,
-                r.get("title") or "", r.get("url") or "",
-                r.get("published_at"),
-            ))
+
+    if as_of is not None:
+        # Replay path: query the tables directly.
+        #
+        # `get_relationship_node_news` anchors its lookback at now() AND caps at
+        # 30 rows per call server-side, always the newest. For a session two
+        # months back there is no combination of page and lookback that reaches
+        # it — the window is simply not addressable through the RPC. So the
+        # replay reads `news_article_tickers` -> `news_articles` bounded by
+        # published_at instead.
+        #
+        # The cost is alias resolution: the RPC maps aliases to a canonical
+        # ticker, and this path matches the symbol as stored. Direct mentions
+        # are covered; an article that names only a subsidiary is not.
+        article_rows = _ticker_articles_as_of(
+            client, schema, normalized, hours=hours,
+            per_ticker_limit=per_ticker_limit, as_of=as_of,
+        )
+        seen_ids = {(r[0], r[1]) for r in article_rows}
+    else:
+        for ticker in normalized:
+            res = client.schema(schema).rpc("get_relationship_node_news", {
+                "p_ticker": ticker,
+                "p_page": 1,
+                "p_page_size": per_ticker_limit,
+                "p_days_lookback": days_lookback,
+            }).execute()
+            for r in (res.data or []):
+                canonical = (r.get("canonical_ticker") or ticker).upper().strip()
+                article_id = int(r["article_id"])
+                key = (canonical, article_id)
+                if key in seen_ids:
+                    continue
+                seen_ids.add(key)
+                article_rows.append((
+                    canonical, article_id,
+                    r.get("title") or "", r.get("url") or "",
+                    r.get("published_at"),
+                ))
 
     if not article_rows:
         return []

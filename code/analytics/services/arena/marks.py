@@ -20,6 +20,7 @@ for an agent's read-only view of its own book, never for accounting.
 from __future__ import annotations
 
 import logging
+import threading
 from datetime import date, timedelta
 from typing import Optional
 
@@ -45,6 +46,13 @@ class PriceBook:
         # June would then be unpriceable in August, and every order in it would
         # be rejected as "no recent price available".
         self._ranges: dict[str, tuple[date, date]] = {}
+        # Agents run concurrently and each may warm a ticker from its own worker
+        # thread (place_order -> _warm -> load). Without this, two agents asking
+        # for the same name at the same moment both fetch it, and a widening
+        # load can interleave with a read that then sees bars whose range entry
+        # does not match. One lock around the fetch is cheap: the work is I/O
+        # and the cache hit path is a dict lookup.
+        self._lock = threading.Lock()
 
     # ── loading ─────────────────────────────────────────────────────────────
 
@@ -56,15 +64,21 @@ class PriceBook:
         """
         want = sorted({(t or "").upper().strip() for t in tickers if t})
         for ticker in want:
+            # Fast path outside the lock — an already-covered ticker is the
+            # common case and must not serialise every agent behind one mutex.
             have = self._ranges.get(ticker)
             if have and have[0] <= start and end <= have[1]:
                 continue
-            lo = min(start, have[0]) if have else start
-            hi = max(end, have[1]) if have else end
-            bars = self._fetch(ticker, lo, hi)
-            if bars or not have:
-                self._bars[ticker] = bars
-                self._ranges[ticker] = (lo, hi)
+            with self._lock:
+                have = self._ranges.get(ticker)
+                if have and have[0] <= start and end <= have[1]:
+                    continue
+                lo = min(start, have[0]) if have else start
+                hi = max(end, have[1]) if have else end
+                bars = self._fetch(ticker, lo, hi)
+                if bars or not have:
+                    self._bars[ticker] = bars
+                    self._ranges[ticker] = (lo, hi)
 
     def _fetch(self, ticker: str, start: date, end: date) -> dict[str, dict]:
         try:

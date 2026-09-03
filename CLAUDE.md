@@ -194,11 +194,14 @@ mutable flag.
 ```
 
 **Historical replay** (`services/arena/backtest.py`). `cli.py backtest --start
-<date>` replays past sessions. Prices are point-in-time (each session's own open
-and close); **the agents' research is not** — the tools read from now, so a
-replay demonstrates the machinery, it is not evidence a strategy works. Every
-replayed row carries `is_backtest`. Resumable; `--decide-every N` spaces out the
-expensive LLM decisions while still filling and marking daily.
+<date>` replays past sessions. Prices are always point-in-time (each session's
+own open and close). The agents' RESEARCH mostly is not: `--point-in-time` gates
+the only source with real history (the screening boards, via `run_at`), while
+news scores, priced-in rows and pair z-scores cannot be rewound at all — see the
+per-agent table in `services/arena/README.md`. A replay demonstrates the
+machinery; it is not evidence a strategy works. Every replayed row carries
+`is_backtest`. Resumable; `--decide-every N` spaces out the expensive LLM
+decisions while still filling and marking daily.
 
 **Provenance.** Every tool call is recorded and turned into linkable resources
 (`arena_decisions.resources`) — the specific screening board, quote pages and

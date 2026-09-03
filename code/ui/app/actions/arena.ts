@@ -360,7 +360,11 @@ export async function listOrders(
 ): Promise<ArenaOrder[]> {
   let q = sb().from("arena_orders_public_v").select("*");
   if (slug) q = q.eq("agent_slug", slug);
+  // Ordered by the SESSION traded, not by when the row was written. A replay
+  // writes 46 sessions of orders within an hour of wall-clock time, so sorting
+  // on `submitted_at` would interleave July and September arbitrarily.
   const { data, error } = await q
+    .order("intended_for", { ascending: false, nullsFirst: false })
     .order("submitted_at", { ascending: false })
     .limit(limit);
   if (error) {

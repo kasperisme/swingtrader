@@ -248,6 +248,7 @@ def cmd_decide(args) -> int:
         prices,
         only=args.only.split(",") if args.only else None,
         dry_run=args.dry_run,
+        concurrency=args.concurrency,
     )
     for r in results:
         if r.get("dry_run"):
@@ -431,6 +432,7 @@ def cmd_backtest(args) -> int:
         wipe=args.wipe,
         resume=not args.no_resume,
         point_in_time=args.point_in_time,
+        concurrency=args.concurrency,
         dry_run=args.dry_run,
     )
     print(json.dumps(result, indent=2, default=str))
@@ -542,6 +544,10 @@ def main(argv=None) -> int:
     p.add_argument("--only", help="comma-separated slugs")
     p.add_argument("--dry-run", action="store_true")
     p.add_argument("--championship", help="slug (default: the running one)")
+    p.add_argument(
+        "--concurrency", type=int, default=scheduler.DEFAULT_CONCURRENCY,
+        help="LLM agents in flight at once",
+    )
     p.set_defaults(func=cmd_decide)
 
     p = sub.add_parser("standings", help="the leaderboard")
@@ -573,6 +579,12 @@ def main(argv=None) -> int:
     p.add_argument("--yes", action="store_true", help="confirm --wipe")
     p.add_argument("--no-resume", action="store_true",
                    help="ignore existing NAV rows instead of continuing after them")
+    p.add_argument(
+        "--concurrency", type=int, default=scheduler.DEFAULT_CONCURRENCY, metavar="N",
+        help=f"LLM agents in flight at once (default {scheduler.DEFAULT_CONCURRENCY}). "
+             "Sessions are always sequential — only agents within a session run "
+             "in parallel.",
+    )
     p.add_argument("--point-in-time", action="store_true",
                    help="gate the sources that can be rewound honestly (off by "
                         "default: applying it unevenly makes agents non-comparable)")

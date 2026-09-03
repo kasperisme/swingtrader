@@ -35,6 +35,7 @@ from services.agent_core import (
 )
 
 from . import provenance, store
+from . import tools as arena_tools
 from .broker import Broker
 from .roster import AgentSpec, get_spec
 from .tools import AccountTools, build_account_registry, build_strategy_registry
@@ -74,8 +75,17 @@ def build_registry(spec: AgentSpec, account: AccountTools) -> ToolRegistry:
     shared = build_market_registry()
     for name in spec.tools:
         tool = shared.get(name)
-        if tool is not None:
-            registry.add(tool)
+        if tool is None:
+            continue
+        if name in arena_tools.AS_OF_AWARE_TOOLS:
+            # Bind the replay clock in Python. Live runs pass None and behave
+            # exactly as before.
+            from services.agent_core import Tool
+
+            tool = Tool(
+                name=tool.name, schema=tool.schema, fn=arena_tools._BindAsOf(tool.fn)
+            )
+        registry.add(tool)
 
     registry.extend(build_strategy_registry(spec.tools))
     registry.extend(build_account_registry(account))
