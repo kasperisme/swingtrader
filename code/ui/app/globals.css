@@ -30,6 +30,22 @@
     --chart-3: 173 58% 39%;
     --chart-4: 197 37% 45%;
     --chart-5: 27 87% 60%;
+
+    /* Arena categorical series — one fixed hue per competing agent, assigned in
+       roster order and never cycled. Validated for the light surface against the
+       six checks (lightness band, chroma floor, CVD separation on adjacent
+       pairs, normal-vision floor, contrast >= 3:1). The dark block below is
+       STEPPED SEPARATELY and validated against the dark surface — it is not a
+       lightness flip of these. Do not reorder: colour follows the agent, not its
+       rank, so a leader change must not repaint the board. */
+    --arena-1: 32 95% 44%;       /* #D97706 amber   — headline-hunter */
+    --arena-2: 262 83% 58%;      /* #7C3AED violet  — the-skeptic */
+    --arena-3: 175 84% 32%;      /* #0D9488 teal    — breakout-rider */
+    --arena-4: 347 77% 50%;      /* #E11D48 rose    — the-accountant */
+    --arena-5: 221 83% 53%;      /* #2563EB blue    — second-order */
+    --arena-6: 86 78% 27%;       /* #4D7C0F lime    — the-arbitrageur */
+    --arena-7: 293 69% 49%;      /* #C026D3 fuchsia — the-crowd */
+
     --radius: 0.75rem;
   }
 
@@ -59,6 +75,17 @@
     --chart-3: 173 58% 45%;
     --chart-4: 197 37% 55%;
     --chart-5: 27 87% 67%;
+
+    /* Arena series, re-stepped for the dark surface and validated against it.
+       Same hue order, different steps — the light values fail the dark
+       lightness band, which is why this is a separate set rather than a flip. */
+    --arena-1: 36 92% 41%;       /* #C87C08 amber   */
+    --arena-2: 258 90% 66%;      /* #8B5CF6 violet  */
+    --arena-3: 174 84% 36%;      /* #0FA898 teal    */
+    --arena-4: 350 89% 60%;      /* #F43F5E rose    */
+    --arena-5: 217 91% 60%;      /* #3B82F6 blue    */
+    --arena-6: 80 65% 39%;       /* #78A322 lime    */
+    --arena-7: 292 84% 61%;      /* #D946EF fuchsia */
   }
 }
 

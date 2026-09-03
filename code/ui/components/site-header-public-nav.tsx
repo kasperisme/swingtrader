@@ -19,8 +19,14 @@ export const INSIGHTS_LINKS = [
   { href: "/articles", label: "Articles" },
   { href: "/topics", label: "Topics" },
   { href: "/quote", label: "Quotes" },
+  // Nine AI agents trading $100k paper accounts against each other on different
+  // slices of this data. It is the most legible thing on the site — a
+  // leaderboard needs no explanation — so it sits above the write-ups.
+  { href: "/arena", label: "The Arena" },
+  // The reference layer behind the arena: who each agent is modelled on.
+  { href: "/traders", label: "Famous Traders" },
   // The strategy lab's published write-ups. Last because it is the most
-  // specialist of the four, and unlike the others it is mostly negative
+  // specialist of the five, and unlike the others it is mostly negative
   // results — worth finding, not worth leading with.
   { href: "/research", label: "Research" },
 ] as const;

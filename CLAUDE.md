@@ -153,6 +153,82 @@ tool calls) → **COMPUTE** (`skill.analytics`, pure Python, decides clear cases
 dynamic LLM planner. Run `python -m services.agent.cli validate-skills` after FMP
 plan changes to confirm/repair the breakout skill's FMP tool names.
 
+## The Arena (competing AI paper-trading agents)
+
+See `code/analytics/services/arena/README.md` and the public page at `/arena`.
+
+Nine agents, **$100,000 each**, trading against each other daily. Every agent gets
+the same model, broker, risk limits and universe; what differs is **which slice of
+the platform's data it can see** (`roster.py`). That difference is the experiment.
+Two of the nine are deterministic controls — `the-index` (buy SPY, hold) and
+`the-coinflip` (seeded random) — because a leaderboard of seven strategies with
+nothing to beat is a ranking, not a result.
+
+**The rule that makes it credible: an LLM's only write is an order intent.** It
+calls `place_order`; cash, positions, fills, realised P&L and NAV are computed by
+`broker.py` (deterministic Python) from the tables. A model cannot mark its own
+book, spend cash it does not have, or revise a fill after the outcome is known —
+a DB trigger enforces that last one. Rejected orders are stored, not discarded.
+
+```bash
+cd code/analytics
+.venv/bin/python -m services.arena.cli sync-roster    # write roster.py -> DB, fund accounts
+.venv/bin/python -m services.arena.cli run-day        # the nightly job: fill -> mark -> decide
+.venv/bin/python -m services.arena.cli standings
+.venv/bin/python -m services.arena.cli show the-skeptic
+```
+
+**Championships.** The arena runs in fixed 3-month windows (`arena_championships`).
+Every agent is re-funded at the start of each, so standings/returns/drawdown are
+computed WITHIN a championship — a curve that spans a re-funding is not a curve.
+The winner takes a title that carries forward until another agent wins a later
+championship; consecutive wins are defences. The lineage is DERIVED
+(`arena_title_lineage_v`) from concluded championships, never stored as a
+mutable flag.
+
+```bash
+.venv/bin/python -m services.arena.cli championship create --slug season-3 --start 2027-01-01
+.venv/bin/python -m services.arena.cli championship start   --slug season-3
+.venv/bin/python -m services.arena.cli championship conclude --slug season-2
+.venv/bin/python -m services.arena.cli championship title      # the belt lineage
+```
+
+**Historical replay** (`services/arena/backtest.py`). `cli.py backtest --start
+<date>` replays past sessions. Prices are point-in-time (each session's own open
+and close); **the agents' research is not** — the tools read from now, so a
+replay demonstrates the machinery, it is not evidence a strategy works. Every
+replayed row carries `is_backtest`. Resumable; `--decide-every N` spaces out the
+expensive LLM decisions while still filling and marking daily.
+
+**Provenance.** Every tool call is recorded and turned into linkable resources
+(`arena_decisions.resources`) — the specific screening board, quote pages and
+articles a decision rested on, each with the URL of the page publishing it. The
+agent pages link both to those and to the trader they are modelled on
+(`/traders/<slug>`, a Sanity `trader` document joined by `arenaAgentSlug`).
+
+Five things to know before touching it:
+
+- **Fills happen at the NEXT session's open, never the decision session's close.**
+  Filling at the close would hand every agent a free overnight gap — the easiest
+  way to manufacture a fake edge. `marks.py` keeps opens and closes separate for
+  exactly this reason.
+- **`roster.py` is the source of truth**, `arena_agents` is a projection. Editing a
+  prompt and re-running `sync-roster` writes definition columns only — it never
+  resets a running experiment. Changing `ARENA_MODEL` mid-competition invalidates
+  the comparison, so it is one env var for the whole roster.
+- **Run `tests/test_arena_broker.py` after any broker change.** 21 in-memory tests
+  over slippage direction, weighted average cost, realised P&L on partial closes
+  and shorts, and every rejection path. If that math drifts, every number on the
+  public leaderboard is wrong.
+- **Every write must be inside a championship.** `store` raises rather than
+  writing an unscoped row; `scheduler.bind_championship()` sets it. `--only`
+  scopes fill and mark as well as decide — marking the whole roster during a
+  partial replay fabricates flat curves for agents that never took part.
+- **`get_fmp_tool_schemas()` cannot be called from a running event loop** (it uses
+  `asyncio.run`). `scheduler._warm_fmp_catalogue()` populates its cache before
+  the loop starts. Without that warm-up the failure is swallowed as a warning
+  and FMP-enabled agents silently run with no FMP tools at all.
+
 ## Viral Reels (Data-Reel Generator)
 
 See `.claude/skills/viral-reel/SKILL.md` and `code/analytics/services/viral_reels/README.md`.

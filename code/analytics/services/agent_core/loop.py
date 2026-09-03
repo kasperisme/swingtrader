@@ -12,7 +12,7 @@ import json
 import logging
 import time
 from dataclasses import dataclass
-from typing import Any, Callable
+from typing import Any, Callable, Optional
 
 import httpx
 
@@ -191,6 +191,15 @@ class ToolRegistry:
 
     def has(self, name: str) -> bool:
         return name in self._tools
+
+    def get(self, name: str) -> Optional[Tool]:
+        """One registered tool by name, or None.
+
+        Lets a caller build a restricted registry by picking tools out of a
+        larger one (the arena mounts a different subset per agent) without
+        reaching into the internal dict.
+        """
+        return self._tools.get(name)
 
     async def call(self, name: str, args: dict) -> Any:
         """Invoke a tool. Sync fns run in a thread (so nested asyncio.run —

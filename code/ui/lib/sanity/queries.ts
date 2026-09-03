@@ -137,3 +137,48 @@ export const blogPostBySlugQuery = `
     "readingTimeMinutes": round(length(pt::text(body)) / 5 / 200)
   }
 `;
+
+// ── Traders ─────────────────────────────────────────────────────────────────
+// The reference layer behind /arena: the investors whose approaches the
+// competing agents implement.
+
+export const traderPreviewsQuery = `
+  *[_type == "trader" && defined(slug.current)] | order(order asc, name asc) {
+    "slug": slug.current,
+    name,
+    knownFor,
+    style,
+    lifespan,
+    nationality,
+    tags,
+    summary,
+    arenaAgentSlug,
+    "imageUrl": image.asset->url
+  }
+`;
+
+export const traderBySlugQuery = `
+  *[_type == "trader" && slug.current == $slug][0] {
+    "slug": slug.current,
+    name,
+    knownFor,
+    style,
+    lifespan,
+    nationality,
+    tags,
+    summary,
+    arenaAgentSlug,
+    keyIdeas[]{title, text},
+    books[]{title, year},
+    links[]{label, url},
+    body,
+    cavemanBody,
+    "imageUrl": image.asset->url
+  }
+`;
+
+export const traderSlugListQuery = `
+  *[_type == "trader" && defined(slug.current)] {
+    "slug": slug.current
+  }
+`;

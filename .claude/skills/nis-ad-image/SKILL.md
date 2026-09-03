@@ -387,6 +387,26 @@ one per magnet (they're the meta_ads A/B). Map the brief onto the spec:
 `utm_content=news_briefing` vs `market_screening` is already in those URLs, so `meta_ads
 reconcile` attributes real sign-ups back to the trend + feature.
 
+## Selling the subscription, not a lead magnet
+
+The trend-driven flow above advertises a **free** magnet. For an ad whose job is a **paying
+customer**, the spec changes in four places — and `nis-ad-launch` has the full checklist
+(destination, conversion event, the four-link attribution chain, `reconcile`'s customers table):
+
+- `design.offer` → `"paid_subscription"`, so the genome analysis never mixes paid ads in with
+  lead-magnet ads when it ranks levers.
+- `destination` → `/pricing` (direct ask) or a public proof page such as `/quote/<symbol>`
+  (proof-first), with a distinct `utm_content` per ad set.
+- `optimization` → `{"goal": "OFFSITE_CONVERSIONS", "event": "INITIATE_CHECKOUT"}` for a
+  `/pricing` ad set; `{"goal": "LINK_CLICKS"}` for a proof page, which fires no conversion
+  event and would otherwise sit in Meta's learning phase forever.
+- `cta_note` carries the real price and terms (`"$9/mo after · cancel anytime"`) — the ad that
+  hides the price buys a click from someone who was never going to pay.
+
+`impact_list` still does the heavy lifting: a ranked board of REAL numbers with the tail hidden.
+Sort it strictly by the underlying value — a board reading `-41 · -41 · -42` looks broken even
+when every number is true.
+
 ## Step 3 — Launch
 
 ```bash

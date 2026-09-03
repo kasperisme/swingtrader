@@ -1,7 +1,11 @@
 import type { MetadataRoute } from "next";
 import { connection } from "next/server";
 import { isSanityConfigured, sanityFetch } from "@/lib/sanity/client";
-import { docPageSlugListQuery, blogPostSlugListQuery } from "@/lib/sanity/queries";
+import {
+  docPageSlugListQuery,
+  blogPostSlugListQuery,
+  traderSlugListQuery,
+} from "@/lib/sanity/queries";
 import { listMarketScreenings } from "@/app/actions/market-screenings";
 import { listCoveredTickers } from "@/app/actions/quotes";
 import { createServiceClient } from "@/lib/supabase/service";
@@ -65,6 +69,8 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
     { url: `${baseUrl}/blog`, lastModified: now, changeFrequency: "weekly", priority: 0.8 },
     { url: `${baseUrl}/about`, lastModified: now, changeFrequency: "monthly", priority: 0.7 },
     { url: `${baseUrl}/research`, lastModified: now, changeFrequency: "weekly", priority: 0.7 },
+    { url: `${baseUrl}/arena`, lastModified: now, changeFrequency: "daily", priority: 0.8 },
+    { url: `${baseUrl}/traders`, lastModified: now, changeFrequency: "weekly", priority: 0.7 },
     // /docs redirects to the first page — list the destination, not the hop.
     { url: `${baseUrl}/docs/getting-started`, lastModified: now, changeFrequency: "weekly", priority: 0.8 },
     { url: `${baseUrl}/pricing`, lastModified: now, changeFrequency: "monthly", priority: 0.7 },
@@ -141,6 +147,42 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
     }));
   } catch (e) {
     console.warn("[sitemap] failed to list research", e);
+  }
+
+  // One page per competing arena agent. Reads the public view, so an agent that
+  // is still being tuned (is_published = false) never reaches the sitemap.
+  let arenaRoutes: MetadataRoute.Sitemap = [];
+  try {
+    const supabase = createServiceClient();
+    const { data, error } = await supabase
+      .schema("swingtrader")
+      .from("arena_agents_public_v")
+      .select("slug");
+    if (error) throw error;
+    arenaRoutes = (data ?? []).map((a) => ({
+      url: `${baseUrl}/arena/${a.slug as string}`,
+      lastModified: now,
+      changeFrequency: "daily" as const,
+      priority: 0.6,
+    }));
+  } catch (e) {
+    console.warn("[sitemap] failed to list arena agents", e);
+  }
+
+  // Famous-trader reference pages, from Sanity.
+  let traderRoutes: MetadataRoute.Sitemap = [];
+  try {
+    const rows = isSanityConfigured
+      ? await sanityFetch<{ slug: string }[]>(traderSlugListQuery)
+      : [];
+    traderRoutes = rows.map((r) => ({
+      url: `${baseUrl}/traders/${r.slug}`,
+      lastModified: now,
+      changeFrequency: "monthly" as const,
+      priority: 0.6,
+    }));
+  } catch (e) {
+    console.warn("[sitemap] failed to list traders", e);
   }
 
   // Per-article pages — sourced from the news_articles table, freshest first.
@@ -280,5 +322,7 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
     ...docRoutes,
     ...blogRoutes,
     ...researchRoutes,
+    ...arenaRoutes,
+    ...traderRoutes,
   ];
 }

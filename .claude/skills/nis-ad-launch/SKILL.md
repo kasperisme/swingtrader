@@ -91,6 +91,79 @@ conversions once leads accrue.
 The token is a **System User** token (Business Settings → System Users). It's a secret even
 though half its use is read-only — never print or commit it (`.env` is gitignored).
 
+### Per-ad-set overrides — `targeting` and `optimization` in `ad.json`
+
+The env vars above are the *campaign* default. Any ad set can override them from its own
+`ad.json`, because the audience and the conversion event are properties of the creative, not
+of the shell that happened to launch it:
+
+```json
+"optimization": { "goal": "OFFSITE_CONVERSIONS", "event": "INITIATE_CHECKOUT" },
+"targeting": {
+  "require_custom_audience": true,
+  "custom_audiences": ["120xxxxxxxxxxx"],
+  "excluded_custom_audiences": [],
+  "countries": ["US", "GB", "CA", "AU"], "age_min": 25, "age_max": 65
+}
+```
+
+- **`optimization.goal`** — `OFFSITE_CONVERSIONS` (needs `META_PIXEL_ID`) or `LINK_CLICKS`.
+  **Never optimize for an event the ad set's landing page cannot fire.** A proof-first ad set
+  landing on `/quote/<symbol>` has no conversion event on the page; pointing it at
+  `OFFSITE_CONVERSIONS` means Meta never leaves the learning phase and delivery stays
+  expensive forever. That ad set wants `LINK_CLICKS`; a `/pricing` ad set wants
+  `INITIATE_CHECKOUT`.
+- **`targeting.custom_audiences`** — numeric ids from `meta_ads audiences` (below).
+- **`require_custom_audience: true`** — refuse to create this ad set unless an audience is
+  attached. Set it on every retargeting ad set. Warm copy ("you already read us free") shown
+  to strangers is not a cheap warm ad set, it is a cold ad set that reads as nonsense, and it
+  spends the same money. Failing the run is the cheaper outcome.
+
+```bash
+.venv/bin/python -m services.meta_ads.cli audiences   # list Custom Audience ids (read-only)
+```
+
+Empty list = none exist yet. Create them in Ads Manager → Audiences (website visitors from the
+pixel; a customer list from the lead-magnet + early-access emails), then paste the ids in.
+
+---
+
+## Selling a subscription instead of a lead magnet
+
+The default pipeline advertises a **free** lead magnet and measures **email leads**. A campaign
+whose goal is *paying customers* differs in three places, and getting any one of them wrong
+makes the spend unmeasurable rather than merely inefficient:
+
+1. **The ask.** Destination is `/pricing` (direct) or a public proof page like
+   `/quote/<symbol>` (proof-first), not a free email capture. `design.offer` becomes
+   `paid_subscription` so the genome analysis can separate paid ads from lead-magnet ads.
+2. **The event.** `Subscribe` is the outcome, but at a handful of sales a week Meta can never
+   exit learning on it (it wants ~50/week). Optimize on **`INITIATE_CHECKOUT`** — fired
+   browser-side by `trackInitiateCheckout()` in `code/ui/lib/pixels.ts` — and report
+   `Subscribe` as the KPI. The `Subscribe` event itself is server-side, from the Stripe
+   webhook Edge Function.
+3. **The attribution chain.** It has four links and is only as good as the weakest:
+
+   | Link | Where | Fails silently as |
+   |---|---|---|
+   | `captureAttribution()` on every page | `components/attribution-capture.tsx`, root layout | every sale looks organic |
+   | `getAttribution()` + `getMetaClickIds()` at checkout | `upgrade-button.tsx`, `onboarding-plan-step.tsx` | ditto |
+   | attribution → Stripe metadata | `app/api/stripe/checkout/route.ts` | ditto |
+   | metadata → `user_subscriptions.attribution` + CAPI `fbc`/`fbp` | `supabase/functions/stripe-webhook/index.ts` | Meta can't match the sale to an ad |
+
+   `captureAttribution` was once called only from inside the subscribe forms, which is invisible
+   until an ad lands anywhere else. It is now in the root layout — keep it there.
+
+Then the paid half of `reconcile` reports the only number that matters:
+
+```bash
+.venv/bin/python -m services.meta_ads.cli reconcile --since YYYY-MM-DD
+# → Meta spend vs REAL PAYING customers: spend · db leads · customers · $MRR · cost/customer
+```
+
+Subscriptions showing under `— organic —` while paid ads run means a link in the chain above is
+broken; `reconcile` warns when it sees zero attributed customers.
+
 ---
 
 ## Step 1 — Preflight (do this before every first launch)
@@ -155,8 +228,14 @@ you do this.
 ```
 
 `reconcile` is the source of truth: it puts Meta spend next to the **actual email leads**
-captured on the subscribe forms (pixel-independent), by feature. Scale the feature with the
-lower cost-per-real-lead; feed the winner back into the next `nis-ad-image` spec.
+captured on the subscribe forms (pixel-independent), by feature, and then next to the **actual
+paying customers** from `user_subscriptions.attribution`. Scale the feature with the lower
+cost-per-real-lead; feed the winner back into the next `nis-ad-image` spec.
+
+**A cheap lead is not the goal.** Cost-per-lead can look healthy while cost-per-customer is
+infinite — six campaigns produced 47 leads at ~DKK 90 each and zero customers, because every
+ad offered a free thing and no ad ever made the ask. Read the customers table before deciding
+a campaign worked.
 
 **What drives engagement (design × performance).**
 

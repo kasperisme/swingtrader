@@ -9,7 +9,8 @@ import {legalPageType} from './legalPageType'
 import {newsPublisherType} from './newsPublisherType'
 import {changelogEntryType} from './changelogEntryType'
 import {landingPageType} from './landingPageType'
+import {traderType} from './traderType'
 
 export const schema: { types: SchemaTypeDefinition[] } = {
-  types: [blockContentType, categoryType, postType, authorType, docPageType, legalPageType, newsPublisherType, changelogEntryType, landingPageType],
+  types: [blockContentType, categoryType, postType, authorType, docPageType, legalPageType, newsPublisherType, changelogEntryType, landingPageType, traderType],
 }

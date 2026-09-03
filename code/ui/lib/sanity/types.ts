@@ -132,3 +132,27 @@ export type BlogPost = BlogPostPreview & {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   cavemanBody?: any[];
 };
+
+export type TraderPreview = {
+  slug: string;
+  name: string;
+  knownFor?: string;
+  style?: string;
+  lifespan?: string;
+  nationality?: string;
+  tags?: string[];
+  summary?: string;
+  /** The /arena agent implementing this approach, if any. */
+  arenaAgentSlug?: string;
+  imageUrl?: string;
+};
+
+export type Trader = TraderPreview & {
+  keyIdeas?: { title?: string; text?: string }[];
+  books?: { title?: string; year?: number }[];
+  links?: { label?: string; url?: string }[];
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  body?: any[];
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  cavemanBody?: any[];
+};
