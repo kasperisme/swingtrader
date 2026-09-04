@@ -47,6 +47,7 @@ from __future__ import annotations
 
 import logging
 import math
+import time
 import uuid
 from datetime import date, timedelta
 from typing import Any, Optional
@@ -166,6 +167,17 @@ def run_backtest(
     slugs = slugs or [s.slug for s in ROSTER]
     run_id = run_id or str(uuid.uuid4())
 
+    # Deterministic agents first. They cost seconds (no LLM at all — see
+    # controls.py) and they are the BASELINE every other agent is measured
+    # against, so having them finish in the first minute means the leaderboard
+    # is readable while the LLM agents are still running. Left in roster order
+    # they sort last and you wait the entire run for the benchmark.
+    _by_slug = {sp.slug: sp for sp in ROSTER}
+    slugs = sorted(
+        slugs,
+        key=lambda sl: 0 if (sp := _by_slug.get(sl)) and sp.engine == "deterministic" else 1,
+    )
+
     prices = PriceBook()
     sessions = sessions_between(start, end, prices)
     if not sessions:
@@ -249,10 +261,20 @@ def run_backtest(
                 a_i, len(slugs), slug, len(agent_sessions),
                 agent_sessions[0], agent_sessions[-1],
             )
-            halted = _sweep_agent(
-                slug, agent_sessions, decision_set, sessions, prices,
-                concurrency=concurrency, point_in_time=point_in_time, stats=stats,
-            )
+            try:
+                halted = _sweep_agent(
+                    slug, agent_sessions, decision_set, sessions, prices,
+                    concurrency=concurrency, point_in_time=point_in_time, stats=stats,
+                )
+            except Exception:
+                # One agent falling over must not end the replay. Agent-major
+                # exists precisely so this is survivable: the others are
+                # untouched, and re-running resumes this one where it stopped.
+                log.exception(
+                    "arena/backtest: %s crashed — skipping to the next agent", slug
+                )
+                stats.setdefault("crashed", []).append(slug)
+                continue
             if halted:
                 stats["halted_on"] = halted
                 log.error(
@@ -271,6 +293,41 @@ def run_backtest(
         arena_tools.set_as_of(None)
 
     return {**plan, "status": "complete", "agents_completed": completed, **stats}
+
+
+#: Transient failures worth retrying: a dropped connection, a gateway blip, a
+#: statement timeout under load. NOT a logic error — those should surface.
+_TRANSIENT = (
+    "server disconnected", "connection reset", "connection refused",
+    "remoteprotocolerror", "timed out", "timeout", "temporarily unavailable",
+    "bad gateway", "service unavailable", "statement timeout", "eof occurred",
+)
+
+
+def _is_transient(exc: BaseException) -> bool:
+    text = f"{type(exc).__name__}: {exc}".lower()
+    return any(m in text for m in _TRANSIENT)
+
+
+def _retry(fn, *, what: str, attempts: int = 4):
+    """Run ``fn`` again on a transient failure, backing off between tries.
+
+    The database calls had no retry at all, so a single dropped Supabase
+    connection during a fill aborted an eleven-hour replay ten sessions in. The
+    LLM path already retries; this closes the same gap for everything else.
+    """
+    for attempt in range(1, attempts + 1):
+        try:
+            return fn()
+        except Exception as exc:
+            if attempt == attempts or not _is_transient(exc):
+                raise
+            wait = min(2 ** attempt, 30)
+            log.warning(
+                "arena/backtest: %s failed (%s) — retry %d/%d in %ds",
+                what, type(exc).__name__, attempt, attempts - 1, wait,
+            )
+            time.sleep(wait)
 
 
 def _sweep_agent(
@@ -304,11 +361,17 @@ def _sweep_agent(
     for i, session in enumerate(agent_sessions, 1):
         log.info("arena/backtest: %s [%d/%d] %s", slug, i, len(agent_sessions), session)
 
-        fills = scheduler.run_fill(session, prices, only=[slug])
+        fills = _retry(
+            lambda: scheduler.run_fill(session, prices, only=[slug]),
+            what=f"fill {slug} {session}",
+        )
         stats["filled"] += fills.get("filled", 0)
         stats["rejected"] += fills.get("rejected", 0)
 
-        marked = scheduler.run_mark(session, prices, only=[slug])
+        marked = _retry(
+            lambda: scheduler.run_mark(session, prices, only=[slug]),
+            what=f"mark {slug} {session}",
+        )
         stats["marks"] += len(marked)
 
         if session not in decision_set:

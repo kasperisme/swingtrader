@@ -56,8 +56,76 @@ def get_supabase_client() -> Client:
     key = os.environ.get("SUPABASE_KEY")
     if not url or not key:
         raise RuntimeError("SUPABASE_URL and SUPABASE_KEY must be set in .env")
-    _supabase_client = create_client(url, key)
+    _supabase_client = _harden(create_client(url, key))
     return _supabase_client
+
+
+def reset_supabase_client() -> None:
+    """Drop the cached client so the next call opens a fresh connection.
+
+    The client is a process-wide singleton holding a pooled connection. When the
+    server closes that connection, every subsequent request through the cached
+    client fails until it is rebuilt — so a caller retrying a transient error
+    should reset first rather than retrying down the same dead socket.
+    """
+    global _supabase_client
+    _supabase_client = None
+
+
+def _harden_session(api) -> None:
+    """Force one API session onto HTTP/1.1 with connect retries."""
+    import httpx
+
+    session = getattr(api, "session", None)
+    if not isinstance(session, httpx.Client):
+        return
+    transport = httpx.HTTPTransport(http2=False, retries=3)
+    session._transport = transport
+    if getattr(session, "_mounts", None):
+        session._mounts = {k: transport for k in session._mounts}
+
+
+def _harden(client: Client) -> Client:
+    """Make the client survive Supabase closing an idle connection.
+
+    Two separate problems, both of which produced
+    ``RemoteProtocolError: Server disconnected`` — repeatedly killing long arena
+    replays and making even ``arena standings`` fail outright:
+
+    1. supabase-py builds its sessions with HTTP/2 and ``retries=0``. Supabase
+       drops idle h2 connections; the pooled client reuses a dead one and the
+       request fails with nothing to catch it. HTTP/1.1 avoids the multiplexed
+       stream reuse that triggers it.
+
+    2. ``client.schema(name)`` returns a NEW postgrest client with its OWN
+       session and connection pool, every call. Code that does
+       ``get_supabase_client().schema("swingtrader").table(...)`` per query —
+       which is most of this codebase — was therefore building a fresh pool per
+       query and leaving a trail of half-open connections. Caching one hardened
+       client per schema fixes the churn as well as the protocol.
+
+    Both use private attributes because supabase-py exposes no supported way to
+    pass a transport through ``create_client`` (``ClientOptions`` has no such
+    field in this version).
+    """
+    for attr in ("postgrest", "storage", "functions", "auth"):
+        api = getattr(client, attr, None)
+        if api is not None:
+            _harden_session(api)
+
+    original_schema = client.schema
+    cache: dict[str, object] = {}
+
+    def schema(name: str):
+        scoped = cache.get(name)
+        if scoped is None:
+            scoped = original_schema(name)
+            _harden_session(scoped)
+            cache[name] = scoped
+        return scoped
+
+    client.schema = schema  # type: ignore[method-assign]
+    return client
 
 
 def count_news_articles_per_calendar_day_utc(n_days: int) -> dict[date, int]:

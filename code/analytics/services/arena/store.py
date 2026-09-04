@@ -9,11 +9,13 @@ nothing in this module needs to think about publication state.
 
 from __future__ import annotations
 
+import functools as _functools
 import logging
+import time as _time
 from datetime import date, datetime, timedelta, timezone
 from typing import Any, Optional
 
-from shared.db import get_supabase_client
+from shared.db import get_supabase_client, reset_supabase_client
 
 from .types import PortfolioSnapshot, PositionRow
 
@@ -569,3 +571,58 @@ BENCHMARK_SYMBOLS = (
     "XLF", "XLE", "XLK", "XLV", "XLI", "XLY", "XLP",   # sectors
     "XLU", "XLB", "XLRE", "XLC", "SMH", "GLD", "TLT",
 )
+
+
+# ── Resilience ───────────────────────────────────────────────────────────────
+# Supabase is reached over a pooled HTTP/2 connection that the server closes
+# from time to time. The cached client then fails every request with
+# "Server disconnected" until it is rebuilt — which killed an eleven-hour replay
+# twice, once inside a fill and once in the pre-loop warm-up. Patching the call
+# sites was whack-a-mole, so the retry lives here, wrapping the whole module.
+
+_DB_ATTEMPTS = 4
+
+_DB_TRANSIENT = (
+    "server disconnected", "connection reset", "connection refused",
+    "remoteprotocolerror", "timed out", "temporarily unavailable",
+    "bad gateway", "service unavailable", "eof occurred", "connection aborted",
+)
+
+#: NOT retried: an insert is the one non-idempotent write here, and replaying it
+#: after a lost response would put a second order in the ledger. A dropped order
+#: is recoverable; a phantom one silently corrupts an agent's book.
+_NO_RETRY = {"insert_order"}
+
+
+def _is_transient_db(exc: BaseException) -> bool:
+    text = f"{type(exc).__name__}: {exc}".lower()
+    return any(m in text for m in _DB_TRANSIENT)
+
+
+def _resilient(fn):
+    @_functools.wraps(fn)
+    def wrapper(*args, **kwargs):
+        for attempt in range(1, _DB_ATTEMPTS + 1):
+            try:
+                return fn(*args, **kwargs)
+            except Exception as exc:
+                if attempt == _DB_ATTEMPTS or not _is_transient_db(exc):
+                    raise
+                wait = min(2 ** attempt, 20)
+                log.warning(
+                    "store.%s: %s — resetting the client, retry %d/%d in %ds",
+                    fn.__name__, type(exc).__name__, attempt, _DB_ATTEMPTS - 1, wait,
+                )
+                reset_supabase_client()
+                _time.sleep(wait)
+    return wrapper
+
+
+for _n, _f in list(globals().items()):
+    if (
+        callable(_f)
+        and not _n.startswith("_")
+        and getattr(_f, "__module__", None) == __name__
+        and _n not in _NO_RETRY
+    ):
+        globals()[_n] = _resilient(_f)
