@@ -132,6 +132,16 @@ def _user_prompt(
 
     invested = portfolio.gross_exposure
     exposure = invested / nav if nav else 0.0
+
+    # The two numbers an agent needs to size an order and is otherwise expected
+    # to derive: cash after the broker's gap reserve, and the smaller of that
+    # and the per-position weight cap. Rejections for "insufficient cash" were
+    # almost always the agent sizing against raw cash, or against NAV without
+    # noticing it had already spent most of it earlier in the same session.
+    from .broker import CASH_BUFFER
+    spendable = portfolio.cash * (1 - CASH_BUFFER)
+    weight_cap = nav * float(agent.get("max_position_pct") or 0.20)
+    most = max(0.0, min(spendable, weight_cap))
     lo, hi = spec_exposure
     if exposure < lo:
         stance = (
@@ -152,6 +162,8 @@ Your account right now:
   NAV        ${nav:,.0f}   (started at ${starting:,.0f}{f", funded {since}" if since else ""})
   Return     {(nav / starting - 1) * 100:+.2f}%
   Cash       ${portfolio.cash:,.0f} ({portfolio.cash / nav * 100 if nav else 0:.0f}% of NAV)
+  Spendable  ${spendable:,.0f}  <- size against THIS, not Cash ({CASH_BUFFER:.0%} is reserved for gap risk)
+  Biggest new position you can open right now: ${most:,.0f}
   Invested   ${invested:,.0f} ({exposure:.0%} of NAV)
 {stance}
   Positions  {held}

@@ -201,9 +201,16 @@ class Broker:
             )
 
         # Position count — only opening a NEW name can breach it.
-        max_positions = int(agent.get("max_positions") or 10)
+        #
+        # 0 means NO cap. Note this cannot be written as `or 10`: that turns a
+        # deliberate 0 back into 10, which is how a removed cap silently comes
+        # back. The per-position weight and gross-exposure limits still bound
+        # the book, so "no count cap" is not "no risk limit" — it only stops the
+        # agent spending rounds on rejections when breadth is part of its method.
+        raw_max = agent.get("max_positions")
+        max_positions = 10 if raw_max is None else int(raw_max)
         opens_new_name = abs(held) <= MIN_QUANTITY and abs(resulting) > MIN_QUANTITY
-        if opens_new_name and len(portfolio.positions) >= max_positions:
+        if max_positions > 0 and opens_new_name and len(portfolio.positions) >= max_positions:
             raise OrderRejected(
                 f"position count limit: already holding {len(portfolio.positions)} "
                 f"names, cap is {max_positions}. Close something first."

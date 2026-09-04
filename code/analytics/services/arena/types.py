@@ -53,6 +53,7 @@ class AgentSpec:
     # Risk limits — enforced by the broker, restated in the prompt.
     starting_cash: float = 100_000.0
     max_position_pct: float = 0.20
+    #: 0 = no position-count cap; the weight and gross-exposure caps still apply.
     max_positions: int = 10
     max_gross_exposure_pct: float = 1.00
     allow_shorts: bool = False

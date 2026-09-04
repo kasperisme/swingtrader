@@ -571,7 +571,11 @@ of them.
         # The old settings (10% / 12 names) enforced the diversification the
         # method explicitly rejects.
         max_position_pct=0.25,
-        max_positions=6,
+        # No position-count cap. Concentration is a CONSEQUENCE of only taking
+        # ideas where an imbalance is demonstrable, not a quota to be enforced —
+        # and a hard count made the agent spend rounds arguing with the broker
+        # instead of researching. The 25% weight cap still does the real work.
+        max_positions=0,
         # A lower floor than the others ON PURPOSE: waiting for an imbalance to
         # appear is the strategy, not idleness. The ceiling still stops it
         # sitting the season out in cash.

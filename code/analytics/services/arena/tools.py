@@ -152,10 +152,24 @@ class AccountTools:
 
     def get_my_portfolio(self) -> dict[str, Any]:
         """Current cash, positions, NAV and the agent's own risk limits."""
+        from .broker import CASH_BUFFER
+
         snap = self.portfolio.to_public_dict()
+
+        # SPENDABLE cash, not raw cash. The broker reserves a slice against gap
+        # risk, so an agent sizing against `cash` overshoots by exactly that
+        # margin and gets rejected — every time, having spent a round on it.
+        # Publishing the number it is actually judged against removes a
+        # subtraction the agent was never told to make.
+        raw_max = self.agent.get("max_positions")
+        max_positions = 10 if raw_max is None else int(raw_max)
+        snap["available_cash"] = round(self.portfolio.cash * (1 - CASH_BUFFER), 2)
+        snap["cash_reserved_pct"] = CASH_BUFFER
         snap["limits"] = {
             "max_position_pct_of_nav": float(self.agent.get("max_position_pct") or 0.20),
-            "max_positions": int(self.agent.get("max_positions") or 10),
+            # 0 means no cap; reporting the fallback here while the broker
+            # enforces none is how an agent learns a limit that is not real.
+            "max_positions": max_positions if max_positions > 0 else None,
             "max_gross_exposure_pct": float(self.agent.get("max_gross_exposure_pct") or 1.0),
             "shorting_allowed": bool(self.agent.get("allow_shorts")),
         }
@@ -266,12 +280,34 @@ class AccountTools:
 
         if row.get("status") == "rejected":
             self.rejected.append(row)
+            # Say what it CAN do, not just what it cannot. A bare "adjust size"
+            # makes the agent guess a smaller number and often get rejected
+            # again; the affordable quantity is arithmetic we already have.
+            snap = self.get_my_portfolio()
+            hint = "Adjust size or pick a different name, then try again."
+            price = reference or self.reference_prices.get(intent.ticker)
+            if price and price > 0:
+                by_cash = int(snap["available_cash"] // price)
+                by_weight = int(
+                    (self.portfolio.nav * float(snap["limits"]["max_position_pct_of_nav"]))
+                    // price
+                )
+                affordable = max(0, min(by_cash, by_weight))
+                hint = (
+                    f"At ~${price:,.2f} you can buy up to {affordable} shares of "
+                    f"{intent.ticker} right now ({by_cash} on available cash, "
+                    f"{by_weight} on the per-position weight cap). Re-order at or "
+                    f"below that, or sell something first."
+                ) if affordable > 0 else (
+                    f"You cannot open {intent.ticker} at ~${price:,.2f} with "
+                    f"${snap['available_cash']:,.0f} available. Sell something first."
+                )
             return {
                 "ok": False,
                 "status": "rejected",
                 "error": row.get("reject_reason"),
-                "hint": "Adjust size or pick a different name, then try again.",
-                "portfolio": self.get_my_portfolio(),
+                "hint": hint,
+                "portfolio": snap,
             }
 
         self.accepted.append(row)
