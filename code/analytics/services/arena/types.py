@@ -56,6 +56,18 @@ class AgentSpec:
     max_positions: int = 10
     max_gross_exposure_pct: float = 1.00
     allow_shorts: bool = False
+
+    #: The exposure band this strategy is expected to run at, as a fraction of
+    #: NAV. NOT enforced by the broker — an agent that sees nothing worth owning
+    #: must still be able to sit in cash. It is stated in the prompt so that
+    #: sitting far below it becomes a decision the agent has to justify rather
+    #: than the default it drifts into.
+    #:
+    #: The first replay made the cost of omitting this obvious: the reasoning
+    #: agents ran at 0-19% invested while the buy-and-hold control ran at 97%,
+    #: so they were competing on a tenth of their capital and lost on exposure
+    #: rather than on stock selection — which measures nothing.
+    target_exposure: tuple[float, float] = (0.50, 0.95)
     max_tool_rounds: int = 20
 
     sort_order: int = 0

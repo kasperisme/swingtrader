@@ -215,58 +215,54 @@ def run_backtest(
         return {**plan, "status": "dry_run"}
 
     log.info(
-        "arena/backtest: %d sessions %s..%s, %d decision days, ~%.1fh",
-        plan["sessions"], plan["first"], plan["last"],
-        plan["decision_days"], plan["estimated_hours"],
+        "arena/backtest: %d agents x %d sessions %s..%s, ~%.1fh",
+        len(slugs), plan["sessions"], plan["first"], plan["last"],
+        plan["estimated_hours"],
     )
+    if point_in_time:
+        log.info(
+            "arena/backtest: point-in-time ON — news (published_at), ticker "
+            "sentiment, attention trends and the screening boards are bounded "
+            "by each session. Priced-in, pair z-scores, the relationship graph "
+            "and FMP fundamentals have no historical version and remain "
+            "look-ahead; see UNBOUNDED_IN_REPLAY in services/arena/tools.py."
+        )
 
     # Warm every ticker the agents already hold, plus the benchmark, across the
-    # whole window in one pass. Names the agents buy later are loaded on demand
-    # by the broker.
+    # whole window in one pass. Names bought later are loaded on demand.
     _preload(prices, slugs, sessions[0], sessions[-1])
 
     store.set_backtest_mode(run_id)
     stats = {"filled": 0, "rejected": 0, "marks": 0, "decisions": 0, "errors": 0}
+    completed: list[str] = []
     try:
         decision_set = set(decision_days)
-        if point_in_time:
-            log.info(
-                "arena/backtest: point-in-time ON — news (published_at), ticker "
-                "sentiment, attention trends and the screening boards are bounded "
-                "by each session. Priced-in, pair z-scores, the relationship graph "
-                "and FMP fundamentals have no historical version and remain "
-                "look-ahead; see UNBOUNDED_IN_REPLAY in services/arena/tools.py."
-            )
-        for i, session in enumerate(sessions, 1):
-            log.info(
-                "arena/backtest: [%d/%d] %s%s",
-                i, len(sessions), session,
-                "  (decision day)" if session in decision_set else "",
-            )
-
-            fills = scheduler.run_fill(session, prices, only=slugs)
-            stats["filled"] += fills.get("filled", 0)
-            stats["rejected"] += fills.get("rejected", 0)
-
-            marked = scheduler.run_mark(session, prices, only=slugs)
-            stats["marks"] += len(marked)
-
-            if session not in decision_set:
+        for a_i, slug in enumerate(slugs, 1):
+            agent_sessions = _remaining_for(slug, sessions, resume=resume and not wipe)
+            if not agent_sessions:
+                log.info("arena/backtest: [agent %d/%d] %s already complete", a_i, len(slugs), slug)
+                completed.append(slug)
                 continue
 
-            # Bound the rewindable sources to this session before the agents
-            # research it. Set per session, not once per run.
-            arena_tools.set_as_of(session if point_in_time else None)
-
-            # An agent decides on this session's close for the NEXT session it
-            # will be filled in — which, when decisions are spaced out, is the
-            # next session in the replay, not merely the next calendar day.
-            nxt = _next_in(sessions, session) or scheduler.next_session_after(session)
-            results = scheduler.run_decide(
-                session, nxt, prices, only=slugs, concurrency=concurrency
+            log.info(
+                "arena/backtest: [agent %d/%d] %s — %d sessions (%s..%s)",
+                a_i, len(slugs), slug, len(agent_sessions),
+                agent_sessions[0], agent_sessions[-1],
             )
-            stats["decisions"] += len(results)
-            stats["errors"] += sum(1 for r in results if r.get("status") == "error")
+            halted = _sweep_agent(
+                slug, agent_sessions, decision_set, sessions, prices,
+                concurrency=concurrency, point_in_time=point_in_time, stats=stats,
+            )
+            if halted:
+                stats["halted_on"] = halted
+                log.error(
+                    "arena/backtest: backend refused %s on %s — stopping. %d of %d "
+                    "agents complete; re-run the same command to resume.",
+                    slug, halted, len(completed), len(slugs),
+                )
+                break
+            completed.append(slug)
+            log.info("arena/backtest: %s COMPLETE (%d/%d)", slug, len(completed), len(slugs))
     finally:
         # Always drop both clocks, including on a crash — leaving either set
         # would silently mark the next LIVE run as simulated, or bound its
@@ -274,7 +270,107 @@ def run_backtest(
         store.set_backtest_mode(None)
         arena_tools.set_as_of(None)
 
-    return {**plan, "status": "complete", **stats}
+    return {**plan, "status": "complete", "agents_completed": completed, **stats}
+
+
+def _sweep_agent(
+    slug: str,
+    agent_sessions: list[date],
+    decision_set: set,
+    all_sessions: list[date],
+    prices: PriceBook,
+    *,
+    concurrency: int,
+    point_in_time: bool,
+    stats: dict[str, Any],
+) -> Optional[str]:
+    """Run ONE agent through its remaining sessions, in order.
+
+    Returns the session it was blocked on, or None if it completed.
+
+    Agent-major rather than session-major, and the two produce identical books:
+    agents share no mutable state — separate cash rows, positions, decisions and
+    in-memory portfolios — so agent A's entire run cannot influence agent B's.
+    What must stay ordered is the sessions WITHIN one agent, because session N+1
+    fills what N decided.
+
+    The reason to prefer it is the failure mode. Session-major spreads an outage
+    across every agent at once: the previous replay lost its LLM backend partway
+    through and left nine agents each holding a stale book through a month of
+    tape, which is unusable. Agent-major turns the same outage into "six agents
+    finished, three untouched", and lets a single agent be re-run after a prompt
+    change without redoing the rest.
+    """
+    for i, session in enumerate(agent_sessions, 1):
+        log.info("arena/backtest: %s [%d/%d] %s", slug, i, len(agent_sessions), session)
+
+        fills = scheduler.run_fill(session, prices, only=[slug])
+        stats["filled"] += fills.get("filled", 0)
+        stats["rejected"] += fills.get("rejected", 0)
+
+        marked = scheduler.run_mark(session, prices, only=[slug])
+        stats["marks"] += len(marked)
+
+        if session not in decision_set:
+            continue
+
+        # Bound the rewindable sources to this session before the agent
+        # researches it. Set per session, not once per run.
+        arena_tools.set_as_of(session if point_in_time else None)
+
+        # It decides on this session's close for the NEXT session it will be
+        # filled in — which, when decisions are spaced out, is the next session
+        # in the replay, not merely the next calendar day.
+        nxt = _next_in(all_sessions, session) or scheduler.next_session_after(session)
+        results = scheduler.run_decide(
+            session, nxt, prices, only=[slug], concurrency=concurrency
+        )
+        stats["decisions"] += len(results)
+        stats["errors"] += sum(1 for r in results if r.get("status") == "error")
+
+        # Stop on a wall rather than walking into it for every remaining
+        # session. A replay is resumable, so stopping loses nothing and keeps
+        # the completed agents clean.
+        if _all_llm_blocked(results):
+            return session.isoformat()
+    return None
+
+
+def _remaining_for(slug: str, sessions: list[date], *, resume: bool) -> list[date]:
+    """Sessions this agent still needs. Resume is per-agent in agent-major order."""
+    if not resume:
+        return sessions
+    done_through = last_marked_session([slug])
+    if done_through is None:
+        return sessions
+    return [s for s in sessions if s > done_through]
+
+
+#: Backend refusals that mean "stop", not "this agent had a bad day".
+_BLOCKED_MARKERS = (
+    "usage limit", "rate limit", "quota",
+    "upgrade for higher limits", "returned 429",
+)
+
+
+def _all_llm_blocked(results: list[dict[str, Any]]) -> bool:
+    """True when no LLM agent got through and at least one was refused outright.
+
+    In agent-major order a decision pass usually holds a SINGLE agent, so a
+    threshold of "three or more blocked" would never fire. What matters is the
+    distinction between kinds of failure: a refusal (quota, rate limit) means the
+    next session fails identically and the run should stop, while a timeout or a
+    crash is that agent having a bad day and is not grounds for abandoning it.
+    """
+    # Any LLM agent that got through means the backend is up and this is not an
+    # outage — the deterministic controls do not count, they never call it.
+    if any(r.get("status") == "ok" and r.get("rounds") is not None for r in results):
+        return False
+    return any(
+        r.get("status") == "error"
+        and any(m in str(r.get("error", "")).lower() for m in _BLOCKED_MARKERS)
+        for r in results
+    )
 
 
 def _next_in(sessions: list[date], current: date) -> Optional[date]:

@@ -22,16 +22,7 @@ import {
   ResourceChips,
   ToolSurface,
 } from "../_components/resource-links";
-
-const COLOR_INDEX: Record<string, number> = {
-  "jim-clamor": 1,
-  "michael-beary": 2,
-  "mark-minervine": 3,
-  "barren-wuffett": 4,
-  "howard-marx": 5,
-  "jim-sigmons": 6,
-  "chris-cameo": 7,
-};
+import { ARENA_COLOR_INDEX as COLOR_INDEX } from "@/lib/arena/colors";
 
 // No `revalidate` and no `generateStaticParams`: this project runs with
 // `cacheComponents: true`, which rejects the route-segment revalidate config,

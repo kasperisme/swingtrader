@@ -345,23 +345,28 @@ def cancel_pending_for(agent_id: str, intended_for: date) -> int:
     return len(rows)
 
 
-def cancel_stale_orders(before: date) -> int:
+def cancel_stale_orders(before: date, agent_ids: Optional[list[str]] = None) -> int:
     """Cancel pending orders that never found a session to fill in.
 
     An order intended for a date that has already been filled past is dead: the
     information it was based on is stale and filling it later would be a
     look-ahead. Cancelling is recorded, not silent.
+
+    ``agent_ids`` scopes it. That matters in an agent-major replay, where one
+    agent sweeps every session before the next starts: without the scope, the
+    second agent's first session would cancel the FIRST agent's final pending
+    order — silently damaging a run that had already completed correctly.
     """
-    rows = (
+    q = (
         _tbl("arena_orders")
         .select("id")
         .eq("status", "pending")
         .eq("championship_id", _champ())
         .lt("intended_for", before.isoformat())
-        .execute()
-        .data
-        or []
     )
+    if agent_ids:
+        q = q.in_("agent_id", agent_ids)
+    rows = q.execute().data or []
     for r in rows:
         update_order(
             r["id"],
@@ -400,6 +405,20 @@ def open_decision(agent_id: str, decision_date: date, llm_model: Optional[str]) 
 def close_decision(decision_id: str, patch: dict[str, Any]) -> None:
     patch = {**patch, "finished_at": _now()}
     _tbl("arena_decisions").update(patch).eq("id", decision_id).execute()
+
+
+def fail_decision(agent_id: str, decision_date: date, reason: str) -> None:
+    """Close one agent's decision as errored.
+
+    Used when the runner abandons a decision from the outside (a deadline), where
+    the coroutine is cancelled and its own error handling never runs — leaving
+    the row stuck at 'running' forever.
+    """
+    _tbl("arena_decisions").update(
+        {"status": "error", "error": reason[:2000], "finished_at": _now()}
+    ).eq("agent_id", agent_id).eq("championship_id", _champ()).eq(
+        "decision_date", decision_date.isoformat()
+    ).execute()
 
 
 def fail_stale_running_decisions(older_than_minutes: int = 90) -> int:

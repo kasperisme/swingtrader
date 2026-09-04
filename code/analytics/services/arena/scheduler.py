@@ -143,7 +143,10 @@ def run_fill(
     stats = broker.fill_pending(session, agents)
 
     # Anything still pending from before today missed its window entirely.
-    stats["expired"] = store.cancel_stale_orders(before=session)
+    # Scoped to the agents in this pass — see cancel_stale_orders.
+    stats["expired"] = store.cancel_stale_orders(
+        before=session, agent_ids=[a["id"] for a in agents.values()]
+    )
     log.info("arena: fill %s — %s", session, stats)
     return stats
 
@@ -209,6 +212,10 @@ def _scoped_agents(only: Optional[list[str]], *, active_only: bool) -> list[dict
 #: Default LLM agents in flight at once. They share one Ollama backend and one
 #: FMP key, so this is a throughput knob, not a free multiplier.
 DEFAULT_CONCURRENCY = int(os.environ.get("ARENA_CONCURRENCY", "4"))
+
+#: Hard deadline on one agent's decision. Normal is 140-250s alone, up to ~600s
+#: under concurrency; anything past this is a stuck connection, not thinking.
+DECISION_TIMEOUT_S = int(os.environ.get("ARENA_DECISION_TIMEOUT", "900"))
 
 
 def run_decide(
@@ -302,13 +309,38 @@ async def _decide_llm_agents(
         async with sem:
             log.info("arena: deciding — %s (for %s)", agent["slug"], intended_for)
             try:
-                return await decide.run_decision(
-                    agent,
-                    session=session,
-                    intended_for=intended_for,
-                    broker=broker,
-                    dry_run=dry_run,
+                return await asyncio.wait_for(
+                    decide.run_decision(
+                        agent,
+                        session=session,
+                        intended_for=intended_for,
+                        broker=broker,
+                        dry_run=dry_run,
+                    ),
+                    timeout=DECISION_TIMEOUT_S,
                 )
+            except asyncio.TimeoutError:
+                # A single agent once ran for 98 minutes and consumed more wall
+                # clock than the twelve sessions around it. The loop retries
+                # transient backend errors but has no overall deadline, so one
+                # degraded connection can stall an entire replay. Abandon it and
+                # carry on: a missed decision is one flat day for that agent, a
+                # stalled replay is every day for all of them.
+                log.warning(
+                    "arena: %s exceeded %ds — abandoning this decision",
+                    agent["slug"], DECISION_TIMEOUT_S,
+                )
+                if not dry_run:
+                    # Cancellation never reaches run_decision's own handler, so
+                    # the row would otherwise sit at 'running' forever.
+                    try:
+                        store.fail_decision(
+                            agent["id"], intended_for,
+                            f"abandoned after {DECISION_TIMEOUT_S}s",
+                        )
+                    except Exception:
+                        log.exception("arena: could not close out %s", agent["slug"])
+                return {"slug": agent["slug"], "status": "error", "error": "timeout"}
             except Exception as exc:  # one bad agent must not end the roster's day
                 log.exception("arena: %s failed", agent["slug"])
                 return {"slug": agent["slug"], "status": "error", "error": str(exc)}

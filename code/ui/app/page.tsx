@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { Suspense } from "react";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { unstable_noStore as noStore } from "next/cache";
@@ -36,6 +37,7 @@ import {
 } from "@/components/narrative-trading";
 import { EarlyAccessSignupForm } from "@/components/early-access-signup-form";
 import { InstagramSection } from "@/components/instagram-section";
+import { ArenaLeaderboardSection } from "@/components/arena-leaderboard-section";
 import { PricingTierSwitcher } from "@/components/pricing-tier-switcher";
 import { isSanityConfigured, sanityFetch } from "@/lib/sanity/client";
 import { landingPageQuery } from "@/lib/sanity/queries";
@@ -1039,6 +1041,12 @@ export default async function Home() {
           </div>
         </div>
       </section>
+
+      {/* ── THE ARENA ────────────────────────────────────────────── */}
+      {/* Renders only while a championship is actually running. */}
+      <Suspense fallback={null}>
+        <ArenaLeaderboardSection />
+      </Suspense>
 
       {/* ── PRICING ──────────────────────────────────────────────── */}
       <section id="pricing" className="border-t border-border py-16 md:py-24">

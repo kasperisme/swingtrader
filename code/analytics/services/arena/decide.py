@@ -116,6 +116,7 @@ def _user_prompt(
     session: date,
     intended_for: date,
     max_rounds: int,
+    spec_exposure: tuple[float, float] = (0.50, 0.95),
 ) -> str:
     nav = portfolio.nav
     starting = float(agent.get("starting_cash") or 100_000)
@@ -128,6 +129,21 @@ def _user_prompt(
         or "nothing — you are all cash"
     )
     order_by = max(4, int(max_rounds * 0.4))
+
+    invested = portfolio.gross_exposure
+    exposure = invested / nav if nav else 0.0
+    lo, hi = spec_exposure
+    if exposure < lo:
+        stance = (
+            f"  BELOW TARGET — you are {exposure:.0%} invested against a "
+            f"{lo:.0%}-{hi:.0%} band. Either deploy this session or say why "
+            f"nothing qualifies."
+        )
+    elif exposure > hi:
+        stance = f"  ABOVE TARGET — {exposure:.0%} invested against a {lo:.0%}-{hi:.0%} band."
+    else:
+        stance = f"  In band ({lo:.0%}-{hi:.0%})."
+
     return f"""
 Trading session: {session.isoformat()} has closed. You are deciding for
 {intended_for.isoformat()}, where any order you place will fill at the open.
@@ -136,6 +152,8 @@ Your account right now:
   NAV        ${nav:,.0f}   (started at ${starting:,.0f}{f", funded {since}" if since else ""})
   Return     {(nav / starting - 1) * 100:+.2f}%
   Cash       ${portfolio.cash:,.0f} ({portfolio.cash / nav * 100 if nav else 0:.0f}% of NAV)
+  Invested   ${invested:,.0f} ({exposure:.0%} of NAV)
+{stance}
   Positions  {held}
 
 You have {max_rounds} tool-calling rounds this session — one tool call each. Aim
@@ -222,7 +240,8 @@ async def run_decision(
             "tools": sorted(registry.names()),
             "nav": round(nav_at_decision, 2),
             "prompt": _user_prompt(
-                agent, portfolio, session, intended_for, spec.max_tool_rounds
+                agent, portfolio, session, intended_for, spec.max_tool_rounds,
+                spec.target_exposure,
             ),
         }
 
@@ -236,7 +255,10 @@ async def run_decision(
                 base_url=base_url,
                 model=model,
                 system=spec.system_prompt,
-                user=_user_prompt(agent, portfolio, session, intended_for, max_rounds),
+                user=_user_prompt(
+                    agent, portfolio, session, intended_for, max_rounds,
+                    spec.target_exposure,
+                ),
                 registry=registry,
                 max_rounds=max_rounds,
                 options={"num_predict": 2048},

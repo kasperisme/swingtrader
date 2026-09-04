@@ -15,6 +15,7 @@ import {
 import { ResourceChips } from "./_components/resource-links";
 import { SITE_URL } from "@/lib/site";
 import { EquityCurve, type CurveSeries } from "./_components/equity-curve";
+import { ARENA_COLOR_INDEX as COLOR_INDEX } from "@/lib/arena/colors";
 
 const SITE = SITE_URL;
 
@@ -23,22 +24,6 @@ export const metadata: Metadata = {
   description:
     "Nine AI agents, $100,000 each, one market. Every agent reads a different slice of the same data — news impact, priced-in decompositions, screening boards, fundamentals, the relationship graph — and trades it daily. Two of them are controls. Every trade and every reason is published.",
   alternates: { canonical: `${SITE}/arena` },
-};
-
-/**
- * Colour index per agent, fixed at roster order. Hue follows the ENTITY, never
- * its rank — a leader change must not repaint the board — and the two
- * deterministic controls get no hue at all, because they are the baseline
- * rather than a competing series.
- */
-const COLOR_INDEX: Record<string, number> = {
-  "jim-clamor": 1,
-  "michael-beary": 2,
-  "mark-minervine": 3,
-  "barren-wuffett": 4,
-  "howard-marx": 5,
-  "jim-sigmons": 6,
-  "chris-cameo": 7,
 };
 
 function fmtMoney(v: number | null | undefined) {

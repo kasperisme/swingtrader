@@ -90,13 +90,30 @@ traded means your whole day is wasted. So:
 - Two or three good pieces of evidence are enough to act on. You are not writing
   a research report; you are running a book.
 
+## Putting the money to work
+
+You are measured against an agent that buys the index on day one and stays 100%
+invested, and against one that picks at random and stays fully deployed. Both of
+them are always in the market. If you sit in cash, you are betting that a better
+entry is coming, and the market rising without you is what that bet costs.
+
+So: **holding cash is a position you have to justify, not the safe default.**
+Your account summary tells you your current exposure and the band this strategy
+is expected to run at. If you are below it, either find something worth owning
+this session or state plainly why nothing qualifies. "I found nothing" is a
+legitimate answer once; it is not a legitimate answer for a month.
+
+This does NOT mean trade for the sake of it. A bad position is worse than cash,
+and forcing a trade you cannot justify is how the reasoning stops being worth
+anything. But an empty book that nobody chose is not caution — it is drift, and
+it loses to the index without ever having had an opinion.
+
 ## Judgement
 
-Doing nothing is a legitimate decision. A day with no good evidence should
-produce no trades, and saying so is worth more than a trade you cannot justify.
-Cash is a position. Equally, sitting in a broken position because you are
-attached to the original thesis is how accounts die — if the evidence has
-changed, sell it.
+A day with no good evidence should produce no trades, and saying so is worth
+more than a trade you cannot justify. Equally, sitting in a broken position
+because you are attached to the original thesis is how accounts die — if the
+evidence has changed, sell it.
 
 You are being judged on risk-adjusted return over months, not on activity.
 
@@ -162,6 +179,7 @@ you are out — you do not become a long-term investor by accident.
         ),
         max_position_pct=0.15,
         max_positions=10,
+        target_exposure=(0.50, 0.90),
         sort_order=10,
     ),
     AgentSpec(
@@ -215,6 +233,8 @@ in the price.
         ),
         max_position_pct=0.20,
         max_positions=8,
+        # Genuinely selective: the lowest floor on the board, by design.
+        target_exposure=(0.20, 0.70),
         sort_order=20,
     ),
     AgentSpec(
@@ -263,6 +283,7 @@ position for a failed breakout before you look at a single new name.
         ),
         max_position_pct=0.15,
         max_positions=12,
+        target_exposure=(0.60, 1.00),
         sort_order=30,
     ),
     AgentSpec(
@@ -277,7 +298,14 @@ position for a failed breakout before you look at a single new name.
             "vectors. If the news-driven agents cannot beat this one, the news "
             "layer is not adding value."
         ),
-        tools=("get_company_vectors",),
+        tools=(
+            "get_company_vectors",
+            # The platform runs a fundamentals screen of its own; an agent whose
+            # whole thesis is the numbers should start from it rather than
+            # picking names out of the air.
+            "get_screening_results",
+            "list_screenings",
+        ),
         include_fmp=True,
         system_prompt=_prompt(
             """
@@ -295,6 +323,9 @@ How you think:
 - You care about: gross and operating margin and their direction, revenue and
   earnings growth, free cash flow conversion, net debt to EBITDA, and what you
   are paying for it. A cheap multiple on a deteriorating business is not value.
+- `get_screening_results` with 'nis-fundamentals' is the platform's own quality
+  screen — start there for candidates rather than picking names from memory,
+  then do the real work on the statements.
 - Pull the actual statements. Do not decide from a single ratio, and do not
   trust one year of anything.
 - You turn over slowly. A thesis about a business is a thesis about years, and
@@ -310,6 +341,8 @@ making sense — never because the stock went down.
         max_position_pct=0.20,
         max_positions=8,
         max_tool_rounds=14,
+        # Buy good businesses and hold them — that requires owning them.
+        target_exposure=(0.70, 1.00),
         sort_order=40,
     ),
     AgentSpec(
@@ -366,6 +399,7 @@ nobody made it in time.
         ),
         max_position_pct=0.15,
         max_positions=10,
+        target_exposure=(0.40, 0.85),
         sort_order=50,
     ),
     AgentSpec(
@@ -416,6 +450,8 @@ loss, and your gross exposure cap counts both legs.
         max_position_pct=0.12,
         max_positions=12,
         max_gross_exposure_pct=1.00,
+        # Gross, both legs. A market-neutral book is still a deployed book.
+        target_exposure=(0.40, 1.00),
         sort_order=60,
     ),
     AgentSpec(
@@ -469,6 +505,7 @@ chart.
         ),
         max_position_pct=0.10,
         max_positions=12,
+        target_exposure=(0.40, 0.80),
         sort_order=70,
     ),
     # ── The two controls. No LLM, no discretion, no excuses. ────────────────
@@ -545,6 +582,7 @@ def spec_to_row(spec: AgentSpec) -> dict:
         "max_positions": spec.max_positions,
         "max_gross_exposure_pct": spec.max_gross_exposure_pct,
         "allow_shorts": spec.allow_shorts,
+        "target_exposure": list(spec.target_exposure),
         "is_published": spec.is_published,
         "sort_order": spec.sort_order,
     }
