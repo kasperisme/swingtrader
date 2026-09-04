@@ -28,7 +28,7 @@ from .graph import (
     expand_related_tickers,
     build_neighborhood_from_seed,
 )
-from .embeddings import search_news, embed_query
+from .embeddings import search_news, semantic_search_news, embed_query
 from .screening import apply_scan_filters, get_filtered_tickers_from_scan
 from .screening_writes import (
     add_ticker_to_screening,
@@ -68,7 +68,7 @@ __all__ = [
     "RelationshipEdge", "fetch_relationship_edges",
     "expand_related_tickers", "build_neighborhood_from_seed",
     # embeddings
-    "search_news", "embed_query",
+    "search_news", "semantic_search_news", "embed_query",
     # screening
     "apply_scan_filters", "get_filtered_tickers_from_scan",
     "add_ticker_to_screening", "set_screening_ticker_status",

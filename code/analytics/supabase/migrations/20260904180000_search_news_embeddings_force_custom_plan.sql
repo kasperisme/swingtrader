@@ -1,0 +1,50 @@
+-- ---------------------------------------------------------------------------
+-- search_news_embeddings: force a custom plan
+--
+-- The filter-first migration (20260904140000) was correct and IS deployed, but
+-- it only helps when the planner knows how selective the time filter is. It
+-- usually does not, and the function then reverts to exactly the behaviour that
+-- migration was written to remove.
+--
+-- Why: the function is SECURITY DEFINER and carries SET clauses, so PostgreSQL
+-- CANNOT inline it. The body is planned with `lookback_hours` as a parameter,
+-- and after five executions the plan cache switches to a GENERIC plan — one
+-- built without parameter values. It cannot estimate
+-- `published_at >= NOW() - make_interval(hours => $3)`, falls back to a default
+-- selectivity, concludes that hundreds of thousands of rows qualify, and at
+-- that estimate the ivfflat index looks cheaper than btree-then-sort.
+--
+-- Measured on the live database, same query, same data, same indexes:
+--
+--   plan_cache_mode      chosen index                            result
+--   force_custom_plan    idx_news_article_embeddings_published      695 ms
+--   force_generic_plan   idx_news_article_embeddings_vec_cos     137 s (timeout)
+--
+--   custom  cost=0.43..199.80        rows=186     <- real estimate
+--   generic cost=23042.95..4310592.37             <- default selectivity
+--
+-- The fix is one setting. `force_custom_plan` makes the planner re-plan on
+-- every call using the actual `lookback_hours`, which is the only way it can
+-- reach the row estimate that makes the btree path win.
+--
+-- Re-planning is not free, but it is ~1ms against a query whose alternative
+-- outcome is a 60-second statement timeout. This is the textbook case for it:
+-- one parameter dominates selectivity and its value varies per call.
+--
+-- Why this was missed: the earlier fix was verified by running the query body
+-- with a LITERAL interval, which always plans as a custom plan and always looked
+-- fast. Verify a function by CALLING it, not by running its body.
+--
+-- Verify:
+--   SELECT count(*) FROM swingtrader.search_news_embeddings(
+--     (SELECT embedding::double precision[] FROM swingtrader.news_article_embeddings LIMIT 1),
+--     12, 24, NULL, NULL);            -- expect well under a second
+--
+--   SELECT proconfig FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
+--   WHERE n.nspname='swingtrader' AND p.proname='search_news_embeddings';
+--   -- must list plan_cache_mode=force_custom_plan
+-- ---------------------------------------------------------------------------
+
+ALTER FUNCTION swingtrader.search_news_embeddings(
+  double precision[], integer, integer, text, text[]
+) SET plan_cache_mode = 'force_custom_plan';

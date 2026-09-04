@@ -75,13 +75,13 @@ AS_OF_AWARE_TOOLS = (
     "get_top_articles",
     "get_ticker_sentiment",
     "get_ticker_news",
+    "search_news",
 )
 
 #: Tools that CANNOT be bounded to a past session, and what leaks as a result.
 #: Listed explicitly so a replay's residual look-ahead is a documented fact
 #: rather than something a reader has to infer from silence.
 UNBOUNDED_IN_REPLAY = {
-    "search_news": "semantic search RPC anchors its window at now() server-side",
     "get_news_by_tag": "tag search RPC anchors its window at now() server-side",
     "get_cluster_trends": "aggregate view anchored at now()",
     "get_dimension_trends": "aggregate view anchored at now()",

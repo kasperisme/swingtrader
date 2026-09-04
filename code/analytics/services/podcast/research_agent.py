@@ -193,7 +193,7 @@ You have at most {max_rounds} tool-calling rounds total before you MUST emit the
 # Optional cross-section context tools
 
 You also have access to the broader RAG market tools — use them ONLY when they would add real cross-section colour the writer can weave in (e.g. "the dominant theme today is rate-cut sensitivity"). Do not call these for routine dossier gathering. Available:
-- search_news(query, lookback_hours, tickers, limit) — semantic search over the news index
+- search_news(query, lookback_hours, tickers, limit) — tag + full-text search over the news index
 - get_cluster_trends(hours), get_dimension_trends(hours) — themes pulsing in the news
 - get_ticker_sentiment(tickers, hours), get_ticker_news(tickers, hours, per_ticker_limit)
 - get_top_articles(tickers, hours, limit) — articles with full impact vectors

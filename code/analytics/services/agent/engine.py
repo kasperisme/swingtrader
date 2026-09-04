@@ -102,8 +102,9 @@ get_company_vectors(tickers: list[str])
   dimensions_json (dict of dimension_key -> score).
 
 search_news(query: str, lookback_hours: int = 24, tickers: list[str] | None = None, limit: int = 12)
-  Semantic search over news articles using vector similarity. Good for \
-  finding macro themes or topic-specific articles.
+  Search news articles. With `tickers` it is an exact tag match on those \
+  symbols; otherwise the query is matched as ranked full text, so use words \
+  that would appear in the article itself.
 
 get_ticker_news(tickers: list[str], hours: int = 24, per_ticker_limit: int = 5)
   Per-ticker articles with sentiment scores and relationship annotations. \
@@ -145,8 +146,8 @@ get_priced_in_case(ticker: str, driver_index: int | None = None)
 search_priced_in_drivers(query: str, limit: int = 20, max_priced_in_pct: float | None = None)
   Search every analysed ticker's drivers for a phrase — "which names carry a \
   datacenter-power driver the price has not yet paid for". Keyword matching, \
-  not semantic; for meaning-level search use search_news first, then bring its \
-  tickers here.
+  not semantic; to find candidate names by phrase use search_news first, then \
+  bring its tickers here.
 
 fetch_url(url: str)
   Fetch the full text content of a URL. Use to read article body when the \

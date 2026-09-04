@@ -213,7 +213,11 @@ TOOL_SCHEMAS: list[dict] = [
         "type": "function",
         "function": {
             "name": "search_news",
-            "description": "Semantic search over news articles using vector similarity.",
+            "description": (
+                "Search news articles. Pass `tickers` for an exact tag match on "
+                "those symbols; otherwise the query is matched as ranked full "
+                "text, so use words that would appear in the article itself."
+            ),
             "parameters": {
                 "type": "object",
                 "properties": {

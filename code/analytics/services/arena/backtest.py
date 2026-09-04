@@ -46,7 +46,6 @@ rather than starting over or double-counting.
 from __future__ import annotations
 
 import logging
-import math
 import time
 import uuid
 from datetime import date, timedelta
@@ -214,13 +213,21 @@ def run_backtest(
         "decide_every": decide_every,
         "point_in_time": point_in_time,
         "concurrency": concurrency,
-        # Wall-clock, not CPU: with N agents in flight the per-session cost is
-        # ceil(agents / concurrency) waves of ~140s, not agents * 140s.
+        # Wall-clock, not CPU. The replay is AGENT-MAJOR: `_sweep_agent` takes
+        # one agent through every session before the next agent starts, so only
+        # one agent is ever deciding and `concurrency` does not divide anything.
+        #
+        # This used to read ceil(agents / concurrency) waves, which was correct
+        # for the original session-major loop and became wrong the moment the
+        # sweep was inverted. It under-reported a 6-agent season as 3.6h when
+        # the measured figure was 11.6h — the kind of error that gets a run
+        # started on a false premise, so it is computed from the actual shape
+        # of the loop rather than from a flag that no longer applies.
+        #
+        # 150s per decision is measured (glm-5.1:cloud, ~87% of it generation,
+        # not tools), not assumed.
         "estimated_hours": round(
-            len(decision_days)
-            * math.ceil(_llm_agent_count(slugs) / max(1, concurrency))
-            * 140 / 3600,
-            1,
+            len(decision_days) * _llm_agent_count(slugs) * 150 / 3600, 1
         ),
     }
     if dry_run:

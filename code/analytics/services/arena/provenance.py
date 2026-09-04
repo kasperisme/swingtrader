@@ -28,11 +28,15 @@ Two rules kept throughout:
 from __future__ import annotations
 
 import logging
+import time
 from typing import Any, Iterable, Optional
 
 from shared.db import get_supabase_client
 
 log = logging.getLogger(__name__)
+
+#: A single tool call slower than this is called out in the log as it happens.
+_SLOW_TOOL_MS = 10_000.0
 
 #: Per-kind caps on what gets stored for one decision.
 _MAX_PER_KIND = {"ticker": 12, "article": 8, "screening": 6, "topic": 6}
@@ -56,10 +60,21 @@ class ToolCallRecorder:
         self.calls = calls
 
     def __call__(self, **kwargs: Any) -> Any:
-        result = self.fn(**kwargs)
+        # Wall time per call. A decision that takes 6 minutes is not debuggable
+        # from a total: the answer is always "which tool", and without this the
+        # only way to find out is to re-run with a profiler attached.
+        t0 = time.perf_counter()
+        try:
+            result = self.fn(**kwargs)
+        finally:
+            ms = (time.perf_counter() - t0) * 1000.0
         # The result is kept only long enough to derive resources from it, then
         # dropped — decision rows must not become a second copy of the corpus.
-        self.calls.append({"name": self.name, "args": kwargs, "result": result})
+        self.calls.append(
+            {"name": self.name, "args": kwargs, "result": result, "ms": ms}
+        )
+        if ms >= _SLOW_TOOL_MS:
+            log.warning("arena: tool %s took %.1fs", self.name, ms / 1000.0)
         return result
 
 
@@ -346,8 +361,8 @@ TOOL_SURFACE: dict[str, dict[str, str]] = {
         "href": "/articles",
     },
     "search_news": {
-        "label": "Semantic news search",
-        "reads": "Embedding search over the scored article corpus.",
+        "label": "News search",
+        "reads": "Tag and full-text search over the scored article corpus.",
         "href": "/articles",
     },
     "get_news_by_tag": {
