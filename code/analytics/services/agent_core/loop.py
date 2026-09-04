@@ -375,6 +375,7 @@ async def run_tool_loop(
     think: bool | None = None,
     label: str = "Agent",
     cache_results: bool = True,
+    stop_tools: set[str] | frozenset[str] | None = None,
 ) -> tuple[dict, dict[str, Any], int]:
     """Run an Ollama tool-calling loop until the model emits a non-tool
     message or ``max_rounds`` is exhausted.
@@ -382,9 +383,17 @@ async def run_tool_loop(
     On budget exhaustion, the model is told to stop calling tools and emit
     its final answer with the data already gathered.
 
+    ``stop_tools`` names tools that END the loop when called. Without it the only
+    way for a model to finish is to emit a message with no tool calls — i.e. to
+    stop by NOT acting — which models do unreliably: in the arena, 60% of runs
+    burned the entire round budget rather than choosing to stop. A terminal tool
+    makes finishing an explicit, callable action, and the caller can take the
+    model's own summary from its arguments.
+
     Returns:
         (final_assistant_message, tool_results_by_name, rounds_used)
     """
+    stop_tools = frozenset(stop_tools or ())
     messages: list[dict] = [
         {"role": "system", "content": system},
         {"role": "user", "content": user},
@@ -517,6 +526,25 @@ async def run_tool_loop(
                     "content": json.dumps(result, default=str)[:8000],
                 }
             )
+
+            if fn_name in stop_tools:
+                # The model chose to finish. Hand back its own arguments as the
+                # final message so the caller does not need another round-trip
+                # just to ask what it decided.
+                log.info(
+                    "%s: round %d — %s called, ending the loop by request",
+                    label, round_idx, fn_name,
+                )
+                final_message = {
+                    "role": "assistant",
+                    "content": (resp.get("content") or "").strip(),
+                    "stopped_by": fn_name,
+                    "stop_args": fn_args,
+                }
+                break
+
+        if final_message:
+            break
 
         log.info(
             "%s: round %d done — %d tool_calls processed in %.1fs",

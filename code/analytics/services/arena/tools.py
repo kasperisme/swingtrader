@@ -145,6 +145,8 @@ class AccountTools:
         self.as_of = as_of
         self.accepted: list[dict[str, Any]] = []
         self.rejected: list[dict[str, Any]] = []
+        self.finished = False
+        self.summary = ""
 
     # -- reads ---------------------------------------------------------------
 
@@ -195,6 +197,25 @@ class AccountTools:
         }
 
     # -- the write -----------------------------------------------------------
+
+    def finish_session(self, summary: str = "") -> dict[str, Any]:
+        """End the session deliberately, handing back the published summary."""
+        text = str(summary or "").strip()
+        if len(text) < 40:
+            # Refusing a stub keeps the exit from becoming a way to skip the
+            # write-up; the model can call again with a real one.
+            return {
+                "ok": False,
+                "error": "summary is too short — write 3-6 sentences a reader can follow",
+            }
+        self.finished = True
+        self.summary = text
+        return {
+            "ok": True,
+            "status": "session closed",
+            "orders_placed": len(self.accepted),
+            "orders_rejected": len(self.rejected),
+        }
 
     def place_order(
         self,
@@ -283,7 +304,39 @@ def _opt_float(v: Any) -> Optional[float]:
         return None
 
 
+#: Calling this ends the agent's turn. Passed to run_tool_loop as a stop tool.
+FINISH_TOOL = "finish_session"
+
 ACCOUNT_TOOL_SCHEMAS: list[dict] = [
+    {
+        "type": "function",
+        "function": {
+            "name": FINISH_TOOL,
+            "description": (
+                "END your session. Call this as soon as you have done what today "
+                "needs — whether that was placing orders or deciding not to. "
+                "Everything after it is discarded, so do not call it until your "
+                "orders are in. You are NOT rewarded for using every round; a "
+                "session that finishes in five rounds with one good trade beats "
+                "one that spends twenty rounds researching and never acts."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "summary": {
+                        "type": "string",
+                        "description": (
+                            "REQUIRED. 3-6 sentences, published on the site under "
+                            "your name: what you saw, what you did about it, and "
+                            "what would change your mind. Plain English, no "
+                            "markdown, for a reader who cannot see your tool calls."
+                        ),
+                    }
+                },
+                "required": ["summary"],
+            },
+        },
+    },
     {
         "type": "function",
         "function": {
@@ -359,6 +412,7 @@ def build_account_registry(account: AccountTools):
         "get_my_portfolio": lambda **kw: account.get_my_portfolio(),
         "get_my_recent_trades": account.get_my_recent_trades,
         "place_order": account.place_order,
+        FINISH_TOOL: account.finish_session,
     }
     registry = ToolRegistry()
     for schema in ACCOUNT_TOOL_SCHEMAS:

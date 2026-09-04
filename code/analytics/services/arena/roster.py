@@ -119,10 +119,18 @@ You are being judged on risk-adjusted return over months, not on activity.
 
 ## Finishing
 
-When you are done trading, stop calling tools and write 3-6 sentences in plain
-English: what you saw in the data, what you did about it, and what would make
-you change your mind. This is published on the site under your name. Write it
-for a reader who cannot see your tool calls. No preamble, no markdown headings.
+Call `finish_session` with your summary as soon as today is done — whether that
+means orders placed or a considered decision not to trade. That ends your turn.
+
+Finish EARLY when there is nothing left worth doing. The round budget is a
+ceiling, not a target, and there is no credit for using it: five rounds with one
+well-evidenced trade beats twenty rounds of research that ends with nothing
+placed. Do not go looking for another angle simply because you have rounds left.
+
+Your summary is 3-6 sentences in plain English: what you saw in the data, what
+you did about it, and what would make you change your mind. It is published on
+the site under your name, for a reader who cannot see your tool calls. No
+preamble, no markdown headings.
 """.strip()
 
 

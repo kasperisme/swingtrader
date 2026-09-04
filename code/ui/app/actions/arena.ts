@@ -127,11 +127,32 @@ export type ArenaNavPoint = {
   as_of: string;
   nav: number;
   cash: number;
+  /** Positive market value of longs. */
+  long_value: number;
+  /** Positive MAGNITUDE of shorts — a liability, so NAV subtracts it. */
+  short_value: number;
   n_positions: number;
   daily_return: number | null;
   cumulative_return: number | null;
   drawdown: number | null;
   is_backtest: boolean;
+  /** The book as it stood at this close — lets the page show a past day's portfolio. */
+  positions: {
+    holdings?: ArenaHolding[];
+    /** Names whose mark is older than this session; the NAV carries the last known price. */
+    stale_marks?: string[];
+  } | null;
+};
+
+/** One line of a stored end-of-session book. */
+export type ArenaHolding = {
+  ticker: string;
+  /** Signed: > 0 long, < 0 short. */
+  quantity: number;
+  avg_cost: number;
+  mark: number;
+  /** Signed, so shorts subtract. */
+  market_value: number;
 };
 
 export type ArenaPosition = {
@@ -284,7 +305,8 @@ export async function listAgents(): Promise<ArenaAgent[]> {
 /* ── Curves ───────────────────────────────────────────────────────────────── */
 
 const NAV_COLUMNS =
-  "agent_slug,as_of,nav,cash,n_positions,daily_return,cumulative_return,drawdown,is_backtest";
+  "agent_slug,as_of,nav,cash,long_value,short_value,n_positions," +
+  "daily_return,cumulative_return,drawdown,is_backtest,positions";
 
 /**
  * Every agent's NAV curve for one championship, keyed by slug.

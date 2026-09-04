@@ -17,6 +17,7 @@ import {
 import { SITE_URL } from "@/lib/site";
 import { getTraderForAgent } from "@/lib/sanity/trader-link";
 import { EquityCurve } from "../_components/equity-curve";
+import { PortfolioPanel } from "../_components/portfolio-panel";
 import {
   CitedResources,
   ResourceChips,
@@ -263,8 +264,11 @@ export default async function ArenaAgentPage({
 
       <section className="mt-12">
         <h2 className="font-mono text-[11px] uppercase tracking-widest text-muted-foreground">
-          Equity curve
+          Return
         </h2>
+        <p className="mt-2 max-w-[68ch] text-sm leading-relaxed text-muted-foreground">
+          Percent return since this championship opened.
+        </p>
         <div className="mt-5">
           <EquityCurve
             series={[{ slug, name: agent.name, colorIndex, points: curve }]}
@@ -275,73 +279,24 @@ export default async function ArenaAgentPage({
 
       <section className="mt-12">
         <h2 className="font-mono text-[11px] uppercase tracking-widest text-muted-foreground">
-          Open positions
+          Portfolio
         </h2>
-        {positions.length === 0 ? (
-          <p className="mt-4 max-w-[60ch] text-sm text-muted-foreground">
-            Holding no positions — all cash{" "}
-            {standing?.cash != null && `(${fmtMoney(standing.cash)})`}. For this
-            agent that may be a decision rather than an absence of one.
-          </p>
-        ) : (
-          <div className="-mx-4 mt-5 overflow-x-auto px-4">
-            <table className="w-full min-w-[620px] border-collapse text-sm">
-              <caption className="sr-only">
-                Open positions with cost basis, current mark and unrealised P&amp;L
-              </caption>
-              <thead>
-                <tr className="border-b text-left font-mono text-[11px] uppercase tracking-widest text-muted-foreground">
-                  <th scope="col" className="pb-2 pr-4 font-normal">Ticker</th>
-                  <th scope="col" className="pb-2 pr-4 text-right font-normal">Qty</th>
-                  <th scope="col" className="pb-2 pr-4 text-right font-normal">Cost</th>
-                  <th scope="col" className="pb-2 pr-4 text-right font-normal">Mark</th>
-                  <th scope="col" className="pb-2 pr-4 text-right font-normal">Value</th>
-                  <th scope="col" className="pb-2 text-right font-normal">Unrealised</th>
-                </tr>
-              </thead>
-              <tbody className="font-mono tabular-nums">
-                {positions.map((p, i) => (
-                  <tr
-                    key={p.ticker}
-                    className="animate-screening-row-in border-b border-border/60"
-                    style={{ animationDelay: `${Math.min(i, 12) * 30}ms` }}
-                  >
-                    <td className="py-2.5 pr-4">
-                      <Link
-                        href={`/quote/${p.ticker}`}
-                        className="font-medium hover:text-amber-600 dark:hover:text-amber-500"
-                      >
-                        {p.ticker}
-                      </Link>
-                      {p.quantity < 0 && (
-                        <span className="ml-2 rounded bg-muted px-1 py-0.5 text-[10px] uppercase tracking-wide text-muted-foreground">
-                          short
-                        </span>
-                      )}
-                    </td>
-                    <td className="py-2.5 pr-4 text-right">
-                      {Math.abs(p.quantity).toLocaleString()}
-                    </td>
-                    <td className="py-2.5 pr-4 text-right text-muted-foreground">
-                      {fmtMoney(p.avg_cost, 2)}
-                    </td>
-                    <td className="py-2.5 pr-4 text-right">
-                      {fmtMoney(p.last_price, 2)}
-                    </td>
-                    <td className="py-2.5 pr-4 text-right text-muted-foreground">
-                      {fmtMoney(Math.abs(p.market_value))}
-                    </td>
-                    <td
-                      className={`py-2.5 text-right font-medium ${toneFor(p.unrealized_pct)}`}
-                    >
-                      {fmtPct(p.unrealized_pct)}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
+        <p className="mt-2 max-w-[68ch] text-sm leading-relaxed text-muted-foreground">
+          The account in dollars, split into holdings and cash — the return chart
+          above cannot tell a flat month spent fully invested from one spent
+          sitting out. <strong className="font-medium text-foreground">Click any
+          point</strong> to see the book it was holding that day.
+        </p>
+        <div className="mt-5">
+          <PortfolioPanel
+            points={curve}
+            livePositions={positions}
+            startingCash={Number(agent.starting_cash) || 100000}
+            colorIndex={colorIndex}
+            nav={standing?.nav ?? null}
+            cash={standing?.cash ?? null}
+          />
+        </div>
       </section>
 
       <section className="mt-12">

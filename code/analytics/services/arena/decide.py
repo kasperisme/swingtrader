@@ -263,13 +263,22 @@ async def run_decision(
                 max_rounds=max_rounds,
                 options={"num_predict": 2048},
                 label=f"Arena/{agent['slug']}",
+                # Calling finish_session ends the turn. Without a terminal tool
+                # the only way to stop is to emit no tool call, which these
+                # models do unreliably — 60% of runs burned the whole budget.
+                stop_tools={arena_tools.FINISH_TOOL},
                 # Portfolio and order results MUST NOT be cached: the book
                 # changes with every order the agent places, and serving a stale
                 # snapshot would let it spend the same cash twice.
                 cache_results=False,
             )
 
-            narrative = _clean_narrative(final_message.get("content") or "")
+            # Prefer the summary the agent handed over when it chose to stop:
+            # it is the one it wrote deliberately, rather than whatever trailed
+            # its last tool call.
+            narrative = _clean_narrative(
+                account.summary or (final_message.get("content") or "")
+            )
             if not narrative:
                 # The model converged (or exhausted its rounds) with an empty
                 # message. That happens often enough to plan for, and the
@@ -336,6 +345,7 @@ async def run_decision(
         "orders_rejected": rejected,
         "tools_called": sorted(tool_results),
         "resources": len(resources),
+        "finished_early": bool(account.finished),
         "narrative": narrative,
         "duration_s": round((datetime.now(timezone.utc) - started).total_seconds(), 1),
     }
