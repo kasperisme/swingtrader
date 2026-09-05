@@ -95,6 +95,109 @@ UNBOUNDED_IN_REPLAY = {
 }
 
 
+#: The priced-in surfaces. Every row they return carries a ``price`` field that
+#: is the price the RECONSTRUCTION was built against, not the price today — and
+#: in a replay it is a price from the future. See ``_RepriceToSession``.
+PRICED_IN_TOOLS = (
+    "get_priced_in",
+    "get_priced_in_drivers",
+    "get_priced_in_case",
+    "search_priced_in_drivers",
+)
+
+
+class _RepriceToSession:
+    """Re-anchor a priced-in payload to the price on the session being traded.
+
+    The priced-in strategy is one comparison: today's price against what the
+    drivers and the published targets justify. Both halves have to be measured
+    on the same day for that subtraction to mean anything, and until now they
+    were not:
+
+      * every ``research_priced_in`` row is ``generation_is_pit = false``, so a
+        replay of 2 July read the row generated on 4 September;
+      * even live, a row is served until it is 45 days old, so its ``price``
+        can be a month and a half stale.
+
+    Measured on the arena's own record, the agent trading this surface believed
+    CEG was $285.05 on 2 July when it was $238.10 — a 19.7% error on the one
+    input the whole strategy subtracts. Across its fourteen buys the mean
+    absolute error was 7.2% against gaps of about 20%: the noise and the signal
+    were the same size.
+
+    So the price is replaced with the session's actual close, ``median_gap`` is
+    recomputed from it, and the original is kept beside it under
+    ``reconstruction_price`` rather than dropped. Nothing about the judged tier
+    is repaired by this — ``priced_in_pct`` still comes from a model that ran on
+    a later date, and ``look_ahead`` continues to say so. This fixes the
+    arithmetic, which is the half that CAN be fixed deterministically.
+    """
+
+    __slots__ = ("fn", "price_of")
+
+    def __init__(self, fn: Callable[..., Any], price_of: Callable[[str], Optional[float]]) -> None:
+        self.fn = fn
+        self.price_of = price_of
+
+    def __call__(self, **kwargs: Any) -> Any:
+        result = self.fn(**kwargs)
+        if isinstance(result, list):
+            for row in result:
+                if isinstance(row, dict):
+                    self._reprice(row)
+        elif isinstance(result, dict):
+            self._reprice(result)
+        return result
+
+    def _reprice(self, row: dict[str, Any]) -> None:
+        ticker = str(row.get("ticker") or "").upper()
+        if not ticker or "price" not in row:
+            return
+        try:
+            live = self.price_of(ticker)
+        except Exception as exc:                               # noqa: BLE001
+            log.debug("arena: reprice lookup failed for %s: %s", ticker, exc)
+            return
+        if not live or live <= 0:
+            # No bar for this name on this session. Leaving the reconstruction
+            # price in place silently is exactly the bug, so say it instead.
+            row["price_note"] = (
+                "No price for this ticker on the session being traded; `price` is "
+                "the price the reconstruction was built against and may be stale."
+            )
+            return
+
+        original = row.get("price")
+        row["price"] = round(live, 4)
+        row["reconstruction_price"] = original
+        row["price_note"] = (
+            f"`price` is the close on the session you are trading. The "
+            f"reconstruction was built against {original}, so its driver "
+            f"percentages describe THAT price. Judge the gap on `price`."
+        )
+
+        vote = row.get("vote")
+        if isinstance(vote, dict):
+            median = vote.get("target_median")
+            try:
+                median = float(median) if median is not None else None
+            except (TypeError, ValueError):
+                median = None
+            if median:
+                vote["median_gap_reconstruction"] = vote.get("median_gap")
+                vote["median_gap"] = round(live / median - 1.0, 6)
+                # The percentile was computed from the stale gap and is now
+                # describing a number that is no longer there.
+                try:
+                    from services.rag.priced_in import gap_context
+
+                    ctx = gap_context(vote["median_gap"])
+                    if ctx is not None:
+                        vote["median_gap_context"] = ctx
+                except Exception:                              # noqa: BLE001
+                    vote.pop("median_gap_context", None)
+
+
 class _BindAsOf:
     """Inject the replayed session into a tool that accepts one.
 
@@ -179,6 +282,45 @@ class AccountTools:
             round(nav / snap["starting_cash"] - 1.0, 4) if snap["starting_cash"] else None
         )
         return snap
+
+    def get_quote(self, tickers: Any = None) -> dict[str, Any]:
+        """Closing price on the session being traded, for any ticker.
+
+        Added because several agents had no way to see the price of a name they
+        did not already own. `get_my_portfolio` marks open positions only, and
+        the daily prompt carries NAV and cash but no quotes — so an agent
+        researching a candidate was reasoning about cheapness with no price in
+        front of it, and took whatever price its research tool happened to
+        carry. For the priced-in agent that was a price from a later date.
+        """
+        syms = tickers if isinstance(tickers, (list, tuple)) else [tickers]
+        syms = list(dict.fromkeys(
+            str(t or "").upper().strip() for t in syms if str(t or "").strip()
+        ))[:25]
+        if not syms:
+            return {"ok": False, "error": "pass one or more tickers"}
+
+        out: dict[str, Any] = {}
+        missing: list[str] = []
+        for sym in syms:
+            price = self.reference_prices.get(sym)
+            if price is None:
+                price = self._warm(sym)
+            if price:
+                out[sym] = round(float(price), 4)
+            else:
+                missing.append(sym)
+        return {
+            "ok": True,
+            "as_of": self.as_of.isoformat(),
+            "prices": out,
+            "no_price": missing,
+            "note": (
+                f"Closes on {self.as_of.isoformat()}. An order you place fills at "
+                f"the OPEN on {self.intended_for.isoformat()}, so treat these as "
+                f"a reference, not a fill price."
+            ),
+        }
 
     def get_my_recent_trades(self, limit: int = 20) -> dict[str, Any]:
         """The agent's own recent orders — fills AND rejections.
@@ -323,6 +465,19 @@ class AccountTools:
             "cash_remaining_after": round(self.portfolio.cash, 2),
         }
 
+    def price_on_session(self, ticker: str) -> Optional[float]:
+        """Close for ``ticker`` on the session being traded, cached per run.
+
+        The lookup ``_RepriceToSession`` uses. Same source and same cache the
+        order path prices against, so an agent cannot be shown one price and
+        filled against a different one.
+        """
+        sym = str(ticker or "").upper().strip()
+        if not sym:
+            return None
+        price = self.reference_prices.get(sym)
+        return price if price is not None else self._warm(sym)
+
     def _warm(self, ticker: str) -> Optional[float]:
         self.broker.prices.load([ticker], self.as_of - timedelta(days=30), self.as_of)
         price, _ = self.broker.prices.last_close_on_or_before(ticker, self.as_of)
@@ -388,6 +543,30 @@ ACCOUNT_TOOL_SCHEMAS: list[dict] = [
     {
         "type": "function",
         "function": {
+            "name": "get_quote",
+            "description": (
+                "The closing price of any ticker on the session you are trading. "
+                "Use it before you reason about whether something is cheap or "
+                "expensive: prices quoted inside research tools are the price that "
+                "research was BUILT against, which can be days or months away from "
+                "the price you would actually pay."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "tickers": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Up to 25 US equity symbols, e.g. [\"CEG\", \"GEV\"]",
+                    }
+                },
+                "required": ["tickers"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "get_my_recent_trades",
             "description": (
                 "Your own recent orders, including ones that were REJECTED and why. "
@@ -447,6 +626,7 @@ def build_account_registry(account: AccountTools):
     fns: dict[str, Callable[..., Any]] = {
         "get_my_portfolio": lambda **kw: account.get_my_portfolio(),
         "get_my_recent_trades": account.get_my_recent_trades,
+        "get_quote": account.get_quote,
         "place_order": account.place_order,
         FINISH_TOOL: account.finish_session,
     }

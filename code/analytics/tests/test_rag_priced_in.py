@@ -366,3 +366,68 @@ def test_every_public_read_carries_the_caveat(rows):
     assert "UNVALIDATED" in pi.get_priced_in_drivers(["TEST"])[0]["caveat"]
     assert "UNVALIDATED" in pi.get_priced_in_case("TEST")[0]["caveat"]
     assert "UNVALIDATED" in pi.search_priced_in_drivers("power")[0]["caveat"]
+
+
+# ── universe percentiles ────────────────────────────────────────────────────
+# The two headline numbers on this surface read like findings and are base
+# rates: 86% of covered names trade below their analyst median and a third of
+# all drivers are <=25% priced in. These assert that a payload says where the
+# number sits, not just what it is.
+
+
+@pytest.fixture
+def _fixed_universe(monkeypatch):
+    """A known distribution, so percentiles are arithmetic rather than data."""
+    gaps = [-0.5, -0.4, -0.3, -0.2, -0.1, 0.0, 0.1, 0.2, 0.3, 0.4]
+    pcts = [0.0, 10.0, 20.0, 30.0, 40.0, 50.0, 60.0, 70.0, 80.0, 90.0]
+    monkeypatch.setattr(pi, "_universe_distributions", lambda: (gaps, pcts))
+    return gaps, pcts
+
+
+def test_percentile_of_counts_the_population_strictly_below(_fixed_universe):
+    gaps, _ = _fixed_universe
+    assert pi._percentile_of(-0.5, gaps) == 0     # nothing is wider
+    assert pi._percentile_of(-0.3, gaps) == 20
+    assert pi._percentile_of(0.4, gaps) == 90
+
+
+def test_percentile_is_none_without_a_value_or_a_population():
+    assert pi._percentile_of(None, [1.0, 2.0]) is None
+    assert pi._percentile_of(0.5, []) is None
+    assert pi._percentile_of("not a number", [1.0]) is None
+
+
+def test_gap_context_reports_percentile_and_the_base_rate(_fixed_universe):
+    ctx = pi.gap_context(-0.3)
+    assert ctx["percentile"] == 20
+    assert ctx["n_universe"] == 10
+    # Five of the ten fixture gaps are negative.
+    assert "50% of the 10 covered names trade below their analyst median" in ctx["base_rate"]
+
+
+def test_driver_pct_context_reports_percentile_and_the_base_rate(_fixed_universe):
+    ctx = pi.driver_pct_context(20.0)
+    assert ctx["percentile"] == 20
+    # Three of the ten fixture driver percentages are <= 25.
+    assert "30% of the 10 covered drivers sit at or below 25%" in ctx["base_rate"]
+
+
+def test_annotate_driver_attaches_context_to_a_driver_payload(_fixed_universe):
+    row = pi._annotate_driver({"ticker": "TEST", "priced_in_pct": 20.0})
+    assert row["priced_in_pct_context"]["percentile"] == 20
+
+
+def test_annotate_driver_is_silent_when_the_driver_has_no_estimate(_fixed_universe):
+    row = pi._annotate_driver({"ticker": "TEST", "priced_in_pct": None})
+    assert "priced_in_pct_context" not in row
+
+
+def test_annotate_record_covers_the_gap_and_every_driver(_fixed_universe):
+    rec = {
+        "ticker": "TEST",
+        "vote": {"median_gap": -0.3, "target_median": 100},
+        "drivers": [{"priced_in_pct": 20.0}, {"priced_in_pct": 80.0}],
+    }
+    pi._annotate_record(rec)
+    assert rec["vote"]["median_gap_context"]["percentile"] == 20
+    assert [d["priced_in_pct_context"]["percentile"] for d in rec["drivers"]] == [20, 80]

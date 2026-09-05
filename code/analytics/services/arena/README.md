@@ -219,9 +219,30 @@ The **research** is a different matter, and it differs per source:
 | Semantic / tag news search | ❌ RPC anchored at `now()` | Jim Clamor, Howard Marx |
 | Cluster & dimension trends | ❌ view anchored at `now()` | Jim Clamor, Chris Cameo |
 | Relationship graph | ❌ refreshed in place | Howard Marx |
-| Priced-in decomposition | ❌ all rows `generation_is_pit = false` | Michael Beary |
+| Priced-in **price + target gap** | ✅ always — re-anchored to the session's close | Michael Beary, Chris Cameo |
+| Priced-in **drivers / `priced_in_pct`** | ❌ all rows `generation_is_pit = false` | Michael Beary, Chris Cameo |
 | Pair z-scores | ❌ current value only, no history | Jim Sigmons |
 | FMP fundamentals | ❌ current TTM, not as-reported | Barren Wuffett |
+
+**The priced-in row is split in two, because only half of it is fixable.** Its
+`price` is what the reconstruction was built against, and in a replay that is a
+price from the future — Michael Beary bought CEG on 2 July believing it cost
+$285.05 when it cost $238.10, a 19.7% error on the one input its whole strategy
+subtracts. Across its fourteen buys the mean absolute error was 7.2%, against
+gaps of about 20%: the noise and the signal were the same size. So
+`_RepriceToSession` (`services/arena/tools.py`) now rewrites `price` to the
+session's actual close and recomputes `median_gap` from it, keeping the original
+under `reconstruction_price`. That repairs the **arithmetic** tier, live and
+replay both — live rows are served until they are 45 days old, so the same
+correction matters outside a backtest.
+
+It repairs nothing about the **judged** tier. `priced_in_pct` still comes from a
+model that ran on a later date over a later corpus, and no amount of `as_of`
+plumbing changes that; `strategylab/social/pit.py` says the same thing about its
+own generator. A genuine fix there means regenerating rows at each past date,
+which is an LLM pass per ticker per date and still leaves the generator
+contaminated. Read a replayed priced-in decision as a demonstration of the
+machinery, never as evidence the strategy works.
 
 **News is gated on `published_at`, not `created_at`.** The corpus has been
 backfilled, so publication time is what was knowable in the market at that

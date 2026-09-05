@@ -426,6 +426,8 @@ def get_priced_in(
     shaped = [_shape_row(r, include_cases, top_claims, passages, include_analyst_cases)
               for r in rows]
     shaped.sort(key=lambda r: order.get(str(r.get("ticker") or "").upper(), 10**6))
+    for rec in shaped:
+        _annotate_record(rec)
     return shaped
 
 
@@ -449,14 +451,14 @@ def get_priced_in_drivers(
                 continue
             if testable_only and not drv.get("testable"):
                 continue
-            out.append({
+            out.append(_annotate_driver({
                 "ticker": rec["ticker"],
                 "as_of": rec["as_of"],
                 "price": rec["price"],
                 "stale": rec["stale"],
                 **{k: v for k, v in drv.items() if k not in ("case", "case_matches_driver")},
                 "caveat": CAVEAT,
-            })
+            }))
     out.sort(key=lambda d: (d.get("priced_in_pct") is None, d.get("priced_in_pct") or 0))
     return out
 
@@ -486,7 +488,7 @@ def get_priced_in_case(
             continue
         if not drv.get("case"):
             continue
-        out.append({
+        out.append(_annotate_driver({
             "ticker": rec["ticker"],
             "as_of": rec["as_of"],
             "price": rec["price"],
@@ -496,7 +498,7 @@ def get_priced_in_case(
             "case_matches_driver": drv.get("case_matches_driver"),
             **drv["case"],
             "caveat": CAVEAT,
-        })
+        }))
     return out
 
 
@@ -576,4 +578,172 @@ def search_priced_in_drivers(
     # which is the end of the distribution the question is usually about.
     scored.sort(key=lambda p: (-p[0], -p[1], p[2].get("priced_in_pct") is None,
                                p[2].get("priced_in_pct") or 0))
-    return [d for _, _, d in scored[:max(1, limit)]]
+    # Annotated AFTER the cut, not before: the percentile lookup is a scan per
+    # driver and the universe was just scored in full.
+    return [_annotate_driver(d) for _, _, d in scored[:max(1, limit)]]
+
+
+# ── Where a number sits in the universe ──────────────────────────────────────
+# Both of this module's headline numbers read like a finding and are actually a
+# base rate. Measured over the published universe:
+#
+#   * 86% of covered names trade BELOW their analyst median, and 43% are more
+#     than 15% below. "The price is at the bottom of the analyst range" is
+#     therefore the normal state of a covered stock, not a signal.
+#   * 32% of all drivers are <=25% priced in. "Barely priced in" describes a
+#     third of the decomposition, not a rare find.
+#
+# An agent reading the level alone selects on a constant and believes it has
+# screened. So every payload now carries the PERCENTILE beside the level, and
+# the base rate beside that — the same discipline the CAVEAT applies to the
+# judged tier, applied to the grounded one.
+
+_PCTL_TTL_SECONDS = 3600
+_pctl_cache: dict[str, Any] = {"at": None, "gaps": [], "driver_pcts": []}
+
+
+def _universe_distributions() -> tuple[list[float], list[float]]:
+    """Sorted (median_gaps, driver priced_in_pcts) over the published universe.
+
+    Cached for an hour: the underlying rows are refreshed by a nightly batch, so
+    a per-call scan of 476 rows would be 476 rows of pure waste on every tool
+    call an agent makes.
+    """
+    now = datetime.now(timezone.utc)
+    at = _pctl_cache["at"]
+    if at is not None and (now - at).total_seconds() < _PCTL_TTL_SECONDS:
+        return _pctl_cache["gaps"], _pctl_cache["driver_pcts"]
+
+    client, schema = _client()
+    try:
+        rows = (
+            client.schema(schema)
+            .table("research_priced_in")
+            .select("ticker, as_of, median_gap, drivers_json")
+            .eq("published", True)
+            .order("as_of", desc=True)
+            .order("created_at", desc=True)
+            .limit(2000)
+            .execute()
+        ).data or []
+    except Exception as exc:                                   # noqa: BLE001
+        log.warning("priced-in universe scan failed: %s", exc)
+        return _pctl_cache["gaps"], _pctl_cache["driver_pcts"]
+
+    latest: dict[str, dict] = {}
+    for row in rows:
+        latest.setdefault(str(row.get("ticker") or "").upper(), row)
+
+    gaps: list[float] = []
+    driver_pcts: list[float] = []
+    for row in latest.values():
+        gap = row.get("median_gap")
+        if gap is not None:
+            try:
+                gaps.append(float(gap))
+            except (TypeError, ValueError):
+                pass
+        for drv in _as_json(row.get("drivers_json"), default=[]) or []:
+            if not isinstance(drv, dict):
+                continue
+            pct = drv.get("priced_in_pct")
+            if pct is not None:
+                try:
+                    driver_pcts.append(float(pct))
+                except (TypeError, ValueError):
+                    pass
+
+    gaps.sort()
+    driver_pcts.sort()
+    _pctl_cache.update({"at": now, "gaps": gaps, "driver_pcts": driver_pcts})
+    return gaps, driver_pcts
+
+
+def _percentile_of(value: Any, population: list[float]) -> int | None:
+    """What share of ``population`` this value is at or below, as 0-100.
+
+    Cheap linear scan rather than bisect on purpose — the populations are a few
+    thousand floats and the caller is already doing network I/O.
+    """
+    if value is None or not population:
+        return None
+    try:
+        v = float(value)
+    except (TypeError, ValueError):
+        return None
+    below = sum(1 for x in population if x < v)
+    return int(round(100.0 * below / len(population)))
+
+
+def gap_context(median_gap: Any) -> dict[str, Any] | None:
+    """Where one name's discount to the analyst median sits among all of them.
+
+    ``percentile`` 10 means only a tenth of covered names trade at a WIDER
+    discount than this one — i.e. genuinely unusual. A percentile near 50 means
+    the name is exactly as cheap as everything else the programme covers, which
+    is the reading the raw number hides.
+    """
+    gaps, _ = _universe_distributions()
+    pct = _percentile_of(median_gap, gaps)
+    if pct is None:
+        return None
+    below_median = sum(1 for g in gaps if g < 0)
+    return {
+        "percentile": pct,
+        "n_universe": len(gaps),
+        "reading": (
+            f"{pct}% of covered names trade at a WIDER discount to their analyst "
+            f"median than this one."
+        ),
+        "base_rate": (
+            f"{round(100.0 * below_median / len(gaps))}% of the {len(gaps)} covered "
+            f"names trade below their analyst median, so a negative gap is the "
+            f"normal state of a covered stock and not by itself a signal."
+        ),
+    }
+
+
+def driver_pct_context(priced_in_pct: Any) -> dict[str, Any] | None:
+    """Where one driver's priced-in estimate sits among every driver's.
+
+    ``percentile`` 20 means only a fifth of drivers in the universe are LESS
+    priced in than this one.
+    """
+    _, pcts = _universe_distributions()
+    pct = _percentile_of(priced_in_pct, pcts)
+    if pct is None:
+        return None
+    under_25 = sum(1 for p in pcts if p <= 25)
+    return {
+        "percentile": pct,
+        "n_universe": len(pcts),
+        "reading": (
+            f"{pct}% of all covered drivers are LESS priced in than this one."
+        ),
+        "base_rate": (
+            f"{round(100.0 * under_25 / len(pcts))}% of the {len(pcts)} covered "
+            f"drivers sit at or below 25% priced in, so 'barely priced in' "
+            f"describes a large slice of the universe rather than a rare find."
+        ),
+    }
+
+
+def _annotate_driver(row: dict[str, Any]) -> dict[str, Any]:
+    """Attach the universe percentile to one driver-shaped payload, in place."""
+    ctx = driver_pct_context(row.get("priced_in_pct"))
+    if ctx is not None:
+        row["priced_in_pct_context"] = ctx
+    return row
+
+
+def _annotate_record(rec: dict[str, Any]) -> dict[str, Any]:
+    """Attach percentiles to a full reconstruction: the gap, and every driver."""
+    vote = rec.get("vote")
+    if isinstance(vote, dict):
+        ctx = gap_context(vote.get("median_gap"))
+        if ctx is not None:
+            vote["median_gap_context"] = ctx
+    for drv in rec.get("drivers") or []:
+        if isinstance(drv, dict):
+            _annotate_driver(drv)
+    return rec

@@ -85,6 +85,18 @@ def build_registry(spec: AgentSpec, account: AccountTools) -> ToolRegistry:
             tool = Tool(
                 name=tool.name, schema=tool.schema, fn=arena_tools._BindAsOf(tool.fn)
             )
+        if name in arena_tools.PRICED_IN_TOOLS:
+            # These carry the price their reconstruction was built against, which
+            # is a price from the future in a replay and up to 45 days stale live.
+            # Re-anchor it to the session's close so the agent's central
+            # subtraction is done on one date. Live and replay both.
+            from services.agent_core import Tool
+
+            tool = Tool(
+                name=tool.name,
+                schema=tool.schema,
+                fn=arena_tools._RepriceToSession(tool.fn, account.price_on_session),
+            )
         registry.add(tool)
 
     registry.extend(build_strategy_registry(spec.tools))
@@ -143,16 +155,51 @@ def _user_prompt(
     weight_cap = nav * float(agent.get("max_position_pct") or 0.20)
     most = max(0.0, min(spendable, weight_cap))
     lo, hi = spec_exposure
+    over_band = exposure > hi
     if exposure < lo:
         stance = (
             f"  BELOW TARGET — you are {exposure:.0%} invested against a "
             f"{lo:.0%}-{hi:.0%} band. Either deploy this session or say why "
             f"nothing qualifies."
         )
-    elif exposure > hi:
-        stance = f"  ABOVE TARGET — {exposure:.0%} invested against a {lo:.0%}-{hi:.0%} band."
+    elif over_band:
+        # Stating the breach without asking for anything let one agent sit 15
+        # points above its band for nine straight sessions, acknowledge it in
+        # every write-up, and never trim. The band is the strategy's own risk
+        # statement; being over it is a trade to consider, not a fact to note.
+        stance = (
+            f"  ABOVE TARGET — {exposure:.0%} invested against a {lo:.0%}-{hi:.0%} "
+            f"band. Trim your weakest thesis back into the band this session, or "
+            f"state explicitly why staying over it is the right call today."
+        )
     else:
         stance = f"  In band ({lo:.0%}-{hi:.0%})."
+
+    # The "trade by round N" nudge exists because agents were researching until
+    # the budget ran out and finishing flat. But issued unconditionally it also
+    # tells a deliberately selective agent — one whose whole strategy is a low
+    # exposure floor and long stretches of doing nothing — that it is behind
+    # schedule for a trade it has no reason to make. So it is only pressure when
+    # the agent is actually short of its own band.
+    if over_band:
+        budget_note = (
+            f"You are over your exposure band, so there is no hurry to add. If you "
+            f"trim, place that order by round {order_by} rather than researching "
+            f"until the budget is gone."
+        )
+    elif exposure < lo:
+        budget_note = (
+            f"Aim to place your first order by round {order_by} at the latest. "
+            f"Agents that research until the budget runs out end the day having "
+            f"traded nothing, which is a worse outcome than a smaller position "
+            f"taken on adequate evidence."
+        )
+    else:
+        budget_note = (
+            f"You are in band. If you do decide to act, place the order by round "
+            f"{order_by} rather than researching until the budget is gone — but "
+            f"being in band is not a reason to trade."
+        )
 
     return f"""
 Trading session: {session.isoformat()} has closed. You are deciding for
@@ -168,10 +215,8 @@ Your account right now:
 {stance}
   Positions  {held}
 
-You have {max_rounds} tool-calling rounds this session — one tool call each. Aim
-to place your first order by round {order_by} at the latest. Agents that research
-until the budget runs out end the day having traded nothing, which is a worse
-outcome than a smaller position taken on adequate evidence.
+You have {max_rounds} tool-calling rounds this session — one tool call each.
+{budget_note}
 
 Do your research, decide, place any orders you want filled tomorrow, then write
 your summary. Remember that no trade is a valid outcome — but it has to be a
