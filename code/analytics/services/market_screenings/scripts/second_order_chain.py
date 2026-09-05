@@ -143,6 +143,14 @@ def _headlines_and_edges(as_of: Optional[date] = None) -> tuple[list[dict], int]
         and e.strength_avg >= %(min_str)s
         and e.mention_count >= %(min_mentions)s
         and e.last_seen_at >= %(ref)s::date - %(edge_age)s
+        -- The edge has to have EXISTED on the as-of date. Roughly a ninth of
+        -- the graph was first asserted after 2026-07-01, so a replay without
+        -- this filter trades
+        -- relationships nobody had written down yet. first_seen_at is populated
+        -- on all 39,724 edges back to 2025-04-10, so this rewinds cleanly; what
+        -- does NOT rewind is strength_avg and mention_count, which are
+        -- aggregates refreshed in place and therefore reflect today's evidence.
+        and e.first_seen_at <= %(ref)s::date + 1
       order by h.ticker,
                case when e.from_ticker = h.ticker then e.to_ticker else e.from_ticker end,
                e.strength_avg * ln(1 + e.mention_count) desc
@@ -186,6 +194,22 @@ def _headlines_and_edges(as_of: Optional[date] = None) -> tuple[list[dict], int]
 
 # ── The price gate: has the neighbour already moved? ────────────────────────
 
+def _tradeable_universe() -> dict[str, dict]:
+    """US-listed names liquid enough to enter and exit, with their sector.
+
+    A separate function rather than an inline call so a backfill can memoize it:
+    the answer is CURRENT membership on every date regardless, which the rewind
+    notes record as a limitation rather than something more calls would fix.
+    """
+    from services.screener.fmp import fmp as FMP
+
+    screen = FMP().stock_screener(price_min=_LIQ_PRICE_MIN, volume_min=_LIQ_VOLUME_MIN)
+    return {
+        str(r["symbol"]): {"sector": r.get("sector") or "", "price": r.get("price")}
+        for _, r in screen.iterrows()
+    }
+
+
 def _returns(price_book, tickers: list[str], start: date, end: date) -> dict[str, float]:
     """Simple return over the window per ticker, from daily closes."""
     out: dict[str, float] = {}
@@ -208,7 +232,6 @@ def _returns(price_book, tickers: list[str], start: date, end: date) -> dict[str
 def run(client, screening: dict) -> ScreeningResult:  # noqa: ARG001
     """Run the board. ``screening["_as_of"]`` replays it at a past date."""
     from services.arena.marks import PriceBook
-    from services.screener.fmp import fmp as FMP
 
     as_of = screening.get("_as_of")
     if isinstance(as_of, str):
@@ -231,10 +254,7 @@ def run(client, screening: dict) -> ScreeningResult:  # noqa: ARG001
     # Tradeable + liquid. The graph is built from news text, so it contains
     # foreign listings and private companies that no order could ever fill.
     try:
-        screen = FMP().stock_screener(price_min=_LIQ_PRICE_MIN, volume_min=_LIQ_VOLUME_MIN)
-        liquid = {str(r["symbol"]): {"sector": r.get("sector") or "",
-                                     "price": r.get("price")}
-                  for _, r in screen.iterrows()}
+        liquid = _tradeable_universe()
     except Exception as exc:                                   # noqa: BLE001
         log.exception("second-order: FMP screener failed")
         return ScreeningResult(triggered=False, error=f"FMP screener failed: {exc}")
@@ -289,6 +309,17 @@ def run(client, screening: dict) -> ScreeningResult:  # noqa: ARG001
             "candidate_pairs": len(pairs),
             "as_of": as_of.isoformat() if as_of else None,
             "window_days": _WINDOW_DAYS,
+            "point_in_time": {
+                "headline_coverage_and_sentiment": "yes — recomputed from published_at",
+                "headline_and_peer_returns": "yes — FMP daily closes over the window",
+                "relationship_graph_membership": "yes — edges filtered on first_seen_at, "
+                                                "so only links that existed by this date are used",
+                "relationship_edge_weights": "NO — strength_avg and mention_count are "
+                                             "aggregates refreshed in place, so an edge that "
+                                             "existed then carries today's evidence count",
+                "tradeable_universe": "NO — current FMP screener membership",
+                "sentiment_scores": "PARTIAL — the article existed then, the LLM score did not",
+            } if as_of else None,
             "gates": {
                 "min_head_articles": _MIN_HEAD_ARTICLES,
                 "min_head_sentiment": _MIN_HEAD_SENTIMENT,
@@ -357,3 +388,59 @@ def _format(rows: list[dict], n_long: int, n_short: int,
             f"| edge {r['edge_strength']:.2f} x{r['edge_mentions']}"
         )
     return head + "\n\n" + "\n".join(lines)
+
+
+# ── Backfill support ────────────────────────────────────────────────────────
+
+def install_backfill_caches(start: date, end: date) -> None:
+    """Swap this board's per-date reads for ones shared across the whole window.
+
+    Two things in ``run()`` are per-date and need not be. The FMP screener call
+    returns the tradeable universe and is the same answer on every session in a
+    backfill — it is CURRENT membership either way, which is a documented
+    limitation of the rewind, not something an extra call would fix. And the
+    price book re-loads bars per run; one book covering the whole range answers
+    every session from memory.
+
+    Called by ``services.market_screenings.backfill``; a live run never sees it.
+    """
+    global _returns, _tradeable_universe
+
+    _tradeable_universe = _memoize_universe(_tradeable_universe)
+
+    from services.arena.marks import PriceBook
+    shared = PriceBook()
+    loaded: set[str] = set()
+
+    def windowed(price_book, tickers: list[str], w_start: date, w_end: date) -> dict[str, float]:
+        # Load each name once for the FULL backfill range, then answer each
+        # session's window off the same bars.
+        fresh = [t for t in tickers if t not in loaded]
+        if fresh:
+            try:
+                shared.load(fresh, start - timedelta(days=14), end)
+            except Exception as exc:                       # noqa: BLE001
+                log.warning("second-order: shared price load failed: %s", exc)
+            loaded.update(fresh)
+        out: dict[str, float] = {}
+        for t in tickers:
+            try:
+                a, _ = shared.last_close_on_or_before(t, w_start)
+                b, _ = shared.last_close_on_or_before(t, w_end)
+            except Exception:                              # noqa: BLE001
+                continue
+            if a and b and a > 0:
+                out[t] = b / a - 1.0
+        return out
+
+    _returns = windowed
+
+
+def _memoize_universe(fn):
+    cache: dict[str, Any] = {}
+
+    def wrapped():
+        if "u" not in cache:
+            cache["u"] = fn()
+        return cache["u"]
+    return wrapped

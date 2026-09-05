@@ -535,3 +535,81 @@ def _format_summary(passed: list[dict], n_long: int, n_short: int,
     if shorts:
         out.append("\nRICH, ADORED, CROWDED:\n" + "\n".join(shorts))
     return "\n".join(out)
+
+
+# ── Backfill support ────────────────────────────────────────────────────────
+
+def install_backfill_caches(start: date, end: date) -> None:
+    """Swap this board's per-date reads for per-ticker ones.
+
+    ``run()`` is written for a single date: it asks FMP for key metrics per
+    surviving ticker and, when repricing, for a short range of bars per ticker.
+    Correct for one run and ruinous across fifty — the same names recur on most
+    sessions, so the naive bill for a two-month window is ~9,600 requests.
+
+    Both replacements key on TICKER alone. Key metrics do not change between two
+    dates in the same window, and the price series is fetched ONCE for the whole
+    range and then answered from memory, falling back to the last close at or
+    before each session so a holiday or a halted name still prices.
+
+    Called by ``services.market_screenings.backfill``; a live run never sees it.
+    """
+    global _value_read, _price_ratio
+    _value_read = _memoize_by_symbol(_value_read)
+    _price_ratio = _series_backed_price_ratio(start, end)
+
+
+def _memoize_by_symbol(fn):
+    cache: dict[str, Any] = {}
+
+    def wrapped(client, symbol, *a, **kw):
+        if symbol not in cache:
+            cache[symbol] = fn(client, symbol, *a, **kw)
+        return cache[symbol]
+    return wrapped
+
+def _series_backed_price_ratio(start: date, end: date):
+    """A ``_price_ratio`` that fetches each ticker's bars ONCE for the window.
+
+    The screen's own version asks FMP for a short range per call, which is right
+    for a single live run and catastrophic across 48 of them. This pulls one
+    series per ticker covering the whole backfill and then answers every date
+    out of memory, falling back to the last close at or before the session so a
+    holiday or a halted name still prices.
+    """
+    cache: dict[str, list[tuple[str, float]]] = {}
+    frm = (start - timedelta(days=10)).strftime("%Y-%m-%d")
+    to = end.strftime("%Y-%m-%d")
+
+    def load(fmp_client, symbol: str) -> list[tuple[str, float]]:
+        if symbol in cache:
+            return cache[symbol]
+        series: list[tuple[str, float]] = []
+        try:
+            df = fmp_client.daily_chart(symbol, frm, to)
+            if df is not None and not getattr(df, "empty", True):
+                col = "close" if "close" in df.columns else df.columns[-1]
+                for _, row in df.iterrows():
+                    try:
+                        series.append((str(row["date"])[:10], float(row[col])))
+                    except Exception:                          # noqa: BLE001
+                        continue
+                series.sort()
+        except Exception as exc:                               # noqa: BLE001
+            log.debug("backfill: no bars for %s: %s", symbol, exc)
+        cache[symbol] = series
+        return series
+
+    def ratio(fmp_client, symbol: str, as_of: date, price_now):
+        if not price_now or price_now <= 0:
+            return None
+        series = load(fmp_client, symbol)
+        key = as_of.isoformat()
+        prior = [px for d, px in series if d <= key]
+        if not prior:
+            return None
+        return prior[-1] / price_now
+
+    return ratio
+
+
