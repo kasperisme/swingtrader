@@ -69,6 +69,25 @@ def _fill_price(reference: float, side: str) -> float:
     return reference * (1 + adj) if side == "buy" else reference * (1 - adj)
 
 
+def _position_effect(held: float, signed: float, resulting: float) -> str:
+    """Name what a fill did to the book, from the position before and after.
+
+    The six outcomes are exhaustive for a non-zero fill. The two flips matter
+    most: they are the ones no consumer could reconstruct later, because the row
+    they produce looks exactly like a plain close.
+    """
+    was_long, was_short = held > MIN_QUANTITY, held < -MIN_QUANTITY
+    if not (was_long or was_short):
+        return "open_long" if signed > 0 else "open_short"
+    if was_long:
+        if signed > 0:
+            return "open_long"                          # adding
+        return "flip_to_short" if resulting < -MIN_QUANTITY else "close_long"
+    if signed < 0:
+        return "open_short"                             # adding to a short
+    return "flip_to_long" if resulting > MIN_QUANTITY else "cover_short"
+
+
 class Broker:
     """Order validation, execution and accounting for one arena.
 
@@ -360,6 +379,14 @@ class Broker:
         avg_cost = existing.avg_cost if existing else 0.0
         resulting = held + signed
 
+        # What this fill DID to the book. `side` alone stopped being readable the
+        # day every agent could short — a SELL is either closing a long or
+        # opening a short, and a BUY is either opening a long or covering one.
+        # Recorded rather than inferred because the flip cases (selling THROUGH
+        # zero, handled below) are indistinguishable from a plain close once the
+        # row is written.
+        effect = _position_effect(held, signed, resulting)
+
         # Realised P&L on the portion that CLOSES exposure. Opening fills carry
         # NULL so win-rate is computed over closes only.
         realized_pnl: Optional[float] = None
@@ -410,6 +437,7 @@ class Broker:
                 "notional": round(cash_effect, 2),
                 "realized_pnl": round(realized_pnl, 2) if realized_pnl is not None else None,
                 "realized_pct": round(realized_pct, 6) if realized_pct is not None else None,
+                "position_effect": effect,
             },
         )
         return cash + cash_effect

@@ -173,6 +173,20 @@ export type ArenaOrder = {
   agent_slug: string;
   ticker: string;
   side: "buy" | "sell";
+  /**
+   * What the fill did to the book. `side` alone is ambiguous once agents can
+   * short — a sell either closes a long or OPENS a short, and a buy either
+   * opens a long or COVERS one. NULL on rows written before 2026-09-05 and on
+   * unfilled orders; render the bare side in that case rather than guessing.
+   */
+  position_effect:
+    | "open_long"
+    | "close_long"
+    | "open_short"
+    | "cover_short"
+    | "flip_to_short"
+    | "flip_to_long"
+    | null;
   quantity: number;
   status: "pending" | "filled" | "rejected" | "cancelled";
   reject_reason: string | null;

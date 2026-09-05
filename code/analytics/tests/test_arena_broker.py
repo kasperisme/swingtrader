@@ -414,3 +414,36 @@ def test_a_position_with_no_recent_bar_is_flagged_stale_not_dropped(store):
 
     assert "AAA" in row["positions"]["stale_marks"]
     assert row["nav"] == pytest.approx(50_000 + 100 * 55.0)
+
+
+# ── position_effect ─────────────────────────────────────────────────────────
+# `side` alone is ambiguous once agents can short: a sell either closes a long
+# or OPENS a short. The two flips are the reason this is recorded rather than
+# inferred — they produce a row indistinguishable from a plain close.
+
+import pytest
+
+from services.arena.broker import _position_effect
+
+
+@pytest.mark.parametrize("held,signed,resulting,expected", [
+    (0,    10,  10,  "open_long"),      # flat -> long
+    (0,   -10, -10,  "open_short"),     # flat -> short
+    (10,    5,  15,  "open_long"),      # adding to a long
+    (10,   -4,   6,  "close_long"),     # partial close
+    (10,  -10,   0,  "close_long"),     # full close
+    (10,  -15,  -5,  "flip_to_short"),  # sold THROUGH zero
+    (-10,  -5, -15,  "open_short"),     # adding to a short
+    (-10,   4,  -6,  "cover_short"),    # partial cover
+    (-10,  10,   0,  "cover_short"),    # full cover
+    (-10,  15,   5,  "flip_to_long"),   # bought THROUGH zero
+])
+def test_position_effect_names_what_the_fill_did(held, signed, resulting, expected):
+    assert _position_effect(held, signed, resulting) == expected
+
+
+def test_a_flip_is_not_reported_as_a_plain_close():
+    # The case the UI could not have recovered from side + realized_pnl: both
+    # of these are a SELL that closes a long and sets realized_pnl.
+    assert _position_effect(10, -10, 0) == "close_long"
+    assert _position_effect(10, -15, -5) == "flip_to_short"
