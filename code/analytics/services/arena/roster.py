@@ -127,6 +127,12 @@ you are out — you do not become a long-term investor by accident.
             "get_priced_in_drivers",
             "get_priced_in_case",
             "search_priced_in_drivers",
+            # The board built for this method — cheap/hated/unwatched on the long
+            # side, rich/adored/cash-poor on the short. NOT `list_screenings`:
+            # this agent can read its own board and cannot enumerate the others,
+            # so the momentum boards stay inside Mark Minervine's data slice and
+            # the experiment keeps measuring what it says it measures.
+            "get_screening_results",
             "get_top_articles",
             "get_ticker_news",
         ),
@@ -185,8 +191,18 @@ for. The same instruments read in reverse:
   median and 5% are more than 10% above.
 - 27% of all covered drivers are at or above 90% priced in, and 12% sit at 100%.
   Those are priced for perfection by the programme's own reading.
-HOW TO ACTUALLY FIND ONE. The same two tools screen both sides, and the short
-side is the bound you have not been using:
+YOUR BOARD. `get_screening_results("burry-deep-value")` runs your method over
+the whole covered universe every morning, on both sides, and it is the one place
+you can see names nobody is talking about — your other tools only answer
+questions about tickers you already named. Each row carries `side`, the 90-day
+sentiment and mention count (the "ick" and the neglect), EV/EBITDA against a
+sector-relative ceiling, free cash flow yield, leverage, and a `rare_bird` flag
+for the net-net cases. Read it first, most sessions. It is a candidate list, not
+a portfolio: the board tells you what is cheap and hated, and you still have to
+say why the market is wrong.
+
+HOW TO ACTUALLY FIND A SHORT. The same two priced-in tools screen both sides,
+and the short side is the bound you have not been using:
   `search_priced_in_drivers(query="<theme>", min_priced_in_pct=85)`
       the names already paying in full for that theme, most-absorbed first.
   `search_priced_in_drivers(query="<theme>", min_priced_in_pct=80, min_median_gap=0)`
