@@ -45,21 +45,48 @@ log = logging.getLogger(__name__)
 
 _OLLAMA_URL_ENV = "OLLAMA_BASE_URL"
 
-#: Model resolution order. ARENA_MODEL lets the whole competition be moved to a
-#: different model in one place — which matters, because changing the model
-#: mid-competition invalidates the comparison and should be a deliberate act.
-_MODEL_ENVS = ("ARENA_MODEL", "OLLAMA_NARRATIVE_MODEL", "OLLAMA_BLOG_MODEL")
-_MODEL_DEFAULT = "glm-5.1:cloud"
+#: The ONE env var that moves the whole competition to a different model.
+#:
+#: It used to fall back to OLLAMA_NARRATIVE_MODEL and then OLLAMA_BLOG_MODEL,
+#: which quietly handed the arena's single most important control variable to
+#: the blog and narrative pipelines. It did not stay theoretical: over one
+#: championship the roster ran on TWO models, and two agents were split across
+#: both mid-run —
+#:
+#:     jim-clamor       glm-5.1:cloud     46/46
+#:     barren-wuffett   gemma4:31b-cloud  32  + glm-5.1:cloud  14
+#:     chris-cameo      gemma4:31b-cloud  45  + glm-5.1:cloud   1
+#:     howard-marx / jim-sigmons / mark-minervine / michael-beary
+#:                      gemma4:31b-cloud  46/46
+#:
+#: A leaderboard whose agents ran on different models measures the models, not
+#: the data slices the experiment is about. So the fallbacks are gone: the model
+#: is ARENA_MODEL, or an explicit per-agent override, or this default — never
+#: something another subsystem set for its own reasons.
+#:
+#: The default is gemma4:31b-cloud rather than the glm-5.1:cloud the rest of the
+#: platform uses, and that is deliberate: gemma4 is what five of the seven LLM
+#: agents actually ran for all 46 sessions of the current championship. Moving
+#: the default to glm-5.1 now would re-split the roster the other way and
+#: confound every curve already on the board. Change it between championships,
+#: not inside one.
+_MODEL_ENV = "ARENA_MODEL"
+_MODEL_DEFAULT = "gemma4:31b-cloud"
 
 
 def resolve_model(agent: dict[str, Any]) -> str:
+    """The model this agent decides with, and where it came from.
+
+    Precedence: the agent's own ``llm_model`` (a deliberate per-agent pin, which
+    is itself a comparability hazard and should be rare), then ARENA_MODEL, then
+    the default. The resolved value is written to every ``arena_decisions`` row,
+    so a split roster is always visible after the fact:
+
+        select llm_model, count(*) from swingtrader.arena_decisions group by 1;
+    """
     if agent.get("llm_model"):
         return str(agent["llm_model"])
-    for env in _MODEL_ENVS:
-        value = os.environ.get(env)
-        if value:
-            return value
-    return _MODEL_DEFAULT
+    return os.environ.get(_MODEL_ENV) or _MODEL_DEFAULT
 
 
 def build_registry(spec: AgentSpec, account: AccountTools) -> ToolRegistry:
