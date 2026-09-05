@@ -150,3 +150,52 @@ def test_the_summary_instruction_is_last():
     p = assemble("PERSONA", inspiration="X.", allow_shorts=True)
     assert p.index("## Finishing") > p.index("## Selling short")
     assert p.rstrip().endswith("preamble, no markdown headings.")
+
+
+# ── roster vs the database projection ───────────────────────────────────────
+# The prompt is read from roster.py; every broker-enforced limit is read from
+# arena_agents. A spec edited without `sync-roster` therefore produces an agent
+# TOLD it may short and then refused by the broker — which is exactly what
+# happened: Michael Beary tried once (sell 60 STX against a holding of 10), was
+# rejected, and never tried again. Nothing errored.
+
+from services.arena.scheduler import roster_drift
+
+
+def _db_row(slug="michael-beary", **kw):
+    from services.arena.roster import BY_SLUG
+    spec = BY_SLUG[slug]
+    row = {
+        "slug": slug,
+        "strategy_key": slug,
+        "allow_shorts": spec.allow_shorts,
+        "max_position_pct": spec.max_position_pct,
+        "max_positions": spec.max_positions,
+        "max_gross_exposure_pct": spec.max_gross_exposure_pct,
+        "starting_cash": spec.starting_cash,
+    }
+    row.update(kw)
+    return row
+
+
+def test_a_matching_projection_reports_no_drift():
+    assert roster_drift([_db_row()]) == []
+
+
+def test_the_exact_failure_that_cost_a_replay_is_caught():
+    drift = roster_drift([_db_row(allow_shorts=False)])
+    assert drift == ["michael-beary.allow_shorts: roster=True db=False"]
+
+
+def test_numeric_limits_drift_too():
+    assert roster_drift([_db_row(max_position_pct=0.05)])
+    assert roster_drift([_db_row(max_positions=99)])
+
+
+def test_an_agent_with_no_spec_is_skipped_not_flagged():
+    # A row left behind by a renamed or retired agent must not block a run.
+    assert roster_drift([{"slug": "ghost", "strategy_key": "ghost", "allow_shorts": True}]) == []
+
+
+def test_missing_columns_are_not_treated_as_disagreement():
+    assert roster_drift([{"slug": "michael-beary", "strategy_key": "michael-beary"}]) == []

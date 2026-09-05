@@ -201,12 +201,67 @@ def _warm_fmp_catalogue(agents: list[dict[str, Any]]) -> None:
         log.warning("arena: could not warm the FMP catalogue: %s", exc)
 
 
+#: Limits the BROKER enforces off the ``arena_agents`` row. The prompt is read
+#: from ``roster.py`` but every one of these is read from the database, so a
+#: spec edited without a `sync-roster` produces an agent told it may do
+#: something the broker then refuses.
+_ENFORCED_FIELDS = (
+    "allow_shorts",
+    "max_position_pct",
+    "max_positions",
+    "max_gross_exposure_pct",
+    "starting_cash",
+)
+
+
+def roster_drift(agents: list[dict[str, Any]]) -> list[str]:
+    """Where the DB projection disagrees with roster.py on an ENFORCED limit.
+
+    This exists because the split cost a whole replay. `allow_shorts` was set
+    True in roster.py and the prompt correctly said "You may go SHORT" — but
+    `sync-roster` had not been run, so `arena_agents.allow_shorts` was still
+    False and `Broker._check_limits` reads the DB row. Michael Beary tried once
+    (sell 60 STX against a holding of 10), was rejected, and never tried again.
+    Nothing errored; the run simply produced 46 sessions of long-only trading
+    that looked deliberate.
+
+    Prompts drifting is cosmetic. These five are not: they are the rules the
+    broker actually applies, and an agent judged against limits its author did
+    not set is not running the experiment its author described.
+    """
+    from .roster import BY_SLUG
+
+    out: list[str] = []
+    for agent in agents:
+        spec = BY_SLUG.get(agent.get("strategy_key") or agent["slug"])
+        if spec is None:
+            continue
+        for field in _ENFORCED_FIELDS:
+            want, have = getattr(spec, field), agent.get(field)
+            if want is None or have is None:
+                continue
+            if isinstance(want, bool) and bool(have) != want:
+                out.append(f"{agent['slug']}.{field}: roster={want} db={bool(have)}")
+            elif not isinstance(want, bool) and abs(float(have) - float(want)) > 1e-9:
+                out.append(f"{agent['slug']}.{field}: roster={want} db={have}")
+    return out
+
+
 def _scoped_agents(only: Optional[list[str]], *, active_only: bool) -> list[dict[str, Any]]:
     agents = store.list_agents(active_only=active_only)
-    if not only:
-        return agents
-    wanted = {s.strip() for s in only}
-    return [a for a in agents if a["slug"] in wanted]
+    if only:
+        wanted = {s.strip() for s in only}
+        agents = [a for a in agents if a["slug"] in wanted]
+
+    drift = roster_drift(agents)
+    if drift:
+        raise RuntimeError(
+            "roster.py and arena_agents disagree on limits the BROKER enforces, so "
+            "these agents would be judged against rules their spec does not set:\n  "
+            + "\n  ".join(drift)
+            + "\n\nRun:  python -m services.arena.cli sync-roster"
+        )
+    return agents
 
 
 #: Default LLM agents in flight at once. They share one Ollama backend and one
