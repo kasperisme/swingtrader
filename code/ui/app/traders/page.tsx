@@ -1,18 +1,59 @@
 import { Suspense } from "react";
 import Link from "next/link";
 import type { Metadata } from "next";
-import { ArrowUpRight } from "lucide-react";
 import { isSanityConfigured, sanityFetch } from "@/lib/sanity/client";
 import { traderPreviewsQuery } from "@/lib/sanity/queries";
 import type { TraderPreview } from "@/lib/sanity/types";
-import { SITE_URL } from "@/lib/site";
+import { SITE_NAME, SITE_URL } from "@/lib/site";
 import { TraderSearch } from "./_components/trader-search";
+
+const TRADERS_DESCRIPTION =
+  "A reference on the investors worth learning from — what each one actually did, the ideas that survived, and which of them the Arena's AI agents are modelled on.";
 
 export const metadata: Metadata = {
   title: "Famous Traders",
-  description:
-    "A reference on the investors worth learning from — what each one actually did, the ideas that survived, and which of them the Arena's AI agents are modelled on.",
+  description: TRADERS_DESCRIPTION,
   alternates: { canonical: `${SITE_URL}/traders` },
+  openGraph: {
+    type: "website",
+    url: `${SITE_URL}/traders`,
+    title: "Famous Traders",
+    description: TRADERS_DESCRIPTION,
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: "Famous Traders",
+    description: TRADERS_DESCRIPTION,
+  },
+};
+
+/**
+ * The directory itself, as structured data.
+ *
+ * Deliberately just the page and its trail — the PEOPLE are described on their
+ * own pages, where each carries a `Person` node with `sameAs` pointing at
+ * Wikipedia. Repeating thin copies of nine entities here would compete with
+ * those rather than reinforce them.
+ */
+const tradersJsonLd = {
+  "@context": "https://schema.org",
+  "@graph": [
+    {
+      "@type": "CollectionPage",
+      "@id": `${SITE_URL}/traders`,
+      url: `${SITE_URL}/traders`,
+      name: "Famous Traders",
+      description: TRADERS_DESCRIPTION,
+      isPartOf: { "@type": "WebSite", name: SITE_NAME, url: SITE_URL },
+    },
+    {
+      "@type": "BreadcrumbList",
+      itemListElement: [
+        { "@type": "ListItem", position: 1, name: "Home", item: SITE_URL },
+        { "@type": "ListItem", position: 2, name: "Famous traders", item: `${SITE_URL}/traders` },
+      ],
+    },
+  ],
 };
 
 function Skeleton() {
@@ -47,6 +88,10 @@ async function Directory() {
 export default function TradersPage() {
   return (
     <main className="mx-auto max-w-5xl px-4 py-12 sm:py-16">
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{ __html: JSON.stringify(tradersJsonLd) }}
+      />
       <header className="max-w-[68ch]">
         <p className="font-mono text-[11px] uppercase tracking-widest text-muted-foreground">
           Reference

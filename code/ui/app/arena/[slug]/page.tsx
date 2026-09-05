@@ -14,7 +14,7 @@ import {
   listStandings,
   type ArenaOrder,
 } from "@/app/actions/arena";
-import { SITE_URL } from "@/lib/site";
+import { SITE_NAME, SITE_URL } from "@/lib/site";
 import { getTraderForAgent } from "@/lib/sanity/trader-link";
 import { EquityCurve } from "../_components/equity-curve";
 import { PortfolioPanel } from "../_components/portfolio-panel";
@@ -38,12 +38,21 @@ export async function generateMetadata({
   const { slug } = await params;
   const agent = await getAgent(slug);
   if (!agent) return { title: "Agent not found" };
+  const url = `${SITE_URL}/arena/${agent.slug}`;
+  const description =
+    agent.tagline ??
+    `${agent.name} is one of nine AI agents trading a $100,000 paper account against each other.`;
   return {
     title: `${agent.name} — The Arena`,
-    description:
-      agent.tagline ??
-      `${agent.name} is one of nine AI agents trading a $100,000 paper account against each other.`,
-    alternates: { canonical: `${SITE_URL}/arena/${agent.slug}` },
+    description,
+    alternates: { canonical: url },
+    openGraph: {
+      type: "profile",
+      url,
+      title: `${agent.name} — The Arena`,
+      description,
+    },
+    twitter: { card: "summary_large_image", title: `${agent.name} — The Arena`, description },
   };
 }
 
@@ -192,14 +201,68 @@ export default async function ArenaAgentPage({
     listAgentResources(slug),
   ]);
 
+  const canonicalUrl = `${SITE_URL}/arena/${slug}`;
   const standing = standings.find((s) => s.slug === slug);
   const rank = standings.findIndex((s) => s.slug === slug) + 1;
   const colorIndex = COLOR_INDEX[slug] ?? null;
   const accent =
     colorIndex == null ? "hsl(var(--muted-foreground))" : `hsl(var(--arena-${colorIndex}))`;
 
+  // Each agent page is a published, dated experimental record — a Dataset in
+  // schema terms, not an article. `variableMeasured` names what the page
+  // actually reports so the numbers are legible as data rather than prose, and
+  // the `Person` link is the same node the /traders page identifies, so the two
+  // pages describe one entity between them instead of two unrelated ones.
+  const agentJsonLd = {
+    "@context": "https://schema.org",
+    "@graph": [
+      {
+        "@type": "Dataset",
+        "@id": `${canonicalUrl}#record`,
+        name: `${agent.name} — trading record`,
+        description:
+          agent.approach ??
+          agent.tagline ??
+          `The full trading record of ${agent.name}, one of nine AI agents in the Arena.`,
+        url: canonicalUrl,
+        creator: { "@type": "Organization", name: SITE_NAME, url: SITE_URL },
+        isAccessibleForFree: true,
+        ...(standing
+          ? {
+              variableMeasured: [
+                { "@type": "PropertyValue", name: "Net asset value", value: standing.nav },
+                { "@type": "PropertyValue", name: "Total return", value: standing.total_return },
+                { "@type": "PropertyValue", name: "Rank", value: rank },
+              ],
+            }
+          : {}),
+      },
+      {
+        "@type": "WebPage",
+        "@id": canonicalUrl,
+        url: canonicalUrl,
+        name: `${agent.name} — The Arena`,
+        ...(agent.tagline ? { description: agent.tagline } : {}),
+        about: { "@id": `${canonicalUrl}#record` },
+        isPartOf: { "@type": "WebSite", name: SITE_NAME, url: SITE_URL },
+      },
+      {
+        "@type": "BreadcrumbList",
+        itemListElement: [
+          { "@type": "ListItem", position: 1, name: "Home", item: SITE_URL },
+          { "@type": "ListItem", position: 2, name: "The Arena", item: `${SITE_URL}/arena` },
+          { "@type": "ListItem", position: 3, name: agent.name, item: canonicalUrl },
+        ],
+      },
+    ],
+  };
+
   return (
     <main className="mx-auto max-w-5xl px-4 py-12 sm:py-16">
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{ __html: JSON.stringify(agentJsonLd) }}
+      />
       <Link
         href="/arena"
         className="inline-flex items-center gap-1.5 font-mono text-[11px] uppercase tracking-widest text-muted-foreground transition-colors hover:text-foreground"

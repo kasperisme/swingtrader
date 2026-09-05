@@ -16,6 +16,8 @@ export default function robots(): MetadataRoute.Robots {
           "/docs",
           "/marketscreenings",
           "/quote",
+          "/arena",
+          "/traders",
           "/about",
           "/pricing",
           "/changelog",

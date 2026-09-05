@@ -8,7 +8,7 @@ import { isSanityConfigured, sanityFetch } from "@/lib/sanity/client";
 import { traderBySlugQuery, traderSlugListQuery } from "@/lib/sanity/queries";
 import type { Trader } from "@/lib/sanity/types";
 import { getAgent } from "@/app/actions/arena";
-import { SITE_URL } from "@/lib/site";
+import { SITE_NAME, SITE_URL } from "@/lib/site";
 
 type Props = { params: Promise<{ slug: string }> };
 
@@ -76,6 +76,74 @@ async function ArenaCounterpart({ agentSlug }: { agentSlug: string }) {
   );
 }
 
+/**
+ * Structured data for one trader.
+ *
+ * The load-bearing property is `sameAs`. These are real, well-documented people
+ * who already exist in Google's Knowledge Graph, and a link out to Wikipedia is
+ * how a page gets resolved TO that entity rather than being read as an unrelated
+ * document that happens to share a name. The URLs are already stored on the
+ * document, so this costs nothing but emitting them.
+ *
+ * `books` is deliberately NOT emitted as `author`. One entry is a book its
+ * subject did not write (Burry / The Big Short), and schema.org `author` is a
+ * factual authorship claim — wrong there, and not worth a special case.
+ *
+ * `lifespan` is editorial free text — "1907–2004", "b. 1971" — so it is parsed
+ * defensively and simply omitted when it does not yield four digits. A wrong
+ * birthDate is worse than none: it is a factual claim about a real person.
+ */
+function traderJsonLd(trader: Trader, url: string) {
+  const sameAs = (trader.links ?? [])
+    .map((l) => l.url)
+    .filter((u): u is string => Boolean(u && /^https?:\/\//.test(u)));
+
+  const years = (trader.lifespan ?? "").match(/\d{4}/g) ?? [];
+  const born = years[0];
+  // Only a bare "YYYY–YYYY" implies a death year; "b. 1971" must not.
+  const died = years.length >= 2 ? years[1] : undefined;
+
+  const knowsAbout = [trader.style, ...(trader.tags ?? [])].filter(Boolean);
+
+  const person = {
+    "@type": "Person",
+    "@id": `${url}#person`,
+    name: trader.name,
+    ...(trader.summary ? { description: trader.summary } : {}),
+    ...(trader.knownFor ? { disambiguatingDescription: trader.knownFor } : {}),
+    ...(trader.nationality ? { nationality: trader.nationality } : {}),
+    ...(born ? { birthDate: born } : {}),
+    ...(died ? { deathDate: died } : {}),
+    ...(sameAs.length ? { sameAs } : {}),
+    ...(knowsAbout.length ? { knowsAbout } : {}),
+  };
+
+  return {
+    "@context": "https://schema.org",
+    "@graph": [
+      person,
+      {
+        "@type": "ProfilePage",
+        "@id": url,
+        url,
+        name: trader.name,
+        ...(trader.summary ? { description: trader.summary } : {}),
+        mainEntity: { "@id": `${url}#person` },
+        isPartOf: { "@type": "WebSite", name: SITE_NAME, url: SITE_URL },
+      },
+      {
+        "@type": "BreadcrumbList",
+        itemListElement: [
+          { "@type": "ListItem", position: 1, name: "Home", item: SITE_URL },
+          { "@type": "ListItem", position: 2, name: "Famous traders", item: `${SITE_URL}/traders` },
+          { "@type": "ListItem", position: 3, name: trader.name, item: url },
+        ],
+      },
+    ],
+  };
+}
+
+
 async function TraderDetail({ params }: Props) {
   const { slug } = await params;
   const trader = isSanityConfigured
@@ -83,8 +151,16 @@ async function TraderDetail({ params }: Props) {
     : null;
   if (!trader) notFound();
 
+  const canonicalUrl = `${SITE_URL}/traders/${slug}`;
+
   return (
     <main className="mx-auto max-w-3xl px-4 py-12 sm:py-16">
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{
+          __html: JSON.stringify(traderJsonLd(trader, canonicalUrl)),
+        }}
+      />
       <Link
         href="/traders"
         className="inline-flex items-center gap-1.5 font-mono text-[11px] uppercase tracking-widest text-muted-foreground transition-colors hover:text-foreground"

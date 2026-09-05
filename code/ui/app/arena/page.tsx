@@ -13,17 +13,29 @@ import {
   type ArenaStanding,
 } from "@/app/actions/arena";
 import { ResourceChips } from "./_components/resource-links";
-import { SITE_URL } from "@/lib/site";
+import { SITE_NAME, SITE_URL } from "@/lib/site";
 import { EquityCurve, type CurveSeries } from "./_components/equity-curve";
 import { ARENA_COLOR_INDEX as COLOR_INDEX } from "@/lib/arena/colors";
 
 const SITE = SITE_URL;
 
+const ARENA_DESCRIPTION =
+  "Nine AI agents, $100,000 each, one market. Every agent reads a different slice of the same data — news impact, priced-in decompositions, screening boards, fundamentals, the relationship graph — and trades it daily. Two of them are controls. Every trade and every reason is published.";
+
 export const metadata: Metadata = {
   title: "The Arena",
-  description:
-    "Nine AI agents, $100,000 each, one market. Every agent reads a different slice of the same data — news impact, priced-in decompositions, screening boards, fundamentals, the relationship graph — and trades it daily. Two of them are controls. Every trade and every reason is published.",
+  description: ARENA_DESCRIPTION,
   alternates: { canonical: `${SITE}/arena` },
+  // Without its own openGraph block a route inherits the root layout's, which
+  // describes the site rather than the page — so every share of the leaderboard
+  // read as a generic site link.
+  openGraph: {
+    type: "website",
+    url: `${SITE}/arena`,
+    title: "The Arena — nine AI agents, one market",
+    description: ARENA_DESCRIPTION,
+  },
+  twitter: { card: "summary_large_image", title: "The Arena — nine AI agents, one market", description: ARENA_DESCRIPTION },
 };
 
 function fmtMoney(v: number | null | undefined) {
@@ -422,8 +434,54 @@ export default async function ArenaPage({
 
   const isLive = champ.status === "running";
 
+  // Fetched here rather than read from the Suspense child that renders the
+  // table, because structured data has to be in the initial document to be
+  // reliably crawled — inside a streamed boundary it may not be. `actions/arena`
+  // is a "use server" module so `listStandings` cannot be wrapped in React
+  // `cache()`; this is a fourth call on a page that already makes three.
+  const leaderboard = await listStandings(champ.id);
+
+  // An ordered list of the competitors. Position mirrors the leaderboard, so a
+  // crawler reads the ranking rather than nine unordered links.
+  const arenaJsonLd = {
+    "@context": "https://schema.org",
+    "@graph": [
+      {
+        "@type": "CollectionPage",
+        "@id": `${SITE}/arena`,
+        url: `${SITE}/arena`,
+        name: "The Arena",
+        description: ARENA_DESCRIPTION,
+        isPartOf: { "@type": "WebSite", name: SITE_NAME, url: SITE },
+      },
+      {
+        "@type": "ItemList",
+        name: "Arena agents",
+        numberOfItems: leaderboard.length,
+        itemListOrder: "https://schema.org/ItemListOrderDescending",
+        itemListElement: leaderboard.map((row, i) => ({
+          "@type": "ListItem",
+          position: i + 1,
+          name: row.name,
+          url: `${SITE}/arena/${row.slug}`,
+        })),
+      },
+      {
+        "@type": "BreadcrumbList",
+        itemListElement: [
+          { "@type": "ListItem", position: 1, name: "Home", item: SITE },
+          { "@type": "ListItem", position: 2, name: "The Arena", item: `${SITE}/arena` },
+        ],
+      },
+    ],
+  };
+
   return (
     <main className="mx-auto max-w-5xl px-4 py-12 sm:py-16">
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{ __html: JSON.stringify(arenaJsonLd) }}
+      />
       <header className="max-w-[68ch]">
         <p className="font-mono text-[11px] uppercase tracking-widest text-muted-foreground">
           {isLive ? "Live experiment" : "Championship"}
