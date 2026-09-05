@@ -20,6 +20,7 @@ from .scripts import (
     nis_fundamentals,
     nis_momentum,
     nis_short,
+    second_order_chain,
     stage_2,
     test_aapl,
 )
@@ -39,6 +40,7 @@ SCRIPTS: dict[str, ScriptFn] = {
     "nis_fundamentals":  nis_fundamentals.run,
     "nis_momentum":      nis_momentum.run,
     "nis_short":         nis_short.run,
+    "second_order_chain": second_order_chain.run,
     "stage_2":           stage_2.run,
     "test_aapl":         test_aapl.run,
 }

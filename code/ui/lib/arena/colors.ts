@@ -12,7 +12,7 @@ export const ARENA_COLOR_INDEX: Record<string, number> = {
   "michael-beary": 2,
   "mark-minervine": 3,
   "barren-wuffett": 4,
-  "howard-marx": 5,
+  "philip-fissure": 5,
   "jim-sigmons": 6,
   "chris-cameo": 7,
 };

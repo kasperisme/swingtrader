@@ -21,7 +21,7 @@ Two of the nine are not intelligent at all, and they are the most important two.
 | **The Skeptic** | the priced-in decomposition — only buys what the price does *not* contain | `get_priced_in*`, `search_priced_in_drivers`, `get_top_articles`, `get_ticker_news` |
 | **The Breakout Rider** | the published screening boards (NIS Momentum et al.) | `get_screening_results`, `list_screenings`, sentiment/news, **+ FMP** |
 | **The Accountant** | fundamentals only — **no access to the news layer at all** | `get_company_vectors`, **+ FMP** |
-| **The Second-Order Thinker** | the 38k-edge relationship graph; never buys the name in the headline | `get_ticker_relationships`, `get_top_articles`, news/sentiment |
+| **Philip Fissure** | the 38k-edge relationship graph; never buys the name in the headline | `get_ticker_relationships`, `get_top_articles`, news/sentiment, **+ the second-order board** |
 | **The Arbitrageur** | cointegrated pair z-scores, market-neutral, **the only agent allowed to short** | `get_pair_signals`, `get_ticker_news`, `get_ticker_relationships` |
 | **The Crowd** | attention acceleration — news volume vs a ticker's own baseline | `get_trending_tickers`, sentiment, news, `get_dimension_trends` |
 | **The Index** *(control)* | buys SPY on day one, holds forever | none — deterministic Python |
@@ -211,16 +211,16 @@ The **research** is a different matter, and it differs per source:
 | Source | Rewindable? | Agents relying on it |
 |---|---|---|
 | Prices (FMP daily bars) | ✅ always | all — this is the accounting |
-| News articles + impact (`published_at`) | ✅ under `--point-in-time` | Jim Clamor, Howard Marx |
-| Ticker sentiment (`published_at`) | ✅ under `--point-in-time` | Jim Clamor, Chris Cameo, Howard Marx |
+| News articles + impact (`published_at`) | ✅ under `--point-in-time` | Jim Clamor, Philip Fissure |
+| Ticker sentiment (`published_at`) | ✅ under `--point-in-time` | Jim Clamor, Chris Cameo, Philip Fissure |
 | Attention acceleration | ✅ under `--point-in-time` | Chris Cameo |
 | Screening boards (`run_at`) | ✅ under `--point-in-time` | Mark Minervine |
 | Burry board — attention half | ✅ recomputed from `published_at` | Michael Beary |
 | Burry board — fundamentals half | ⚠️ price rewinds, EBITDA/FCF/net debt do not | Michael Beary |
 | *(nothing — deterministic)* | ✅ always | Jack Boggle, Burton Malarkey |
-| Semantic / tag news search | ❌ RPC anchored at `now()` | Jim Clamor, Howard Marx |
+| Semantic / tag news search | ❌ RPC anchored at `now()` | Jim Clamor, Philip Fissure |
 | Cluster & dimension trends | ❌ view anchored at `now()` | Jim Clamor, Chris Cameo |
-| Relationship graph | ❌ refreshed in place | Howard Marx |
+| Relationship graph | ❌ refreshed in place | Philip Fissure |
 | Priced-in **price + target gap** | ✅ always — re-anchored to the session's close | Michael Beary, Chris Cameo |
 | Priced-in **drivers / `priced_in_pct`** | ❌ all rows `generation_is_pit = false` | Michael Beary, Chris Cameo |
 | Pair z-scores | ❌ current value only, no history | Jim Sigmons |
