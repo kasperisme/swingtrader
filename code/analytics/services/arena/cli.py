@@ -197,14 +197,36 @@ def cmd_sync_roster(args) -> int:
 def cmd_run_day(args) -> int:
     if _bind(args) is None:
         return 1
-    result = scheduler.run_day(
-        session=_parse_date(args.session),
-        only=args.only.split(",") if args.only else None,
-        skip_decide=args.skip_decide,
-        dry_run=args.dry_run,
-    )
-    print(json.dumps(result, indent=2, default=str))
-    return 1 if result.get("error") else 0
+
+    def _go() -> dict:
+        return scheduler.run_day(
+            session=_parse_date(args.session),
+            only=args.only.split(",") if args.only else None,
+            skip_decide=args.skip_decide,
+            dry_run=args.dry_run,
+        )
+
+    # `--heartbeat` registers the run in `job_health`, which scripts/watchdog.py
+    # polls every 15 minutes and alerts on. OFF by default: a manual or
+    # `--only` run is not the nightly job, and marking it as one would either
+    # mask a genuinely missed night or fire a false alert for a debug run. The
+    # cron wrapper passes it; nothing else should.
+    if not args.heartbeat:
+        result = _go()
+        print(json.dumps(result, indent=2, default=str))
+        return 1 if result.get("error") else 0
+
+    from shared.health import JobHeartbeat
+
+    # Weekdays only, so a missed run should be noticed within a day.
+    with JobHeartbeat("arena_run_day", expected_interval=24.0):
+        result = _go()
+        print(json.dumps(result, indent=2, default=str))
+        if result.get("error"):
+            # Raise so the heartbeat records a failure rather than a clean run
+            # that happened to return an error object.
+            raise RuntimeError(result["error"])
+    return 0
 
 
 def cmd_fill(args) -> int:
@@ -526,6 +548,9 @@ def main(argv=None) -> int:
     p.add_argument("--skip-decide", action="store_true")
     p.add_argument("--dry-run", action="store_true", help="no orders, no LLM calls")
     p.add_argument("--championship", help="slug (default: the running one)")
+    p.add_argument("--heartbeat", action="store_true",
+                   help="record the run in job_health so the watchdog alerts on a "
+                        "missed or failed night. For the cron wrapper only.")
     p.set_defaults(func=cmd_run_day)
 
     p = sub.add_parser("fill", help="execute pending orders at a session's open")
