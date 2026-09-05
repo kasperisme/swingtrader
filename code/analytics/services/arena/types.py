@@ -15,48 +15,6 @@ from typing import Any, Optional
 # ── The competitors ──────────────────────────────────────────────────────────
 
 
-_SHORTING_ALLOWED = """
-## Selling short
-
-You may go SHORT. `place_order` with side='sell' on a name you do not own opens
-a short position; buying it back closes it. This is not a hedge you bolt on at
-the end — it is the other half of every opinion you already form. When your
-research says a price has run past what the evidence supports, that is a trade,
-not just a name you decline to buy.
-
-The mechanics, which differ from a long in ways that matter:
-
-- A short sale CREDITS cash; covering spends it. So a short does not need cash
-  up front, but it is not free — see exposure below.
-- Exposure is measured GROSS: longs plus the absolute value of shorts, against
-  your gross-exposure cap. A book that is already fully invested long has no
-  room to short, and the order will be rejected. Sell something first.
-- Your per-position cap applies to a short exactly as to a long.
-- A long can lose 100%. A short's loss has NO upper bound — the position grows
-  against you as it moves, so a short that halves your money has not stopped
-  getting worse. Size shorts SMALLER than a long you believe equally strongly.
-- You trade once a day and cannot leave a resting stop. A short that gaps
-  against you overnight is not something you can manage in the morning; it is
-  something you must have sized for the night before.
-
-Two failure modes to avoid. Do not short something merely because it has gone
-up — that is the crowded, expensive side of a trend and being early is
-indistinguishable from being wrong. And do not short to look balanced; a short
-you cannot state a thesis for is worse than no position, because it costs
-exposure you could have spent on a conviction you actually have.
-""".strip()
-
-_SHORTING_FORBIDDEN = """
-## Selling short
-
-You are LONG ONLY. `place_order` with side='sell' closes a position you hold; it
-cannot open a short, and an order that would take a holding below zero is
-rejected. When your research says something is over-priced, the trade available
-to you is to not own it, or to sell what you do own — say so in your reasoning
-rather than reaching for a position you cannot take.
-""".strip()
-
-
 @dataclass(frozen=True)
 class AgentSpec:
     """A competitor's definition, as declared in ``roster.py``.
@@ -76,7 +34,23 @@ class AgentSpec:
     #: The names are affectionate parodies; nothing here implies affiliation or
     #: endorsement, and the page says whose style it is rather than leaving the
     #: pun to carry the meaning on its own.
+    #:
+    #: This reaches the PROMPT as well as the public page. Naming the investor
+    #: buys the one thing a persona description cannot: the model already knows
+    #: how these people behaved in the situations a prompt never anticipates —
+    #: how long they held, what they did in a drawdown, what they refused. The
+    #: framing in prompt.py is what keeps that from becoming a costume: act as
+    #: they would WITH ONLY THE DATA HERE, which leaves the data slice as the
+    #: thing the experiment varies.
     inspiration: str = ""
+
+    #: The handful of behavioural rules that investor is known for, in the
+    #: imperative. Stated as rules rather than left to the name because a name
+    #: invites imitation of a style while a rule constrains an actual decision —
+    #: "hold through a drawdown when nothing you believed has changed" survives
+    #: contact with a session where the position is down 8%, and "be like Burry"
+    #: does not. Rendered into the prompt under the inspiration.
+    discipline: tuple[str, ...] = ()
 
     #: 'llm' runs the tool loop; 'deterministic' runs a pure-Python control.
     engine: str = "llm"
@@ -117,25 +91,28 @@ class AgentSpec:
     is_published: bool = True
 
     def __post_init__(self) -> None:
-        """Append the truthful shorting section to the prompt.
+        """Compose the full system prompt from the persona and this spec.
 
-        Kept here rather than written into each persona because it is MECHANICS,
-        and mechanics that differ between agents stop the agents being
-        comparable. More importantly it is derived from ``allow_shorts`` rather
-        than restated beside it: an agent whose flag says one thing and whose
-        prompt says another will either never use a capability it has, or spend
-        rounds placing orders the broker rejects. Both happened before this
-        existed — the broker has supported shorting throughout and no prompt
-        mentioned it, so six of the seven LLM agents ran long-only by ignorance
-        rather than by strategy.
+        ``roster.py`` declares only the persona; the shared operating rules, the
+        'who you are modelled on' section and the shorting section are DERIVED
+        here from the fields beside it. Derived rather than restated, because a
+        prompt that repeats a limit in prose can disagree with the field the
+        broker enforces — and both directions of that disagreement have cost
+        real sessions.
 
-        Deterministic controls get nothing: they have no prompt to read.
+        Deterministic controls are skipped: they have no prompt to read.
         """
         if self.engine != "llm" or not self.system_prompt:
             return
-        block = _SHORTING_ALLOWED if self.allow_shorts else _SHORTING_FORBIDDEN
+        from .prompt import assemble
+
         # frozen=True, so the field is set the way frozen dataclasses set fields.
-        object.__setattr__(self, "system_prompt", f"{self.system_prompt}\n\n{block}")
+        object.__setattr__(self, "system_prompt", assemble(
+            self.system_prompt,
+            inspiration=self.inspiration,
+            discipline=self.discipline,
+            allow_shorts=self.allow_shorts,
+        ))
 
 
 # ── What an agent asks for ───────────────────────────────────────────────────

@@ -9,7 +9,8 @@ mentioned it, so six of seven LLM agents ran long-only by ignorance.
 """
 
 from services.arena.roster import ROSTER
-from services.arena.types import AgentSpec, _SHORTING_ALLOWED, _SHORTING_FORBIDDEN
+from services.arena.prompt import _SHORTING_ALLOWED, _SHORTING_FORBIDDEN
+from services.arena.types import AgentSpec
 
 
 def _spec(**kw) -> AgentSpec:
@@ -78,3 +79,74 @@ def test_every_llm_agent_has_a_prompt_and_tools():
             continue
         assert spec.system_prompt.strip(), f"{spec.slug} has no prompt"
         assert spec.tools, f"{spec.slug} has no tools"
+
+
+# ── who the agent is modelled on ────────────────────────────────────────────
+# The persona describes a method; the inspiration names the person. Naming them
+# buys what a description cannot — the model already knows how these people
+# behaved in situations no prompt anticipates. The framing is what stops that
+# becoming a costume: act as they would with ONLY this data.
+
+from services.arena.prompt import assemble
+
+
+def test_the_inspiration_reaches_the_prompt():
+    spec = _spec(inspiration="Michael Burry — contrarian.")
+    assert "## Who you are modelled on" in spec.system_prompt
+    assert "Michael Burry — contrarian." in spec.system_prompt
+
+
+def test_no_inspiration_means_no_section():
+    assert "## Who you are modelled on" not in _spec(inspiration="").system_prompt
+
+
+def test_discipline_rules_are_rendered_as_a_list():
+    spec = _spec(inspiration="X.", discipline=("Hold through drawdown.", "Concentrate."))
+    assert "- Hold through drawdown." in spec.system_prompt
+    assert "- Concentrate." in spec.system_prompt
+
+
+def test_discipline_needs_an_inspiration_to_hang_from():
+    # Rules with nobody attached would read as free-floating orders.
+    assert "Hold through" not in _spec(inspiration="", discipline=("Hold through it.",)).system_prompt
+
+
+def _flat(text: str) -> str:
+    """Prompt prose is hard-wrapped, so assert on content, not on line breaks."""
+    return " ".join(text.split())
+
+
+def test_the_data_slice_constraint_is_stated():
+    # Without this the naming turns the experiment into celebrity imitation.
+    p = _flat(_spec(inspiration="Michael Burry — contrarian.").system_prompt)
+    assert "ONLY the data in front of you" in p
+    assert "borrowing their sources is cheating" in p
+
+
+def test_every_llm_agent_names_someone_and_lists_their_discipline():
+    for spec in ROSTER:
+        if spec.engine != "llm":
+            continue
+        assert spec.inspiration.strip(), f"{spec.slug} has no inspiration"
+        assert spec.discipline, f"{spec.slug} has no discipline rules"
+        assert spec.inspiration.split("—")[0].strip() in spec.system_prompt, spec.slug
+        for rule in spec.discipline:
+            assert rule in spec.system_prompt, f"{spec.slug}: {rule[:40]}"
+
+
+# ── assembly order ──────────────────────────────────────────────────────────
+
+def test_sections_appear_in_the_fixed_order():
+    p = assemble("PERSONA", inspiration="X.", discipline=("R.",), allow_shorts=True)
+    order = [p.index(s) for s in (
+        "PERSONA", "## Who you are modelled on", "## Selling short", "## How this works",
+    )]
+    assert order == sorted(order)
+
+
+def test_the_summary_instruction_is_last():
+    # Recency is the cheapest instruction-following the prompt gets, and the
+    # write-up is the step most often skipped.
+    p = assemble("PERSONA", inspiration="X.", allow_shorts=True)
+    assert p.index("## Finishing") > p.index("## Selling short")
+    assert p.rstrip().endswith("preamble, no markdown headings.")
