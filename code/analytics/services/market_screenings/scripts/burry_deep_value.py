@@ -64,6 +64,7 @@ hole ``nis_short`` documents. ``_SQUEEZE_SI_MAX_PCT`` is the hook.
 from __future__ import annotations
 
 import logging
+from datetime import date, timedelta
 from typing import Any, Optional
 
 from shared.db import get_pg_connection
@@ -123,26 +124,50 @@ _LIQ_VOLUME_MIN = 300_000
 
 # ── Step 1: the attention gates, in one query ───────────────────────────────
 
-def _attention_candidates() -> tuple[list[dict], list[dict], int]:
-    """(ick+neglected, adored+crowded, universe size) from ticker_coverage_daily.
+def _attention_candidates(as_of: Optional[date] = None) -> tuple[list[dict], list[dict], int]:
+    """(ick+neglected, adored+crowded, universe size) for the window ending ``as_of``.
 
-    One query for both sides. Runs first because it is the only step that costs
-    nothing per ticker and it removes ~97% of the universe.
+    Reads the RAW tables rather than ``ticker_coverage_daily``, and does so for
+    live runs too, for two reasons that both matter:
+
+      * The rollup is a rolling 120-day window that is DELETEd and rebuilt on
+        every refresh, so it cannot answer a question about a date more than 120
+        days ago and never will. The raw sources go back to 2025-04-10.
+      * One code path means a backfilled run and a live run are computed the
+        same way. Two paths that "should agree" is how a backfill quietly stops
+        being comparable to the live record.
+
+    It costs about a second, which is nothing beside the per-ticker FMP calls
+    downstream.
+
+    On point-in-time honesty: the bucket is ``published_at``, which is when the
+    MARKET could see the article — not when our ingester did. For a screen whose
+    premise is "nobody is talking about this", published_at is the correct clock;
+    a backfilled article was still public on its publication date. What does NOT
+    rewind is the sentiment SCORE, which exists because we ran a scorer later.
+    The score is a function of text that existed at publication, so it is a
+    defensible approximation and not a clean one.
     """
-    sql = """
+    ref = as_of or date.today()
+    sql = r"""
     with w as (
-      select ticker,
-             sum(mention_count)  as mentions,
-             sum(scored_count)   as scored,
-             avg(avg_sentiment)  as sentiment
-      from swingtrader.ticker_coverage_daily
-      where bucket_day >= current_date - %(days)s
-      group by ticker
-      having sum(mention_count) >= %(min_mentions)s
+      select nat.ticker                    as ticker,
+             count(*)                      as mentions,
+             count(sh.head_id)             as scored,
+             avg(sh.sentiment_score)       as sentiment
+      from swingtrader.news_article_tickers nat
+      join swingtrader.news_articles a on a.id = nat.article_id
+      left join swingtrader.ticker_sentiment_heads sh
+             on sh.article_id = a.id and sh.ticker = nat.ticker
+      where a.published_at >= %(ref)s::date - %(days)s
+        and a.published_at <  %(ref)s::date + 1
+        and nat.ticker ~ '^[A-Z][A-Z0-9.\-]{0,11}$'
+      group by nat.ticker
+      having count(*) >= %(min_mentions)s
     )
     select ticker, mentions, scored, sentiment,
            case
-             when sentiment < %(ick)s  and mentions <= %(max_long)s  then 'long'
+             when sentiment < %(ick)s    and mentions <= %(max_long)s  then 'long'
              when sentiment > %(adored)s and mentions >= %(min_short)s then 'short'
            end as side,
            count(*) over () as universe
@@ -150,7 +175,7 @@ def _attention_candidates() -> tuple[list[dict], list[dict], int]:
     order by sentiment
     """
     args = {
-        "days": _COVERAGE_DAYS, "min_mentions": _MIN_MENTIONS,
+        "ref": ref.isoformat(), "days": _COVERAGE_DAYS, "min_mentions": _MIN_MENTIONS,
         "ick": _ICK_SENTIMENT_MAX, "max_long": _MAX_MENTIONS_LONG,
         "adored": _ADORED_SENTIMENT_MIN, "min_short": _MIN_MENTIONS_SHORT,
     }
@@ -158,20 +183,18 @@ def _attention_candidates() -> tuple[list[dict], list[dict], int]:
         cur.execute(sql, args)
         rows = cur.fetchall()
 
-    # index 5, not 4 — `side` sits between sentiment and the window count.
     universe = int(rows[0][5]) if rows else 0
     longs, shorts = [], []
     for ticker, mentions, scored, sentiment, side, _u in rows:
+        if side is None:
+            continue
         rec = {
             "symbol": ticker,
             "mentions_90d": int(mentions or 0),
             "scored_90d": int(scored or 0),
             "sentiment_90d": round(float(sentiment), 4) if sentiment is not None else None,
         }
-        if side == "long":
-            longs.append(rec)
-        elif side == "short":
-            shorts.append(rec)
+        (longs if side == "long" else shorts).append(rec)
     return longs, shorts, universe
 
 
@@ -241,6 +264,47 @@ def _value_read(fmp_client, symbol: str) -> Optional[dict]:
     }
 
 
+def _reprice_value(v: dict, px_ratio: Optional[float]) -> dict:
+    """Move a value read from today's price back to the price on the as-of date.
+
+    The fundamentals themselves do NOT rewind — FMP serves the current TTM, not
+    what was on file then, the same limitation the arena README already records
+    for Barren Wuffett. But the fast-moving half of a multiple is the PRICE, and
+    that does rewind, so a backfilled run at least judges the name on what it
+    cost that day rather than on what it costs now.
+
+    EV = market cap + net debt. Only the market-cap term moves with price, so
+    the debt is held fixed and the equity is scaled:
+
+        EBITDA    = EV / (EV/EBITDA)
+        net_debt  = (net_debt/EBITDA) * EBITDA
+        EV_as_of  = (EV - net_debt) * ratio + net_debt
+
+    Free cash flow yield is FCF over market cap, so it scales inversely.
+    Leverage is unchanged: both of its terms are price-independent.
+
+    A ratio of None (no bar that day) returns the read untouched and the caller
+    records that the row was not repriced.
+    """
+    if not px_ratio or px_ratio <= 0:
+        return v
+    out = dict(v)
+    ev, evx, levx = v.get("enterprise_value"), v.get("ev_to_ebitda"), v.get("net_debt_to_ebitda")
+    if ev and evx and evx != 0:
+        ebitda = ev / evx
+        net_debt = (levx or 0.0) * ebitda
+        equity = ev - net_debt
+        ev_asof = equity * px_ratio + net_debt
+        out["enterprise_value"] = ev_asof
+        out["ev_to_ebitda"] = ev_asof / ebitda if ebitda else None
+    if v.get("fcf_yield") is not None:
+        out["fcf_yield"] = v["fcf_yield"] / px_ratio
+    if v.get("earnings_yield") is not None:
+        out["earnings_yield"] = v["earnings_yield"] / px_ratio
+    out["price_ratio_applied"] = round(px_ratio, 6)
+    return out
+
+
 def _passes_long(v: dict, sector: str) -> bool:
     ceiling = _SECTOR_EV_EBITDA_MAX.get(sector, _SECTOR_EV_EBITDA_DEFAULT)
     ev = v.get("ev_to_ebitda")
@@ -284,16 +348,47 @@ def _rare_bird(v: dict, price: Optional[float], shares: Optional[float]) -> bool
     return (wc / shares) > (price / (2 / 3))
 
 
+def _price_ratio(fmp_client, symbol: str, as_of: date,
+                 price_now: Optional[float]) -> Optional[float]:
+    """close(as_of) / price(now), or None when there is no bar to anchor on."""
+    if not price_now or price_now <= 0:
+        return None
+    try:
+        start = (as_of - timedelta(days=10)).strftime("%Y-%m-%d")
+        df = fmp_client.daily_chart(symbol, start, as_of.strftime("%Y-%m-%d"))
+    except Exception as exc:                                   # noqa: BLE001
+        log.debug("burry: no bars for %s at %s: %s", symbol, as_of, exc)
+        return None
+    if df is None or getattr(df, "empty", True):
+        return None
+    try:
+        col = "close" if "close" in df.columns else df.columns[-1]
+        px = float(df.sort_values("date").iloc[-1][col]) if "date" in df.columns \
+            else float(df.iloc[-1][col])
+    except Exception:                                          # noqa: BLE001
+        return None
+    return px / price_now if px > 0 else None
+
+
 # ── The run ─────────────────────────────────────────────────────────────────
 
 def run(client, screening: dict) -> ScreeningResult:  # noqa: ARG001
+    """Run the board. ``screening["_as_of"]`` replays it at a past date.
+
+    A live run passes nothing and behaves exactly as before. The backfill sets
+    the key; everything that CAN be rewound then is, and ``point_in_time`` in
+    the payload records exactly what could not.
+    """
     from services.screener.fmp import fmp as FMP
 
     fmp_client = FMP()
+    as_of = screening.get("_as_of")
+    if isinstance(as_of, str):
+        as_of = date.fromisoformat(as_of)
 
     # 1. Attention. The only free step, so it goes first and does the most work.
     try:
-        longs, shorts, universe = _attention_candidates()
+        longs, shorts, universe = _attention_candidates(as_of)
     except Exception as exc:                                   # noqa: BLE001
         log.exception("burry: attention query failed")
         return ScreeningResult(triggered=False, error=f"coverage query failed: {exc}")
@@ -341,6 +436,9 @@ def run(client, screening: dict) -> ScreeningResult:  # noqa: ARG001
         value = _value_read(fmp_client, sym)
         if not value:
             continue
+        # A past run is judged on the price that day, not today's.
+        px_ratio = _price_ratio(fmp_client, sym, as_of, meta["price"]) if as_of else None
+        value = _reprice_value(value, px_ratio)
         ok = _passes_long(value, meta["sector"]) if side == "long" \
             else _passes_short(value, meta["sector"])
         if not ok:
@@ -379,6 +477,14 @@ def run(client, screening: dict) -> ScreeningResult:  # noqa: ARG001
             "passed_long": n_long,
             "passed_short": n_short,
             "coverage_days": _COVERAGE_DAYS,
+            "as_of": as_of.isoformat() if as_of else None,
+            "point_in_time": {
+                "mentions_and_sentiment": "yes — recomputed from news_articles.published_at",
+                "price_and_market_cap": "yes — FMP daily close on the as-of date",
+                "ebitda_fcf_net_debt": "NO — FMP serves current TTM, not as-reported",
+                "sector_and_liquidity": "NO — current FMP screener membership",
+                "sentiment_scores": "PARTIAL — the article existed then, the LLM score did not",
+            } if as_of else None,
             "gates": {
                 "ick_sentiment_max": _ICK_SENTIMENT_MAX,
                 "neglect_mentions_max": _MAX_MENTIONS_LONG,

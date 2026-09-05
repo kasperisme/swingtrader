@@ -215,6 +215,8 @@ The **research** is a different matter, and it differs per source:
 | Ticker sentiment (`published_at`) | ✅ under `--point-in-time` | Jim Clamor, Chris Cameo, Howard Marx |
 | Attention acceleration | ✅ under `--point-in-time` | Chris Cameo |
 | Screening boards (`run_at`) | ✅ under `--point-in-time` | Mark Minervine |
+| Burry board — attention half | ✅ recomputed from `published_at` | Michael Beary |
+| Burry board — fundamentals half | ⚠️ price rewinds, EBITDA/FCF/net debt do not | Michael Beary |
 | *(nothing — deterministic)* | ✅ always | Jack Boggle, Burton Malarkey |
 | Semantic / tag news search | ❌ RPC anchored at `now()` | Jim Clamor, Howard Marx |
 | Cluster & dimension trends | ❌ view anchored at `now()` | Jim Clamor, Chris Cameo |
@@ -223,6 +225,25 @@ The **research** is a different matter, and it differs per source:
 | Priced-in **drivers / `priced_in_pct`** | ❌ all rows `generation_is_pit = false` | Michael Beary, Chris Cameo |
 | Pair z-scores | ❌ current value only, no history | Jim Sigmons |
 | FMP fundamentals | ❌ current TTM, not as-reported | Barren Wuffett |
+
+**The Burry board is backfilled, and only partly point-in-time.** Screening
+boards are the one research source that rewinds honestly, so `burry-deep-value`
+was backfilled over season-1's sessions rather than left with a single run that
+every replayed session would have read identically. What that backfill can and
+cannot do is recorded on every row it wrote, in `data_used.point_in_time`:
+
+| | rewinds? | how |
+|---|---|---|
+| mentions, sentiment | ✅ | recomputed from `news_articles.published_at`; raw sources go back to 2025-04-10, well past the 120-day window `ticker_coverage_daily` keeps |
+| price, market cap | ✅ | FMP daily close on the as-of date |
+| EV/EBITDA, FCF yield | ⚠️ | the equity half is repriced (`EV = (EV − net_debt) × ratio + net_debt`); the earnings half is not |
+| EBITDA, FCF, net debt | ❌ | FMP serves current TTM, not as-reported — same limitation as Barren Wuffett's fundamentals |
+| sector, liquidity membership | ❌ | current screener output, so a since-delisted name is absent from every historical run |
+| sentiment scores | ⚠️ | the article was public then; the LLM score exists because we ran a scorer later |
+
+The attention gates read the raw tables on LIVE runs too, not just backfilled
+ones. Two code paths that "should agree" is how a backfill quietly stops being
+comparable to the record it is meant to extend.
 
 **The priced-in row is split in two, because only half of it is fixable.** Its
 `price` is what the reconstruction was built against, and in a replay that is a

@@ -104,3 +104,56 @@ def test_an_ordinary_company_is_not_a_rare_bird():
 @pytest.mark.parametrize("price,shares", [(None, 1_000), (50.0, None), (50.0, 0)])
 def test_rare_bird_is_false_when_it_cannot_be_computed(price, shares):
     assert not B._rare_bird(_v(wc=100_000_000), price=price, shares=shares)
+
+
+# ── repricing a past run ────────────────────────────────────────────────────
+# The fundamentals cannot be rewound (FMP serves current TTM), but the PRICE
+# half of a multiple can, and it is the half that moves daily. Without this a
+# backfilled July run would judge every name on its September price.
+
+def test_a_halved_price_halves_the_equity_not_the_debt():
+    # EV 1000 = 800 equity + 200 net debt (2.0x on 100 EBITDA).
+    v = {"enterprise_value": 1000.0, "ev_to_ebitda": 10.0,
+         "net_debt_to_ebitda": 2.0, "fcf_yield": 0.08, "earnings_yield": 0.05}
+    out = B._reprice_value(v, 0.5)
+    assert out["enterprise_value"] == pytest.approx(600.0)     # 400 + 200
+    assert out["ev_to_ebitda"] == pytest.approx(6.0)
+
+
+def test_yields_scale_inversely_with_price():
+    v = {"enterprise_value": 1000.0, "ev_to_ebitda": 10.0,
+         "net_debt_to_ebitda": 2.0, "fcf_yield": 0.08, "earnings_yield": 0.05}
+    out = B._reprice_value(v, 0.5)
+    assert out["fcf_yield"] == pytest.approx(0.16)
+    assert out["earnings_yield"] == pytest.approx(0.10)
+
+
+def test_leverage_is_price_independent():
+    v = {"enterprise_value": 1000.0, "ev_to_ebitda": 10.0,
+         "net_debt_to_ebitda": 2.0, "fcf_yield": 0.08}
+    assert B._reprice_value(v, 3.0)["net_debt_to_ebitda"] == 2.0
+
+
+def test_a_ratio_of_one_changes_nothing_material():
+    v = {"enterprise_value": 1000.0, "ev_to_ebitda": 10.0,
+         "net_debt_to_ebitda": 2.0, "fcf_yield": 0.08}
+    out = B._reprice_value(v, 1.0)
+    assert out["ev_to_ebitda"] == pytest.approx(10.0)
+    assert out["fcf_yield"] == pytest.approx(0.08)
+
+
+@pytest.mark.parametrize("ratio", [None, 0, -1.0])
+def test_no_usable_ratio_leaves_the_read_untouched(ratio):
+    # No bar that day must not silently pass today's multiple off as history —
+    # the row comes back unrepriced and without the marker.
+    v = {"enterprise_value": 1000.0, "ev_to_ebitda": 10.0,
+         "net_debt_to_ebitda": 2.0, "fcf_yield": 0.08}
+    out = B._reprice_value(v, ratio)
+    assert out == v
+    assert "price_ratio_applied" not in out
+
+
+def test_repricing_is_recorded_on_the_row():
+    v = {"enterprise_value": 1000.0, "ev_to_ebitda": 10.0,
+         "net_debt_to_ebitda": 2.0, "fcf_yield": 0.08}
+    assert B._reprice_value(v, 0.75)["price_ratio_applied"] == 0.75
