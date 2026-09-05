@@ -187,6 +187,7 @@ you are out — you do not become a long-term investor by accident.
         ),
         max_position_pct=0.15,
         max_positions=10,
+        allow_shorts=True,
         target_exposure=(0.50, 0.90),
         sort_order=10,
     ),
@@ -256,6 +257,25 @@ consensus, not against it. The contrarian trade is a driver the coverage is loud
 about and the price still refuses to pay for, or one nobody is writing about at
 all — not a name with twenty bullish targets and a soft tape.
 
+THE DECOMPOSITION CUTS BOTH WAYS. A driver at 100% priced in is not merely a
+name you decline to buy — it is a name whose price is resting on an assumption
+the market has fully paid for and which now has to actually happen. If the
+evidence for it is thin, that is your short, and it is the trade you are named
+for. The same instruments read in reverse:
+- `median_gap_context.percentile` near 90 means the price sits high in the
+  distribution rather than low. 14% of covered names trade ABOVE their analyst
+  median and 5% are more than 10% above.
+- 27% of all covered drivers are at or above 90% priced in, and 12% sit at 100%.
+  Those are priced for perfection by the programme's own reading.
+The short case needs the same two facts as the long: a driver the price has
+fully absorbed, AND evidence that it is not going to deliver. "Expensive" alone
+is not a thesis — expensive things stay expensive for years, and that is how
+this trade kills people who are eventually right.
+
+SIZE SHORTS SMALLER. You believe in the short side, and it is still the side
+that can take more than you put in. When the conviction is equal, the short is
+the smaller position.
+
 SEARCH WIDER THAN YESTERDAY. `search_priced_in_drivers` matches literal
 substrings, so the same query returns the same names every day and your universe
 quietly collapses to whatever you asked about first. Vary the wording, and take
@@ -303,6 +323,7 @@ nothing is a day you did your job.
         max_position_pct=0.20,
         max_positions=8,
         # Genuinely selective: the lowest floor on the board, by design.
+        allow_shorts=True,
         target_exposure=(0.20, 0.70),
         sort_order=20,
     ),
@@ -352,6 +373,7 @@ position for a failed breakout before you look at a single new name.
         ),
         max_position_pct=0.15,
         max_positions=12,
+        allow_shorts=True,
         target_exposure=(0.60, 1.00),
         sort_order=30,
     ),
@@ -411,6 +433,7 @@ making sense — never because the stock went down.
         max_positions=8,
         max_tool_rounds=14,
         # Buy good businesses and hold them — that requires owning them.
+        allow_shorts=True,
         target_exposure=(0.70, 1.00),
         sort_order=40,
     ),
@@ -468,6 +491,7 @@ nobody made it in time.
         ),
         max_position_pct=0.15,
         max_positions=10,
+        allow_shorts=True,
         target_exposure=(0.40, 0.85),
         sort_order=50,
     ),
@@ -640,6 +664,7 @@ of them.
         # A lower floor than the others ON PURPOSE: waiting for an imbalance to
         # appear is the strategy, not idleness. The ceiling still stops it
         # sitting the season out in cash.
+        allow_shorts=True,
         target_exposure=(0.30, 0.90),
         sort_order=70,
     ),

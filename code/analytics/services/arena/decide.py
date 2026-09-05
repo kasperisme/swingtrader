@@ -172,6 +172,18 @@ def _user_prompt(
     invested = portfolio.gross_exposure
     exposure = invested / nav if nav else 0.0
 
+    # Gross alone is ambiguous once shorting is on: "84% invested" reads the
+    # same whether the book is 84% long or 42% long against 42% short, which
+    # are not remotely the same risk. Split it whenever there is a short on.
+    short_value = abs(portfolio.short_value)
+    long_value = max(0.0, invested - short_value)
+    side_line = (
+        f"\n  Long/Short ${long_value:,.0f} long vs ${short_value:,.0f} short "
+        f"(net ${long_value - short_value:,.0f}, "
+        f"{(long_value - short_value) / nav * 100 if nav else 0:.0f}% of NAV)"
+        if short_value > 0 else ""
+    )
+
     # The two numbers an agent needs to size an order and is otherwise expected
     # to derive: cash after the broker's gap reserve, and the smaller of that
     # and the per-position weight cap. Rejections for "insufficient cash" were
@@ -238,7 +250,7 @@ Your account right now:
   Cash       ${portfolio.cash:,.0f} ({portfolio.cash / nav * 100 if nav else 0:.0f}% of NAV)
   Spendable  ${spendable:,.0f}  <- size against THIS, not Cash ({CASH_BUFFER:.0%} is reserved for gap risk)
   Biggest new position you can open right now: ${most:,.0f}
-  Invested   ${invested:,.0f} ({exposure:.0%} of NAV)
+  Invested   ${invested:,.0f} gross ({exposure:.0%} of NAV){side_line}
 {stance}
   Positions  {held}
 

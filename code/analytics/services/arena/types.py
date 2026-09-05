@@ -15,6 +15,48 @@ from typing import Any, Optional
 # ── The competitors ──────────────────────────────────────────────────────────
 
 
+_SHORTING_ALLOWED = """
+## Selling short
+
+You may go SHORT. `place_order` with side='sell' on a name you do not own opens
+a short position; buying it back closes it. This is not a hedge you bolt on at
+the end — it is the other half of every opinion you already form. When your
+research says a price has run past what the evidence supports, that is a trade,
+not just a name you decline to buy.
+
+The mechanics, which differ from a long in ways that matter:
+
+- A short sale CREDITS cash; covering spends it. So a short does not need cash
+  up front, but it is not free — see exposure below.
+- Exposure is measured GROSS: longs plus the absolute value of shorts, against
+  your gross-exposure cap. A book that is already fully invested long has no
+  room to short, and the order will be rejected. Sell something first.
+- Your per-position cap applies to a short exactly as to a long.
+- A long can lose 100%. A short's loss has NO upper bound — the position grows
+  against you as it moves, so a short that halves your money has not stopped
+  getting worse. Size shorts SMALLER than a long you believe equally strongly.
+- You trade once a day and cannot leave a resting stop. A short that gaps
+  against you overnight is not something you can manage in the morning; it is
+  something you must have sized for the night before.
+
+Two failure modes to avoid. Do not short something merely because it has gone
+up — that is the crowded, expensive side of a trend and being early is
+indistinguishable from being wrong. And do not short to look balanced; a short
+you cannot state a thesis for is worse than no position, because it costs
+exposure you could have spent on a conviction you actually have.
+""".strip()
+
+_SHORTING_FORBIDDEN = """
+## Selling short
+
+You are LONG ONLY. `place_order` with side='sell' closes a position you hold; it
+cannot open a short, and an order that would take a holding below zero is
+rejected. When your research says something is over-priced, the trade available
+to you is to not own it, or to sell what you do own — say so in your reasoning
+rather than reaching for a position you cannot take.
+""".strip()
+
+
 @dataclass(frozen=True)
 class AgentSpec:
     """A competitor's definition, as declared in ``roster.py``.
@@ -73,6 +115,27 @@ class AgentSpec:
 
     sort_order: int = 0
     is_published: bool = True
+
+    def __post_init__(self) -> None:
+        """Append the truthful shorting section to the prompt.
+
+        Kept here rather than written into each persona because it is MECHANICS,
+        and mechanics that differ between agents stop the agents being
+        comparable. More importantly it is derived from ``allow_shorts`` rather
+        than restated beside it: an agent whose flag says one thing and whose
+        prompt says another will either never use a capability it has, or spend
+        rounds placing orders the broker rejects. Both happened before this
+        existed — the broker has supported shorting throughout and no prompt
+        mentioned it, so six of the seven LLM agents ran long-only by ignorance
+        rather than by strategy.
+
+        Deterministic controls get nothing: they have no prompt to read.
+        """
+        if self.engine != "llm" or not self.system_prompt:
+            return
+        block = _SHORTING_ALLOWED if self.allow_shorts else _SHORTING_FORBIDDEN
+        # frozen=True, so the field is set the way frozen dataclasses set fields.
+        object.__setattr__(self, "system_prompt", f"{self.system_prompt}\n\n{block}")
 
 
 # ── What an agent asks for ───────────────────────────────────────────────────
