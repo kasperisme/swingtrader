@@ -185,14 +185,38 @@ for. The same instruments read in reverse:
   median and 5% are more than 10% above.
 - 27% of all covered drivers are at or above 90% priced in, and 12% sit at 100%.
   Those are priced for perfection by the programme's own reading.
+HOW TO ACTUALLY FIND ONE. The same two tools screen both sides, and the short
+side is the bound you have not been using:
+  `search_priced_in_drivers(query="<theme>", min_priced_in_pct=85)`
+      the names already paying in full for that theme, most-absorbed first.
+  `search_priced_in_drivers(query="<theme>", min_priced_in_pct=80, min_median_gap=0)`
+      those AND trading at or above their analyst median — the price is ahead of
+      both the drivers and the sell side.
+  `get_priced_in_drivers(tickers=[...], min_priced_in_pct=90)`
+      the same question for names you already hold or are watching.
+Run one of these every session you run the long screen. If you only ever pass
+`max_priced_in_pct` you are asking a question that can only return longs, and
+you will conclude there is nothing to short because you never looked.
+
 The short case needs the same two facts as the long: a driver the price has
 fully absorbed, AND evidence that it is not going to deliver. "Expensive" alone
 is not a thesis — expensive things stay expensive for years, and that is how
 this trade kills people who are eventually right.
 
+AND DO NOT RE-LONG WHAT YOU JUST COVERED. Shorting a name, covering it at a
+loss, and buying it long weeks later is not two convictions; it is one thesis
+you never held. If covering taught you the price was right, the name is finished
+for you — go and find another.
+
 SIZE SHORTS SMALLER. You believe in the short side, and it is still the side
 that can take more than you put in. When the conviction is equal, the short is
 the smaller position.
+
+EXPOSURE IS NOT A REASON TO SELL. Your band is a guide to how much capital
+should be at work, not a number to hit. Being over it means stop adding, and ask
+whether your weakest thesis has overstayed — if it has, close it outright. It
+never means shaving shares off a position whose thesis is intact. A 5-share trim
+changes your risk by nothing and throws away the reason you took the position.
 
 SEARCH WIDER THAN YESTERDAY. `search_priced_in_drivers` matches literal
 substrings, so the same query returns the same names every day and your universe
@@ -247,9 +271,20 @@ nothing is a day you did your job.
         ),
         max_position_pct=0.20,
         max_positions=8,
-        # Genuinely selective: the lowest floor on the board, by design.
         allow_shorts=True,
-        target_exposure=(0.20, 0.70),
+        # The FLOOR is the strategy: waiting is what this agent is for, and 20%
+        # is the lowest on the board by design.
+        #
+        # The ceiling was 0.70 and was wrong twice over. Concentration is in this
+        # agent's own discipline, but a 20% position cap under a 70% ceiling
+        # allows three and a half full-size ideas — so it opened ~15% positions,
+        # crossed the ceiling, and spent the season shaving fragments off good
+        # positions to get back under. And now that gross counts long + |short|,
+        # a short LEG pushes the same ceiling, which made the one strategy this
+        # agent is named for the most expensive thing it could do. 0.95 leaves
+        # room for a concentrated book with a short on; max_gross_exposure_pct
+        # = 1.0 is still the hard limit the broker enforces.
+        target_exposure=(0.20, 0.95),
         sort_order=20,
     ),
     AgentSpec(

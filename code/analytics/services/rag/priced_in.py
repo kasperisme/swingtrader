@@ -431,16 +431,39 @@ def get_priced_in(
     return shaped
 
 
+def _most_priced_first(
+    max_priced_in_pct: float | None, min_priced_in_pct: float | None
+) -> bool:
+    """Put the end of the distribution the caller ASKED FOR at the top.
+
+    A screen is only as good as its first page: `limit` truncates, so whichever
+    end is sorted last is effectively invisible. Asking for a floor means the
+    short side, so the most-absorbed drivers lead; anything else keeps the
+    original least-priced-first order and the long side leads.
+    """
+    return min_priced_in_pct is not None and max_priced_in_pct is None
+
+
 def get_priced_in_drivers(
     tickers: list[str] | str,
     max_priced_in_pct: float | None = None,
+    min_priced_in_pct: float | None = None,
     testable_only: bool = False,
 ) -> list[dict[str, Any]]:
     """The decomposition alone — every driver for these tickers, no case bodies.
 
     The cheap read: what the price is resting on and how much of each piece it
-    already pays for, without pulling the evidence. `max_priced_in_pct` keeps
-    only the drivers the price has NOT already absorbed (the interesting end);
+    already pays for, without pulling the evidence.
+
+    The two bounds are the two SIDES of the trade, and for a long time only one
+    of them existed. `max_priced_in_pct` keeps the drivers the price has NOT
+    absorbed — the long case. `min_priced_in_pct` keeps the ones it has FULLY
+    absorbed, which is the short case: a driver at 100% is an assumption the
+    price has already paid for and which now has to actually happen. With only
+    a ceiling and an ascending sort, the 567 drivers in this universe sitting at
+    90%+ were unreachable, and an agent told to look for over-priced
+    assumptions had no query that could express it.
+
     `testable_only` keeps the ones with an observable something could settle.
     """
     out: list[dict[str, Any]] = []
@@ -448,6 +471,8 @@ def get_priced_in_drivers(
         for drv in rec["drivers"]:
             pct = drv.get("priced_in_pct")
             if max_priced_in_pct is not None and (pct is None or pct > max_priced_in_pct):
+                continue
+            if min_priced_in_pct is not None and (pct is None or pct < min_priced_in_pct):
                 continue
             if testable_only and not drv.get("testable"):
                 continue
@@ -459,7 +484,8 @@ def get_priced_in_drivers(
                 **{k: v for k, v in drv.items() if k not in ("case", "case_matches_driver")},
                 "caveat": CAVEAT,
             }))
-    out.sort(key=lambda d: (d.get("priced_in_pct") is None, d.get("priced_in_pct") or 0))
+    out.sort(key=lambda d: (d.get("priced_in_pct") is None, d.get("priced_in_pct") or 0),
+             reverse=_most_priced_first(max_priced_in_pct, min_priced_in_pct))
     return out
 
 
@@ -506,7 +532,10 @@ def search_priced_in_drivers(
     query: str,
     limit: int = 20,
     max_priced_in_pct: float | None = None,
+    min_priced_in_pct: float | None = None,
     tickers: list[str] | None = None,
+    min_median_gap: float | None = None,
+    max_median_gap: float | None = None,
 ) -> list[dict[str, Any]]:
     """Find drivers across the published universe by what they say.
 
@@ -561,12 +590,25 @@ def search_priced_in_drivers(
         pct = drv.get("priced_in_pct")
         if max_priced_in_pct is not None and (pct is None or pct > max_priced_in_pct):
             continue
+        if min_priced_in_pct is not None and (pct is None or pct < min_priced_in_pct):
+            continue
+        # The gap bounds answer the cross-ticker question the per-quote read
+        # cannot: which names does the market pay MORE for than the published
+        # models do. 14% of the covered universe trades above its analyst
+        # median and there was no way to ask for them.
+        gap = (rec.get("vote") or {}).get("median_gap")
+        if min_median_gap is not None and (gap is None or gap < min_median_gap):
+            continue
+        if max_median_gap is not None and (gap is None or gap > max_median_gap):
+            continue
         score = sum(weight[t] for t in hits)
         scored.append((score, len(hits), {
             "ticker": rec["ticker"],
             "as_of": rec["as_of"],
             "price": rec["price"],
             "stale": rec["stale"],
+            "median_gap": gap,
+            "median_gap_context": (rec.get("vote") or {}).get("median_gap_context"),
             "score": round(score, 3),
             "match_terms": len(hits),
             "matched": hits,
@@ -576,8 +618,9 @@ def search_priced_in_drivers(
 
     # Best-matching first; within an equal match, the least-priced-in driver,
     # which is the end of the distribution the question is usually about.
+    _rev = _most_priced_first(max_priced_in_pct, min_priced_in_pct)
     scored.sort(key=lambda p: (-p[0], -p[1], p[2].get("priced_in_pct") is None,
-                               p[2].get("priced_in_pct") or 0))
+                               (-1 if _rev else 1) * (p[2].get("priced_in_pct") or 0)))
     # Annotated AFTER the cut, not before: the percentile lookup is a scan per
     # driver and the universe was just scored in full.
     return [_annotate_driver(d) for _, _, d in scored[:max(1, limit)]]

@@ -318,8 +318,11 @@ TOOL_SCHEMAS: list[dict] = [
                 "The assumptions behind these tickers' prices, without the evidence "
                 "bodies: what each driver is, its segment, how much of it the price "
                 "already appears to pay for, what it is worth if it proves out, and "
-                "whether anything can measure it. Use max_priced_in_pct to keep only "
-                "what the price has NOT absorbed. priced_in_pct is UNVALIDATED."
+                "whether anything can measure it. The two bounds are the two SIDES: "
+                "max_priced_in_pct keeps what the price has NOT absorbed (the long "
+                "case), min_priced_in_pct keeps what it has FULLY absorbed (the short "
+                "case — an assumption already paid for that now has to happen). "
+                "priced_in_pct is UNVALIDATED."
             ),
             "parameters": {
                 "type": "object",
@@ -327,7 +330,14 @@ TOOL_SCHEMAS: list[dict] = [
                     "tickers": {"type": "array", "items": {"type": "string"}},
                     "max_priced_in_pct": {
                         "type": "number",
-                        "description": "Keep only drivers at or below this priced-in percentage.",
+                        "description": "Keep only drivers at or below this priced-in percentage (the LONG side).",
+                    },
+                    "min_priced_in_pct": {
+                        "type": "number",
+                        "description": (
+                            "Keep only drivers at or above this priced-in percentage "
+                            "(the SHORT side). Results lead with the most-absorbed."
+                        ),
                     },
                     "testable_only": {
                         "type": "boolean",
@@ -373,8 +383,13 @@ TOOL_SCHEMAS: list[dict] = [
                 "Search the drivers of every ticker the priced-in programme has "
                 "published for ones matching a phrase — the cross-ticker question, e.g. "
                 "which names carry a datacenter-power driver the price has not yet paid "
-                "for. Literal keyword matching over driver text, segment and observable, "
-                "not semantic. priced_in_pct is UNVALIDATED."
+                "for, or which are already paying for one in full. Literal keyword "
+                "matching over driver text, segment and observable, not semantic. "
+                "SCREENS BOTH SIDES: max_priced_in_pct for what the price has not "
+                "absorbed (long), min_priced_in_pct for what it has (short), and the "
+                "median_gap bounds for where the price sits against the published "
+                "analyst models — min_median_gap=0 is the set trading ABOVE its analyst "
+                "median. priced_in_pct is UNVALIDATED."
             ),
             "parameters": {
                 "type": "object",
@@ -383,7 +398,33 @@ TOOL_SCHEMAS: list[dict] = [
                     "limit": {"type": "integer", "default": 20},
                     "max_priced_in_pct": {
                         "type": "number",
-                        "description": "Keep only drivers at or below this priced-in percentage.",
+                        "description": "Keep only drivers at or below this priced-in percentage (the LONG side).",
+                    },
+                    "min_priced_in_pct": {
+                        "type": "number",
+                        "description": (
+                            "Keep only drivers at or above this priced-in percentage "
+                            "(the SHORT side). Results lead with the most-absorbed."
+                        ),
+                    },
+                    "min_median_gap": {
+                        "type": "number",
+                        "description": (
+                            "Keep only tickers whose price sits at least this far "
+                            "against the analyst median, as a fraction. 0 = trading at "
+                            "or ABOVE the median; 0.10 = more than 10% above."
+                        ),
+                    },
+                    "max_median_gap": {
+                        "type": "number",
+                        "description": (
+                            "Keep only tickers at or below this gap. -0.20 = trading "
+                            "more than 20% BELOW the analyst median."
+                        ),
+                    },
+                    "tickers": {
+                        "type": "array", "items": {"type": "string"},
+                        "description": "Restrict the search to these tickers.",
                     },
                 },
                 "required": ["query"],

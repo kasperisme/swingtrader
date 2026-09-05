@@ -431,3 +431,41 @@ def test_annotate_record_covers_the_gap_and_every_driver(_fixed_universe):
     pi._annotate_record(rec)
     assert rec["vote"]["median_gap_context"]["percentile"] == 20
     assert [d["priced_in_pct_context"]["percentile"] for d in rec["drivers"]] == [20, 80]
+
+
+# ── screening the short side ────────────────────────────────────────────────
+# Both driver tools took only max_priced_in_pct and sorted ascending, so the
+# 567 drivers in the universe at >=90% priced in could not be reached by any
+# query: `limit` truncated a list that led with the cheapest. An agent told to
+# short over-absorbed drivers had no way to ask for one.
+
+
+def test_a_floor_leads_with_the_most_absorbed_driver():
+    assert pi._most_priced_first(max_priced_in_pct=None, min_priced_in_pct=90) is True
+
+
+def test_a_ceiling_still_leads_with_the_least_absorbed():
+    assert pi._most_priced_first(max_priced_in_pct=25, min_priced_in_pct=None) is False
+
+
+def test_no_bound_keeps_the_original_long_side_order():
+    assert pi._most_priced_first(max_priced_in_pct=None, min_priced_in_pct=None) is False
+
+
+def test_a_band_leads_with_the_long_side():
+    # Both bounds set is a window, not a short screen; keep the old ordering.
+    assert pi._most_priced_first(max_priced_in_pct=60, min_priced_in_pct=40) is False
+
+
+def test_both_driver_tools_accept_a_floor():
+    import inspect
+    for fn in (pi.get_priced_in_drivers, pi.search_priced_in_drivers):
+        assert "min_priced_in_pct" in inspect.signature(fn).parameters, fn.__name__
+
+
+def test_search_can_screen_on_the_analyst_gap():
+    import inspect
+    params = inspect.signature(pi.search_priced_in_drivers).parameters
+    # min_median_gap=0 is "trading at or above the analyst median" — the 14% of
+    # the universe the per-quote read could never enumerate.
+    assert "min_median_gap" in params and "max_median_gap" in params

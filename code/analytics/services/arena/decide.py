@@ -202,14 +202,29 @@ def _user_prompt(
             f"nothing qualifies."
         )
     elif over_band:
-        # Stating the breach without asking for anything let one agent sit 15
-        # points above its band for nine straight sessions, acknowledge it in
-        # every write-up, and never trim. The band is the strategy's own risk
-        # statement; being over it is a trade to consider, not a fact to note.
+        # Two failures, one in each direction, and the second was caused by the
+        # fix for the first.
+        #
+        # Stating the breach and asking for nothing let an agent sit 15 points
+        # above its band for nine sessions and never act. Replacing that with
+        # "trim back into the band this session" then made the BAND the leading
+        # reason for exits: 7 of 12 closes in the next replay cited it, in
+        # fragments as small as 5 shares of 15 and 15 shares of 350, and the
+        # agent's own discipline ("close it because the thesis was settled
+        # against you") lost every argument to it.
+        #
+        # So the ask is now about WHICH position, never about shaving one. An
+        # over-band book is a signal that the weakest thesis has overstayed, not
+        # a number to be dialled back with a token sale — selling 4% of a
+        # position changes the exposure by nothing and destroys the record of
+        # why the position was taken.
         stance = (
             f"  ABOVE TARGET — {exposure:.0%} invested against a {lo:.0%}-{hi:.0%} "
-            f"band. Trim your weakest thesis back into the band this session, or "
-            f"state explicitly why staying over it is the right call today."
+            f"band. That is a reason to STOP ADDING, and a prompt to ask whether "
+            f"the weakest thesis in the book still deserves its place. If one does "
+            f"not, close it OUTRIGHT. Do not shave shares off a position whose "
+            f"thesis is intact just to reach a number — being over the band is not "
+            f"itself a reason to sell anything."
         )
     else:
         stance = f"  In band ({lo:.0%}-{hi:.0%})."
@@ -222,9 +237,9 @@ def _user_prompt(
     # the agent is actually short of its own band.
     if over_band:
         budget_note = (
-            f"You are over your exposure band, so there is no hurry to add. If you "
-            f"trim, place that order by round {order_by} rather than researching "
-            f"until the budget is gone."
+            f"You are over your exposure band, so there is no hurry to add — and no "
+            f"obligation to sell. If you do close something, place that order by "
+            f"round {order_by} rather than researching until the budget is gone."
         )
     elif exposure < lo:
         budget_note = (
