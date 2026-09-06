@@ -157,8 +157,9 @@ function Board({
           Sharpe is withheld until an agent has 20 marked sessions — below that
           the number is noise wearing a decimal point. Drawdown is measured from
           each agent&rsquo;s own running peak within this championship. Paper
-          trading: no real money is at risk, and none of this is investment
-          advice.
+          trading and experimental: no real money is at risk, none of this is
+          investment advice, and no agent&rsquo;s result says anything about the
+          investor it is named after.
         </p>
       </section>
     </>
@@ -372,6 +373,14 @@ export default async function ArenaPage({
             including the ones that lost money. Each decision links the screening
             boards, quote pages and articles it actually rested on, so you can
             check the reasoning against the source.
+          </p>
+          <p className="text-base leading-relaxed text-muted-foreground">
+            Every agent is named after a real investor and is emphatically not
+            them. Each is a general-purpose language model handed a caricature of
+            a public method and one narrow slice of this site&rsquo;s data —
+            cheap knock-offs, run as an experiment. Nothing here reflects the
+            record, holdings or opinions of the people the names allude to, and
+            none of them are involved.
           </p>
           <p className="text-base leading-relaxed text-muted-foreground">
             An agent&rsquo;s only write is an order intent. Cash, fills, realised

@@ -1,8 +1,8 @@
 # Supabase `swingtrader` catalog
 
-Generated 2026-09-05 by `python -m services.catalog.build`. **Do not hand-edit** — regenerate instead.
+Generated 2026-09-06 by `python -m services.catalog.build`. **Do not hand-edit** — regenerate instead.
 
-108 tables/views, 1247 columns, 55 functions.
+108 tables/views, 1249 columns, 55 functions.
 
 `rows` is a planner estimate, not a count. `fresh` is the newest row's timestamp — an object with an old date is likely abandoned, and that is as important to know as whether it exists.
 
@@ -10,7 +10,7 @@ Generated 2026-09-05 by `python -m services.catalog.build`. **Do not hand-edit**
 
 ### `ticker_relationship_edge_evidence` (table)
 
-*~88,286 rows, fresh to 2026-09-05*
+*~88,538 rows, fresh to 2026-09-05*
 
 Ticker relationship edge traceability Goal: - Provide deterministic traceability from ticker_relationship_edges back to source articles and impact-vector dimensions.
 
@@ -32,7 +32,7 @@ Ticker relationship edge traceability Goal: - Provide deterministic traceability
 
 ### `ticker_relationship_edges` (table)
 
-*~39,685 rows, fresh to 2026-09-05*
+*~39,730 rows, fresh to 2026-09-05*
 
 Ticker Relationship Network (graph-ready adjacency structure) Why: - Avoid scanning/parsing JSONB relationship heads for every narrative run. - Materialize ticker->ticker edges with indexed lookup for multi-hop traversal. - Keep provenance + recency so downstream ranking can prioritize fresh edges.
 
@@ -197,7 +197,7 @@ Ticker Relationship Network (graph-ready adjacency structure) Why: - Avoid scann
 
 ### `news_impact_heads` (table)
 
-*~2,651,283 rows, fresh to 2026-09-05*
+*~2,651,283 rows, fresh to 2026-09-06*
 
 news_impact_heads: per-cluster LLM scoring results
 
@@ -214,6 +214,8 @@ news_impact_heads: per-cluster LLM scoring results
 | `created_at` | timestamp with time zone |
 
 `cluster` values: `ARTICLE_TAGS`, `BUSINESS_MODEL`, `FINANCIAL_STRUCTURE`, `GEOGRAPHY_TRADE`, `GROWTH_PROFILE`, `MACRO_SENSITIVITY`, `MARKET_BEHAVIOUR`, `SECTOR_ROTATION`, `STORY_KEY_POINTS`, `SUPPLY_CHAIN_EXPOSURE`, `TICKER_RELATIONSHIPS`, `TICKER_SENTIMENT`, `VALUATION_POSITIONING`
+
+`model` values: `gemma4:31b-cloud`, `gemma4:e4b`
 
 ### `news_article_embeddings` (table)
 
@@ -247,7 +249,7 @@ news_article_tickers: ticker mentions extracted from articles
 
 ### `news_articles` (table)
 
-*~226,391 rows, fresh to 2026-09-05*
+*~226,391 rows, fresh to 2026-09-06*
 
 news_articles: article content and metadata
 
@@ -294,7 +296,7 @@ Embedding setup for semantic retrieval over scored news.
 
 ### `news_impact_vectors` (table)
 
-*~209,330 rows, fresh to 2026-09-05*
+*~209,330 rows, fresh to 2026-09-06*
 
 news_impact_vectors: aggregated impact dimension vectors
 
@@ -618,7 +620,7 @@ Pre-aggregated views for News Trends charts. Goal: avoid scanning/parsing every 
 
 ### `topic_claim_stats` (table)
 
-*~1,497 rows, fresh to 2026-09-05*
+*~1,501 rows, fresh to 2026-09-05*
 
 topic_claim_stats — the materialized half. Ranked STORY_KEY_POINTS across a topic's whole arc. This CANNOT be live: it scans every matching article's heads, and the REST role (`authenticator`) caps statements at 8s. Refreshed after each ingest, exactly like ticker_sentiment_heads / ticker_relationship_edges. Every claim keeps `article_ts`. A permanent page that aggregates claims will otherwise enshrine stale numbers as evergreen fact — observed repeatedly: NVIDIA "$119B supply commitments / $91B guide" (pre-quarter, reports Aug 26) and Micron "+346% to $41.46B" (a prior quarter) both resurface
 
@@ -670,7 +672,7 @@ topic_article_v — the membership query, as a view. Deliberately NOT materializ
 
 ### `ticker_sentiment_heads` (table)
 
-*~364,321 rows, fresh to 2026-09-05*
+*~364,935 rows, fresh to 2026-09-05*
 
 Ticker Sentiment Materialization (pre-exploded, indexed) Why: - swingtrader.ticker_sentiment_heads_v explodes EVERY TICKER_SENTIMENT head's scores_json (text->jsonb cast + jsonb_each_text) and joins news_articles on every request. The `ticker` column is derived from JSON keys and `article_ts` from a join, so neither a `ticker IN (...)` nor a date filter can be pushed down or indexed — the view is O(all sentiment heads) per call and was taking 4–8s for a single ticker (and growing with ingestion). - This pre-explodes the same data into a real table keyed by (head_id, ticker) with an index on (t
 
@@ -688,11 +690,11 @@ Ticker Sentiment Materialization (pre-exploded, indexed) Why: - swingtrader.tick
 | `article_ts` | timestamp with time zone |
 | `updated_at` | timestamp with time zone |
 
-`model` values: `claude-haiku-4-5`, `do-agent`, `gemma4:31b-cloud`, `gemma4:e4b`
+`model` values: `claude-haiku-4-5`, `do-agent`, `gemma4:31b-cloud`, `gemma4:e4b`, `glm-5.1:cloud`
 
 ### `ticker_coverage_daily` (table)
 
-*~60,400 rows, fresh to 2026-09-05*
+*~60,248 rows, fresh to 2026-09-05*
 
 Materialize the /quote directory's daily rollup. get_top_covered_tickers read news_trends_ticker_daily_v directly, which rescans 120 days of news_article_tickers + news_articles + ticker_sentiment heads on every call: measured 4.6s for a plain page and 7.6s for a search — against the REST role's 8s statement_timeout. That is a page that breaks the first time the corpus grows. Same split the topic hubs use: membership stays live, the expensive rollup is materialized and rebuilt post-ingest. A table (not a matview) so it can carry RLS like its siblings. Only the daily rollup is stored, NOT the w
 
@@ -819,7 +821,7 @@ Market screening EMAIL subscriptions: the lightweight, email-only delivery list 
 
 ### `market_screenings` (table)
 
-*~10 rows, fresh to 2026-09-05*
+*~10 rows, fresh to 2026-09-06*
 
 | column | type |
 |---|---|
@@ -843,7 +845,7 @@ Market screening EMAIL subscriptions: the lightweight, email-only delivery list 
 | `download_count` | bigint |
 | `llm_prompt` | text |
 
-`category` values: `IPO`, `Insider`, `Thematic`, `fundamental-sentiment`, `fundamentals`, `technical`, `technical-fundamental`, `test`
+`category` values: `IPO`, `Insider`, `Thematic`, `fundamental-sentiment`, `fundamentals`, `relationship-graph`, `technical`, `technical-fundamental`, `test`
 
 ### `market_screening_subscriptions` (table)
 
@@ -1268,7 +1270,7 @@ tickers: universe of actively-traded NYSE and NASDAQ stocks Seeded via scripts/s
 
 ### `research_priced_in_universe` (table)
 
-*~5,807 rows, fresh to 2026-09-04*
+*~5,807 rows, fresh to 2026-09-05*
 
 1) The working universe and its schedule.
 
@@ -1341,7 +1343,7 @@ telegram_message_log — record every Telegram message sent by the platform Popu
 
 ### `research_priced_in` (table)
 
-*~650 rows, fresh to 2026-09-04*
+*~732 rows, fresh to 2026-09-05*
 
 1) What a price already contains, reconstructed at a point in time.
 
@@ -1378,7 +1380,7 @@ telegram_message_log — record every Telegram message sent by the platform Popu
 
 ### `arena_orders` (table)
 
-*~562 rows, fresh to 2026-09-05*
+*~512 rows, fresh to 2026-09-05*
 
 ── 3) Orders — the only thing an agent writes ────────────────────────────── An order is an INTENT until the fill pass runs. `status` walks pending -> filled | rejected | cancelled. Rejections keep their reason.
 
@@ -1412,11 +1414,11 @@ telegram_message_log — record every Telegram message sent by the platform Popu
 | `championship_id` | uuid |
 | `position_effect` | text |
 
-`status` values: `filled`, `pending`, `rejected`
+`status` values: `cancelled`, `filled`, `pending`, `rejected`
 
 ### `arena_decisions` (table)
 
-*~388 rows, fresh to 2026-09-05*
+*~410 rows, fresh to 2026-09-05*
 
 ── 2) The decision record ────────────────────────────────────────────────── One row per agent per trading day. This is the public "why" — the narrative the agent gives for what it did, alongside the machine trace (which tools it called, how many rounds, how long) so a bad day can be diagnosed.
 
@@ -1451,7 +1453,7 @@ telegram_message_log — record every Telegram message sent by the platform Popu
 
 ### `arena_nav_history` (table)
 
-*~371 rows, fresh to 2026-09-05*
+*~407 rows, fresh to 2026-09-05*
 
 Arena: competing AI paper-trading agents What: - A set of autonomous agents, each funded with the same starting cash, each restricted to a DIFFERENT slice of the platform's data (news impact scores, the priced-in decomposition, the NIS Momentum screenings, FMP fundamentals, the relationship graph, pair z-scores, sentiment trends), trading against each other on a daily clock. The point is not to make money — it is to make the comparison between approaches falsifiable and public. Why the accounting lives here and not in the model: - The LLM's only write is an ORDER INTENT (arena_orders). Cash, p
 
@@ -1506,7 +1508,7 @@ Arena: competing AI paper-trading agents What: - A set of autonomous agents, eac
 
 ### `arena_positions` (table)
 
-*~64 rows, fresh to 2026-09-05*
+*~62 rows, fresh to 2026-09-05*
 
 ── 4) Positions — current book, one row per (agent, ticker) ────────────────
 
@@ -1612,7 +1614,7 @@ The strategies themselves: everything needed to re-run one exactly.
 
 ### `arena_agents` (table)
 
-*~9 rows, fresh to 2026-09-05*
+*~9 rows, fresh to 2026-09-06*
 
 ── 1) The competitors ──────────────────────────────────────────────────────
 
@@ -1642,6 +1644,7 @@ The strategies themselves: everything needed to re-run one exactly.
 | `inspiration` | text |
 | `tool_surface` | jsonb |
 | `target_exposure` | jsonb |
+| `system_prompt` | text |
 
 ### `podcast_episodes` (table)
 
@@ -1709,7 +1712,7 @@ api_rate_limits: 1-minute sliding window buckets
 
 *view — row count n/a*
 
-Arena: investor personas + decision provenance Two changes: 1) PERSONAS. The agents are renamed after the investor whose approach each one actually implements (Barren Wuffett runs the fundamentals book, Mark Minervine trades volume-confirmed breakouts, Burton Malarkey is the random walk). Slugs are UPDATED IN PLACE rather than re-inserted, so every order, decision and NAV row stays attached to its agent by id — a re-insert under a new slug would orphan the entire history. `inspiration` records whose style the agent implements, so the page can say it plainly instead of leaving readers to decode
+The assembled system prompt, published. `roster.py` is the source of truth and `arena_agents` is its projection. The prompt is part of an agent's DEFINITION, exactly like its tool surface and its risk limits, so it belongs in the projection alongside them rather than living only in Python where the site cannot reach it. Publishing it is what turns the downloadable spec at /agent/<slug>/spec from a description into something reproducible: across the roster the model, broker, limits and universe are identical, so the prompt and the tool surface ARE the experiment. A reader who can see neither ca
 
 | column | type |
 |---|---|
@@ -1720,6 +1723,7 @@ Arena: investor personas + decision provenance Two changes: 1) PERSONAS. The age
 | `approach` | text |
 | `inspiration` | text |
 | `tool_surface` | jsonb |
+| `system_prompt` | text |
 | `engine` | text |
 | `starting_cash` | numeric |
 | `max_position_pct` | numeric |

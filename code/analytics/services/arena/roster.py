@@ -778,6 +778,10 @@ def spec_to_row(spec: AgentSpec) -> dict:
             list(spec.tools) + (["fmp"] if spec.include_fmp else [])
         ),
         "engine": spec.engine,
+        # The assembled prompt — persona plus the shared operating rules. Written
+        # here so the published spec and the running agent cannot disagree about
+        # what the agent was actually told. Empty for the controls.
+        "system_prompt": spec.system_prompt,
         "max_tool_rounds": spec.max_tool_rounds,
         "starting_cash": spec.starting_cash,
         "max_position_pct": spec.max_position_pct,
