@@ -140,7 +140,7 @@ export function Leaderboard({ rows, championshipId }: Props) {
                     />
                     <span className="min-w-0">
                       <Link
-                        href={`/agent/${row.slug}`}
+                        href={`/agent/${row.slug}/${row.championship_slug}`}
                         className="group flex items-center gap-1 font-medium leading-tight transition-colors hover:text-amber-600 dark:hover:text-amber-500"
                       >
                         {row.name}
@@ -234,10 +234,10 @@ export function Leaderboard({ rows, championshipId }: Props) {
                           />
                           <div className="mt-6">
                             <Link
-                              href={`/agent/${row.slug}`}
+                              href={`/agent/${row.slug}/${row.championship_slug}`}
                               className="inline-flex items-center gap-1.5 font-mono text-[11px] uppercase tracking-widest text-muted-foreground transition-colors hover:text-amber-600 dark:hover:text-amber-500"
                             >
-                              {row.name}&rsquo;s orders, reasoning and sources
+                              {row.name}&rsquo;s full season — every order and its reasoning
                               <ArrowUpRight className="h-3.5 w-3.5" aria-hidden />
                             </Link>
                           </div>

@@ -291,7 +291,7 @@ export default async function ArenaPage({
         <p className="mt-4 text-sm">
           <span className="text-muted-foreground">Won by </span>
           <Link
-            href={`/agent/${champ.champion_slug}`}
+            href={`/agent/${champ.champion_slug}/${champ.slug}`}
             className="font-medium hover:text-amber-600 dark:hover:text-amber-500"
           >
             {champ.champion_name}

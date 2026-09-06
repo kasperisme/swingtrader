@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 import Link from "next/link";
 import { ArrowUpRight, Search } from "lucide-react";
 import type { TraderPreview } from "@/lib/sanity/types";
+import { Portrait } from "./portrait";
 
 /**
  * The lookup half of the directory.
@@ -110,8 +111,17 @@ export function TraderSearch({ traders }: { traders: TraderPreview[] }) {
             >
               <Link
                 href={`/traders/${t.slug}`}
-                className="group block border-l-2 border-l-border py-4 pl-5 transition-colors hover:border-l-amber-500 hover:bg-muted/50 focus-visible:border-l-amber-500 focus-visible:bg-muted/50 focus-visible:outline-none"
+                className="group flex gap-4 border-l-2 border-l-border py-4 pl-5 transition-colors hover:border-l-amber-500 hover:bg-muted/50 focus-visible:border-l-amber-500 focus-visible:bg-muted/50 focus-visible:outline-none"
               >
+                <Portrait
+                  name={t.name}
+                  slug={t.slug}
+                  url={t.imageUrl}
+                  alt={t.imageAlt}
+                  size={48}
+                  className="mt-0.5"
+                />
+                <div className="min-w-0 flex-1">
                 <div className="flex flex-wrap items-baseline gap-x-3 font-mono text-[11px] uppercase tracking-widest text-muted-foreground">
                   {t.style && <span>{t.style}</span>}
                   {t.lifespan && (
@@ -135,6 +145,7 @@ export function TraderSearch({ traders }: { traders: TraderPreview[] }) {
                     {t.summary || t.knownFor}
                   </p>
                 )}
+                </div>
               </Link>
             </li>
           ))}

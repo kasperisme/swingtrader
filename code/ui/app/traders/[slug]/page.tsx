@@ -4,6 +4,7 @@ import { notFound } from "next/navigation";
 import { Suspense } from "react";
 import { ArrowLeft, ArrowUpRight } from "lucide-react";
 import { CavemanContent } from "@/components/caveman-content";
+import { Portrait } from "../_components/portrait";
 import { isSanityConfigured, sanityFetch } from "@/lib/sanity/client";
 import { traderBySlugQuery, traderSlugListQuery } from "@/lib/sanity/queries";
 import type { Trader } from "@/lib/sanity/types";
@@ -169,7 +170,15 @@ async function TraderDetail({ params }: Props) {
         Famous traders
       </Link>
 
-      <header className="mt-6">
+      <header className="mt-6 flex flex-wrap items-start gap-5">
+        <Portrait
+          name={trader.name}
+          slug={slug}
+          url={trader.imageUrl}
+          alt={trader.imageAlt}
+          size={88}
+        />
+        <div className="min-w-0 flex-1">
         <div className="flex flex-wrap items-baseline gap-x-3 font-mono text-[11px] uppercase tracking-widest text-muted-foreground">
           {trader.style && <span>{trader.style}</span>}
           {trader.lifespan && <span className="tabular-nums">{trader.lifespan}</span>}
@@ -181,6 +190,27 @@ async function TraderDetail({ params }: Props) {
         {trader.knownFor && (
           <p className="mt-2 text-base text-muted-foreground">{trader.knownFor}</p>
         )}
+        {/* Credit is a licence obligation, not a nicety: four of the five
+            usable portraits are CC BY or BY-SA and require visible
+            attribution. Rendered only when a credit is actually recorded. */}
+        {trader.imageUrl && trader.imageCredit && (
+          <p className="mt-2 font-mono text-[10px] text-muted-foreground/70">
+            Portrait:{" "}
+            {trader.imageCreditUrl ? (
+              <a
+                href={trader.imageCreditUrl}
+                target="_blank"
+                rel="noopener noreferrer nofollow"
+                className="underline underline-offset-2 hover:text-foreground"
+              >
+                {trader.imageCredit}
+              </a>
+            ) : (
+              trader.imageCredit
+            )}
+          </p>
+        )}
+        </div>
       </header>
 
       {trader.arenaAgentSlug && (

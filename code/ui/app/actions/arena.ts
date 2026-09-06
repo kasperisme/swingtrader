@@ -112,6 +112,11 @@ export type ArenaAgent = {
   approach: string | null;
   inspiration: string | null;
   tool_surface: ArenaToolSurface[] | null;
+  /**
+   * The assembled system prompt — persona plus the shared operating rules.
+   * Empty for the two deterministic controls, which have no model to prompt.
+   */
+  system_prompt: string | null;
   engine: "llm" | "deterministic";
   starting_cash: number;
   max_position_pct: number;
@@ -219,6 +224,7 @@ export type ArenaDecision = {
   orders_accepted: number;
   orders_rejected: number;
   nav_at_decision: number | null;
+  cash_at_decision: number | null;
   duration_ms: number | null;
   is_backtest: boolean;
 };

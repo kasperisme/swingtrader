@@ -1,30 +1,30 @@
 import { Suspense } from "react";
 import Link from "next/link";
-import { notFound } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 import type { Metadata } from "next";
-import { ArrowLeft, ArrowUpRight, Trophy } from "lucide-react";
+import { ArrowLeft, ArrowUpRight, Download, Trophy } from "lucide-react";
 import {
   getAgent,
+  listAgentAppearances,
   listAgentResources,
-  listDecisions,
   listNavCurve,
-  listOrders,
-  listPositions,
   listStandings,
-  resolveAgentAppearance,
-  type ArenaOrder,
   type ArenaStanding,
 } from "@/app/actions/arena";
 import { SITE_NAME, SITE_URL } from "@/lib/site";
 import { getTraderForAgent } from "@/lib/sanity/trader-link";
 import { EquityCurve } from "@/app/arena/_components/equity-curve";
-import { PortfolioPanel } from "@/app/arena/_components/portfolio-panel";
-import {
-  CitedResources,
-  ResourceChips,
-  ToolSurface,
-} from "@/app/arena/_components/resource-links";
+import { CitedResources, ToolSurface } from "@/app/arena/_components/resource-links";
 import { ARENA_COLOR_INDEX as COLOR_INDEX } from "@/lib/arena/colors";
+import { StatGrid, type Stat } from "../_components/stat-grid";
+import {
+  fmtDate,
+  fmtMoney,
+  fmtPct,
+  fmtRate,
+  fmtSignedMoney,
+  toneFor,
+} from "../_components/format";
 
 // No `revalidate` and no `generateStaticParams`: this project runs with
 // `cacheComponents: true`, which rejects the route-segment revalidate config,
@@ -57,83 +57,10 @@ export async function generateMetadata({
   };
 }
 
-function fmtMoney(v: number | null | undefined, digits = 0) {
-  if (v == null) return "—";
-  return `$${v.toLocaleString("en-US", {
-    minimumFractionDigits: digits,
-    maximumFractionDigits: digits,
-  })}`;
-}
-
-function fmtPct(v: number | null | undefined, digits = 2) {
-  if (v == null) return "—";
-  return `${v >= 0 ? "+" : ""}${(v * 100).toFixed(digits)}%`;
-}
-
-function toneFor(v: number | null | undefined) {
-  if (v == null) return "text-muted-foreground";
-  if (v > 0) return "text-emerald-600 dark:text-emerald-500";
-  if (v < 0) return "text-rose-600 dark:text-rose-500";
-  return "text-muted-foreground";
-}
-
-function fmtDate(iso: string | null) {
-  if (!iso) return "—";
-  return new Date(iso.length === 10 ? `${iso}T00:00:00Z` : iso).toLocaleDateString(
-    "en-GB",
-    { day: "numeric", month: "short", year: "numeric", timeZone: "UTC" },
-  );
-}
-
 /**
- * How a fill reads on the tape, once agents can short.
+ * The trader this agent is modelled on — its academy, in the athlete reading.
  *
- * Colouring by `side` inverted the meaning for both short cases: opening a
- * short is a new BEARISH position and was painted in the exit colour, while
- * covering one CLOSES a bearish bet and was painted like a fresh buy. So the
- * colour tracks the direction of the bet, not the direction of the cash:
- * emerald opens bullish, rose opens bearish, muted closes either.
- */
-const EFFECT_LABEL: Record<
-  NonNullable<ArenaOrder["position_effect"]>,
-  { label: string; tone: string }
-> = {
-  open_long: { label: "BUY", tone: "text-emerald-600 dark:text-emerald-500" },
-  close_long: { label: "SELL", tone: "text-muted-foreground" },
-  open_short: { label: "SHORT", tone: "text-rose-600 dark:text-rose-500" },
-  cover_short: { label: "COVER", tone: "text-muted-foreground" },
-  flip_to_short: { label: "SELL → SHORT", tone: "text-rose-600 dark:text-rose-500" },
-  flip_to_long: { label: "COVER → BUY", tone: "text-emerald-600 dark:text-emerald-500" },
-};
-
-/**
- * Rows written before position_effect existed, and any unfilled order, carry
- * NULL. Those fall back to the bare side — every agent but Jim Sigmons was
- * long-only then, so the old reading was right for them, and an invented label
- * would be worse than a plain one.
- */
-function orderVerb(o: ArenaOrder): { label: string; tone: string } {
-  if (o.position_effect) return EFFECT_LABEL[o.position_effect];
-  return {
-    label: o.side.toUpperCase(),
-    tone:
-      o.side === "buy"
-        ? "text-emerald-600 dark:text-emerald-500"
-        : "text-rose-600 dark:text-rose-500",
-  };
-}
-
-const ORDER_TONE: Record<ArenaOrder["status"], string> = {
-  filled: "text-foreground",
-  pending: "text-amber-600 dark:text-amber-500",
-  rejected: "text-rose-600 dark:text-rose-500",
-  cancelled: "text-muted-foreground",
-};
-
-/**
- * The trader this agent is modelled on.
- *
- * Links to the profile on this site rather than off to Wikipedia — the
+ * Links to the profile on this site rather than off to Wikipedia: the
  * biography, the ideas and where the approach fails are all written here, and
  * that page links back. If no profile has been written yet, the prose line from
  * the roster stands in rather than showing a link to nothing.
@@ -149,106 +76,136 @@ async function Idol({
 
   if (!trader) {
     return fallbackText ? (
-      <p className="mt-6 font-mono text-xs text-muted-foreground/80">
-        After {fallbackText}
-      </p>
+      <p className="font-mono text-xs text-muted-foreground/80">After {fallbackText}</p>
     ) : null;
   }
 
   return (
     <Link
       href={`/traders/${trader.slug}`}
-      className="group mt-6 block rounded-lg border p-4 transition-colors hover:border-amber-500/50 hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+      className="group inline-flex items-baseline gap-1.5 font-mono text-xs text-muted-foreground transition-colors hover:text-amber-600 dark:hover:text-amber-500"
     >
-      <p className="font-mono text-[11px] uppercase tracking-widest text-muted-foreground">
-        Modelled on
-      </p>
-      <p className="mt-1.5 flex items-baseline gap-1.5 text-lg font-semibold tracking-tight transition-colors group-hover:text-amber-600 dark:group-hover:text-amber-500">
+      <span className="uppercase tracking-widest">Modelled on</span>
+      <span className="font-medium text-foreground transition-colors group-hover:text-amber-600 dark:group-hover:text-amber-500">
         {trader.name}
-        <ArrowUpRight
-          className="h-4 w-4 shrink-0 opacity-0 transition-opacity group-hover:opacity-100"
-          aria-hidden
-        />
-      </p>
-      {(trader.summary || trader.knownFor) && (
-        <p className="mt-1 max-w-[64ch] text-sm leading-relaxed text-muted-foreground">
-          {trader.summary || trader.knownFor}
-        </p>
-      )}
-      <p className="mt-2 font-mono text-[11px] text-muted-foreground/70">
-        Read the method this agent is running →
-      </p>
+      </span>
+      <ArrowUpRight className="h-3 w-3 shrink-0 opacity-60" aria-hidden />
     </Link>
   );
 }
 
-
 /**
- * The agent's record across championships.
+ * The career table — one row per championship the agent has entered.
  *
- * Rendered only when there is more than one: with a single season a switcher is
- * chrome that implies a choice the reader does not have, and the season is
- * already named in the back-link above. It becomes useful the moment season-2
- * opens, which is the reason the agent has its own URL at all — the agent
- * persists, the championship is an appearance.
- *
- * Plain links rather than a client control, so each season is addressable
- * (`?season=season-1`), shareable, and works before hydration.
+ * This is the spine of the page. An agent is a lasting competitor and a
+ * championship is a season it played; the profile is therefore a record of
+ * seasons, and each row is a link into that season's full log rather than a
+ * number the reader has to take on trust.
  */
-function Appearances({
+function SeasonRecord({
   slug,
-  appearances,
-  current,
+  rows,
 }: {
   slug: string;
-  appearances: ArenaStanding[];
-  current: ArenaStanding | null;
+  rows: (ArenaStanding & { rank: number | null; entrants: number })[];
 }) {
-  if (appearances.length < 2) return null;
-
   return (
-    <nav
-      aria-label="Championship appearances"
-      className="mt-8 flex flex-wrap items-center gap-2"
-    >
-      <span className="mr-1 font-mono text-[11px] uppercase tracking-widest text-muted-foreground">
-        Appearances
-      </span>
-      {appearances.map((a) => {
-        const isCurrent = a.championship_id === current?.championship_id;
-        return (
-          <Link
-            key={a.championship_id}
-            href={`/agent/${slug}?season=${a.championship_slug}`}
-            aria-current={isCurrent ? "page" : undefined}
-            className={`rounded-full border px-3 py-1 text-xs tabular-nums transition-colors ${
-              isCurrent
-                ? "border-foreground/30 bg-muted font-medium text-foreground"
-                : "border-transparent bg-muted/40 text-muted-foreground hover:bg-muted hover:text-foreground"
-            }`}
-          >
-            {a.championship_name}
-            {a.total_return != null && (
-              <span className={`ml-2 ${toneFor(a.total_return)}`}>
+    <div className="-mx-4 overflow-x-auto px-4">
+      <table className="w-full min-w-[820px] border-collapse text-sm">
+        <caption className="sr-only">
+          Every championship this agent has entered, newest first, with its
+          finishing position and record in each.
+        </caption>
+        <thead>
+          <tr className="border-b text-left font-mono text-[11px] uppercase tracking-widest text-muted-foreground">
+            <th scope="col" className="pb-2 pr-4 font-normal">Season</th>
+            <th scope="col" className="pb-2 pr-4 text-right font-normal">Finish</th>
+            <th scope="col" className="pb-2 pr-4 text-right font-normal">Return</th>
+            <th scope="col" className="pb-2 pr-4 text-right font-normal">Max DD</th>
+            <th scope="col" className="pb-2 pr-4 text-right font-normal">Sharpe</th>
+            <th scope="col" className="pb-2 pr-4 text-right font-normal">Trades</th>
+            <th scope="col" className="pb-2 pr-4 text-right font-normal">Win rate</th>
+            <th scope="col" className="pb-2 text-right font-normal">Realised</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((a, i) => (
+            <tr
+              key={a.championship_id}
+              className="animate-screening-row-in border-b border-border/60 transition-colors hover:bg-muted/50"
+              style={{ animationDelay: `${Math.min(i, 12) * 30}ms` }}
+            >
+              <td className="py-3 pr-4">
+                <Link
+                  href={`/agent/${slug}/${a.championship_slug}`}
+                  className="group flex items-center gap-1.5 font-medium transition-colors hover:text-amber-600 dark:hover:text-amber-500"
+                >
+                  {a.championship_name}
+                  {a.is_champion && (
+                    <Trophy
+                      className="h-3.5 w-3.5 text-amber-600 dark:text-amber-500"
+                      aria-label="Won this championship"
+                    />
+                  )}
+                  <ArrowUpRight
+                    className="h-3.5 w-3.5 shrink-0 opacity-0 transition-opacity group-hover:opacity-100"
+                    aria-hidden
+                  />
+                </Link>
+                <span className="mt-0.5 block font-mono text-[11px] text-muted-foreground">
+                  {fmtDate(a.starts_on)} → {fmtDate(a.ends_on)}
+                  {a.championship_status === "running" && (
+                    <span className="ml-1.5 text-emerald-600 dark:text-emerald-500">
+                      live
+                    </span>
+                  )}
+                </span>
+              </td>
+              <td className="py-3 pr-4 text-right font-mono tabular-nums">
+                {a.rank == null ? (
+                  "—"
+                ) : (
+                  <>
+                    {a.rank}
+                    <span className="text-muted-foreground">/{a.entrants}</span>
+                  </>
+                )}
+              </td>
+              <td
+                className={`py-3 pr-4 text-right font-mono font-medium tabular-nums ${toneFor(a.total_return)}`}
+              >
                 {fmtPct(a.total_return)}
-              </span>
-            )}
-            {a.championship_status === "running" && (
-              <span className="ml-1.5 opacity-60">live</span>
-            )}
-            {a.is_champion && (
-              <Trophy
-                className="ml-1.5 inline h-3 w-3 text-amber-600 dark:text-amber-500"
-                aria-label="Won this championship"
-              />
-            )}
-          </Link>
-        );
-      })}
-    </nav>
+              </td>
+              <td className="py-3 pr-4 text-right font-mono tabular-nums text-muted-foreground">
+                {fmtPct(a.max_drawdown, 1)}
+              </td>
+              <td className="py-3 pr-4 text-right font-mono tabular-nums text-muted-foreground">
+                {a.sharpe == null ? (
+                  <span className="text-[11px] uppercase tracking-wide text-muted-foreground/60">
+                    {(a.nav_days ?? 0) < 20 ? "too early" : "—"}
+                  </span>
+                ) : (
+                  a.sharpe.toFixed(2)
+                )}
+              </td>
+              <td className="py-3 pr-4 text-right font-mono tabular-nums text-muted-foreground">
+                {a.closed_trades ?? 0}
+              </td>
+              <td className="py-3 pr-4 text-right font-mono tabular-nums text-muted-foreground">
+                {a.win_rate == null ? "—" : fmtRate(a.win_rate)}
+              </td>
+              <td
+                className={`py-3 text-right font-mono tabular-nums ${toneFor(a.realized_pnl)}`}
+              >
+                {fmtSignedMoney(a.realized_pnl)}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
   );
 }
-
 
 export default async function AgentPage({
   params,
@@ -259,32 +216,79 @@ export default async function AgentPage({
 }) {
   const { slug } = await params;
   const { season } = await searchParams;
+
+  // A season now has its own URL. The old `?season=` links keep working by
+  // landing on it rather than on a second, half-detailed view of the same data.
+  if (season) redirect(`/agent/${slug}/${season}`);
+
   const agent = await getAgent(slug);
   if (!agent) notFound();
 
-  // The agent is the entity; a championship is a season it appeared in. So the
-  // page resolves against THIS AGENT'S appearances rather than the arena's
-  // featured championship — the two diverge the moment an agent sits a season
-  // out, and opening on a season it never entered would show an empty book with
-  // no explanation. Defaults to its most recent appearance.
-  const { appearances, current } = await resolveAgentAppearance(slug, season);
-  const champId = current?.championship_id;
+  const appearances = await listAgentAppearances(slug);
+  // Finishing position has to come from the standings OF THAT SEASON — the
+  // leaderboard row knows the agent's own numbers but not who else was in it.
+  const tables = await Promise.all(
+    appearances.map((a) => listStandings(a.championship_id)),
+  );
+  const record = appearances.map((a, i) => {
+    const table = tables[i];
+    const idx = table.findIndex((r) => r.slug === slug);
+    return {
+      ...a,
+      rank: idx === -1 ? null : idx + 1,
+      entrants: table.length,
+    };
+  });
 
-  const [standings, curve, positions, orders, decisions, cited] = await Promise.all([
-    listStandings(champId),
-    listNavCurve(slug, champId),
-    listPositions(slug, champId),
-    listOrders(slug, 40),
-    listDecisions(slug, 12),
-    listAgentResources(slug),
-  ]);
+  const latest = record[0] ?? null;
+  const curve = latest ? await listNavCurve(slug, latest.championship_id) : [];
+  const cited = await listAgentResources(slug);
 
-  const canonicalUrl = `${SITE_URL}/agent/${slug}`;
-  const standing = standings.find((s) => s.slug === slug);
-  const rank = standings.findIndex((s) => s.slug === slug) + 1;
   const colorIndex = COLOR_INDEX[slug] ?? null;
   const accent =
     colorIndex == null ? "hsl(var(--muted-foreground))" : `hsl(var(--arena-${colorIndex}))`;
+  // The roster orders agents in tens; the squad number is that position.
+  const squadNumber = agent.sort_order ? Math.round(agent.sort_order / 10) : null;
+
+  // Career totals. Rates are recomputed from the underlying counts rather than
+  // averaged across seasons — averaging a win rate over seasons of unequal
+  // length gives a number that belongs to no season and to no career.
+  const seasonsPlayed = record.length;
+  const titles = record.filter((a) => a.is_champion).length;
+  const closedTrades = record.reduce((n, a) => n + (a.closed_trades ?? 0), 0);
+  const winningTrades = record.reduce((n, a) => n + (a.winning_trades ?? 0), 0);
+  const realisedPnl = record.reduce((n, a) => n + (a.realized_pnl ?? 0), 0);
+  const sessions = record.reduce((n, a) => n + (a.nav_days ?? 0), 0);
+  const returns = record.map((a) => a.total_return).filter((v): v is number => v != null);
+  const bestSeason = returns.length ? Math.max(...returns) : null;
+  const drawdowns = record.map((a) => a.max_drawdown).filter((v): v is number => v != null);
+  const worstDrawdown = drawdowns.length ? Math.min(...drawdowns) : null;
+
+  const career: Stat[] = [
+    {
+      label: "Seasons",
+      value: String(seasonsPlayed),
+      note: titles > 0 ? `${titles} won` : `${sessions} sessions`,
+    },
+    {
+      label: "Best season",
+      value: fmtPct(bestSeason),
+      tone: toneFor(bestSeason),
+    },
+    {
+      label: "Realised P&L",
+      value: fmtSignedMoney(realisedPnl),
+      tone: toneFor(realisedPnl),
+      note: `${closedTrades} closed ${closedTrades === 1 ? "trade" : "trades"}`,
+    },
+    {
+      label: "Win rate",
+      value: closedTrades > 0 ? fmtRate(winningTrades / closedTrades) : "—",
+      note: closedTrades > 0 ? `${winningTrades} of ${closedTrades}` : "no closed trades",
+    },
+  ];
+
+  const canonicalUrl = `${SITE_URL}/agent/${slug}`;
 
   // Each agent page is a published, dated experimental record — a Dataset in
   // schema terms, not an article. `variableMeasured` names what the page
@@ -305,12 +309,14 @@ export default async function AgentPage({
         url: canonicalUrl,
         creator: { "@type": "Organization", name: SITE_NAME, url: SITE_URL },
         isAccessibleForFree: true,
-        ...(standing
+        ...(latest
           ? {
               variableMeasured: [
-                { "@type": "PropertyValue", name: "Net asset value", value: standing.nav },
-                { "@type": "PropertyValue", name: "Total return", value: standing.total_return },
-                { "@type": "PropertyValue", name: "Rank", value: rank },
+                { "@type": "PropertyValue", name: "Net asset value", value: latest.nav },
+                { "@type": "PropertyValue", name: "Total return", value: latest.total_return },
+                ...(latest.rank
+                  ? [{ "@type": "PropertyValue", name: "Rank", value: latest.rank }]
+                  : []),
               ],
             }
           : {}),
@@ -328,7 +334,7 @@ export default async function AgentPage({
         "@type": "BreadcrumbList",
         itemListElement: [
           { "@type": "ListItem", position: 1, name: "Home", item: SITE_URL },
-          { "@type": "ListItem", position: 2, name: "Agents", item: `${SITE_URL}/agent` },
+          { "@type": "ListItem", position: 2, name: "The Arena", item: `${SITE_URL}/arena` },
           { "@type": "ListItem", position: 3, name: agent.name, item: canonicalUrl },
         ],
       },
@@ -346,84 +352,147 @@ export default async function AgentPage({
         className="inline-flex items-center gap-1.5 font-mono text-[11px] uppercase tracking-widest text-muted-foreground transition-colors hover:text-foreground"
       >
         <ArrowLeft className="h-3.5 w-3.5" aria-hidden />
-        {current ? current.championship_name : "The Arena"}
+        The Arena
       </Link>
 
-      <header className="mt-6 border-l-2 pl-5" style={{ borderLeftColor: accent }}>
-        <div className="flex flex-wrap items-center gap-3 font-mono text-[11px] uppercase tracking-widest text-muted-foreground">
-          {rank > 0 && standing?.total_return != null && (
-            <span>Rank {rank} of {standings.length}</span>
+      {/* ── The player card ─────────────────────────────────────────────── */}
+      <header className="mt-6 flex flex-wrap items-start justify-between gap-x-8 gap-y-6 border-b pb-8">
+        <div className="flex items-start gap-5">
+          {squadNumber != null && (
+            <div
+              aria-hidden
+              className="hidden h-20 w-16 shrink-0 items-center justify-center rounded-lg border-t-2 sm:flex"
+              style={{
+                borderTopColor: accent,
+                backgroundImage: `linear-gradient(to bottom, ${accent.replace("hsl(", "hsl(").replace(")", " / 0.18)")}, transparent)`,
+              }}
+            >
+              <span className="font-mono text-3xl font-semibold tabular-nums text-foreground/55">
+                {squadNumber}
+              </span>
+            </div>
           )}
-          {agent.engine === "deterministic" && (
-            <span className="rounded bg-muted px-1.5 py-0.5 text-muted-foreground">
-              control · no LLM
-            </span>
-          )}
-          {agent.allow_shorts && <span>may short</span>}
+          <div>
+            <div className="flex flex-wrap items-center gap-2 font-mono text-[11px] uppercase tracking-widest text-muted-foreground">
+              <span className="sm:hidden">#{squadNumber}</span>
+              <span>
+                {agent.engine === "deterministic" ? "control · no LLM" : "LLM trader"}
+              </span>
+              {agent.allow_shorts && <span>· may short</span>}
+              {titles > 0 && (
+                <span className="inline-flex items-center gap-1 text-amber-600 dark:text-amber-500">
+                  <Trophy className="h-3 w-3" aria-hidden />
+                  {titles} {titles === 1 ? "title" : "titles"}
+                </span>
+              )}
+            </div>
+            <h1 className="mt-2 text-3xl font-semibold tracking-tight sm:text-4xl">
+              {agent.name}
+            </h1>
+            {agent.tagline && (
+              <p className="mt-2 max-w-[52ch] text-base text-muted-foreground">
+                {agent.tagline}
+              </p>
+            )}
+            <div className="mt-3">
+              <Suspense fallback={null}>
+                <Idol agentSlug={slug} fallbackText={agent.inspiration} />
+              </Suspense>
+            </div>
+          </div>
         </div>
-        <h1 className="mt-2 text-3xl font-semibold tracking-tight sm:text-4xl">
-          {agent.name}
-        </h1>
-        {agent.tagline && (
-          <p className="mt-2 text-base text-muted-foreground">{agent.tagline}</p>
-        )}
-        {agent.inspiration && (
-          <p className="mt-1.5 font-mono text-xs text-muted-foreground/80">
-            After {agent.inspiration}
-          </p>
+
+        {/* Current standing — the scoreboard half of the card. */}
+        {latest && (
+          <Link
+            href={`/agent/${slug}/${latest.championship_slug}`}
+            className="group border-l-2 pl-5 transition-colors hover:bg-muted/40"
+            style={{ borderLeftColor: accent }}
+          >
+            <p className="font-mono text-[11px] uppercase tracking-widest text-muted-foreground">
+              {latest.championship_name}
+              {latest.championship_status === "running" && (
+                <span className="ml-1.5 text-emerald-600 dark:text-emerald-500">live</span>
+              )}
+            </p>
+            <p
+              className={`mt-1.5 font-mono text-3xl font-medium tabular-nums ${toneFor(latest.total_return)}`}
+            >
+              {fmtPct(latest.total_return)}
+            </p>
+            <p className="mt-1 font-mono text-xs tabular-nums text-muted-foreground">
+              {fmtMoney(latest.nav)}
+              {latest.rank != null && (
+                <>
+                  <span className="mx-1.5 opacity-40">·</span>
+                  {latest.rank} of {latest.entrants}
+                </>
+              )}
+            </p>
+            <p className="mt-2 font-mono text-[11px] text-muted-foreground/70 transition-colors group-hover:text-amber-600 dark:group-hover:text-amber-500">
+              See the season →
+            </p>
+          </Link>
         )}
       </header>
 
-      <Appearances slug={slug} appearances={appearances} current={current} />
-
-      <Suspense fallback={null}>
-        <Idol agentSlug={slug} fallbackText={agent.inspiration} />
-      </Suspense>
-
-      {/* Headline numbers. NAV and return are the hero pair; everything else is
-          the context that stops them being read as a claim. */}
-      <section className="mt-10 grid grid-cols-2 gap-x-6 gap-y-6 sm:grid-cols-4">
-        {(
-          [
-            ["NAV", fmtMoney(standing?.nav), null],
-            [
-              "Return",
-              fmtPct(standing?.total_return),
-              toneFor(standing?.total_return),
-            ],
-            ["Max drawdown", fmtPct(standing?.max_drawdown, 1), null],
-            [
-              "Sharpe",
-              standing?.sharpe == null
-                ? (standing?.nav_days ?? 0) < 20
-                  ? "too early"
-                  : "—"
-                : standing.sharpe.toFixed(2),
-              null,
-            ],
-          ] as const
-        ).map(([label, value, tone]) => (
-          <div key={label}>
-            <p className="font-mono text-[11px] uppercase tracking-widest text-muted-foreground">
-              {label}
+      {/* ── Career ───────────────────────────────────────────────────────── */}
+      {record.length > 0 && (
+        <>
+          <section className="mt-10">
+            <h2 className="font-mono text-[11px] uppercase tracking-widest text-muted-foreground">
+              Career
+            </h2>
+            <div className="mt-5">
+              <StatGrid stats={career} />
+            </div>
+            <p className="mt-4 max-w-[68ch] text-xs leading-relaxed text-muted-foreground">
+              Realised P&amp;L and win rate count CLOSED trades only — a position
+              still open has not been right or wrong yet. Worst drawdown across
+              seasons: {fmtPct(worstDrawdown, 1)}.
             </p>
-            <p
-              className={`mt-1.5 font-mono text-2xl font-medium tabular-nums ${tone ?? ""}`}
-            >
-              {value}
+          </section>
+
+          <section className="mt-12">
+            <h2 className="font-mono text-[11px] uppercase tracking-widest text-muted-foreground">
+              Season by season
+            </h2>
+            <p className="mt-2 max-w-[68ch] text-sm text-muted-foreground">
+              Open a season for the full log — every order, and the reasoning
+              that produced it.
             </p>
+            <div className="mt-5">
+              <SeasonRecord slug={slug} rows={record} />
+            </div>
+          </section>
+        </>
+      )}
+
+      {/* ── Current form ─────────────────────────────────────────────────── */}
+      {latest && curve.length > 0 && (
+        <section className="mt-12">
+          <h2 className="font-mono text-[11px] uppercase tracking-widest text-muted-foreground">
+            Form · {latest.championship_name}
+          </h2>
+          <p className="mt-2 max-w-[68ch] text-sm leading-relaxed text-muted-foreground">
+            Percent return since this season opened.
+          </p>
+          <div className="mt-5">
+            <EquityCurve
+              series={[{ slug, name: agent.name, colorIndex, points: curve }]}
+              height={260}
+            />
           </div>
-        ))}
-      </section>
+        </section>
+      )}
 
+      {/* ── Style of play ────────────────────────────────────────────────── */}
       {agent.approach && (
         <section className="mt-12">
           <h2 className="font-mono text-[11px] uppercase tracking-widest text-muted-foreground">
-            The approach
+            How it plays
           </h2>
-          <p className="mt-4 max-w-[70ch] text-base leading-relaxed">
-            {agent.approach}
-          </p>
+          <p className="mt-4 max-w-[70ch] text-base leading-relaxed">{agent.approach}</p>
           <dl className="mt-6 flex flex-wrap gap-x-8 gap-y-2 font-mono text-xs text-muted-foreground">
             <div className="flex gap-1.5">
               <dt>Funded</dt>
@@ -439,90 +508,34 @@ export default async function AgentPage({
               <dt>Max names</dt>
               <dd className="text-foreground tabular-nums">{agent.max_positions}</dd>
             </div>
+            <div className="flex gap-1.5">
+              <dt>Shorts</dt>
+              <dd className="text-foreground">{agent.allow_shorts ? "allowed" : "no"}</dd>
+            </div>
           </dl>
+
+          {/* A plain <a>, not next/link: this is a file download, and routing it
+              through the client router would navigate rather than save. */}
+          <a
+            href={`/agent/${slug}/spec`}
+            download={`${slug}.arena-agent.json`}
+            className="group mt-6 inline-flex items-center gap-2 rounded-lg border px-3.5 py-2 text-sm transition-colors hover:border-amber-500/50 hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          >
+            <Download
+              className="h-4 w-4 shrink-0 text-muted-foreground transition-colors group-hover:text-amber-600 dark:group-hover:text-amber-500"
+              aria-hidden
+            />
+            <span className="font-medium">Download the spec</span>
+            <span className="font-mono text-[11px] text-muted-foreground">JSON</span>
+          </a>
+          <p className="mt-2 max-w-[62ch] text-xs leading-relaxed text-muted-foreground">
+            Its system prompt verbatim, the exact data surface it is allowed to
+            read, the capital, the risk limits and the rules the broker enforces
+            — enough to build it yourself and compare. It names what it leaves
+            out, too.
+          </p>
         </section>
       )}
-
-      <section className="mt-12">
-        <h2 className="font-mono text-[11px] uppercase tracking-widest text-muted-foreground">
-          Return
-        </h2>
-        <p className="mt-2 max-w-[68ch] text-sm leading-relaxed text-muted-foreground">
-          Percent return since this championship opened.
-        </p>
-        <div className="mt-5">
-          <EquityCurve
-            series={[{ slug, name: agent.name, colorIndex, points: curve }]}
-            height={260}
-          />
-        </div>
-      </section>
-
-      <section className="mt-12">
-        <h2 className="font-mono text-[11px] uppercase tracking-widest text-muted-foreground">
-          Portfolio
-        </h2>
-        <p className="mt-2 max-w-[68ch] text-sm leading-relaxed text-muted-foreground">
-          The account in dollars, split into holdings and cash — the return chart
-          above cannot tell a flat month spent fully invested from one spent
-          sitting out. <strong className="font-medium text-foreground">Click any
-          point</strong> to see the book it was holding that day.
-        </p>
-        <div className="mt-5">
-          <PortfolioPanel
-            points={curve}
-            livePositions={positions}
-            startingCash={Number(agent.starting_cash) || 100000}
-            colorIndex={colorIndex}
-            nav={standing?.nav ?? null}
-            cash={standing?.cash ?? null}
-          />
-        </div>
-      </section>
-
-      <section className="mt-12">
-        <h2 className="font-mono text-[11px] uppercase tracking-widest text-muted-foreground">
-          Daily reasoning
-        </h2>
-        {decisions.filter((d) => d.narrative).length === 0 ? (
-          <p className="mt-4 text-sm text-muted-foreground">
-            No published reasoning yet.
-          </p>
-        ) : (
-          <ul className="mt-5 grid gap-2">
-            {decisions
-              .filter((d) => d.narrative)
-              .map((d, i) => (
-                <li
-                  key={d.id}
-                  className="animate-screening-row-in border-l-2 border-l-border py-4 pl-5"
-                  style={{ animationDelay: `${Math.min(i, 12) * 40}ms` }}
-                >
-                  <div className="flex flex-wrap items-baseline gap-x-3 font-mono text-[11px] uppercase tracking-widest text-muted-foreground">
-                    <span className="tabular-nums text-foreground">
-                      {fmtDate(d.decision_date)}
-                    </span>
-                    <span>
-                      {d.orders_accepted === 0
-                        ? "no trades"
-                        : `${d.orders_accepted} placed`}
-                      {d.orders_rejected > 0 && ` · ${d.orders_rejected} refused`}
-                    </span>
-                    {d.nav_at_decision != null && (
-                      <span className="tabular-nums">
-                        NAV {fmtMoney(d.nav_at_decision)}
-                      </span>
-                    )}
-                  </div>
-                  <p className="mt-2 max-w-[72ch] text-sm leading-relaxed">
-                    {d.narrative}
-                  </p>
-                  <ResourceChips resources={d.resources ?? []} />
-                </li>
-              ))}
-          </ul>
-        )}
-      </section>
 
       <section className="mt-12">
         <h2 className="font-mono text-[11px] uppercase tracking-widest text-muted-foreground">
@@ -546,72 +559,6 @@ export default async function AgentPage({
           the page that publishes it and check the reasoning against the source.
         </p>
         <CitedResources resources={cited} />
-      </section>
-
-      <section className="mt-12">
-        <h2 className="font-mono text-[11px] uppercase tracking-widest text-muted-foreground">
-          Order log
-        </h2>
-        <p className="mt-2 max-w-[68ch] text-xs leading-relaxed text-muted-foreground">
-          Including orders the broker refused. What an agent tried to do and was
-          not allowed to do is part of the record.
-        </p>
-        {orders.length === 0 ? (
-          <p className="mt-4 text-sm text-muted-foreground">No orders yet.</p>
-        ) : (
-          <ul className="mt-5 grid gap-px bg-border">
-            {orders.map((o) => (
-              <li key={o.id} className="bg-background py-3">
-                <div className="flex flex-wrap items-baseline gap-x-3 font-mono text-xs tabular-nums">
-                  {/* The SESSION the order belongs to, not when the row was
-                      written. In a replay `submitted_at` is the wall-clock time
-                      the backtest ran, so using it would stamp 46 sessions of
-                      trades with the same evening. */}
-                  <span className="text-muted-foreground">
-                    {fmtDate(o.intended_for ?? o.submitted_at.slice(0, 10))}
-                  </span>
-                  <span className={`font-medium ${orderVerb(o).tone}`}>
-                    {orderVerb(o).label}
-                  </span>
-                  <Link
-                    href={`/quote/${o.ticker}`}
-                    className="font-medium hover:text-amber-600 dark:hover:text-amber-500"
-                  >
-                    {o.ticker}
-                  </Link>
-                  <span className="text-muted-foreground">
-                    ×{Math.round(o.quantity).toLocaleString()}
-                  </span>
-                  {o.fill_price != null && (
-                    <span className="text-muted-foreground">
-                      @ {fmtMoney(o.fill_price, 2)}
-                    </span>
-                  )}
-                  <span className={`uppercase tracking-wide ${ORDER_TONE[o.status]}`}>
-                    {o.status}
-                  </span>
-                  {o.realized_pnl != null && (
-                    <span className={`font-medium ${toneFor(o.realized_pnl)}`}>
-                      {o.realized_pnl >= 0 ? "+" : "−"}
-                      {fmtMoney(Math.abs(o.realized_pnl))}
-                    </span>
-                  )}
-                </div>
-                {o.reject_reason ? (
-                  <p className="mt-1.5 max-w-[72ch] text-xs leading-relaxed text-rose-600/90 dark:text-rose-500/90">
-                    {o.reject_reason}
-                  </p>
-                ) : (
-                  o.thesis && (
-                    <p className="mt-1.5 max-w-[72ch] text-xs leading-relaxed text-muted-foreground">
-                      {o.thesis}
-                    </p>
-                  )
-                )}
-              </li>
-            ))}
-          </ul>
-        )}
       </section>
 
       <p className="mt-14 max-w-[68ch] text-xs leading-relaxed text-muted-foreground">

@@ -3,6 +3,15 @@ import type { NextConfig } from "next";
 const nextConfig: NextConfig = {
   cacheComponents: true,
   skipTrailingSlashRedirect: true,
+  images: {
+    // next/image refuses any host not listed here, so without this a portrait
+    // uploaded in the Studio 500s rather than rendering — the failure looks
+    // like the upload did not work.
+    remotePatterns: [
+      { protocol: "https", hostname: "cdn.sanity.io", pathname: "/images/**" },
+    ],
+  },
+
   async redirects() {
     return [
       // Agents moved out of /arena and onto their own entity route. An agent

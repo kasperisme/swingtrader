@@ -64,7 +64,10 @@ function Place({ row, rank }: { row: ArenaStanding; rank: number }) {
       style={{ animationDelay: `${i * 70}ms` }}
     >
       <Link
-        href={`/agent/${row.slug}`}
+        // Into THIS season, not the agent's profile: the podium is a claim
+        // about one championship, and the page that backs it up is that
+        // championship's log.
+        href={`/agent/${row.slug}/${row.championship_slug}`}
         className="group flex flex-col justify-end rounded-t-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
       >
         <div className="px-1 pb-3">
