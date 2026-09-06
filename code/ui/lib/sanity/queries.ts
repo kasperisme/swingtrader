@@ -153,7 +153,10 @@ export const traderPreviewsQuery = `
     tags,
     summary,
     arenaAgentSlug,
-    "imageUrl": image.asset->url
+    "imageUrl": image.asset->url,
+    "imageAlt": image.alt,
+    "imageCredit": image.credit,
+    "imageCreditUrl": image.creditUrl
   }
 `;
 
@@ -169,11 +172,14 @@ export const traderBySlugQuery = `
     summary,
     arenaAgentSlug,
     keyIdeas[]{title, text},
-    books[]{title, year},
+    books[]{title, year, url},
     links[]{label, url},
     body,
     cavemanBody,
-    "imageUrl": image.asset->url
+    "imageUrl": image.asset->url,
+    "imageAlt": image.alt,
+    "imageCredit": image.credit,
+    "imageCreditUrl": image.creditUrl
   }
 `;
 

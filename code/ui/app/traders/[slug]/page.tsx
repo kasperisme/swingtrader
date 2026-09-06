@@ -228,16 +228,37 @@ async function TraderDetail({ params }: Props) {
             Books
           </h2>
           <ul className="mt-4 grid gap-1.5">
-            {trader.books.map((b, i) => (
-              <li key={i} className="flex items-baseline gap-2 text-sm">
+            {trader.books.map((b, i) => {
+              const title = b.url ? (
+                // rel="nofollow": these are commercial outbound links and we do
+                // not want to pass ranking signal to a retailer.
+                <a
+                  href={b.url}
+                  target="_blank"
+                  rel="noopener noreferrer nofollow"
+                  className="group inline-flex items-baseline gap-1.5 font-medium underline decoration-muted-foreground/30 underline-offset-4 transition-colors hover:text-amber-600 hover:decoration-amber-600/50 dark:hover:text-amber-500"
+                >
+                  {b.title}
+                  <ArrowUpRight
+                    className="h-3 w-3 shrink-0 self-center opacity-0 transition-opacity group-hover:opacity-60"
+                    aria-hidden
+                  />
+                  <span className="sr-only">(find on Amazon)</span>
+                </a>
+              ) : (
                 <span className="font-medium">{b.title}</span>
-                {b.year && (
-                  <span className="font-mono text-xs tabular-nums text-muted-foreground">
-                    {b.year}
-                  </span>
-                )}
-              </li>
-            ))}
+              );
+              return (
+                <li key={i} className="flex items-baseline gap-2 text-sm">
+                  {title}
+                  {b.year && (
+                    <span className="font-mono text-xs tabular-nums text-muted-foreground">
+                      {b.year}
+                    </span>
+                  )}
+                </li>
+              );
+            })}
           </ul>
         </section>
       )}

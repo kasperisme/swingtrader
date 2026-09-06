@@ -65,7 +65,30 @@ export const traderType = defineType({
       type: 'image',
       group: 'identity',
       options: {hotspot: true},
-      fields: [defineField({name: 'alt', title: 'Alt text', type: 'string'})],
+      description:
+        'Only upload a portrait we hold a licence for. Most photographs of these '
+        + 'people are Getty/Shutterstock stock or press images; the usable ones '
+        + 'are the free-licensed portraits on Wikimedia Commons, and four of the '
+        + 'five REQUIRE visible credit. Fill in credit + creditUrl whenever the '
+        + 'licence is anything other than public domain. Traders with no '
+        + 'licensable portrait render a typographic mark instead — that is a '
+        + 'designed fallback, not a missing image.',
+      fields: [
+        defineField({name: 'alt', title: 'Alt text', type: 'string'}),
+        defineField({
+          name: 'credit',
+          title: 'Credit line',
+          type: 'string',
+          description: 'e.g. "kellywritershouse, CC BY 2.0". Required by the licence.',
+        }),
+        defineField({
+          name: 'creditUrl',
+          title: 'Credit link',
+          type: 'url',
+          description: 'The Commons file page or licence deed.',
+          validation: (Rule) => Rule.uri({scheme: ['http', 'https']}),
+        }),
+      ],
     }),
     defineField({
       name: 'order',
@@ -135,6 +158,17 @@ export const traderType = defineType({
           fields: [
             defineField({name: 'title', title: 'Title', type: 'string'}),
             defineField({name: 'year', title: 'Year', type: 'number'}),
+            defineField({
+              name: 'url',
+              title: 'Buy link',
+              type: 'url',
+              description:
+                'Amazon search URL for the exact title and author. A search URL '
+                + 'rather than a product link on purpose: an ASIN is per-edition '
+                + 'and per-region, so it rots and can silently resolve to the '
+                + 'wrong book, while a title+author search cannot.',
+              validation: (Rule) => Rule.uri({scheme: ['http', 'https']}),
+            }),
           ],
           preview: {select: {title: 'title', subtitle: 'year'}},
         }),

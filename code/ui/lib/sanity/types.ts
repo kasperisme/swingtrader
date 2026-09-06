@@ -145,11 +145,15 @@ export type TraderPreview = {
   /** The /arena agent implementing this approach, if any. */
   arenaAgentSlug?: string;
   imageUrl?: string;
+  imageAlt?: string;
+  /** Required by CC BY / BY-SA: the four usable portraits are not public domain. */
+  imageCredit?: string;
+  imageCreditUrl?: string;
 };
 
 export type Trader = TraderPreview & {
   keyIdeas?: { title?: string; text?: string }[];
-  books?: { title?: string; year?: number }[];
+  books?: { title?: string; year?: number; url?: string }[];
   links?: { label?: string; url?: string }[];
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   body?: any[];
