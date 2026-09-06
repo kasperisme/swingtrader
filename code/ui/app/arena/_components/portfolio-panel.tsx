@@ -210,7 +210,7 @@ export function PortfolioPanel({
           {shownCash != null && ` (${fmtMoney(shownCash)})`}
         </p>
       ) : (
-        <div className="-mx-4 mt-4 overflow-x-auto px-4">
+        <div className="relative -mx-4 mt-4 overflow-x-auto px-4">
           <table className="w-full min-w-[620px] border-collapse text-sm">
             <caption className="sr-only">
               Positions with cost basis, mark, value and unrealised P&amp;L

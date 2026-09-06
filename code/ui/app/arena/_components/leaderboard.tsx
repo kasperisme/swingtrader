@@ -49,6 +49,15 @@ function toneFor(v: number | null | undefined) {
   return "text-muted-foreground";
 }
 
+/**
+ * `relative` on the scroll wrappers below is load-bearing, not decoration.
+ *
+ * Tailwind's `sr-only` is `position: absolute`. Without a positioned ancestor
+ * those captions and button labels resolve against the PAGE, sit at the far
+ * right of the 760px-wide table, escape the scroll container's clipping, and
+ * make the whole document scrollable sideways on a phone — 386px of viewport
+ * against 745px of scroll width, with nothing visible out there.
+ */
 export function Leaderboard({ rows, championshipId }: Props) {
   const [open, setOpen] = useState<string | null>(null);
   const [books, setBooks] = useState<Record<string, ArenaAgentBook>>({});
@@ -71,7 +80,7 @@ export function Leaderboard({ rows, championshipId }: Props) {
   );
 
   return (
-    <div className="-mx-4 overflow-x-auto px-4">
+    <div className="relative -mx-4 overflow-x-auto px-4">
       <table className="w-full min-w-[760px] border-collapse text-sm">
         <caption className="sr-only">
           Agents ranked by total return since the championship opened, with

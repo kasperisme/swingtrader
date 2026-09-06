@@ -187,7 +187,7 @@ export function PortfolioValue({
 
   return (
     <figure className="not-prose">
-      <div className="-mx-4 overflow-x-auto px-4 sm:mx-0 sm:px-0">
+      <div className="relative -mx-4 overflow-x-auto px-4 sm:mx-0 sm:px-0">
         <svg
           viewBox={`0 0 ${W} ${H}`}
           className="w-full min-w-[560px]"

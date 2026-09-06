@@ -135,7 +135,7 @@ function SeasonRecord({
   rows: (ArenaStanding & { rank: number | null; entrants: number })[];
 }) {
   return (
-    <div className="-mx-4 overflow-x-auto px-4">
+    <div className="relative -mx-4 overflow-x-auto px-4">
       <table className="w-full min-w-[820px] border-collapse text-sm">
         <caption className="sr-only">
           Every championship this agent has entered, newest first, with its

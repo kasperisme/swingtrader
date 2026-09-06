@@ -27,11 +27,15 @@ import { ARENA_COLOR_INDEX } from "@/lib/arena/colors";
 
 const PLACE_LABEL = ["Leader", "Second", "Third"] as const;
 
-/** Plinth heights, in the podium's own visual order. */
-const PLINTH = ["h-24 sm:h-28", "h-16 sm:h-20", "h-11 sm:h-14"] as const;
+/** Plinth heights, in the podium's own visual order. Shorter on a phone, where
+ *  three columns leave each plinth about a hundred pixels wide and the tall
+ *  version reads as a bar chart rather than a podium. */
+const PLINTH = ["h-16 sm:h-28", "h-11 sm:h-20", "h-8 sm:h-14"] as const;
 
-/** 2 · 1 · 3 on wide screens; rank order when stacked. */
-const ORDER = ["sm:order-2", "sm:order-1", "sm:order-3"] as const;
+/** Always 2 · 1 · 3: the silhouette IS the ranking, and stacking it into a
+ *  single column on a phone throws that away and leaves three cards that have
+ *  to be read in order instead of seen at once. */
+const ORDER = ["order-2", "order-1", "order-3"] as const;
 
 function fmtMoney(v: number | null | undefined) {
   if (v == null) return "—";
@@ -70,8 +74,8 @@ function Place({ row, rank }: { row: ArenaStanding; rank: number }) {
         href={`/agent/${row.slug}/${row.championship_slug}`}
         className="group flex flex-col justify-end rounded-t-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
       >
-        <div className="px-1 pb-3">
-          <div className="flex items-center gap-2">
+        <div className="px-0.5 pb-2.5 sm:px-1 sm:pb-3">
+          <div className="flex flex-wrap items-center gap-x-1.5 gap-y-1 sm:gap-x-2">
             <span
               aria-hidden
               className="h-2.5 w-2.5 shrink-0 rounded-full"
@@ -87,34 +91,38 @@ function Place({ row, rank }: { row: ArenaStanding; rank: number }) {
             </span>
           </div>
 
-          <span className="mt-2 flex items-start gap-1 text-lg font-semibold leading-tight tracking-tight transition-colors group-hover:text-amber-600 dark:group-hover:text-amber-500">
+          <span className="mt-1.5 flex items-start gap-1 text-sm font-semibold leading-tight tracking-tight transition-colors group-hover:text-amber-600 dark:group-hover:text-amber-500 sm:mt-2 sm:text-lg">
             {row.name}
             <ArrowUpRight
-              className="mt-1 h-3.5 w-3.5 shrink-0 opacity-0 transition-opacity group-hover:opacity-100"
+              className="mt-1 hidden h-3.5 w-3.5 shrink-0 opacity-0 transition-opacity group-hover:opacity-100 sm:block"
               aria-hidden
             />
           </span>
 
           {row.tagline && (
-            <p className="mt-1 line-clamp-2 text-xs leading-snug text-muted-foreground">
+            <p className="mt-1 hidden line-clamp-2 text-xs leading-snug text-muted-foreground sm:block">
               {row.tagline}
             </p>
           )}
 
           <p
-            className={`mt-3 font-mono text-2xl font-medium tabular-nums sm:text-3xl ${toneFor(row.total_return)}`}
+            className={`mt-2 font-mono text-base font-medium tabular-nums sm:mt-3 sm:text-3xl ${toneFor(row.total_return)}`}
           >
             {fmtPct(row.total_return)}
           </p>
-          <p className="mt-1 font-mono text-xs tabular-nums text-muted-foreground">
+          <p className="mt-0.5 font-mono text-[11px] tabular-nums text-muted-foreground sm:mt-1 sm:text-xs">
             {fmtMoney(row.nav)}
-            <span className="mx-1.5 opacity-40">·</span>
-            {fmtPct(row.max_drawdown, 1)} DD
+            {/* Drawdown is the first thing to go when the column is a third of a
+                phone: it is context for the return, not the headline. */}
+            <span className="hidden sm:inline">
+              <span className="mx-1.5 opacity-40">·</span>
+              {fmtPct(row.max_drawdown, 1)} DD
+            </span>
           </p>
 
           {isControl && (
-            <span className="mt-2 inline-block rounded bg-muted px-1.5 py-0.5 font-mono text-[10px] uppercase tracking-widest text-muted-foreground">
-              control · no LLM
+            <span className="mt-1.5 inline-block rounded bg-muted px-1.5 py-0.5 font-mono text-[10px] uppercase tracking-widest text-muted-foreground sm:mt-2">
+              control<span className="hidden sm:inline"> · no LLM</span>
             </span>
           )}
         </div>
@@ -137,7 +145,7 @@ function Place({ row, rank }: { row: ArenaStanding; rank: number }) {
               : `linear-gradient(to bottom, hsl(${hue} / 0.20), hsl(${hue} / 0.03))`,
           }}
         >
-          <span className="font-mono text-2xl font-semibold tabular-nums text-foreground/50 sm:text-3xl">
+          <span className="font-mono text-lg font-semibold tabular-nums text-foreground/50 sm:text-3xl">
             {rank}
           </span>
         </div>
@@ -152,7 +160,7 @@ export function Podium({ rows }: { rows: ArenaStanding[] }) {
 
   return (
     <ol
-      className="grid items-end gap-x-4 gap-y-8 sm:grid-cols-3 sm:gap-y-0"
+      className="grid grid-cols-3 items-end gap-x-2 sm:gap-x-4"
       aria-label="Top three agents"
     >
       {top.map((r, i) => (
