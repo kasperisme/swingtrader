@@ -12,11 +12,13 @@ import {
   type ArenaStanding,
 } from "@/app/actions/arena";
 import { SITE_NAME, SITE_URL } from "@/lib/site";
-import { getTraderForAgent } from "@/lib/sanity/trader-link";
+import { getTradersForAgent } from "@/lib/sanity/trader-link";
 import { EquityCurve } from "@/app/arena/_components/equity-curve";
 import { CitedResources, ToolSurface } from "@/app/arena/_components/resource-links";
 import { ARENA_COLOR_INDEX as COLOR_INDEX } from "@/lib/arena/colors";
+import { Portrait } from "@/app/traders/_components/portrait";
 import { StatGrid, type Stat } from "../_components/stat-grid";
+import { NotTheTrader } from "../_components/not-the-trader";
 import {
   fmtDate,
   fmtMoney,
@@ -72,25 +74,48 @@ async function Idol({
   agentSlug: string;
   fallbackText: string | null;
 }) {
-  const trader = await getTraderForAgent(agentSlug);
+  const traders = await getTradersForAgent(agentSlug);
 
-  if (!trader) {
+  if (traders.length === 0) {
     return fallbackText ? (
       <p className="font-mono text-xs text-muted-foreground/80">After {fallbackText}</p>
     ) : null;
   }
 
   return (
-    <Link
-      href={`/traders/${trader.slug}`}
-      className="group inline-flex items-baseline gap-1.5 font-mono text-xs text-muted-foreground transition-colors hover:text-amber-600 dark:hover:text-amber-500"
-    >
-      <span className="uppercase tracking-widest">Modelled on</span>
-      <span className="font-medium text-foreground transition-colors group-hover:text-amber-600 dark:group-hover:text-amber-500">
-        {trader.name}
+    <div className="mt-4 flex flex-wrap items-center gap-x-5 gap-y-3">
+      <span className="font-mono text-[11px] uppercase tracking-widest text-muted-foreground">
+        Modelled on
       </span>
-      <ArrowUpRight className="h-3 w-3 shrink-0 opacity-60" aria-hidden />
-    </Link>
+      {traders.map((t) => (
+        <Link
+          key={t.slug}
+          href={`/traders/${t.slug}`}
+          className="group flex items-center gap-2.5 transition-colors"
+        >
+          {/* The same Portrait the directory uses, so an agent and its trader
+              are visibly the same person — including the fallback mark, whose
+              hue is derived from the slug and therefore matches across pages. */}
+          <Portrait
+            name={t.name}
+            slug={t.slug}
+            url={t.imageUrl}
+            alt={t.imageAlt}
+            size={32}
+            className="transition-transform group-hover:scale-105"
+          />
+          <span className="flex items-baseline gap-1">
+            <span className="text-sm font-medium transition-colors group-hover:text-amber-600 dark:group-hover:text-amber-500">
+              {t.name}
+            </span>
+            <ArrowUpRight
+              className="h-3 w-3 shrink-0 self-center opacity-0 transition-opacity group-hover:opacity-60"
+              aria-hidden
+            />
+          </span>
+        </Link>
+      ))}
+    </div>
   );
 }
 
@@ -436,6 +461,12 @@ export default async function AgentPage({
         )}
       </header>
 
+      <section className="mt-8">
+        <Suspense fallback={null}>
+          <NotTheTrader agentName={agent.name} agentSlug={slug} />
+        </Suspense>
+      </section>
+
       {/* ── Career ───────────────────────────────────────────────────────── */}
       {record.length > 0 && (
         <>
@@ -562,9 +593,10 @@ export default async function AgentPage({
       </section>
 
       <p className="mt-14 max-w-[68ch] text-xs leading-relaxed text-muted-foreground">
-        Paper trading. No real money is at risk and nothing here is investment
-        advice. Orders fill at the next session&rsquo;s open with modelled
-        slippage; positions are marked to the close.
+        Paper trading, and experimental. No real money is at risk, nothing here
+        is investment advice, and none of it represents the investor this agent
+        is named after. Orders fill at the next session&rsquo;s open with
+        modelled slippage; positions are marked to the close.
       </p>
     </main>
   );

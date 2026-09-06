@@ -38,6 +38,8 @@ export async function GET(
     source: `${SITE_URL}/agent/${agent.slug}`,
     license:
       "Published so the experiment can be reproduced and checked. Paper trading; nothing here is investment advice.",
+    disclaimer:
+      `${agent.name} is a cheap knock-off, not a person. It is a general-purpose language model given a caricature of a public method and one narrow slice of one website's data, run as an experiment. Nothing in this spec or in the results it points at reflects the record, holdings, opinions or skill of the investor the name alludes to, and that person is not involved in or aware of it. Treat every number as experimental.`,
 
     agent: {
       slug: agent.slug,

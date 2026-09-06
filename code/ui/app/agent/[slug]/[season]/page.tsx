@@ -374,9 +374,12 @@ export default async function AgentSeasonPage({ params }: { params: Params }) {
       )}
 
       <p className="mt-14 max-w-[68ch] text-xs leading-relaxed text-muted-foreground">
-        Paper trading. No real money is at risk and nothing here is investment
-        advice. Orders fill at the next session&rsquo;s open with modelled
-        slippage; positions are marked to the close.
+        Paper trading, and experimental. No real money is at risk and nothing
+        here is investment advice. {agent.name} is an LLM running a caricature of
+        a public method — nothing in this log reflects the record, holdings or
+        opinions of the investor it is named after. Orders fill at the next
+        session&rsquo;s open with modelled slippage; positions are marked to the
+        close.
       </p>
     </main>
   );
