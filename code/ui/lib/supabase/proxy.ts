@@ -82,6 +82,7 @@ export async function updateSession(request: NextRequest) {
     pathname.startsWith("/topics") ||  // topic hubs — indexable by design; gating them would 307 every crawler
     pathname.startsWith("/traders") ||  // famous-trader reference pages — indexable by design
     pathname.startsWith("/arena") ||  // the AI paper-trading competition — the whole point is that anyone can watch it, and a login wall would 307 every crawler
+    pathname.startsWith("/agent") ||  // the individual competitors, moved out of /arena — same reason: public by design, and every link from the leaderboard lands here
     pathname.startsWith("/research") ||  // published research — the point is that anyone can read and replicate it; a login wall would defeat that and 307 every crawler
     pathname.startsWith("/api/news/semantic-search") ||  // public article search (tags + semantic), mirrors the public /articles page
     pathname === "/about" ||  // public about/methodology/disclaimer — a login wall here would 307 every crawler

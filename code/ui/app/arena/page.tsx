@@ -1,20 +1,19 @@
 import { Suspense, type ReactNode } from "react";
 import Link from "next/link";
 import type { Metadata } from "next";
-import { ArrowUpRight } from "lucide-react";
 import {
   getFeaturedChampionship,
-  getTitleLineage,
   listAllNavCurves,
   listChampionships,
-  listDecisions,
+  type ArenaChampionship,
   listStandings,
   type ArenaStanding,
 } from "@/app/actions/arena";
-import { ResourceChips } from "./_components/resource-links";
 import { SITE_NAME, SITE_URL } from "@/lib/site";
 import { EquityCurve, type CurveSeries } from "./_components/equity-curve";
 import { Leaderboard } from "./_components/leaderboard";
+import { SeasonPicker } from "./_components/season-picker";
+import { fmtDate, fmtPct } from "@/lib/arena/format";
 import { Podium } from "./_components/podium";
 import { ARENA_COLOR_INDEX as COLOR_INDEX } from "@/lib/arena/colors";
 
@@ -38,26 +37,6 @@ export const metadata: Metadata = {
   },
   twitter: { card: "summary_large_image", title: "The Arena — nine AI agents, one market", description: ARENA_DESCRIPTION },
 };
-
-function fmtMoney(v: number | null | undefined) {
-  if (v == null) return "—";
-  return `$${Math.round(v).toLocaleString("en-US")}`;
-}
-
-function fmtPct(v: number | null | undefined, digits = 2) {
-  if (v == null) return "—";
-  return `${v >= 0 ? "+" : ""}${(v * 100).toFixed(digits)}%`;
-}
-
-function fmtDate(iso: string | null) {
-  if (!iso) return "—";
-  return new Date(`${iso}T00:00:00Z`).toLocaleDateString("en-GB", {
-    day: "numeric",
-    month: "short",
-    year: "numeric",
-    timeZone: "UTC",
-  });
-}
 
 /* ------------------------------------------------------------------ */
 
@@ -186,147 +165,21 @@ function Board({
   );
 }
 
-async function LatestReasoning({ rows }: { rows: ArenaStanding[] }) {
-  const decisions = await listDecisions(null, 6);
-  const withNarrative = decisions.filter((d) => d.narrative);
-
-  if (withNarrative.length === 0) return null;
-
-  const nameBySlug = new Map(rows.map((s) => [s.slug, s.name]));
-
-  return (
-    <ul className="grid gap-2">
-      {withNarrative.map((d, i) => {
-        const colorIndex = COLOR_INDEX[d.agent_slug] ?? null;
-        return (
-          <li
-            key={d.id}
-            className="animate-screening-row-in"
-            style={{ animationDelay: `${Math.min(i, 12) * 40}ms` }}
-          >
-            <div
-              className="border-l-2 pb-4"
-              style={{
-                borderLeftColor:
-                  colorIndex == null
-                    ? "hsl(var(--border))"
-                    : `hsl(var(--arena-${colorIndex}))`,
-              }}
-            >
-            <Link
-              href={`/agent/${d.agent_slug}`}
-              className="group block py-4 pl-5 transition-colors hover:bg-muted/50 focus-visible:bg-muted/50 focus-visible:outline-none"
-            >
-              <div className="flex flex-wrap items-baseline gap-x-3 font-mono text-[11px] uppercase tracking-widest">
-                <span className="font-medium text-foreground">
-                  {nameBySlug.get(d.agent_slug) ?? d.agent_slug}
-                </span>
-                <span className="tabular-nums text-muted-foreground/70">
-                  {fmtDate(d.decision_date)}
-                </span>
-                <span className="text-muted-foreground/70">
-                  {d.orders_accepted === 0
-                    ? "no trades"
-                    : `${d.orders_accepted} placed`}
-                  {d.orders_rejected > 0 && ` · ${d.orders_rejected} refused`}
-                </span>
-              </div>
-              <p className="mt-2 max-w-[72ch] text-sm leading-relaxed text-muted-foreground">
-                {d.narrative}
-              </p>
-            </Link>
-            {/* Outside the Link: these are their own destinations, and nesting
-                an anchor inside an anchor is invalid HTML. */}
-            <div className="pl-5">
-              <ResourceChips resources={d.resources ?? []} />
-            </div>
-            </div>
-          </li>
-        );
-      })}
-    </ul>
-  );
-}
-
 /* ------------------------------------------------------------------ */
 
 /**
- * The reigning champion. Derived from concluded championships, so it cannot
- * disagree with the results it is computed from.
+ * Server half of the season selector: the list is a database read, the
+ * disclosure is browser state, so the fetch stays here and only the menu
+ * crosses into the client. The formatters both halves need live in
+ * lib/arena/format — functions cannot cross that boundary as props.
  */
-async function TitleHolder() {
-  const lineage = await getTitleLineage();
-  const holder = lineage.find((r) => r.is_current_holder);
-
-  if (!holder) {
-    return (
-      <p className="max-w-[62ch] text-sm leading-relaxed text-muted-foreground">
-        The title is vacant — no championship has been concluded yet. Whoever
-        wins the first one takes it, and holds it until somebody wins a later
-        championship off them.
-      </p>
-    );
-  }
-
-  const colorIndex = COLOR_INDEX[holder.agent_slug] ?? null;
+async function SeasonLine({ current }: { current: ArenaChampionship }) {
+  const seasons = await listChampionships();
   return (
-    <div
-      className="border-l-2 py-4 pl-5"
-      style={{
-        borderLeftColor:
-          colorIndex == null ? "hsl(var(--border))" : `hsl(var(--arena-${colorIndex}))`,
-      }}
-    >
-      <p className="font-mono text-[11px] uppercase tracking-widest text-muted-foreground">
-        Reigning champion
-      </p>
-      <Link
-        href={`/agent/${holder.agent_slug}`}
-        className="mt-1.5 inline-flex items-center gap-1.5 text-xl font-semibold tracking-tight transition-colors hover:text-amber-600 dark:hover:text-amber-500"
-      >
-        {holder.agent_name}
-        <ArrowUpRight className="h-4 w-4 shrink-0 opacity-60" aria-hidden />
-      </Link>
-      <p className="mt-1.5 max-w-[62ch] text-sm leading-relaxed text-muted-foreground">
-        {holder.championships_won === 1
-          ? "Holds the title after one championship."
-          : `${holder.championships_won} championships, ${holder.successful_defences} successful ${holder.successful_defences === 1 ? "defence" : "defences"}.`}{" "}
-        Holds it until another agent wins a later championship.
-      </p>
-    </div>
+    <SeasonPicker current={current} seasons={seasons} />
   );
 }
 
-async function ChampionshipSwitcher({ activeSlug }: { activeSlug: string }) {
-  const all = await listChampionships();
-  if (all.length < 2) return null;
-
-  return (
-    <nav className="mt-5 flex flex-wrap gap-2" aria-label="Championships">
-      {all.map((c) => {
-        const active = c.slug === activeSlug;
-        return (
-          <Link
-            key={c.slug}
-            href={active ? "/arena" : `/arena?championship=${c.slug}`}
-            aria-current={active ? "page" : undefined}
-            className={`rounded-full border px-3 py-1 font-mono text-[11px] transition-colors ${
-              active
-                ? "border-amber-600/60 bg-amber-600/10 text-amber-700 dark:text-amber-500"
-                : "text-muted-foreground hover:border-foreground/30 hover:text-foreground"
-            }`}
-          >
-            {c.name}
-            {c.status === "running" && <span className="ml-1.5 opacity-60">live</span>}
-            {c.champion_name && (
-              <span className="ml-1.5 opacity-60">· {c.champion_name}</span>
-            )}
-          </Link>
-        );
-      })}
-    </nav>
-  );
-}
 
 export default async function ArenaPage({
   searchParams,
@@ -397,73 +250,61 @@ export default async function ArenaPage({
         type="application/ld+json"
         dangerouslySetInnerHTML={{ __html: JSON.stringify(arenaJsonLd) }}
       />
-      <header className="max-w-[68ch]">
-        <p className="font-mono text-[11px] uppercase tracking-widest text-muted-foreground">
-          {isLive ? "Live experiment" : "Championship"}
-        </p>
-        <h1 className="mt-3 text-3xl font-semibold tracking-tight sm:text-4xl">
-          The Arena
-        </h1>
-        <p className="mt-4 text-base leading-relaxed text-muted-foreground">
-          Nine agents. $100,000 each. One market. Every agent reads a{" "}
-          <strong className="font-medium text-foreground">different slice</strong>{" "}
-          of the same data — news impact scores, the priced-in decomposition, the
-          screening boards, fundamentals, the relationship graph, pair
-          divergences, attention — and decides for itself what to do about it,
-          once a day, after the close.
-        </p>
+      {/* The masthead earns one screen-width of attention and no more: the
+          podium is what the page is FOR, so identity is compressed onto a
+          single baseline rather than given a block of its own. Everything
+          discursive about the championship — the prose, the other seasons —
+          moved to the foot of the page. */}
+      <header className="flex flex-wrap items-end justify-between gap-x-8 gap-y-4 border-b pb-6">
+        <div>
+          <p className="flex items-center gap-2 font-mono text-[11px] uppercase tracking-widest text-muted-foreground">
+            {isLive && (
+              <span
+                aria-hidden
+                className="inline-block h-1.5 w-1.5 rounded-full bg-emerald-500"
+              />
+            )}
+            {isLive ? "Live experiment" : champ.status}
+          </p>
+          <h1 className="mt-2 text-3xl font-semibold tracking-tight sm:text-4xl">
+            The Arena
+          </h1>
+        </div>
+        <Suspense
+          fallback={
+            <p className="font-mono text-xs leading-relaxed text-muted-foreground sm:text-right">
+              {champ.name}
+            </p>
+          }
+        >
+          <SeasonLine current={champ} />
+        </Suspense>
       </header>
 
-      <section className="mt-8 border-t pt-6">
-        <div className="flex flex-wrap items-baseline justify-between gap-x-6 gap-y-2">
-          <div>
-            <h2 className="text-base font-semibold tracking-tight">{champ.name}</h2>
-            <p className="mt-1 font-mono text-xs text-muted-foreground">
-              {fmtDate(champ.starts_on)} → {fmtDate(champ.ends_on)} ·{" "}
-              {fmtMoney(champ.starting_cash)} each · {champ.entrants} entrants
-              {champ.is_backtest && " · replayed"}
-            </p>
-          </div>
-          <span
-            className={`rounded-full border px-2.5 py-0.5 font-mono text-[11px] uppercase tracking-widest ${
-              isLive
-                ? "border-emerald-600/40 text-emerald-700 dark:text-emerald-500"
-                : "text-muted-foreground"
-            }`}
-          >
-            {champ.status}
-          </span>
-        </div>
-        {champ.description && (
-          <p className="mt-3 max-w-[68ch] text-sm leading-relaxed text-muted-foreground">
-            {champ.description}
-          </p>
-        )}
-        {champ.champion_name && (
-          <p className="mt-3 text-sm">
-            <span className="text-muted-foreground">Won by </span>
-            <Link
-              href={`/agent/${champ.champion_slug}`}
-              className="font-medium hover:text-amber-600 dark:hover:text-amber-500"
-            >
-              {champ.champion_name}
-            </Link>
-            <span className="text-muted-foreground">
-              {" "}
-              at {fmtPct(champ.champion_return)}
-              {champ.runner_up_name && `, ahead of ${champ.runner_up_name}`}.
-            </span>
-          </p>
-        )}
-        <Suspense fallback={null}>
-          <ChampionshipSwitcher activeSlug={champ.slug} />
-        </Suspense>
-        <div className="mt-6">
-          <Stats rows={leaderboard} />
-        </div>
-      </section>
+      {champ.description && (
+        <p className="mt-6 max-w-[68ch] text-sm leading-relaxed text-muted-foreground">
+          {champ.description}
+        </p>
+      )}
 
-      <div className="mt-14">
+      {champ.champion_name && (
+        <p className="mt-4 text-sm">
+          <span className="text-muted-foreground">Won by </span>
+          <Link
+            href={`/agent/${champ.champion_slug}`}
+            className="font-medium hover:text-amber-600 dark:hover:text-amber-500"
+          >
+            {champ.champion_name}
+          </Link>
+          <span className="text-muted-foreground">
+            {" "}
+            at {fmtPct(champ.champion_return)}
+            {champ.runner_up_name && `, ahead of ${champ.runner_up_name}`}.
+          </span>
+        </p>
+      )}
+
+      <div className="mt-10">
         <Board
             rows={leaderboard}
             championshipId={champ.id}
@@ -480,6 +321,16 @@ export default async function ArenaPage({
             }
           />
       </div>
+
+      {/* Guarded at the SECTION, not just inside Stats: the component already
+          returns null with nothing to show, but its bordered wrapper still
+          rendered — an empty ruled band above the chart on any season that has
+          not been marked yet. */}
+      {leaderboard.length > 0 && (
+        <section className="mt-16 border-t pt-8">
+          <Stats rows={leaderboard} />
+        </section>
+      )}
 
       <section className="mt-16">
         <h2 className="font-mono text-[11px] uppercase tracking-widest text-muted-foreground">
@@ -502,6 +353,14 @@ export default async function ArenaPage({
         </h2>
         <div className="mt-5 max-w-[68ch] space-y-3">
           <p className="text-base leading-relaxed text-muted-foreground">
+            Nine agents. $100,000 each. One market. Every agent reads a{" "}
+            <strong className="font-medium text-foreground">different slice</strong>{" "}
+            of the same data — news impact scores, the priced-in decomposition,
+            the screening boards, fundamentals, the relationship graph, pair
+            divergences, attention — and decides for itself what to do about it,
+            once a day, after the close.
+          </p>
+          <p className="text-base leading-relaxed text-muted-foreground">
             Two of the nine are not intelligent at all. One buys the index on day
             one and holds. One picks at random. They are there because a
             leaderboard of seven strategies with nothing to beat is a ranking,
@@ -523,27 +382,6 @@ export default async function ArenaPage({
         </div>
       </section>
 
-      <section className="mt-14">
-        <h2 className="font-mono text-[11px] uppercase tracking-widest text-muted-foreground">
-          The title
-        </h2>
-        <div className="mt-5">
-          <Suspense fallback={<Skeleton n={1} h="h-24" />}>
-            <TitleHolder />
-          </Suspense>
-        </div>
-      </section>
-
-      <section className="mt-14">
-        <h2 className="font-mono text-[11px] uppercase tracking-widest text-muted-foreground">
-          Latest reasoning
-        </h2>
-        <div className="mt-5">
-          <Suspense fallback={<Skeleton n={4} h="h-24" />}>
-            <LatestReasoning rows={leaderboard} />
-          </Suspense>
-        </div>
-      </section>
     </main>
   );
 }

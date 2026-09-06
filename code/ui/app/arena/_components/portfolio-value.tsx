@@ -4,20 +4,28 @@ import { useMemo, useState } from "react";
 import type { ArenaNavPoint } from "@/app/actions/arena";
 
 /**
- * Portfolio value over time, in dollars — the companion to the equity curve.
+ * One agent's book over time, in either of the two encodings that matter.
  *
- * The equity curve answers "how much did it make". This answers "what was it
- * holding while it did", which is a different and often more revealing question:
- * an agent parked in cash and an agent fully invested can print the same flat
- * return, and only this chart tells them apart. The arena's first replay had
- * reasoning agents sitting at 10% invested against a buy-and-hold control at
- * 97%, which is invisible on a return chart and obvious here.
+ *  - **`return`** — the equity line: cumulative return since funding, against
+ *    the zero line that separates profit from loss. The question "did it make
+ *    money", answered in the shape everyone already reads.
  *
- * Cash is stacked under holdings so the band heights read as the split, and the
- * total height IS net asset value. Shorts are drawn BELOW the zero line rather
- * than stacked: a short is a liability, and stacking it would imply the book is
- * bigger than it is.
+ *  - **`value`** — portfolio value in dollars, cash stacked under holdings so
+ *    the band heights read as the split and the total height IS net asset
+ *    value. This answers "what was it holding while it did", which the return
+ *    line cannot: an agent parked in cash and an agent fully invested print the
+ *    same flat return. The arena's first replay had reasoning agents sitting at
+ *    10% invested against a buy-and-hold control at 97% — invisible on a return
+ *    chart, obvious here. Shorts are drawn BELOW the zero line rather than
+ *    stacked: a short is a liability, and stacking it would imply the book is
+ *    bigger than it is.
+ *
+ * The x-axis, the hover crosshair and the click-to-select are identical in both
+ * — it is the same chart with a different y — so switching encoding never
+ * changes which session the holdings table below is showing.
  */
+
+export type PortfolioChartMode = "value" | "return";
 
 type Props = {
   points: ArenaNavPoint[];
@@ -25,6 +33,8 @@ type Props = {
   /** 1-7 for a strategy, null for a deterministic control. */
   colorIndex: number | null;
   height?: number;
+  /** Which y-encoding to draw. */
+  mode?: PortfolioChartMode;
   /** Session the table below is showing, marked on the chart. */
   selected?: string | null;
   /** Click a session to drive the holdings table. */
@@ -40,6 +50,10 @@ function fmtMoney(v: number) {
   return `$${Math.round(v)}`;
 }
 
+function fmtPct(v: number, digits = 1) {
+  return `${v >= 0 ? "+" : ""}${(v * 100).toFixed(digits)}%`;
+}
+
 function fmtDay(iso: string) {
   return new Date(`${iso}T00:00:00Z`).toLocaleDateString("en-GB", {
     day: "numeric",
@@ -48,11 +62,18 @@ function fmtDay(iso: string) {
   });
 }
 
+/** Cumulative return, falling back to NAV against funding when it is missing. */
+function returnOf(p: ArenaNavPoint, startingCash: number) {
+  if (p.cumulative_return != null) return p.cumulative_return;
+  return startingCash ? p.nav / startingCash - 1 : 0;
+}
+
 export function PortfolioValue({
   points,
   startingCash,
   colorIndex,
   height = 260,
+  mode = "value",
   selected = null,
   onSelect,
 }: Props) {
@@ -71,6 +92,23 @@ export function PortfolioValue({
 
   const model = useMemo(() => {
     const rows = [...points].sort((a, b) => a.as_of.localeCompare(b.as_of));
+
+    if (mode === "return") {
+      let min = 0;
+      let max = 0;
+      for (const p of rows) {
+        const v = returnOf(p, startingCash);
+        if (v < min) min = v;
+        if (v > max) max = v;
+      }
+      // Zero always stays in frame — the question "did it make money" is
+      // answered by which side of that line the curve is on, so it can never be
+      // cropped out.
+      const span = Math.max(max - min, 0.02);
+      const pad = span * 0.12;
+      return { rows, yMin: min - pad, yMax: max + pad };
+    }
+
     let max = startingCash;
     let minShort = 0;
     for (const p of rows) {
@@ -80,7 +118,7 @@ export function PortfolioValue({
     // Keep the starting line and the zero axis in frame; head-room so the top
     // band is not flush against the edge.
     return { rows, yMax: max * 1.06, yMin: Math.min(0, minShort * 1.15) };
-  }, [points, startingCash]);
+  }, [points, startingCash, mode]);
 
   const { rows, yMax, yMin } = model;
 
@@ -95,6 +133,7 @@ export function PortfolioValue({
     );
   }
 
+  const isReturn = mode === "return";
   const W = 1000;
   const H = height;
   const plotW = W - PAD.left - PAD.right;
@@ -114,15 +153,31 @@ export function PortfolioValue({
     return `${up.join(" ")} ${down.join(" ")} Z`;
   };
 
-  const cashBand = band((p) => p.cash, () => 0);
-  const longBand = band((p) => p.cash + (p.long_value ?? 0), (p) => p.cash);
-  const shortBand = band(() => 0, (p) => -(p.short_value ?? 0));
+  // The marked value per session — NAV in dollars, or cumulative return.
+  const valueAt = (p: ArenaNavPoint) => (isReturn ? returnOf(p, startingCash) : p.nav);
+
+  const cashBand = isReturn ? "" : band((p) => p.cash, () => 0);
+  const longBand = isReturn ? "" : band((p) => p.cash + (p.long_value ?? 0), (p) => p.cash);
+  const shortBand = isReturn ? "" : band(() => 0, (p) => -(p.short_value ?? 0));
+  // In return mode the fill runs between the line and zero, so a losing stretch
+  // reads as area BELOW the axis rather than as a smaller positive block.
+  const returnArea = isReturn
+    ? `${rows.map((p, i) => `${i === 0 ? "M" : "L"}${x(i)},${y(valueAt(p))}`).join(" ")} L${x(rows.length - 1)},${y(0)} L${x(0)},${y(0)} Z`
+    : "";
   const navLine = rows
-    .map((p, i) => `${i === 0 ? "M" : "L"}${x(i)},${y(p.nav)}`)
+    .map((p, i) => `${i === 0 ? "M" : "L"}${x(i)},${y(valueAt(p))}`)
     .join(" ");
 
   const hasShorts = rows.some((p) => (p.short_value ?? 0) > 0);
   const ticks = niceTicks(yMin, yMax, 4);
+  // Axis precision follows the tick STEP, not a fixed digit count: on the first
+  // sessions the whole range is a fraction of a percent, and rounding to whole
+  // percent would label every gridline "+0%".
+  const tickStep = ticks.length > 1 ? Math.abs(ticks[1] - ticks[0]) : 0.01;
+  const tickDigits = tickStep >= 0.01 ? 0 : tickStep >= 0.001 ? 1 : 2;
+  const tickLabel = (t: number) => (isReturn ? fmtPct(t, tickDigits) : fmtMoney(t));
+  const baseline = isReturn ? 0 : startingCash;
+
   const hovered = hoverIdx == null ? null : rows[hoverIdx];
   const selectedIdx = selected
     ? (rows.findIndex((p) => p.as_of === selected) === -1
@@ -138,7 +193,11 @@ export function PortfolioValue({
           className="w-full min-w-[560px]"
           style={{ height }}
           role="img"
-          aria-label={`Portfolio value over time: cash and holdings stacked to net asset value. Starting capital ${fmtMoney(startingCash)}.${onSelect ? " Click a session to show the book held that day." : ""}`}
+          aria-label={`${
+            isReturn
+              ? "Cumulative return since funding, against the zero line."
+              : `Portfolio value over time: cash and holdings stacked to net asset value. Starting capital ${fmtMoney(startingCash)}.`
+          }${onSelect ? " Click a session to show the book held that day." : ""}`}
           onMouseLeave={() => setHoverIdx(null)}
         >
           {ticks.map((t) => (
@@ -159,17 +218,17 @@ export function PortfolioValue({
                 dominantBaseline="middle"
                 className="fill-muted-foreground font-mono text-[11px] tabular-nums"
               >
-                {fmtMoney(t)}
+                {tickLabel(t)}
               </text>
             </g>
           ))}
 
-          {/* Starting capital — the line that turns height into profit or loss. */}
+          {/* Funding — the line that turns height into profit or loss. */}
           <line
             x1={PAD.left}
             x2={W - PAD.right}
-            y1={y(startingCash)}
-            y2={y(startingCash)}
+            y1={y(baseline)}
+            y2={y(baseline)}
             stroke="hsl(var(--foreground))"
             strokeWidth={1}
             strokeDasharray="4 4"
@@ -177,17 +236,23 @@ export function PortfolioValue({
           />
           <text
             x={W - PAD.right}
-            y={y(startingCash) - 5}
+            y={y(baseline) - 5}
             textAnchor="end"
             className="fill-muted-foreground font-mono text-[10px]"
           >
-            start {fmtMoney(startingCash)}
+            start {isReturn ? "0%" : fmtMoney(startingCash)}
           </text>
 
-          <path d={cashBand} fill="hsl(var(--muted-foreground))" opacity={cashOpacity} />
-          <path d={longBand} fill={invested} opacity={investedOpacity} />
-          {hasShorts && (
-            <path d={shortBand} fill="hsl(var(--destructive))" opacity={0.3} />
+          {isReturn ? (
+            <path d={returnArea} fill={invested} opacity={0.14} />
+          ) : (
+            <>
+              <path d={cashBand} fill="hsl(var(--muted-foreground))" opacity={cashOpacity} />
+              <path d={longBand} fill={invested} opacity={investedOpacity} />
+              {hasShorts && (
+                <path d={shortBand} fill="hsl(var(--destructive))" opacity={0.3} />
+              )}
+            </>
           )}
 
           <path
@@ -238,7 +303,7 @@ export function PortfolioValue({
               />
               <circle
                 cx={x(selectedIdx)}
-                cy={y(rows[selectedIdx].nav)}
+                cy={y(valueAt(rows[selectedIdx]))}
                 r={4.5}
                 fill={invested}
                 stroke="hsl(var(--background))"
@@ -265,35 +330,48 @@ export function PortfolioValue({
 
       <figcaption className="mt-3">
         <ul className="flex flex-wrap gap-x-4 gap-y-1.5 text-[11px] text-muted-foreground">
-          <li className="flex items-center gap-1.5">
-            <span
-              aria-hidden
-              className="h-2.5 w-2.5 rounded-sm"
-              style={{ backgroundColor: invested, opacity: investedOpacity }}
-            />
-            Holdings
-          </li>
-          <li className="flex items-center gap-1.5">
-            <span
-              aria-hidden
-              className="h-2.5 w-2.5 rounded-sm bg-muted-foreground/25"
-            />
-            Cash
-          </li>
-          {hasShorts && (
+          {isReturn ? (
             <li className="flex items-center gap-1.5">
-              <span aria-hidden className="h-2.5 w-2.5 rounded-sm bg-destructive/30" />
-              Shorts (below the line — a liability)
+              <span
+                aria-hidden
+                className="h-0.5 w-4 rounded-full"
+                style={{ backgroundColor: invested }}
+              />
+              Cumulative return since funding
             </li>
+          ) : (
+            <>
+              <li className="flex items-center gap-1.5">
+                <span
+                  aria-hidden
+                  className="h-2.5 w-2.5 rounded-sm"
+                  style={{ backgroundColor: invested, opacity: investedOpacity }}
+                />
+                Holdings
+              </li>
+              <li className="flex items-center gap-1.5">
+                <span
+                  aria-hidden
+                  className="h-2.5 w-2.5 rounded-sm bg-muted-foreground/25"
+                />
+                Cash
+              </li>
+              {hasShorts && (
+                <li className="flex items-center gap-1.5">
+                  <span aria-hidden className="h-2.5 w-2.5 rounded-sm bg-destructive/30" />
+                  Shorts (below the line — a liability)
+                </li>
+              )}
+              <li className="flex items-center gap-1.5">
+                <span
+                  aria-hidden
+                  className="h-0.5 w-4 rounded-full"
+                  style={{ backgroundColor: invested }}
+                />
+                Net asset value
+              </li>
+            </>
           )}
-          <li className="flex items-center gap-1.5">
-            <span
-              aria-hidden
-              className="h-0.5 w-4 rounded-full"
-              style={{ backgroundColor: invested }}
-            />
-            Net asset value
-          </li>
         </ul>
 
         {hovered && (
@@ -303,6 +381,20 @@ export function PortfolioValue({
                 {fmtDay(hovered.as_of)}
               </dt>
             </div>
+            {isReturn && (
+              <div className="flex gap-1.5">
+                <dt className="text-muted-foreground">Return</dt>
+                <dd
+                  className={`font-medium ${
+                    returnOf(hovered, startingCash) >= 0
+                      ? "text-emerald-600 dark:text-emerald-500"
+                      : "text-rose-600 dark:text-rose-500"
+                  }`}
+                >
+                  {fmtPct(returnOf(hovered, startingCash), 2)}
+                </dd>
+              </div>
+            )}
             <div className="flex gap-1.5">
               <dt className="text-muted-foreground">NAV</dt>
               <dd className="font-medium">{fmtMoney(hovered.nav)}</dd>

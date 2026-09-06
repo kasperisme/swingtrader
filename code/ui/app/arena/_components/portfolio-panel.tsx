@@ -3,7 +3,7 @@
 import { useMemo, useState } from "react";
 import Link from "next/link";
 import type { ArenaHolding, ArenaNavPoint, ArenaPosition } from "@/app/actions/arena";
-import { PortfolioValue } from "./portfolio-value";
+import { PortfolioValue, type PortfolioChartMode } from "./portfolio-value";
 
 /**
  * The portfolio chart and the holdings table, sharing one selected session.
@@ -25,6 +25,13 @@ type Props = {
   colorIndex: number | null;
   nav: number | null;
   cash: number | null;
+  /**
+   * Which encoding the chart opens on. Surfaces that already draw a return
+   * curve of their own leave this at "value" so the two are not the same
+   * picture twice; the leaderboard, where this panel IS the only chart, opens
+   * on "return" because "did it make money" is the first question.
+   */
+  defaultChart?: PortfolioChartMode;
 };
 
 type Row = {
@@ -100,7 +107,9 @@ export function PortfolioPanel({
   colorIndex,
   nav,
   cash,
+  defaultChart = "value",
 }: Props) {
+  const [chart, setChart] = useState<PortfolioChartMode>(defaultChart);
   const sorted = useMemo(
     () => [...points].sort((a, b) => a.as_of.localeCompare(b.as_of)),
     [points],
@@ -131,13 +140,45 @@ export function PortfolioPanel({
 
   return (
     <>
-      <PortfolioValue
-        points={points}
-        startingCash={startingCash}
-        colorIndex={colorIndex}
-        selected={point?.as_of ?? null}
-        onSelect={(d) => setSelected(d)}
-      />
+      <div className="flex justify-end">
+        <div
+          role="group"
+          aria-label="Chart encoding"
+          className="inline-flex rounded-full border p-0.5"
+        >
+          {(
+            [
+              ["return", "Return"],
+              ["value", "Value"],
+            ] as const
+          ).map(([value, label]) => (
+            <button
+              key={value}
+              type="button"
+              onClick={() => setChart(value)}
+              aria-pressed={chart === value}
+              className={`rounded-full px-2.5 py-0.5 font-mono text-[11px] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
+                chart === value
+                  ? "bg-muted font-medium text-foreground"
+                  : "text-muted-foreground hover:text-foreground"
+              }`}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div className="mt-2">
+        <PortfolioValue
+          points={points}
+          startingCash={startingCash}
+          colorIndex={colorIndex}
+          mode={chart}
+          selected={point?.as_of ?? null}
+          onSelect={(d) => setSelected(d)}
+        />
+      </div>
 
       <div className="mt-10 flex flex-wrap items-baseline justify-between gap-x-6 gap-y-2">
         <h3 className="font-mono text-[11px] uppercase tracking-widest text-muted-foreground">

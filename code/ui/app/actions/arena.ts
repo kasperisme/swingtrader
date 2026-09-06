@@ -199,6 +199,8 @@ export type ArenaOrder = {
   filled_at: string | null;
   fill_price: number | null;
   notional: number | null;
+  /** The decision that produced it. NULL on rows written before decisions were recorded. */
+  decision_id: string | null;
   realized_pnl: number | null;
   realized_pct: number | null;
   is_backtest: boolean;
@@ -399,9 +401,11 @@ export async function listPositions(
 export async function listOrders(
   slug: string | null,
   limit = 40,
+  championshipId?: string,
 ): Promise<ArenaOrder[]> {
   let q = sb().from("arena_orders_public_v").select("*");
   if (slug) q = q.eq("agent_slug", slug);
+  if (championshipId) q = q.eq("championship_id", championshipId);
   // Ordered by the SESSION traded, not by when the row was written. A replay
   // writes 46 sessions of orders within an hour of wall-clock time, so sorting
   // on `submitted_at` would interleave July and September arbitrarily.
@@ -419,9 +423,11 @@ export async function listOrders(
 export async function listDecisions(
   slug: string | null,
   limit = 20,
+  championshipId?: string,
 ): Promise<ArenaDecision[]> {
   let q = sb().from("arena_decisions_public_v").select("*");
   if (slug) q = q.eq("agent_slug", slug);
+  if (championshipId) q = q.eq("championship_id", championshipId);
   const { data, error } = await q
     .order("decision_date", { ascending: false })
     .limit(limit);
@@ -559,4 +565,93 @@ export async function resolveAgentAppearance(
     appearances[0] ??
     null;
   return { appearances, current };
+}
+
+/* ── One appearance, in full ──────────────────────────────────────────────── */
+
+/** One session of an appearance: what the agent decided, and what it then did. */
+export type ArenaSession = {
+  decision: ArenaDecision;
+  /** The orders that decision produced — accepted AND refused. */
+  orders: ArenaOrder[];
+};
+
+export type ArenaAppearance = {
+  sessions: ArenaSession[];
+  /**
+   * Orders with no decision attached. Rows written before decisions were
+   * recorded, and the deterministic controls, which place orders without ever
+   * reasoning about them. Kept rather than dropped — an order the page cannot
+   * explain is still part of the record.
+   */
+  unattributed: ArenaOrder[];
+  decisions: ArenaDecision[];
+  orders: ArenaOrder[];
+};
+
+/**
+ * Everything one agent did in one championship, with each order filed under the
+ * reasoning that produced it.
+ *
+ * Joined on `decision_id` rather than on the date, because the two do not line
+ * up: an order is decided after one close and INTENDED FOR the next session, so
+ * matching `decision_date` to `intended_for` would file every order under the
+ * previous day's thinking. Both sides are fetched whole — a season is ~46
+ * decisions and a few hundred orders, and a truncated log is a misleading one.
+ */
+export async function getAgentAppearance(
+  slug: string,
+  championshipId: string,
+): Promise<ArenaAppearance> {
+  const [decisionsRes, ordersRes] = await Promise.all([
+    fetchAllPaged<ArenaDecision>((from, to) =>
+      sb()
+        .from("arena_decisions_public_v")
+        .select("*")
+        .eq("agent_slug", slug)
+        .eq("championship_id", championshipId)
+        .order("decision_date", { ascending: false })
+        .range(from, to)
+        .overrideTypes<ArenaDecision[]>(),
+    ),
+    fetchAllPaged<ArenaOrder>((from, to) =>
+      sb()
+        .from("arena_orders_public_v")
+        .select("*")
+        .eq("agent_slug", slug)
+        .eq("championship_id", championshipId)
+        .order("intended_for", { ascending: false, nullsFirst: false })
+        .order("submitted_at", { ascending: false })
+        .range(from, to)
+        .overrideTypes<ArenaOrder[]>(),
+    ),
+  ]);
+  if (decisionsRes.error) console.error("getAgentAppearance/decisions", decisionsRes.error);
+  if (ordersRes.error) console.error("getAgentAppearance/orders", ordersRes.error);
+
+  const decisions = decisionsRes.data;
+  const orders = ordersRes.data;
+
+  const byDecision = new Map<string, ArenaOrder[]>();
+  const unattributed: ArenaOrder[] = [];
+  const known = new Set(decisions.map((d) => d.id));
+  for (const o of orders) {
+    if (o.decision_id && known.has(o.decision_id)) {
+      const bucket = byDecision.get(o.decision_id);
+      if (bucket) bucket.push(o);
+      else byDecision.set(o.decision_id, [o]);
+    } else {
+      unattributed.push(o);
+    }
+  }
+
+  return {
+    sessions: decisions.map((decision) => ({
+      decision,
+      orders: byDecision.get(decision.id) ?? [],
+    })),
+    unattributed,
+    decisions,
+    orders,
+  };
 }

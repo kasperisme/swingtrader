@@ -230,6 +230,7 @@ export function Leaderboard({ rows, championshipId }: Props) {
                             colorIndex={isControl ? null : colorIndex}
                             nav={book.nav}
                             cash={book.cash}
+                            defaultChart="return"
                           />
                           <div className="mt-6">
                             <Link

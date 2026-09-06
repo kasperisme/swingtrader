@@ -2,7 +2,7 @@ import { Suspense } from "react";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import type { Metadata } from "next";
-import { ArrowLeft, ArrowUpRight } from "lucide-react";
+import { ArrowLeft, ArrowUpRight, Trophy } from "lucide-react";
 import {
   getAgent,
   listAgentResources,
@@ -237,9 +237,10 @@ function Appearances({
               <span className="ml-1.5 opacity-60">live</span>
             )}
             {a.is_champion && (
-              <span className="ml-1.5" title="Won this championship">
-                &#127942;
-              </span>
+              <Trophy
+                className="ml-1.5 inline h-3 w-3 text-amber-600 dark:text-amber-500"
+                aria-label="Won this championship"
+              />
             )}
           </Link>
         );
