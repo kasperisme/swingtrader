@@ -139,7 +139,7 @@ export async function ArenaLeaderboardSection() {
                     </td>
                     <td className="py-3 pr-4">
                       <Link
-                        href={`/arena/${r.slug}`}
+                        href={`/agent/${r.slug}`}
                         className="group flex items-center gap-2.5"
                       >
                         <span

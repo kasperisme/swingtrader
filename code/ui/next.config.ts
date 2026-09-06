@@ -5,6 +5,16 @@ const nextConfig: NextConfig = {
   skipTrailingSlashRedirect: true,
   async redirects() {
     return [
+      // Agents moved out of /arena and onto their own entity route. An agent
+      // persists across championships; the arena is a season it appears in, so
+      // nesting the agent under it made the URL claim otherwise. These URLs are
+      // in the sitemap and carry structured data, so the move is a 308 rather
+      // than a fresh set of 404s.
+      {
+        source: "/arena/:slug",
+        destination: "/agent/:slug",
+        permanent: true,
+      },
       // Routes that were folded into other surfaces. Briefing emails already in
       // inboxes carry signed one-click links to these paths, and their tokens
       // stay valid for seven days — a 404 there is a lost sign-in, not just a

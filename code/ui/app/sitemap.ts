@@ -160,7 +160,7 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
       .select("slug");
     if (error) throw error;
     arenaRoutes = (data ?? []).map((a) => ({
-      url: `${baseUrl}/arena/${a.slug as string}`,
+      url: `${baseUrl}/agent/${a.slug as string}`,
       lastModified: now,
       changeFrequency: "daily" as const,
       priority: 0.6,
@@ -234,7 +234,7 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
   // full list is 8 cheap calls instead of 30 expensive ones.
   const QUOTE_RPC_PAGE = 200;
   let quoteRoutes: MetadataRoute.Sitemap = [];
-  let quoteIndexRoutes: MetadataRoute.Sitemap = [];
+  const quoteIndexRoutes: MetadataRoute.Sitemap = [];
   try {
     const seen = new Map<string, Date>();
     let total = 0;

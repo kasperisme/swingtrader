@@ -57,7 +57,7 @@ async function ArenaCounterpart({ agentSlug }: { agentSlug: string }) {
         Running in the Arena
       </p>
       <Link
-        href={`/arena/${agent.slug}`}
+        href={`/agent/${agent.slug}`}
         className="mt-2 inline-flex items-baseline gap-1.5 text-lg font-semibold tracking-tight transition-colors hover:text-amber-600 dark:hover:text-amber-500"
       >
         {agent.name}

@@ -5,24 +5,25 @@ import type { Metadata } from "next";
 import { ArrowLeft, ArrowUpRight } from "lucide-react";
 import {
   getAgent,
-  getFeaturedChampionship,
   listAgentResources,
   listDecisions,
   listNavCurve,
   listOrders,
   listPositions,
   listStandings,
+  resolveAgentAppearance,
   type ArenaOrder,
+  type ArenaStanding,
 } from "@/app/actions/arena";
 import { SITE_NAME, SITE_URL } from "@/lib/site";
 import { getTraderForAgent } from "@/lib/sanity/trader-link";
-import { EquityCurve } from "../_components/equity-curve";
-import { PortfolioPanel } from "../_components/portfolio-panel";
+import { EquityCurve } from "@/app/arena/_components/equity-curve";
+import { PortfolioPanel } from "@/app/arena/_components/portfolio-panel";
 import {
   CitedResources,
   ResourceChips,
   ToolSurface,
-} from "../_components/resource-links";
+} from "@/app/arena/_components/resource-links";
 import { ARENA_COLOR_INDEX as COLOR_INDEX } from "@/lib/arena/colors";
 
 // No `revalidate` and no `generateStaticParams`: this project runs with
@@ -38,7 +39,7 @@ export async function generateMetadata({
   const { slug } = await params;
   const agent = await getAgent(slug);
   if (!agent) return { title: "Agent not found" };
-  const url = `${SITE_URL}/arena/${agent.slug}`;
+  const url = `${SITE_URL}/agent/${agent.slug}`;
   const description =
     agent.tagline ??
     `${agent.name} is one of nine AI agents trading a $100,000 paper account against each other.`;
@@ -182,26 +183,102 @@ async function Idol({
 }
 
 
-export default async function ArenaAgentPage({
+/**
+ * The agent's record across championships.
+ *
+ * Rendered only when there is more than one: with a single season a switcher is
+ * chrome that implies a choice the reader does not have, and the season is
+ * already named in the back-link above. It becomes useful the moment season-2
+ * opens, which is the reason the agent has its own URL at all — the agent
+ * persists, the championship is an appearance.
+ *
+ * Plain links rather than a client control, so each season is addressable
+ * (`?season=season-1`), shareable, and works before hydration.
+ */
+function Appearances({
+  slug,
+  appearances,
+  current,
+}: {
+  slug: string;
+  appearances: ArenaStanding[];
+  current: ArenaStanding | null;
+}) {
+  if (appearances.length < 2) return null;
+
+  return (
+    <nav
+      aria-label="Championship appearances"
+      className="mt-8 flex flex-wrap items-center gap-2"
+    >
+      <span className="mr-1 font-mono text-[11px] uppercase tracking-widest text-muted-foreground">
+        Appearances
+      </span>
+      {appearances.map((a) => {
+        const isCurrent = a.championship_id === current?.championship_id;
+        return (
+          <Link
+            key={a.championship_id}
+            href={`/agent/${slug}?season=${a.championship_slug}`}
+            aria-current={isCurrent ? "page" : undefined}
+            className={`rounded-full border px-3 py-1 text-xs tabular-nums transition-colors ${
+              isCurrent
+                ? "border-foreground/30 bg-muted font-medium text-foreground"
+                : "border-transparent bg-muted/40 text-muted-foreground hover:bg-muted hover:text-foreground"
+            }`}
+          >
+            {a.championship_name}
+            {a.total_return != null && (
+              <span className={`ml-2 ${toneFor(a.total_return)}`}>
+                {fmtPct(a.total_return)}
+              </span>
+            )}
+            {a.championship_status === "running" && (
+              <span className="ml-1.5 opacity-60">live</span>
+            )}
+            {a.is_champion && (
+              <span className="ml-1.5" title="Won this championship">
+                &#127942;
+              </span>
+            )}
+          </Link>
+        );
+      })}
+    </nav>
+  );
+}
+
+
+export default async function AgentPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ slug: string }>;
+  searchParams: Promise<{ season?: string }>;
 }) {
   const { slug } = await params;
+  const { season } = await searchParams;
   const agent = await getAgent(slug);
   if (!agent) notFound();
 
-  const champ = await getFeaturedChampionship();
+  // The agent is the entity; a championship is a season it appeared in. So the
+  // page resolves against THIS AGENT'S appearances rather than the arena's
+  // featured championship — the two diverge the moment an agent sits a season
+  // out, and opening on a season it never entered would show an empty book with
+  // no explanation. Defaults to its most recent appearance.
+  const { appearances, current } = await resolveAgentAppearance(slug, season);
+  const champId = current?.championship_id;
+
   const [standings, curve, positions, orders, decisions, cited] = await Promise.all([
-    listStandings(champ?.id),
-    listNavCurve(slug, champ?.id),
-    listPositions(slug),
+    listStandings(champId),
+    listNavCurve(slug, champId),
+    listPositions(slug, champId),
     listOrders(slug, 40),
     listDecisions(slug, 12),
     listAgentResources(slug),
   ]);
 
-  const canonicalUrl = `${SITE_URL}/arena/${slug}`;
+  const canonicalUrl = `${SITE_URL}/agent/${slug}`;
   const standing = standings.find((s) => s.slug === slug);
   const rank = standings.findIndex((s) => s.slug === slug) + 1;
   const colorIndex = COLOR_INDEX[slug] ?? null;
@@ -250,7 +327,7 @@ export default async function ArenaAgentPage({
         "@type": "BreadcrumbList",
         itemListElement: [
           { "@type": "ListItem", position: 1, name: "Home", item: SITE_URL },
-          { "@type": "ListItem", position: 2, name: "The Arena", item: `${SITE_URL}/arena` },
+          { "@type": "ListItem", position: 2, name: "Agents", item: `${SITE_URL}/agent` },
           { "@type": "ListItem", position: 3, name: agent.name, item: canonicalUrl },
         ],
       },
@@ -268,7 +345,7 @@ export default async function ArenaAgentPage({
         className="inline-flex items-center gap-1.5 font-mono text-[11px] uppercase tracking-widest text-muted-foreground transition-colors hover:text-foreground"
       >
         <ArrowLeft className="h-3.5 w-3.5" aria-hidden />
-        The Arena
+        {current ? current.championship_name : "The Arena"}
       </Link>
 
       <header className="mt-6 border-l-2 pl-5" style={{ borderLeftColor: accent }}>
@@ -295,6 +372,8 @@ export default async function ArenaAgentPage({
           </p>
         )}
       </header>
+
+      <Appearances slug={slug} appearances={appearances} current={current} />
 
       <Suspense fallback={null}>
         <Idol agentSlug={slug} fallbackText={agent.inspiration} />

@@ -371,11 +371,17 @@ export async function listNavCurve(
 
 /* ── Book, orders, reasoning ──────────────────────────────────────────────── */
 
-export async function listPositions(slug: string): Promise<ArenaPosition[]> {
-  const { data, error } = await sb()
-    .from("arena_positions_public_v")
-    .select("*")
-    .eq("agent_slug", slug);
+export async function listPositions(
+  slug: string,
+  championshipId?: string,
+): Promise<ArenaPosition[]> {
+  // Scoped to the championship when one is given: the book is LIVE, so an
+  // unscoped read would hang this season's positions off a past season's page.
+  // Returning nothing there is correct — the panel then falls back to the
+  // snapshot stored on that season's last NAV row.
+  let q = sb().from("arena_positions_public_v").select("*").eq("agent_slug", slug);
+  if (championshipId) q = q.eq("championship_id", championshipId);
+  const { data, error } = await q;
   if (error) {
     console.error("listPositions", error.message);
     return [];
@@ -465,4 +471,92 @@ export async function getArenaStats(championshipId?: string): Promise<{
     filledOrders: standings.reduce((n, s) => n + (s.filled_orders ?? 0), 0),
     asOf: standings.map((s) => s.as_of).filter(Boolean).sort().at(-1) ?? null,
   };
+}
+
+/* ── One agent's book, on demand ──────────────────────────────────────────── */
+
+/** Everything the portfolio panel needs for one agent, in one round trip. */
+export type ArenaAgentBook = {
+  points: ArenaNavPoint[];
+  positions: ArenaPosition[];
+  startingCash: number;
+  nav: number | null;
+  cash: number | null;
+};
+
+/**
+ * Loaded LAZILY, when a leaderboard row is opened.
+ *
+ * The NAV history carries a stored snapshot of the book on every row, so
+ * shipping all nine agents' curves up front — nine seasons of holdings arrays
+ * — would multiply the leaderboard's payload for panels most visitors never
+ * open. One agent at a time is the whole point of the collapsed design.
+ */
+export async function getAgentBook(
+  slug: string,
+  championshipId?: string,
+): Promise<ArenaAgentBook> {
+  const [points, positions, standings] = await Promise.all([
+    listNavCurve(slug, championshipId),
+    listPositions(slug, championshipId),
+    listStandings(championshipId),
+  ]);
+  const standing = standings.find((s) => s.slug === slug) ?? null;
+  return {
+    points,
+    positions,
+    startingCash: Number(standing?.starting_cash) || 100000,
+    nav: standing?.nav ?? null,
+    cash: standing?.cash ?? null,
+  };
+}
+
+/**
+ * Every championship this agent has competed in, newest first.
+ *
+ * An agent is a lasting entity and a championship is a season it appeared in —
+ * which is why the agent lives at /agent/<slug> rather than inside /arena. The
+ * standings row already carries a full per-championship record (return,
+ * drawdown, Sharpe, trades, win rate), so an appearance is one row of
+ * `arena_leaderboard_v` filtered to this agent; no new view is needed.
+ *
+ * Ordered by start date descending so the caller can take [0] as "latest"
+ * without re-deriving it. A running championship is therefore first as long as
+ * it is also the most recent, which the fixed three-month windows guarantee.
+ */
+export async function listAgentAppearances(
+  slug: string,
+): Promise<ArenaStanding[]> {
+  const { data, error } = await sb()
+    .from("arena_leaderboard_v")
+    .select("*")
+    .eq("slug", slug)
+    .order("starts_on", { ascending: false });
+  if (error) {
+    console.error("listAgentAppearances", error.message);
+    return [];
+  }
+  return (data ?? []) as ArenaStanding[];
+}
+
+/**
+ * The championship an agent page should open on, given an optional ?season=.
+ *
+ * Defaults to the agent's most recent appearance rather than to the arena's
+ * featured championship: the two differ the moment an agent sits a season out,
+ * and a page that opens on a season the agent never entered shows an empty book
+ * with no explanation.
+ */
+export async function resolveAgentAppearance(
+  slug: string,
+  requestedSlug?: string,
+): Promise<{ appearances: ArenaStanding[]; current: ArenaStanding | null }> {
+  const appearances = await listAgentAppearances(slug);
+  const current =
+    (requestedSlug
+      ? appearances.find((a) => a.championship_slug === requestedSlug)
+      : null) ??
+    appearances[0] ??
+    null;
+  return { appearances, current };
 }
