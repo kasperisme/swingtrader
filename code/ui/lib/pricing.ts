@@ -9,7 +9,8 @@
  * $29 on the way in.
  *
  * So the phase is declared ONCE, here, and every price is looked up from it.
- * Moving to phase 3 is a one-line change to `CURRENT_PHASE_INDEX`.
+ * Moving to phase 3 is a one-line change to `CURRENT_PHASE_INDEX` — plus the
+ * Stripe side, which is the half that actually charges people.
  *
  * IMPORTANT — this table is what the product SAYS. What a customer is actually
  * charged is the Stripe price object behind `STRIPE_<PLAN>_<INTERVAL>_PRICE_ID`,
@@ -24,13 +25,23 @@ export type PricedTierId = "observer" | "investor" | "trader";
 /**
  * Which phase is on sale, 0-based. 0 = "Phase 1", 1 = "Phase 2", 2 = "Phase 3".
  *
- * MUST match the prices behind the live `STRIPE_*_PRICE_ID` env vars. The live
- * deployment points at the Phase 1 objects ($9 / $99 / $19 / $199), so this is
- * 0. Moving it without creating the matching Stripe prices first makes the site
- * advertise a rate Checkout will not charge — which is what happened when this
- * was briefly set to 1.
+ * MUST match the prices behind the live `STRIPE_*_PRICE_ID` env vars. Moving it
+ * without repointing those first makes the site advertise a rate Checkout will
+ * not charge — which is what happened when this was briefly set to 1 before.
+ *
+ * Phase 2 is $29/$299 investor and $49/$499 trader. At the time of this change
+ * the Stripe catalogue held Phase 1 ($9/$99/$19/$199) and Phase 3
+ * ($39/$399/$69/$699) objects but NO Phase 2 prices, so the four new prices
+ * have to exist and the env vars point at them — in live mode, not only test —
+ * before this ships. Verify with `getPlanOptions()`, which reads the amounts
+ * straight from Stripe.
+ *
+ * /protected/profile does not read this table at all: it fetches
+ * /api/stripe/change-plan, which reports Stripe's own `unit_amount`. So that
+ * page follows the catalogue on its own and cannot disagree with what is
+ * charged — only the marketing surfaces below can.
  */
-export const CURRENT_PHASE_INDEX = 0;
+export const CURRENT_PHASE_INDEX = 1;
 
 export const PHASE_COUNT = 3;
 
