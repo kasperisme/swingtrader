@@ -3,7 +3,6 @@ import { Suspense } from "react";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { unstable_noStore as noStore } from "next/cache";
-import { createServiceClient } from "@/lib/supabase/service";
 import {
   ArrowRight,
   BarChart3,
@@ -26,22 +25,15 @@ import {
 import { createClient } from "@/lib/supabase/server";
 import { getNarrativeShowcase } from "@/lib/quote/priced-in";
 import {
-  currentAnnualLabel,
-  currentMonthly,
-  finalAnnual,
-  finalMonthly,
-} from "@/lib/pricing";
-import {
   NarrativeTradingPreviewCard,
   NarrativeTradingSection,
 } from "@/components/narrative-trading";
 import { EarlyAccessSignupForm } from "@/components/early-access-signup-form";
 import { InstagramSection } from "@/components/instagram-section";
 import { ArenaLeaderboardSection } from "@/components/arena-leaderboard-section";
-import { PricingTierSwitcher } from "@/components/pricing-tier-switcher";
 import { isSanityConfigured, sanityFetch } from "@/lib/sanity/client";
 import { landingPageQuery } from "@/lib/sanity/queries";
-import type { LandingPage, LandingCardItem, LandingStep, LandingPricingPlan } from "@/lib/sanity/types";
+import type { LandingPage, LandingCardItem, LandingStep } from "@/lib/sanity/types";
 import { listMarketScreenings, getLatestMarketScreeningResultRows } from "@/app/actions/market-screenings";
 
 // Self-canonical. The root layout deliberately no longer sets one, because
@@ -211,86 +203,10 @@ const DEFAULT_TICKER_THEMES = [
   "Dollar strength impact",
 ];
 
-// Every money value here is looked up from `lib/pricing.ts`, which tracks the
-// phase whose prices the live Stripe catalogue actually holds. Nothing in this
-// list is a literal, so the landing card cannot drift from /pricing, the
-// onboarding picker, or Checkout.
-//
-// `spotLimit` is the current phase's ceiling — phase 1's founder cohort is 100.
-const DEFAULT_PRICING_PLANS: LandingPricingPlan[] = [
-  {
-    name: "Observer",
-    price: "$0",
-    billingNote: "forever free",
-    annualLabel: null,
-    phase2Price: null,
-    phase2AnnualLabel: null,
-    phase3Price: null,
-    phase3AnnualLabel: null,
-    description: "Get a feel for the screener. No card, no commitment.",
-    features: ["Daily top 5 news-impacted stocks", "Basic impact score", "1-day delay on results"],
-    ctaLabel: "Start for free",
-    badge: null,
-    isHighlighted: false,
-    spotLimit: null,
-    isCurrentPhase: false,
-  },
-  {
-    name: "Investor",
-    price: `$${currentMonthly("investor")}`,
-    billingNote: "/ month",
-    annualLabel: currentAnnualLabel("investor"),
-    phase2Price: null,
-    phase2AnnualLabel: null,
-    phase3Price: `$${finalMonthly("investor")}`,
-    phase3AnnualLabel: `$${finalAnnual("investor")}/yr`,
-    description: "Real-time screening, locked at this price for life.",
-    features: ["Real-time news impact screener", "Full impact score breakdown", "Sector & theme filters", "Watchlist alerts", "7-day history"],
-    ctaLabel: `Lock in $${currentMonthly("investor")}/mo`,
-    badge: "Early Access",
-    isHighlighted: true,
-    spotLimit: 100,
-    isCurrentPhase: true,
-  },
-  {
-    name: "Trader",
-    price: `$${currentMonthly("trader")}`,
-    billingNote: "/ month",
-    annualLabel: currentAnnualLabel("trader"),
-    phase2Price: null,
-    phase2AnnualLabel: null,
-    phase3Price: `$${finalMonthly("trader")}`,
-    phase3AnnualLabel: `$${finalAnnual("trader")}/yr`,
-    description: "Everything in Investor, plus advanced tools. Locked forever.",
-    features: ["Everything in Investor", "Extended 30-day history", "AI stock summaries", "Portfolio impact view", "Priority support"],
-    ctaLabel: `Lock in $${currentMonthly("trader")}/mo`,
-    badge: "Early Access",
-    isHighlighted: false,
-    spotLimit: 100,
-    isCurrentPhase: true,
-  },
-];
-
-// ── Sub-components ────────────────────────────────────────────────────────────
-
-async function getSignupCount(): Promise<number> {
-  try {
-    const supabase = createServiceClient();
-    const { count, error } = await supabase
-      .schema("swingtrader")
-      .from("early_access_signups")
-      .select("id", { count: "exact", head: true });
-    if (error) throw error;
-    return count ?? 0;
-  } catch {
-    return 0;
-  }
-}
-
 // ── Page ──────────────────────────────────────────────────────────────────────
 
 export default async function Home() {
-  noStore(); // pricing section shows live signup count — never serve stale
+  noStore(); // live arena standings and screening rows — never serve stale
 
   const supabase = await createClient();
   const { data: claims } = await supabase.auth.getClaims();
@@ -337,21 +253,6 @@ export default async function Home() {
     "Join the list for product updates and early access. Built for people who invest their own money and want context, not chaos.";
   const ctaFootnote = cms?.ctaFootnote ?? "No credit card. No terminal subscription.";
 
-  const pricingSectionLabel = cms?.pricingSectionLabel ?? "Pricing";
-  const pricingHeading = cms?.pricingHeading ?? "Lock in the founder rate.";
-  const pricingSubheading = cms?.pricingSubheading ?? "Price increases every 100 subscribers. Early subscribers lock in their rate forever.";
-  const pricingFounderNote = cms?.pricingFounderNote ?? "Your price is locked for life. Cancel any time — but once you cancel, the founder rate is gone.";
-  const pricingPlans = cms?.pricingPlans?.length ? cms.pricingPlans : DEFAULT_PRICING_PLANS;
-  const signupCount = await getSignupCount();
-  const currentPlans = pricingPlans.filter((p) => p.isCurrentPhase);
-  const freePlan = pricingPlans.find((p) => p.price === "$0");
-  const futurePlans = pricingPlans.filter((p) => !p.isCurrentPhase && p !== freePlan);
-  const finalPhasePlan = futurePlans[futurePlans.length - 1];
-  const heroSpotLimit = currentPlans[0]?.spotLimit ?? null;
-  const heroSpotsLeft =
-    heroSpotLimit != null ? Math.max(0, heroSpotLimit - signupCount) : null;
-  const heroFillPct =
-    heroSpotLimit ? Math.min(100, (signupCount / heroSpotLimit) * 100) : 0;
 
   const offerSectionLabel = cms?.offerSectionLabel ?? null;
   const offerHeading = cms?.offerHeading ?? null;
@@ -1047,50 +948,6 @@ export default async function Home() {
       <Suspense fallback={null}>
         <ArenaLeaderboardSection />
       </Suspense>
-
-      {/* ── PRICING ──────────────────────────────────────────────── */}
-      <section id="pricing" className="border-t border-border py-16 md:py-24">
-        <div className="mx-auto max-w-3xl px-4 sm:px-6 lg:px-8">
-          <p className="text-xs font-semibold uppercase tracking-widest text-amber-500">
-            {pricingSectionLabel}
-          </p>
-          <h2 className="mt-3 text-2xl font-bold tracking-tight sm:text-3xl">
-            {pricingHeading}
-          </h2>
-          {pricingSubheading && (
-            <p className="mt-3 max-w-xl text-sm leading-6 text-muted-foreground">
-              {pricingSubheading}
-            </p>
-          )}
-
-          {/* Free-until-launch callout */}
-          <div className="mt-6 flex items-start gap-3 rounded-xl border border-emerald-500/30 bg-emerald-500/5 p-4">
-            <span className="mt-0.5 inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-emerald-500/15">
-              <Check className="h-3.5 w-3.5 text-emerald-400" />
-            </span>
-            <div className="text-sm leading-6">
-              <span className="font-semibold text-emerald-300">Free to explore until launch.</span>{" "}
-              <span className="text-muted-foreground">
-                The full platform is free of charge while we&apos;re in early access. The rates
-                below only kick in at launch — and founders who sign up now lock theirs in for life.
-              </span>
-            </div>
-          </div>
-
-          {/* Current phase — pill-switched tier card */}
-          <PricingTierSwitcher
-            freePlan={freePlan}
-            currentPlans={currentPlans}
-            finalPhasePlan={finalPhasePlan}
-            spotsLeft={heroSpotsLeft}
-            spotLimit={heroSpotLimit}
-            signupCount={signupCount}
-            fillPct={heroFillPct}
-            founderNote={pricingFounderNote}
-          />
-
-        </div>
-      </section>
 
       {/* ── OFFER ────────────────────────────────────────────────── */}
       {showOffer && (
