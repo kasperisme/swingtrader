@@ -928,3 +928,20 @@ def refresh_ticker_coverage_materialization() -> None:
     client = get_supabase_client()
     schema = os.environ.get("SUPABASE_SCHEMA", "swingtrader")
     client.schema(schema).rpc("exec_ticker_coverage_refresh", {}).execute()
+
+
+def refresh_sitemap_articles_materialization() -> None:
+    """
+    Rebuild swingtrader.sitemap_article_urls — the gated set of /articles/* URLs
+    that app/sitemap.ts submits to search engines.
+
+    MUST run after refresh_ticker_coverage_materialization(): the relevance gate
+    reads ticker_coverage_daily to decide which tickers are actively covered, so
+    refreshing in the other order gates today's articles on yesterday's
+    coverage. Computed live the gates ran 0.88s warm but up to 8.93s cold
+    against the REST role's 8s statement_timeout — and the sitemap is the one
+    endpoint guaranteed to be cold. Same deferred-refresh rationale as above.
+    """
+    client = get_supabase_client()
+    schema = os.environ.get("SUPABASE_SCHEMA", "swingtrader")
+    client.schema(schema).rpc("exec_sitemap_article_refresh", {}).execute()

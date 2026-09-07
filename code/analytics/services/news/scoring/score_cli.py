@@ -118,6 +118,7 @@ from shared.db import (
     get_dry_days,
     get_supabase_client,
     is_source_day_dry,
+    refresh_sitemap_articles_materialization,
     refresh_ticker_coverage_materialization,
     refresh_ticker_relationship_materialization,
     refresh_ticker_sentiment_materialization,
@@ -1210,6 +1211,19 @@ def _maybe_refresh_relationship_graph(args: argparse.Namespace) -> None:
         logger.warning("[score_news] ticker coverage refresh failed: %s", exc)
         console.print(
             f"[yellow]Ticker coverage refresh failed (ingest OK): {exc}[/yellow]",
+        )
+
+    # Which article URLs the sitemap offers to crawlers. Deliberately LAST: the
+    # relevance gate reads the coverage rollup refreshed immediately above, so
+    # running it earlier would gate today's articles on yesterday's coverage.
+    console.print("[dim]Refreshing sitemap article set…[/dim]")
+    try:
+        refresh_sitemap_articles_materialization()
+        console.print("[dim]Sitemap article set refreshed.[/dim]")
+    except Exception as exc:
+        logger.warning("[score_news] sitemap article refresh failed: %s", exc)
+        console.print(
+            f"[yellow]Sitemap article refresh failed (ingest OK): {exc}[/yellow]",
         )
 
 

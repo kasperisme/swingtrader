@@ -25,7 +25,15 @@ const SITE_BASE_URL = SITE_URL;
 function clampText(s: string, max: number): string {
   const t = s.trim().replace(/\s+/g, " ");
   if (t.length <= max) return t;
-  return t.slice(0, max - 1).trimEnd() + "…";
+  // Cut at the last word boundary inside the budget rather than mid-word.
+  // "This Payroll Software Com…" reads as a rendering bug in a SERP; "This
+  // Payroll Software…" reads as an abbreviation. Fall back to the hard cut
+  // only when there is no space in the last 40% of the budget, which means a
+  // single very long token.
+  const cut = t.slice(0, max - 1);
+  const lastSpace = cut.lastIndexOf(" ");
+  const head = lastSpace > max * 0.6 ? cut.slice(0, lastSpace) : cut;
+  return head.trimEnd().replace(/[\s,;:—–-]+$/, "") + "…";
 }
 
 function signedScore(n: number, digits = 2): string {
@@ -33,16 +41,27 @@ function signedScore(n: number, digits = 2): string {
 }
 
 /**
- * Build the SEO <title> bounded to 60 chars: "[headline] — TICKER ±score |
- * NewsImpactScreener". The ticker tag + brand suffix are always preserved; only
- * the headline is trimmed to fit the budget.
+ * Build the SEO <title>: "[headline] — TICKER ±score". The brand is left to
+ * the root layout's title template.
+ *
+ * This used to hardcode " | NewsImpactScreener" (21 chars) and bound the WHOLE
+ * string to 60. Once a ticker tag like " — MSFT -0.60" (14 chars) was also
+ * reserved, the headline was left 25 characters. Live output, verbatim:
+ * "Seattle Times and Newsday… — MSFT -0.60 | NewsImpactScreener" and "This
+ * Payroll Software Com… — PAYC +0.80 | NewsImpactScreener". The headline is
+ * the only part carrying the query anyone actually searches, and it was the
+ * part being thrown away — to spend a third of the budget on a brand name
+ * spelled differently here than the "· News Impact Screener" used site-wide.
+ *
+ * Google truncates the RENDERED title near 60 characters, so the fix is not a
+ * shorter string but a better ordering: give the headline the budget, put the
+ * ticker tag after it, and let the brand ride at the end of a longer title
+ * where being cut off costs nothing.
  */
+const HEADLINE_TITLE_BUDGET = 65;
+
 function buildBoundedTitle(headline: string, tickerTag: string): string {
-  const brand = " | NewsImpactScreener";
-  const suffix = `${tickerTag}${brand}`;
-  const room = 60 - suffix.length;
-  const head = clampText(headline, Math.max(12, room));
-  return `${head}${suffix}`;
+  return `${clampText(headline, HEADLINE_TITLE_BUDGET)}${tickerTag}`;
 }
 
 type ArticleRow = {
@@ -1010,7 +1029,7 @@ export async function generateMetadata({
   params: Promise<{ slug?: string }>;
 }): Promise<Metadata> {
   const slug = String((await params)?.slug ?? "").trim();
-  if (!slug) return { title: "Article not found | News Impact Screener" };
+  if (!slug) return { title: "Article not found" };
 
   const dataClient = await createServerDataClient();
   const { data: article } = await dataClient
@@ -1023,7 +1042,7 @@ export async function generateMetadata({
     .single<ArticleMetaRow>();
 
   if (!article?.title) {
-    return { title: "Article not found | News Impact Screener" };
+    return { title: "Article not found" };
   }
 
   // Pull the model heads so the title/description can carry the primary ticker's
@@ -1061,9 +1080,11 @@ export async function generateMetadata({
   const images = article.image_url ? [{ url: article.image_url }] : undefined;
 
   return {
-    // `absolute` bypasses the root layout's "%s · News Impact Screener" template
-    // so the title lands exactly as built (no double brand) and stays within 60.
-    title: { absolute: title },
+    // Uses the root layout's "%s · News Impact Screener" template rather than
+    // `absolute`. buildBoundedTitle no longer carries a brand of its own, so
+    // there is no double brand to avoid — and going through the template is
+    // what makes every article title match the rest of the site.
+    title,
     description,
     alternates: { canonical },
     openGraph: {

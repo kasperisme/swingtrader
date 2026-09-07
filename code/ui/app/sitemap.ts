@@ -15,9 +15,19 @@ import { SITE_URL } from "@/lib/site";
 // so all ~6.5k sitemap URLs were redirects (GSC: 1,600 submitted / 0 indexed).
 const baseUrl = SITE_URL;
 
-// Cap article URLs — protocol limit is 50k/file and the freshest articles
-// matter most for indexing. Older pieces remain reachable via internal links.
-const ARTICLE_SITEMAP_LIMIT = 5000;
+// Cap article URLs. This was 5,000 unfiltered — the newest slugs in
+// news_articles, whatever they were about — and that made 74% of everything
+// offered to a crawler a wrapper around a third-party headline: law-firm
+// class-action notices, an ASICS retail partnership, a construction contract in
+// Fort Nelson BC. Search Console's verdict on the whole domain matched: every
+// hub page sat at "Crawled - currently not indexed" and the /quote tree had
+// never been fetched at all. Crawl budget is finite; it was being spent there.
+//
+// The set now comes from swingtrader.sitemap_article_urls, which keeps only
+// articles naming a real, actively-covered ticker and drops the
+// securities-litigation wire genre (10% of the corpus on its own). See
+// migration 20260907140000 for why each gate is shaped the way it is.
+const ARTICLE_SITEMAP_LIMIT = 1500;
 
 // Cap /quote/[symbol] URLs to the most-covered tickers. Sourced from recent
 // sentiment heads so only symbols with real news-impact data get indexed.
@@ -67,6 +77,10 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
     { url: `${baseUrl}/topics`, lastModified: now, changeFrequency: "daily", priority: 0.9 },
     { url: `${baseUrl}/quote`, lastModified: now, changeFrequency: "daily", priority: 0.8 },
     { url: `${baseUrl}/blog`, lastModified: now, changeFrequency: "weekly", priority: 0.8 },
+    // The free lead magnet, and the highest-intent page on the site — it was
+    // indexable, canonicalised and taking real traffic, but had never been
+    // listed here, so the sitemap offered no path to it at all.
+    { url: `${baseUrl}/briefings`, lastModified: now, changeFrequency: "weekly", priority: 0.8 },
     { url: `${baseUrl}/about`, lastModified: now, changeFrequency: "monthly", priority: 0.7 },
     { url: `${baseUrl}/research`, lastModified: now, changeFrequency: "weekly", priority: 0.7 },
     { url: `${baseUrl}/arena`, lastModified: now, changeFrequency: "daily", priority: 0.8 },
@@ -185,23 +199,25 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
     console.warn("[sitemap] failed to list traders", e);
   }
 
-  // Per-article pages — sourced from the news_articles table, freshest first.
+  // Per-article pages, freshest first — read from the pre-gated rollup rather
+  // than scanning news_articles.
+  //
+  // Computing the gates live measured 622ms-1.6s server-side and up to 8.9s on
+  // a cold cache, against the REST role's 8s statement timeout. The sitemap is
+  // the one endpoint guaranteed to be cold (Google's last two fetches were 13
+  // days apart) and the failure here is SILENT — the catch below warns and
+  // ships zero article URLs, which has already happened once on this file for
+  // the /quote block. Reading the rollup is an index-only scan: 0.6ms.
   let articleRoutes: MetadataRoute.Sitemap = [];
   try {
     const supabase = createServiceClient();
-    const data = await fetchAllRows<{
-      slug: string | null;
-      published_at: string | null;
-      created_at: string | null;
-    }>(
+    const data = await fetchAllRows<{ slug: string; published_at: string }>(
       (from, to) =>
         supabase
           .schema("swingtrader")
-          .from("news_articles")
-          .select("slug, published_at, created_at")
-          .not("slug", "is", null)
-          .order("published_at", { ascending: false, nullsFirst: false })
-          .order("created_at", { ascending: false })
+          .from("sitemap_article_urls")
+          .select("slug, published_at")
+          .order("published_at", { ascending: false })
           .range(from, to),
       ARTICLE_SITEMAP_LIMIT,
     );
@@ -209,11 +225,7 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
       .filter((r) => typeof r.slug === "string" && r.slug.length > 0)
       .map((r) => ({
         url: `${baseUrl}/articles/${r.slug}`,
-        lastModified: r.published_at
-          ? new Date(r.published_at)
-          : r.created_at
-            ? new Date(r.created_at)
-            : now,
+        lastModified: r.published_at ? new Date(r.published_at) : now,
         changeFrequency: "monthly" as const,
         priority: 0.6,
       }));

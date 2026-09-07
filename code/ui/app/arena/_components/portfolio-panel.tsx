@@ -272,7 +272,7 @@ export function PortfolioPanel({
                   because there the direction is the point. */}
               <tr className="border-t-2 font-mono tabular-nums">
                 <td className="py-3 pr-4 text-[11px] uppercase tracking-widest text-muted-foreground">
-                  Total
+                  Invested
                 </td>
                 <td className="py-3 pr-4 text-right text-muted-foreground">
                   {ordered.length}
@@ -288,15 +288,45 @@ export function PortfolioPanel({
                   {fmtMoney(Math.abs(pnl))}
                 </td>
               </tr>
+              {/* The cash the agent has NOT put to work. Without it the table
+                  reads as the whole account, and an agent sitting 80% in cash
+                  looks identical to one fully invested. */}
+              <tr className="font-mono tabular-nums">
+                <td className="py-2 pr-4 text-[11px] uppercase tracking-widest text-muted-foreground">
+                  Cash
+                </td>
+                <td className="py-2 pr-4 text-right text-[11px] text-muted-foreground/70">
+                  uninvested
+                </td>
+                <td className="py-2 pr-4" />
+                <td className="py-2 pr-4" />
+                <td className="py-2 pr-4 text-right text-muted-foreground">
+                  {fmtMoney(shownCash)}
+                </td>
+                <td className="py-2" />
+              </tr>
+              {/* Positions + cash = the account. Stated rather than left for the
+                  reader to add up, because shorts carry a NEGATIVE market value
+                  while the rows above print gross exposure. */}
+              <tr className="border-t font-mono tabular-nums">
+                <td className="py-3 pr-4 text-[11px] uppercase tracking-widest text-muted-foreground">
+                  Account value
+                </td>
+                <td className="py-3 pr-4" />
+                <td className="py-3 pr-4" />
+                <td className="py-3 pr-4" />
+                <td className="py-3 pr-4 text-right font-medium">{fmtMoney(shownNav)}</td>
+                <td className="py-3" />
+              </tr>
             </tfoot>
           </table>
         </div>
       )}
 
-      {ordered.length > 0 && shownNav != null && (
+      {ordered.length > 0 && shownNav != null && shownNav !== 0 && (
         <p className="mt-3 font-mono text-xs text-muted-foreground">
-          {fmtMoney(invested)} invested · {Math.round((invested / shownNav) * 100)}% of{" "}
-          {fmtMoney(shownNav)} NAV · {fmtMoney(shownCash ?? 0)} cash
+          {Math.round((invested / shownNav) * 100)}% of the account deployed ·{" "}
+          {fmtMoney(shownCash)} held in cash
         </p>
       )}
     </>

@@ -11,7 +11,11 @@ const GALLERY_DESCRIPTION =
   "Curated swing-trading screenings — Stage 2, technicals, fundamentals — delivered on a schedule. Subscribe to get results in your inbox.";
 
 export const metadata: Metadata = {
-  title: "Market Screenings | News Impact Screener",
+  // No brand suffix here — the root layout's title template already appends
+  // "· News Impact Screener". Spelling it out too rendered "Market Screenings |
+  // News Impact Screener · News Impact Screener", burning ~26 of the ~60
+  // characters a SERP title gets on the brand name, twice.
+  title: "Market Screenings",
   description: GALLERY_DESCRIPTION,
   alternates: { canonical: "/marketscreenings" },
   openGraph: {
