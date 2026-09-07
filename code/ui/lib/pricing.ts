@@ -1,107 +1,67 @@
 /**
- * The launch-phase price table — the one place a price is written down.
+ * The price table — the one place a price is written down.
  *
- * Four surfaces quote the current price to a user: the landing tier card, the
- * /pricing timeline and its comparison table, the pricing checkout buttons, and
- * the onboarding plan step. Each of them used to hold its own literal, and
- * advancing from phase 1 to phase 2 updated three of the four — leaving the
- * onboarding picker offering $9/mo on the same account that had just been shown
- * $29 on the way in.
+ * Four surfaces quote the price to a user: the landing tier card, the /pricing
+ * cards and comparison table, the pricing checkout buttons, and the onboarding
+ * plan step. Each of them used to hold its own literal, and a price change
+ * updated three of the four — leaving the onboarding picker offering $9/mo on
+ * the same account that had just been shown $29 on the way in. So it is
+ * declared ONCE, here, and every surface looks it up.
  *
- * So the phase is declared ONCE, here, and every price is looked up from it.
- * Moving to phase 3 is a one-line change to `CURRENT_PHASE_INDEX` — plus the
- * Stripe side, which is the half that actually charges people.
+ * This used to be a three-phase launch ladder ($9 → $29 → $39) with a timeline
+ * on /pricing and a `CURRENT_PHASE_INDEX` to advance. That is gone: the price
+ * is not going up again, so promising a rise was a countdown the product had no
+ * intention of running. Existing subscribers on the old $9/$19 rate keep it —
+ * that is the `grandfathered` column on their subscription row, not anything
+ * this table has to model.
  *
  * IMPORTANT — this table is what the product SAYS. What a customer is actually
  * charged is the Stripe price object behind `STRIPE_<PLAN>_<INTERVAL>_PRICE_ID`,
  * and nothing here can change that. The two are only in agreement because
- * someone kept them in agreement: before flipping `PRELAUNCH_OPEN_ACCESS` to
- * false, check the live amounts (`getPlanOptions()` reads them straight from
- * Stripe) against `currentMonthly`/`currentAnnual` below.
+ * someone kept them in agreement: after editing an amount below, check it
+ * against the live one (`getPlanOptions()` reads them straight from Stripe).
+ * /protected/profile is exempt — it reports Stripe's own `unit_amount` and so
+ * cannot disagree with what is charged; only the marketing surfaces can.
  */
 
 export type PricedTierId = "observer" | "investor" | "trader";
 
+type TierPrices = {
+  /** Monthly price in whole dollars. */
+  monthly: number;
+  /** Annual price in whole dollars. */
+  annual: number;
+};
+
+export const PRICES: Record<PricedTierId, TierPrices> = {
+  observer: { monthly: 0, annual: 0 },
+  investor: { monthly: 29, annual: 299 },
+  trader: { monthly: 49, annual: 499 },
+};
+
+/** Monthly price of a tier, in whole dollars. */
+export function monthlyPrice(tier: PricedTierId): number {
+  return PRICES[tier].monthly;
+}
+
+/** Annual price of a tier, in whole dollars. */
+export function annualPrice(tier: PricedTierId): number {
+  return PRICES[tier].annual;
+}
+
+/** The annual line as shown under the monthly price, e.g. "$299/yr". */
+export function annualLabel(tier: PricedTierId): string {
+  const annual = PRICES[tier].annual;
+  return annual === 0 ? "Always free" : `$${annual}/yr`;
+}
+
 /**
- * Which phase is on sale, 0-based. 0 = "Phase 1", 1 = "Phase 2", 2 = "Phase 3".
- *
- * MUST match the prices behind the live `STRIPE_*_PRICE_ID` env vars. Moving it
- * without repointing those first makes the site advertise a rate Checkout will
- * not charge — which is what happened when this was briefly set to 1 before.
- *
- * Phase 2 is $29/$299 investor and $49/$499 trader. At the time of this change
- * the Stripe catalogue held Phase 1 ($9/$99/$19/$199) and Phase 3
- * ($39/$399/$69/$699) objects but NO Phase 2 prices, so the four new prices
- * have to exist and the env vars point at them — in live mode, not only test —
- * before this ships. Verify with `getPlanOptions()`, which reads the amounts
- * straight from Stripe.
- *
- * /protected/profile does not read this table at all: it fetches
- * /api/stripe/change-plan, which reports Stripe's own `unit_amount`. So that
- * page follows the catalogue on its own and cannot disagree with what is
- * charged — only the marketing surfaces below can.
+ * How much the annual plan saves against paying monthly, as a whole percent.
+ * 0 for a free tier, so callers can hide the badge on a falsy value.
  */
-export const CURRENT_PHASE_INDEX = 1;
-
-export const PHASE_COUNT = 3;
-
-/** Where a phase sits relative to the one currently on sale. */
-export type PhaseStatus = "finished" | "current" | "upcoming";
-
-export function phaseStatus(index: number): PhaseStatus {
-  if (index < CURRENT_PHASE_INDEX) return "finished";
-  if (index === CURRENT_PHASE_INDEX) return "current";
-  return "upcoming";
-}
-
-type PhasePrices = {
-  /** Monthly price in whole dollars, indexed by phase. */
-  monthlyByPhase: number[];
-  /** Annual price in whole dollars, indexed by phase. */
-  annualByPhase: number[];
-  /** The annual line as shown, indexed by phase. */
-  annualLabelByPhase: string[];
-};
-
-export const PRICE_TABLE: Record<PricedTierId, PhasePrices> = {
-  observer: {
-    monthlyByPhase: [0, 0, 0],
-    annualByPhase: [0, 0, 0],
-    annualLabelByPhase: ["Always free", "Always free", "Always free"],
-  },
-  investor: {
-    monthlyByPhase: [9, 29, 39],
-    annualByPhase: [99, 299, 399],
-    annualLabelByPhase: ["$99/yr · lock in forever", "$299/yr", "$399/yr"],
-  },
-  trader: {
-    monthlyByPhase: [19, 49, 69],
-    annualByPhase: [199, 499, 699],
-    annualLabelByPhase: ["$199/yr · lock in forever", "$499/yr", "$699/yr"],
-  },
-};
-
-/** Monthly price of a tier in the phase that is currently on sale. */
-export function currentMonthly(tier: PricedTierId): number {
-  return PRICE_TABLE[tier].monthlyByPhase[CURRENT_PHASE_INDEX] ?? 0;
-}
-
-/** Annual price of a tier in the phase that is currently on sale. */
-export function currentAnnual(tier: PricedTierId): number {
-  return PRICE_TABLE[tier].annualByPhase[CURRENT_PHASE_INDEX] ?? 0;
-}
-
-/** The annual line for the phase currently on sale, e.g. "$299/yr · lock in forever". */
-export function currentAnnualLabel(tier: PricedTierId): string {
-  return PRICE_TABLE[tier].annualLabelByPhase[CURRENT_PHASE_INDEX] ?? "";
-}
-
-/** Final-phase monthly price — what the current rate is a discount against. */
-export function finalMonthly(tier: PricedTierId): number {
-  return PRICE_TABLE[tier].monthlyByPhase[PHASE_COUNT - 1] ?? 0;
-}
-
-/** Final-phase annual price. */
-export function finalAnnual(tier: PricedTierId): number {
-  return PRICE_TABLE[tier].annualByPhase[PHASE_COUNT - 1] ?? 0;
+export function annualSavingPct(tier: PricedTierId): number {
+  const { monthly, annual } = PRICES[tier];
+  if (monthly === 0 || annual === 0) return 0;
+  const yearOfMonths = monthly * 12;
+  return Math.round(((yearOfMonths - annual) / yearOfMonths) * 100);
 }

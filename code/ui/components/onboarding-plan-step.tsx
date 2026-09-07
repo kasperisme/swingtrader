@@ -15,7 +15,7 @@ import { track } from "@/lib/analytics/events";
 import { getAttribution } from "@/lib/attribution";
 import { getMetaClickIds, trackInitiateCheckout } from "@/lib/pixels";
 import type { PlanTier } from "@/lib/plans";
-import { currentAnnual, currentMonthly } from "@/lib/pricing";
+import { annualPrice, monthlyPrice } from "@/lib/pricing";
 
 type Interval = "monthly" | "annual";
 
@@ -51,8 +51,8 @@ const PLANS: PlanInfo[] = [
     id: "investor",
     name: "Investor",
     tagline: "Best for your setup",
-    priceMonthly: currentMonthly("investor"),
-    priceAnnual: currentAnnual("investor"),
+    priceMonthly: monthlyPrice("investor"),
+    priceAnnual: annualPrice("investor"),
     paid: true,
     features: [
       "Real-time news impact on your holdings",
@@ -65,8 +65,8 @@ const PLANS: PlanInfo[] = [
     id: "trader",
     name: "Trader",
     tagline: "For active traders",
-    priceMonthly: currentMonthly("trader"),
-    priceAnnual: currentAnnual("trader"),
+    priceMonthly: monthlyPrice("trader"),
+    priceAnnual: annualPrice("trader"),
     paid: true,
     features: [
       "Everything in Investor",
