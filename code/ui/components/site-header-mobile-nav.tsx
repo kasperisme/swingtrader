@@ -157,20 +157,6 @@ export function SiteHeaderMobileNav({ isAuthed, userEmail }: Props) {
               {isLoggedIn ? (
                 <>
                   <div>
-                    <p className={sectionLabelClass}>Help</p>
-                    <ul className="space-y-0.5">
-                      <li onClick={close}>
-                        <HelpChatTrigger
-                          className={cn(
-                            linkClass,
-                            "inline-flex w-full items-center gap-2 text-amber-600 dark:text-amber-400",
-                          )}
-                        />
-                      </li>
-                    </ul>
-                  </div>
-
-                  <div>
                     <p className={sectionLabelClass}>Operations</p>
                     <ul className="space-y-0.5">
                       {operationsLinks.map(({ href, label }) => (
@@ -236,6 +222,23 @@ export function SiteHeaderMobileNav({ isAuthed, userEmail }: Props) {
                 </>
               )}
             </nav>
+
+            {/* Ask AI
+                Pinned to the footer rather than sitting in a "Help" section at
+                the top of the scroll area. It is not a destination like the
+                links above it — it is the thing you reach for when the links
+                did not answer you, which is after you have scrolled the list,
+                not before. Down here it never scrolls out of reach. */}
+            {isLoggedIn && (
+              <div className="shrink-0 border-t border-border px-4 py-3" onClick={close}>
+                <HelpChatTrigger
+                  className={cn(
+                    linkClass,
+                    "inline-flex w-full items-center gap-2 text-amber-600 dark:text-amber-400",
+                  )}
+                />
+              </div>
+            )}
 
             {/* Caveman toggle */}
             <div className="shrink-0 border-t border-border px-4 py-3">
