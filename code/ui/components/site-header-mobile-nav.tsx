@@ -13,11 +13,18 @@ import {
   INSIGHTS_LINKS,
 } from "@/components/site-header-public-nav";
 
-const portfolioLinks = [
-  { href: "/protected", label: "Overview" },
-] as const;
-
+/**
+ * The authed user's own workspace, as one section.
+ *
+ * This used to be two: an "Ops center" heading over a single "Overview" link,
+ * and an "Operations" heading over the rest — with Insights and Free services
+ * sitting between them, so the two halves of the same area were separated by
+ * two unrelated sections. On desktop the split earns its keep (Overview is a
+ * top-level link, Operations is a dropdown); in a flat drawer it was a heading
+ * introducing one item.
+ */
 const operationsLinks = [
+  { href: "/protected", label: "Overview" },
   { href: "/protected/workspace", label: "Workspace" },
   { href: "/protected/agents", label: "Agents" },
   { href: "/protected/trades", label: "Trades" },
@@ -165,9 +172,9 @@ export function SiteHeaderMobileNav({ isAuthed, userEmail }: Props) {
                   </div>
 
                   <div>
-                    <p className={sectionLabelClass}>Ops center</p>
+                    <p className={sectionLabelClass}>Operations</p>
                     <ul className="space-y-0.5">
-                      {portfolioLinks.map(({ href, label }) => (
+                      {operationsLinks.map(({ href, label }) => (
                         <NavLink key={href} href={href} label={label} onClick={close} />
                       ))}
                     </ul>
@@ -186,15 +193,6 @@ export function SiteHeaderMobileNav({ isAuthed, userEmail }: Props) {
                     <p className={sectionLabelClass}>Free services</p>
                     <ul className="space-y-0.5">
                       {FREE_SERVICE_LINKS.map(({ href, label }) => (
-                        <NavLink key={href} href={href} label={label} onClick={close} />
-                      ))}
-                    </ul>
-                  </div>
-
-                  <div>
-                    <p className={sectionLabelClass}>Operations</p>
-                    <ul className="space-y-0.5">
-                      {operationsLinks.map(({ href, label }) => (
                         <NavLink key={href} href={href} label={label} onClick={close} />
                       ))}
                     </ul>
