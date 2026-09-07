@@ -1,4 +1,4 @@
-import { cache } from "react";
+import { cache, Suspense } from "react";
 import type { Metadata } from "next";
 import Link from "next/link";
 import {
@@ -364,43 +364,39 @@ function PeerLinks({
   );
 }
 
-export default async function QuotePage({
-  params,
+/**
+ * Everything on the quote page that is not the masthead.
+ *
+ * Split out so it can sit behind a Suspense boundary. It owns the three slow
+ * reads — the FMP bar series, the relationship graph and the priced-in
+ * reconstruction — and the page above it owns only the profile, the quote and
+ * the scored events, which are the fields the header and the structured data
+ * actually use.
+ *
+ * `events` is passed down rather than re-fetched: `eventsOf` is request-scoped
+ * through React `cache()`, so a second call would be free, but passing it makes
+ * it obvious that both halves are looking at the same list.
+ */
+async function QuoteBody({
+  symbol,
+  companyName,
+  events,
+  profile,
+  quote,
 }: {
-  params: Promise<{ symbol: string }>;
+  symbol: string;
+  companyName: string;
+  events: ScoredNewsEvent[];
+  profile: Awaited<ReturnType<typeof profileOf>>;
+  quote: RawQuote | null;
 }) {
-  // Case is normalised to a 308 in proxy.ts before this route is reached.
-  const symbol = normSymbol((await params).symbol);
-
-  const [profile, quoteRes, ohlcRes, eventsResult, pricedIn, peers] =
-    await Promise.all([
-      profileOf(symbol),
-      fmpGetQuote(symbol),
-      fmpGetOhlc(symbol, "1day"),
-      eventsOf(symbol),
-      pricedInOf(symbol),
-      peersOf(symbol),
-    ]);
-  const events = eventsResult.events;
-
-  const quote: RawQuote | null =
-    quoteRes.ok && Array.isArray(quoteRes.data) ? (quoteRes.data[0] as RawQuote) ?? null : null;
+  const [ohlcRes, pricedIn, peers] = await Promise.all([
+    fmpGetOhlc(symbol, "1day"),
+    pricedInOf(symbol),
+    peersOf(symbol),
+  ]);
   const bars: FmpOhlcBar[] = ohlcRes.ok ? ohlcRes.data : [];
-
-  const hasAnything = Boolean(profile || quote || bars.length || events.length);
-  if (!hasAnything) {
-    return (
-      <div className="mx-auto max-w-3xl px-4 py-20 text-center">
-        <h1 className="text-2xl font-bold">{symbol}</h1>
-        <p className="mt-3 text-sm text-muted-foreground">
-          No data available for this symbol yet. Check the ticker and try again.
-        </p>
-        <Link href="/articles" className="mt-6 inline-block text-sm text-primary hover:underline">
-          ← Back to articles
-        </Link>
-      </div>
-    );
-  }
+  const price = qnum(quote, "price") ?? profile?.price ?? null;
 
   const chartEvents = attachBars(events, bars);
 
@@ -420,127 +416,14 @@ export default async function QuotePage({
       .sort((a, b) => Math.abs(b.movePct ?? 0) - Math.abs(a.movePct ?? 0))[0] ??
     null;
 
-  const price = qnum(quote, "price") ?? profile?.price ?? null;
-  const change = qnum(quote, "change") ?? profile?.change ?? null;
-  const changePct = qnum(quote, "changePercentage", "changesPercentage") ?? profile?.changePercentage ?? null;
-  const companyName = profile?.companyName ?? symbol;
-  const exchange = profile?.exchange ?? profile?.exchangeFullName ?? null;
-  const tone = (change ?? 0) > 0 ? "up" : (change ?? 0) < 0 ? "down" : undefined;
-
-  const canonicalUrl = `${SITE_BASE_URL}/quote/${symbol}`;
-
-  // Structured data: the company as a tradable financial entity + a breadcrumb
-  // trail. Lets search engines attach this page to the {ticker} entity and
-  // surface it for "{ticker} stock news" / "{company} news impact" queries.
-  // Newest scored catalyst = the last time this page's own content actually
-  // changed. Deploy time would be a lie, and `dateModified` is the signal that
-  // decides whether a crawler comes back to a page it already has.
   const lastCatalystAt =
     events.reduce<string | null>(
       (max, e) => (e.publishedAt && (!max || e.publishedAt > max) ? e.publishedAt : max),
       null,
     ) ?? null;
 
-  const jsonLd = {
-    "@context": "https://schema.org",
-    "@graph": [
-      {
-        "@type": ["Corporation", "Organization"],
-        // Always identified, so the WebPage can point at this node instead of
-        // repeating a second, unlinked copy of the company.
-        "@id": `${canonicalUrl}#company`,
-        name: companyName,
-        tickerSymbol: symbol,
-        url: profile?.website || canonicalUrl,
-        ...(profile?.website ? { sameAs: [profile.website] } : {}),
-        ...(exchange ? { identifier: `${exchange}:${symbol}` } : {}),
-        ...(profile?.industry ? { industry: profile.industry } : {}),
-        ...(profile?.image && !profile.defaultImage ? { logo: profile.image } : {}),
-        ...(profile?.description ? { description: profile.description } : {}),
-      },
-      {
-        "@type": "WebPage",
-        "@id": canonicalUrl,
-        url: canonicalUrl,
-        name: `${symbol} Stock News & Catalysts — ${companyName}`,
-        description: `Scored news catalysts, price chart, sentiment, key statistics and connected tickers for ${companyName} (${symbol}).`,
-        about: { "@id": `${canonicalUrl}#company` },
-        ...(lastCatalystAt ? { dateModified: lastCatalystAt } : {}),
-        isPartOf: {
-          "@type": "WebSite",
-          name: "News Impact Screener",
-          url: SITE_BASE_URL,
-        },
-        primaryImageOfPage:
-          profile?.image && !profile.defaultImage ? profile.image : undefined,
-      },
-      {
-        "@type": "BreadcrumbList",
-        itemListElement: [
-          { "@type": "ListItem", position: 1, name: "Home", item: SITE_BASE_URL },
-          { "@type": "ListItem", position: 2, name: "Quotes", item: `${SITE_BASE_URL}/quote` },
-          { "@type": "ListItem", position: 3, name: `${symbol} — ${companyName}`, item: canonicalUrl },
-        ],
-      },
-    ],
-  };
-
   return (
-    <div className="mx-auto flex w-full min-w-0 max-w-7xl flex-col gap-8 px-4 py-8 sm:px-6 lg:px-8">
-      <script
-        type="application/ld+json"
-        dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }}
-      />
-      {/* ── Breadcrumb (entity trail for crawlers + orientation) ──── */}
-      <nav aria-label="Breadcrumb" className="-mb-4 text-xs text-muted-foreground">
-        <ol className="flex flex-wrap items-center gap-1.5">
-          <li>
-            <Link href="/" className="hover:text-foreground">Home</Link>
-          </li>
-          <li aria-hidden className="text-muted-foreground/50">/</li>
-          <li>
-            <Link href="/quote" className="hover:text-foreground">Quotes</Link>
-          </li>
-          <li aria-hidden className="text-muted-foreground/50">/</li>
-          <li className="font-medium text-foreground" aria-current="page">
-            {symbol}
-          </li>
-        </ol>
-      </nav>
-      {/* ── Header ───────────────────────────────────────────────── */}
-      <header className="flex flex-wrap items-end justify-between gap-4 border-b border-border/60 pb-5">
-        <div className="flex items-center gap-4">
-          {profile?.image ? (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img
-              src={profile.image}
-              alt={`${companyName} (${symbol}) logo`}
-              width={48}
-              height={48}
-              className="h-12 w-12 shrink-0 rounded-md border border-border bg-muted object-contain"
-            />
-          ) : null}
-          <div className="min-w-0">
-            <p className="font-mono text-[11px] uppercase tracking-[0.2em] text-amber-500/80">
-              {exchange ?? "Quote"}
-            </p>
-            <h1 className="text-2xl font-bold leading-tight tracking-tight md:text-3xl">
-              {companyName} <span className="font-mono text-muted-foreground">{symbol}</span>
-            </h1>
-          </div>
-        </div>
-        <div className="text-right">
-          <p className="font-mono text-3xl font-semibold tabular-nums">
-            {price != null ? fmtFixed(price, 2) : "—"}
-            {profile?.currency ? <span className="ml-1 text-sm text-muted-foreground">{profile.currency}</span> : null}
-          </p>
-          <p className={`font-mono text-sm tabular-nums ${tone === "up" ? "text-emerald-500" : tone === "down" ? "text-rose-500" : "text-muted-foreground"}`}>
-            {change != null ? `${change > 0 ? "+" : ""}${fmtFixed(change, 2)}` : "—"}
-            {changePct != null ? ` (${changePct > 0 ? "+" : ""}${fmtFixed(changePct, 2)}%)` : ""}
-          </p>
-        </div>
-      </header>
-
+    <>
       {/* ── The unique summary (see CatalystLede) ─────────────────── */}
       <CatalystLede
         symbol={symbol}
@@ -745,6 +628,204 @@ export default async function QuotePage({
       <section>
         <ArticleBriefingCTA tickers={[symbol]} tags={[]} source="quote_page" />
       </section>
+    </>
+  );
+}
+
+/**
+ * Holds the vertical space the streamed half will occupy.
+ *
+ * Sized to the real layout rather than a generic spinner, so the masthead does
+ * not jump down when the content arrives — a layout shift on arrival undoes
+ * most of what streaming bought.
+ */
+function QuoteBodySkeleton() {
+  return (
+    <div className="flex flex-col gap-8" aria-hidden>
+      <div className="h-24 animate-pulse rounded-lg bg-muted/60" />
+      <div className="grid gap-6 lg:grid-cols-[1.6fr_1fr]">
+        <div className="h-[320px] animate-pulse rounded-lg bg-muted/60" />
+        <div className="h-[320px] animate-pulse rounded-lg bg-muted/40" />
+      </div>
+    </div>
+  );
+}
+
+export default async function QuotePage({
+  params,
+}: {
+  params: Promise<{ symbol: string }>;
+}) {
+  // Case is normalised to a 308 in proxy.ts before this route is reached.
+  const symbol = normSymbol((await params).symbol);
+
+  // Only what the masthead and the structured data need. Everything heavier —
+  // the bar series, the peer graph, the priced-in panel — is awaited inside
+  // <QuoteBody/> behind a Suspense boundary, so the company, its price and the
+  // breadcrumb paint as soon as these resolve rather than waiting on the
+  // slowest of six fetches. The page had no boundary at all, so a slow FMP
+  // response meant the visitor stared at nothing for the whole of it.
+  const [profile, quoteRes, eventsResult] = await Promise.all([
+    profileOf(symbol),
+    fmpGetQuote(symbol),
+    eventsOf(symbol),
+  ]);
+  const events = eventsResult.events;
+
+  const quote: RawQuote | null =
+    quoteRes.ok && Array.isArray(quoteRes.data) ? (quoteRes.data[0] as RawQuote) ?? null : null;
+
+  // `bars` no longer participates: a symbol with a profile, a quote or scored
+  // events is a real page even if the price series is slow or missing.
+  const hasAnything = Boolean(profile || quote || events.length);
+  if (!hasAnything) {
+    return (
+      <div className="mx-auto max-w-3xl px-4 py-20 text-center">
+        <h1 className="text-2xl font-bold">{symbol}</h1>
+        <p className="mt-3 text-sm text-muted-foreground">
+          No data available for this symbol yet. Check the ticker and try again.
+        </p>
+        <Link href="/articles" className="mt-6 inline-block text-sm text-primary hover:underline">
+          ← Back to articles
+        </Link>
+      </div>
+    );
+  }
+
+
+  const price = qnum(quote, "price") ?? profile?.price ?? null;
+  const change = qnum(quote, "change") ?? profile?.change ?? null;
+  const changePct = qnum(quote, "changePercentage", "changesPercentage") ?? profile?.changePercentage ?? null;
+  const companyName = profile?.companyName ?? symbol;
+  const exchange = profile?.exchange ?? profile?.exchangeFullName ?? null;
+  const tone = (change ?? 0) > 0 ? "up" : (change ?? 0) < 0 ? "down" : undefined;
+
+  const canonicalUrl = `${SITE_BASE_URL}/quote/${symbol}`;
+
+  // Structured data: the company as a tradable financial entity + a breadcrumb
+  // trail. Lets search engines attach this page to the {ticker} entity and
+  // surface it for "{ticker} stock news" / "{company} news impact" queries.
+  // Newest scored catalyst = the last time this page's own content actually
+  // changed. Deploy time would be a lie, and `dateModified` is the signal that
+  // decides whether a crawler comes back to a page it already has.
+  const lastCatalystAt =
+    events.reduce<string | null>(
+      (max, e) => (e.publishedAt && (!max || e.publishedAt > max) ? e.publishedAt : max),
+      null,
+    ) ?? null;
+
+  const jsonLd = {
+    "@context": "https://schema.org",
+    "@graph": [
+      {
+        "@type": ["Corporation", "Organization"],
+        // Always identified, so the WebPage can point at this node instead of
+        // repeating a second, unlinked copy of the company.
+        "@id": `${canonicalUrl}#company`,
+        name: companyName,
+        tickerSymbol: symbol,
+        url: profile?.website || canonicalUrl,
+        ...(profile?.website ? { sameAs: [profile.website] } : {}),
+        ...(exchange ? { identifier: `${exchange}:${symbol}` } : {}),
+        ...(profile?.industry ? { industry: profile.industry } : {}),
+        ...(profile?.image && !profile.defaultImage ? { logo: profile.image } : {}),
+        ...(profile?.description ? { description: profile.description } : {}),
+      },
+      {
+        "@type": "WebPage",
+        "@id": canonicalUrl,
+        url: canonicalUrl,
+        name: `${symbol} Stock News & Catalysts — ${companyName}`,
+        description: `Scored news catalysts, price chart, sentiment, key statistics and connected tickers for ${companyName} (${symbol}).`,
+        about: { "@id": `${canonicalUrl}#company` },
+        ...(lastCatalystAt ? { dateModified: lastCatalystAt } : {}),
+        isPartOf: {
+          "@type": "WebSite",
+          name: "News Impact Screener",
+          url: SITE_BASE_URL,
+        },
+        primaryImageOfPage:
+          profile?.image && !profile.defaultImage ? profile.image : undefined,
+      },
+      {
+        "@type": "BreadcrumbList",
+        itemListElement: [
+          { "@type": "ListItem", position: 1, name: "Home", item: SITE_BASE_URL },
+          { "@type": "ListItem", position: 2, name: "Quotes", item: `${SITE_BASE_URL}/quote` },
+          { "@type": "ListItem", position: 3, name: `${symbol} — ${companyName}`, item: canonicalUrl },
+        ],
+      },
+    ],
+  };
+
+  return (
+    <div className="mx-auto flex w-full min-w-0 max-w-7xl flex-col gap-8 px-4 py-8 sm:px-6 lg:px-8">
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }}
+      />
+      {/* ── Breadcrumb (entity trail for crawlers + orientation) ──── */}
+      <nav aria-label="Breadcrumb" className="-mb-4 text-xs text-muted-foreground">
+        <ol className="flex flex-wrap items-center gap-1.5">
+          <li>
+            <Link href="/" className="hover:text-foreground">Home</Link>
+          </li>
+          <li aria-hidden className="text-muted-foreground/50">/</li>
+          <li>
+            <Link href="/quote" className="hover:text-foreground">Quotes</Link>
+          </li>
+          <li aria-hidden className="text-muted-foreground/50">/</li>
+          <li className="font-medium text-foreground" aria-current="page">
+            {symbol}
+          </li>
+        </ol>
+      </nav>
+      {/* ── Header ───────────────────────────────────────────────── */}
+      <header className="flex flex-wrap items-end justify-between gap-4 border-b border-border/60 pb-5">
+        <div className="flex items-center gap-4">
+          {profile?.image ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              src={profile.image}
+              alt={`${companyName} (${symbol}) logo`}
+              width={48}
+              height={48}
+              className="h-12 w-12 shrink-0 rounded-md border border-border bg-muted object-contain"
+            />
+          ) : null}
+          <div className="min-w-0">
+            <p className="font-mono text-[11px] uppercase tracking-[0.2em] text-amber-500/80">
+              {exchange ?? "Quote"}
+            </p>
+            <h1 className="text-2xl font-bold leading-tight tracking-tight md:text-3xl">
+              {companyName} <span className="font-mono text-muted-foreground">{symbol}</span>
+            </h1>
+          </div>
+        </div>
+        <div className="text-right">
+          <p className="font-mono text-3xl font-semibold tabular-nums">
+            {price != null ? fmtFixed(price, 2) : "—"}
+            {profile?.currency ? <span className="ml-1 text-sm text-muted-foreground">{profile.currency}</span> : null}
+          </p>
+          <p className={`font-mono text-sm tabular-nums ${tone === "up" ? "text-emerald-500" : tone === "down" ? "text-rose-500" : "text-muted-foreground"}`}>
+            {change != null ? `${change > 0 ? "+" : ""}${fmtFixed(change, 2)}` : "—"}
+            {changePct != null ? ` (${changePct > 0 ? "+" : ""}${fmtFixed(changePct, 2)}%)` : ""}
+          </p>
+        </div>
+      </header>
+
+      {/* Everything below needs the bar series, the peer graph or the
+          priced-in reconstruction. Streamed so the masthead above does not
+          wait on them — the skeleton holds the layout so nothing jumps. */}
+      <Suspense fallback={<QuoteBodySkeleton />}>
+        <QuoteBody
+          symbol={symbol}
+          companyName={companyName}
+          events={events}
+          profile={profile}
+          quote={quote}
+        />
+      </Suspense>
     </div>
   );
 }
