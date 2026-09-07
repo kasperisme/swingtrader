@@ -1,4 +1,4 @@
-# swingtrader schema index (generated 2026-09-06)
+# swingtrader schema index (generated 2026-09-07)
 
 ## Relationships & graph
 - `ticker_relationship_edge_evidence` (table, ~88,538 @2026-09-05) Ticker relationship edge traceability Goal: - Provide deterministic traceability from ticker_relationship_edge
@@ -17,7 +17,7 @@
 - `news_article_tickers` (table, ~739,882) news_article_tickers: ticker mentions extracted from articles
 - `news_articles` (table, ~226,391 @2026-09-06) news_articles: article content and metadata
 - `news_article_embedding_jobs` (table, ~225,591 @2026-09-05) Embedding setup for semantic retrieval over scored news.
-- `news_impact_vectors` (table, ~209,330 @2026-09-06) news_impact_vectors: aggregated impact dimension vectors
+- `news_impact_vectors` (table, ~225,284 @2026-09-06) news_impact_vectors: aggregated impact dimension vectors
 - `news_source_dry_days` (table, ~691) Track calendar days where a news source stream has been fully exhausted (all available articles fetched/proces
 - `news_embedding_hourly_cluster_articles` (table, ~57) Hourly / daily embedding clusters over swingtrader.news_article_embeddings (UTC buckets)
 - `news_briefing_subscriptions` (table, ~34 @2026-09-04) News briefing subscriptions: the free, no-account email service that sends a nicely structured PDF of the last
@@ -55,7 +55,7 @@
 - `market_screening_result_rows` (table, ~134,149 @2026-09-05) 
 - `market_screening_results` (table, ~4,296 @2026-09-05) 
 - `market_screening_email_subscriptions` (table, ~23 @2026-08-19) Market screening EMAIL subscriptions: the lightweight, email-only delivery list that powers the "Send me the r
-- `market_screenings` (table, ~10 @2026-09-06) 
+- `market_screenings` (table, ~10 @2026-09-07) 
 - `market_screening_subscriptions` (table, ~0) 
 
 ## Users, plans & billing
@@ -100,7 +100,7 @@
 - `podcast_episodes` (table, ~6 @2026-05-14) 
 - `telegram_update_requests` (table, ~5 @2026-05-08) telegram_update_requests Queue table for on-demand Telegram /update requests
 - `api_rate_limits` (table, ~1) api_rate_limits: 1-minute sliding window buckets
-- `arena_championships` (table, ~0 @2026-09-03) ── 1) The championships ────────────────────────────────────────────────────
+- `arena_championships` (table, ~0 @2026-09-07) ── 1) The championships ────────────────────────────────────────────────────
 - `daily_narratives` (table, ~0) ── daily_narratives ─────────────────────────────────────────────────────────
 - `research_artifacts` (table, ~0 @2026-08-19) Artifacts attached to a research write-up
 - `research_campaigns` (table, ~0 @2026-08-19) Autonomous quant research lab — the published record

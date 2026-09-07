@@ -1,6 +1,6 @@
 # Supabase `swingtrader` catalog
 
-Generated 2026-09-06 by `python -m services.catalog.build`. **Do not hand-edit** — regenerate instead.
+Generated 2026-09-07 by `python -m services.catalog.build`. **Do not hand-edit** — regenerate instead.
 
 108 tables/views, 1249 columns, 55 functions.
 
@@ -215,8 +215,6 @@ news_impact_heads: per-cluster LLM scoring results
 
 `cluster` values: `ARTICLE_TAGS`, `BUSINESS_MODEL`, `FINANCIAL_STRUCTURE`, `GEOGRAPHY_TRADE`, `GROWTH_PROFILE`, `MACRO_SENSITIVITY`, `MARKET_BEHAVIOUR`, `SECTOR_ROTATION`, `STORY_KEY_POINTS`, `SUPPLY_CHAIN_EXPOSURE`, `TICKER_RELATIONSHIPS`, `TICKER_SENTIMENT`, `VALUATION_POSITIONING`
 
-`model` values: `gemma4:31b-cloud`, `gemma4:e4b`
-
 ### `news_article_embeddings` (table)
 
 *~1,853,533 rows*
@@ -296,7 +294,7 @@ Embedding setup for semantic retrieval over scored news.
 
 ### `news_impact_vectors` (table)
 
-*~209,330 rows, fresh to 2026-09-06*
+*~225,284 rows, fresh to 2026-09-06*
 
 news_impact_vectors: aggregated impact dimension vectors
 
@@ -690,7 +688,7 @@ Ticker Sentiment Materialization (pre-exploded, indexed) Why: - swingtrader.tick
 | `article_ts` | timestamp with time zone |
 | `updated_at` | timestamp with time zone |
 
-`model` values: `claude-haiku-4-5`, `do-agent`, `gemma4:31b-cloud`, `gemma4:e4b`, `glm-5.1:cloud`
+`model` values: `claude-haiku-4-5`, `do-agent`, `gemma4:31b-cloud`, `gemma4:e4b`
 
 ### `ticker_coverage_daily` (table)
 
@@ -821,7 +819,7 @@ Market screening EMAIL subscriptions: the lightweight, email-only delivery list 
 
 ### `market_screenings` (table)
 
-*~10 rows, fresh to 2026-09-06*
+*~10 rows, fresh to 2026-09-07*
 
 | column | type |
 |---|---|
@@ -1735,7 +1733,7 @@ The assembled system prompt, published. `roster.py` is the source of truth and `
 
 ### `arena_championships` (table)
 
-*~0 rows, fresh to 2026-09-03*
+*~0 rows, fresh to 2026-09-07*
 
 ── 1) The championships ────────────────────────────────────────────────────
 
