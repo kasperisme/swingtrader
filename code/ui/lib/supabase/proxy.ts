@@ -70,47 +70,53 @@ export async function updateSession(request: NextRequest) {
     url.pathname = "/protected";
     return NextResponse.redirect(url);
   }
-  // /docs and /blog are public marketing/reference; do not require Supabase session.
-  const isPublicPath =
-    pathname === "/" ||
-    pathname.startsWith("/auth") ||
-    pathname.startsWith("/login") ||
-    pathname.startsWith("/docs") ||
-    pathname.startsWith("/blog") ||
-    pathname.startsWith("/articles") ||
-    pathname.startsWith("/quote") ||  // public per-ticker pages (impact-scored news + chart), server-rendered like /articles
-    pathname.startsWith("/topics") ||  // topic hubs — indexable by design; gating them would 307 every crawler
-    pathname.startsWith("/traders") ||  // famous-trader reference pages — indexable by design
-    pathname.startsWith("/arena") ||  // the AI paper-trading competition — the whole point is that anyone can watch it, and a login wall would 307 every crawler
-    pathname.startsWith("/agent") ||  // the individual competitors, moved out of /arena — same reason: public by design, and every link from the leaderboard lands here
-    pathname.startsWith("/research") ||  // published research — the point is that anyone can read and replicate it; a login wall would defeat that and 307 every crawler
-    pathname.startsWith("/api/news/semantic-search") ||  // public article search (tags + semantic), mirrors the public /articles page
-    pathname === "/about" ||  // public about/methodology/disclaimer — a login wall here would 307 every crawler
-    pathname === "/llms.txt" ||  // public site map for LLM clients
-    pathname === "/terms" ||
-    pathname === "/privacy" ||
-    pathname.startsWith("/api/v1") ||  // public API — uses its own Bearer auth
-    pathname === "/api/telegram-webhook" ||  // Telegram webhook — authenticated by secret header
-    pathname === "/api/early-access" ||  // public waitlist signup — no auth required
-    pathname === "/api/subscribe" ||  // public email-only screening subscription — no auth required
-    pathname === "/api/unsubscribe" ||  // public one-click unsubscribe — token-signed, no auth required
-    pathname.startsWith("/briefings") ||  // free news-briefing signup + manage (no account)
-    pathname.startsWith("/api/briefings") ||  // briefing subscribe/manage/unsubscribe/suggestions — no auth (manage/unsub are token-signed)
-    pathname.startsWith("/api/market-screenings") ||  // public read-only screening JSON API
-    pathname.startsWith("/api/stripe/checkout") ||  // creates checkout session (has own auth check)
-    pathname === "/pricing" ||  // public pricing page
-    pathname.startsWith("/marketscreenings") ||  // market screenings gallery + detail + CSV export
-    pathname.startsWith("/changelog") ||  // public release notes
-    pathname.startsWith("/podcast");  // public RSS feed + episode pages
+  // The gate is a DENY-list, not an allow-list, and the direction matters for
+  // more than tidiness.
+  //
+  // It used to be an allow-list: every public path had to be enumerated, and
+  // anything unlisted 307ed to /auth/login. So a URL matching NO route at all
+  // — a typo, a stale inbound link, a crawler probing an old path — was
+  // answered with a redirect into /auth/login, which robots.txt disallows.
+  // Googlebot saw a redirect terminating in a blocked resource instead of a
+  // 404, which is strictly worse: a 404 retires a URL, a redirect-to-blocked
+  // leaves it in limbo to be re-crawled. The site reported no 404s at all.
+  //
+  // Inverted, an unmatched path falls through to Next's router and gets a real
+  // 404. The cost is that a NEW private page is public until listed here —
+  // which is why the page-level guards stay (every /protected page calls
+  // redirect("/auth/login") itself) and why API routes keep the opposite
+  // default below.
+  const isPrivatePage =
+    pathname.startsWith("/protected") ||
+    pathname.startsWith("/studio") || // Sanity Studio — also has its own login
+    pathname.startsWith("/x"); // OAuth callback shim
 
-  if (!user && !isPublicPath) {
-    // For API routes return 401 instead of redirecting to the login page
+  // API routes keep DENY-by-default: an endpoint added tomorrow is private
+  // until someone lists it. None of it is crawlable, so the argument above
+  // does not apply, and the failure modes are asymmetric — a page wrongly
+  // public leaks a screen, an endpoint wrongly public leaks data.
+  const isPublicApi =
+    pathname.startsWith("/api/v1") || // public API — uses its own Bearer auth
+    pathname.startsWith("/api/news/semantic-search") || // mirrors the public /articles search
+    pathname.startsWith("/api/briefings") || // subscribe/manage/unsub — token-signed
+    pathname.startsWith("/api/market-screenings") || // read-only screening JSON
+    pathname.startsWith("/api/stripe/checkout") || // creates session; has its own auth check
+    pathname.startsWith("/api/telegram-webhook") || // authenticated by secret header
+    pathname.startsWith("/api/early-access") || // public waitlist signup
+    pathname.startsWith("/api/subscribe") || // public email-only screening signup
+    pathname.startsWith("/api/unsubscribe"); // one-click unsubscribe, token-signed
+
+  if (!user) {
     if (pathname.startsWith("/api/")) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+      // API routes return 401 rather than redirecting to the login page.
+      if (!isPublicApi) {
+        return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+      }
+    } else if (isPrivatePage) {
+      const url = request.nextUrl.clone();
+      url.pathname = "/auth/login";
+      return NextResponse.redirect(url);
     }
-    const url = request.nextUrl.clone();
-    url.pathname = "/auth/login";
-    return NextResponse.redirect(url);
   }
 
   // IMPORTANT: You *must* return the supabaseResponse object as it is.
