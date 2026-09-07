@@ -114,7 +114,25 @@ async function buildTickerIndex(windowDays: number): Promise<TrendIndex | null> 
   }>((from, to) =>
     supabase
       .schema("swingtrader")
-      .from("news_trends_ticker_daily_v")
+      // Reads the materialized rollup, NOT news_trends_ticker_daily_v.
+      //
+      // This paged the live view, and since getTrendingLookup runs on every
+      // article page it ran constantly. The view recomputes two 120-day
+      // aggregates per call: measured 8,250ms at offset 0 against the REST
+      // role's 8s statement_timeout, so PostgREST logged SQLSTATE 57014
+      // ("canceling statement due to statement timeout") continuously — the
+      // first page was already over the limit, every time.
+      //
+      // ticker_coverage_daily is that same view, materialized after each
+      // scoring run. Same columns, same grain, 0.75ms instead of 8,250ms.
+      // `weighted_sentiment` was the only column it lacked (added in migration
+      // 20260907150000) and the sole reason this still read the view.
+      //
+      // Two deliberate differences: the rollup is as fresh as the last scoring
+      // run rather than live — the same trade /quote already makes — and it
+      // filters tickers to '^[A-Z][A-Z0-9.\-]{0,11}$', which drops numeric and
+      // foreign codes like '000063.SZ' that a trending board should not show.
+      .from("ticker_coverage_daily")
       .select("bucket_day, ticker, mention_count, scored_count, avg_sentiment, weighted_sentiment")
       .gte("bucket_day", since)
       .order("bucket_day", { ascending: true })
