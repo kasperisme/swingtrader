@@ -10,7 +10,14 @@ import { SITE_URL as baseUrl } from "@/lib/site";
 
 
 // Cap the per-post list so the file stays a concise index, not a full dump.
-const BLOG_LLMS_LIMIT = 25;
+//
+// Was 25, which made the blog 25 of 60 links — 42% of the file — and every one
+// of them a dated "Pre-Market News Impact: <date>" entry with no excerpt. That
+// is the same mistake the sitemap had: the least distinctive content taking the
+// most room. It costs more here than in a sitemap, because llms.txt is read
+// into a context window, so those lines crowd out the pages that would actually
+// make a model recommend the product. Blog home is still linked for the rest.
+const BLOG_LLMS_LIMIT = 6;
 
 type DocPreview = {
   title: string;
@@ -31,8 +38,12 @@ function clean(text: string | undefined, max = 160): string {
   return flat.length > max ? `${flat.slice(0, max - 1).trimEnd()}…` : flat;
 }
 
-function line(name: string, url: string, note?: string): string {
-  const n = clean(note);
+// `max` is overridable because a handful of entries stand for a whole surface
+// rather than a single page — /quote is one page template covering ~1,500
+// tickers and four distinct tools — and the default 160 characters silently
+// truncates those into something that undersells what is there.
+function line(name: string, url: string, note?: string, max = 160): string {
+  const n = clean(note, max);
   return n ? `- [${name}](${url}): ${n}` : `- [${name}](${url})`;
 }
 
@@ -54,18 +65,22 @@ export async function GET(): Promise<Response> {
   );
   out.push("");
 
-  // --- Core pages (curated, stable) ---
-  out.push("## Core pages");
+  // --- The public surfaces, grouped the way the site groups them ---
+  //
+  // These three headings mirror the two dropdowns in the public header
+  // (INSIGHTS_LINKS / FREE_SERVICE_LINKS in components/site-header-public-nav)
+  // plus the standalone product pages. Keeping the same shape is the point: an
+  // LLM reading this gets the site's own information architecture, and when a
+  // surface is added to the nav there is one obvious place to add it here.
+  //
+  // This section previously listed six pages under "Core pages" and had drifted
+  // badly — /topics, /arena, /traders and /research were all live and all
+  // absent, which is four of the six Insights entries. Individual entity pages
+  // are described by their {slug} pattern rather than enumerated, the same way
+  // /quote and /articles have always been handled here: this file is a map, not
+  // an index, and the sitemap is linked below for the exhaustive list.
+  out.push("## Insights");
   out.push("");
-  out.push(line("Home", `${baseUrl}/`, "Product overview, features, and pricing."));
-  out.push(line("Pricing", `${baseUrl}/pricing`, "Plans and what each tier includes."));
-  out.push(
-    line(
-      "Market screenings",
-      `${baseUrl}/marketscreenings`,
-      "Gallery of curated screeners; individual screeners at /marketscreenings/{slug}.",
-    ),
-  );
   out.push(
     line(
       "News articles",
@@ -75,11 +90,71 @@ export async function GET(): Promise<Response> {
   );
   out.push(
     line(
-      "Stock quotes",
-      `${baseUrl}/quote`,
-      "Per-ticker news-impact analysis. Each US ticker lives at /quote/{SYMBOL}, e.g. /quote/NVDA.",
+      "Topics",
+      `${baseUrl}/topics`,
+      "Live trackers for stories that keep developing, each new development scored for market impact. Hubs at /topics/{slug}.",
     ),
   );
+  // Not "live quotes" — the price is the least of it. This one template carries
+  // the charting workspace and the relationship graph (both moved here from
+  // /protected/charts and /protected/relations) plus the priced-in
+  // reconstruction, and the old one-line description sold none of that.
+  out.push(
+    line(
+      "Ticker research pages",
+      `${baseUrl}/quote`,
+      "One research workspace per ticker at /quote/{SYMBOL}, e.g. /quote/NVDA: scored news catalysts plotted on the price chart, an interactive charting workspace, a priced-in reconstruction of what the current price already reflects, and a relationship network of connected tickers (suppliers, customers, competitors) — plus sentiment, peers and key statistics.",
+      400,
+    ),
+  );
+  // Agents are described here rather than given their own entry: there is no
+  // /agent hub route, only /agent/[slug], so linking /agent would be a 404.
+  out.push(
+    line(
+      "The Arena",
+      `${baseUrl}/arena`,
+      "Nine AI agents, $100,000 each, same model and risk limits — only their data access differs; two are deterministic controls. Agents at /agent/{slug}.",
+    ),
+  );
+  out.push(
+    line(
+      "Famous traders",
+      `${baseUrl}/traders`,
+      "Reference profiles of well-known traders and their methods; several are the named influence behind an Arena agent.",
+    ),
+  );
+  out.push(
+    line(
+      "Research",
+      `${baseUrl}/research`,
+      "Published research write-ups and methodology; individual pieces at /research/{slug}.",
+    ),
+  );
+  out.push("");
+
+  out.push("## Free services");
+  out.push("");
+  out.push(
+    line(
+      "Daily news briefing",
+      `${baseUrl}/briefings`,
+      "Free daily PDF of the news moving your chosen tickers and tags, delivered before the open. No account required.",
+    ),
+  );
+  out.push(
+    line(
+      "Market screenings",
+      `${baseUrl}/marketscreenings`,
+      "Gallery of curated screeners; individual screeners at /marketscreenings/{slug}.",
+    ),
+  );
+  out.push("");
+
+  out.push("## Product");
+  out.push("");
+  out.push(line("Home", `${baseUrl}/`, "Product overview, features, and pricing."));
+  out.push(line("Pricing", `${baseUrl}/pricing`, "Plans and what each tier includes."));
+  out.push(line("About", `${baseUrl}/about`, "Methodology, data sources, and disclaimers."));
   out.push("");
 
   // --- Documentation (live from Sanity) ---
