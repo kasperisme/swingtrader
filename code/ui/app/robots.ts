@@ -21,7 +21,6 @@ export default function robots(): MetadataRoute.Robots {
           "/traders",
           "/about",
           "/pricing",
-          "/changelog",
           "/terms",
           "/privacy",
           "/podcast/feed.xml",

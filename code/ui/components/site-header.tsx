@@ -51,7 +51,6 @@ export function SiteHeaderFallback() {
         <Link href="/pricing" className={`${navLinkClass} hidden md:inline`}>Pricing</Link>
         <Link href="/docs" className={`${navLinkClass} hidden md:inline`}>Docs</Link>
         <Link href="/blog" className={`${navLinkClass} hidden md:inline`}>Blog</Link>
-        <Link href="/changelog" className={`${navLinkClass} hidden md:inline`}>Changelog</Link>
         <Button asChild size="sm" variant="outline" className="hidden md:inline-flex">
           <Link href="/auth/login">Sign in</Link>
         </Button>
@@ -88,7 +87,6 @@ export async function SiteHeader() {
           <Link href="/pricing" className={`${navLinkClass} hidden md:inline`}>Pricing</Link>
           <Link href="/docs" className={`${navLinkClass} hidden md:inline`}>Docs</Link>
           <Link href="/blog" className={`${navLinkClass} hidden md:inline`}>Blog</Link>
-          <Link href="/changelog" className={`${navLinkClass} hidden md:inline`}>Changelog</Link>
           <CavemanToggle className="hidden md:flex" />
           <Link
             href="/protected/profile"
@@ -105,7 +103,6 @@ export async function SiteHeader() {
           <Link href="/pricing" className={`${navLinkClass} hidden md:inline`}>Pricing</Link>
           <Link href="/docs" className={`${navLinkClass} hidden md:inline`}>Docs</Link>
           <Link href="/blog" className={`${navLinkClass} hidden md:inline`}>Blog</Link>
-          <Link href="/changelog" className={`${navLinkClass} hidden md:inline`}>Changelog</Link>
           <CavemanToggle className="hidden md:flex" />
           <Button asChild size="sm" variant="outline" className="hidden md:inline-flex">
             <Link href="/auth/login">Sign in</Link>

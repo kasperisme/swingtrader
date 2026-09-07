@@ -80,7 +80,6 @@ export async function GET(): Promise<Response> {
       "Per-ticker news-impact analysis. Each US ticker lives at /quote/{SYMBOL}, e.g. /quote/NVDA.",
     ),
   );
-  out.push(line("Changelog", `${baseUrl}/changelog`, "Product updates and releases."));
   out.push("");
 
   // --- Documentation (live from Sanity) ---
