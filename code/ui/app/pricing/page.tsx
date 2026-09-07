@@ -141,17 +141,9 @@ export default function PricingPage() {
       {/* Header */}
       <section className="border-b border-border py-16 md:py-20">
         <div className="mx-auto max-w-3xl px-4 sm:px-6 lg:px-8 text-center">
-          <p className="text-xs font-semibold uppercase tracking-widest text-amber-500">
-            Pricing
-          </p>
-          <h1 className="mt-3 text-3xl font-bold tracking-tight sm:text-4xl">
+          <h1 className="text-3xl font-bold tracking-tight sm:text-4xl">
             One price, no countdown
           </h1>
-          <p className="mt-4 max-w-xl mx-auto text-sm leading-6 text-muted-foreground">
-            Start free and stay free, or take a paid plan month-to-month.
-            No tiered launch ladder, no seat counter, no rate expiring on you
-            at the end of the week.
-          </p>
         </div>
       </section>
 
