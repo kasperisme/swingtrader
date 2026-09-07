@@ -3,7 +3,7 @@
 import { useEffect, useId, useState } from "react";
 import { createPortal } from "react-dom";
 import Link from "next/link";
-import { Menu, X, LogOut, UserCircle } from "lucide-react";
+import { Menu, LogOut, UserCircle } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { cn } from "@/lib/utils";
 import { CavemanToggle } from "@/components/caveman-toggle";
@@ -120,37 +120,16 @@ export function SiteHeaderMobileNav({ isAuthed, userEmail }: Props) {
 
       {open && createPortal(
         <div className="fixed inset-0 z-[10000]">
-          {/* Backdrop */}
+          {/* Backdrop — and the only pointer way out, now that the drawer has
+              no close button of its own. It spans the whole overlay and the
+              drawer renders after it, so anything outside the panel closes.
+              Escape still works too (see the keydown effect above). */}
           <button
             type="button"
             className="absolute inset-0 bg-black/60 backdrop-blur-sm"
             aria-label="Close menu"
             onClick={close}
           />
-
-          {/* Close — outside the panel, on the backdrop.
-              It used to own a 64px header band inside the drawer, which cost a
-              tenth of the screen to hold one 32px button and pushed the links
-              down. Out here the nav starts at the top edge and fills the whole
-              height.
-
-              Vertically centred on the drawer, so it reads as a handle on the
-              panel's edge rather than a stray control floating in the corner,
-              and it sits where a thumb already rests.
-
-              The offset clamps: `20rem` normally puts it just clear of the
-              drawer, but on a viewport narrower than the drawer itself (where
-              the panel goes full-width) `100% - 3rem` keeps it on screen at the
-              panel's right edge instead of off it. Escape and a backdrop tap
-              close too, so this is never the only way out. */}
-          <button
-            type="button"
-            className="absolute left-[min(calc(100%-3rem),20rem)] top-1/2 ml-2 inline-flex h-9 w-9 -translate-y-1/2 cursor-pointer items-center justify-center rounded-lg border border-border bg-background text-foreground shadow-lg transition-colors hover:bg-muted"
-            onClick={close}
-            aria-label="Close navigation menu"
-          >
-            <X className="h-4 w-4" aria-hidden />
-          </button>
 
           {/* Drawer */}
           <div
