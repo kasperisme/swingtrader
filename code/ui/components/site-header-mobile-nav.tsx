@@ -136,12 +136,11 @@ export function SiteHeaderMobileNav({ isAuthed, userEmail }: Props) {
             aria-label="Site navigation"
             className="absolute inset-y-0 left-0 flex w-[min(100%,20rem)] flex-col border-r border-border bg-card shadow-2xl"
           >
-            {/* Drawer header */}
-            <div className="flex h-16 shrink-0 items-center justify-between border-b border-border px-5">
-              <div className="flex items-center gap-2">
-                <span className="h-1.5 w-1.5 rounded-full bg-amber-500" />
-                <span className="text-sm font-semibold tracking-tight">newsimpactscreener</span>
-              </div>
+            {/* Drawer header — close only.
+                The wordmark that used to sit here restated the one in the site
+                header the drawer opened from, which is still visible beside it.
+                A panel does not need to tell you which site you are on. */}
+            <div className="flex h-16 shrink-0 items-center justify-end border-b border-border px-5">
               <button
                 type="button"
                 className="inline-flex h-8 w-8 cursor-pointer items-center justify-center rounded-lg border border-border bg-background transition-colors hover:bg-muted"
@@ -249,34 +248,35 @@ export function SiteHeaderMobileNav({ isAuthed, userEmail }: Props) {
                    read; Profile is this account, which is what the rest of
                    this footer is already about — the address above it and the
                    way out below it. */
-                <div className="space-y-1">
-                  {email && (
-                    <p className="truncate px-3 text-xs text-muted-foreground">{email}</p>
-                  )}
-                  <div className="flex items-center justify-between gap-2">
-                    <Link
-                      href="/protected/profile"
-                      onClick={close}
-                      className={cn(
-                        linkClass,
-                        "flex items-center gap-2 text-muted-foreground hover:text-foreground",
-                      )}
-                    >
-                      <UserCircle className="h-4 w-4" />
-                      Profile
-                    </Link>
-                    <button
-                      type="button"
-                      onClick={handleLogout}
-                      className={cn(
-                        linkClass,
-                        "flex items-center gap-2 text-muted-foreground hover:text-foreground",
-                      )}
-                    >
-                      <LogOut className="h-4 w-4" />
-                      Sign out
-                    </button>
-                  </div>
+                <div className="flex items-center justify-between gap-2">
+                  {/* The address IS the profile link. A "Profile" row under the
+                      email was a label for the thing directly above it, and the
+                      address says whose account it is better than the word does.
+                      Falls back to "Profile" only if the email is unavailable. */}
+                  <Link
+                    href="/protected/profile"
+                    onClick={close}
+                    className={cn(
+                      linkClass,
+                      "flex min-w-0 flex-1 items-center gap-2 text-muted-foreground hover:text-foreground",
+                    )}
+                  >
+                    <UserCircle className="h-4 w-4 shrink-0" />
+                    <span className="truncate">{email ?? "Profile"}</span>
+                  </Link>
+                  <button
+                    type="button"
+                    onClick={handleLogout}
+                    aria-label="Sign out"
+                    title="Sign out"
+                    className={cn(
+                      linkClass,
+                      "flex shrink-0 items-center gap-2 text-muted-foreground hover:text-foreground",
+                    )}
+                  >
+                    <LogOut className="h-4 w-4" />
+                    Sign out
+                  </button>
                 </div>
               ) : (
                 <div className="flex flex-col gap-2">
