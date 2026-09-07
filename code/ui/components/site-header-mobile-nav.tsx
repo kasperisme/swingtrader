@@ -128,6 +128,30 @@ export function SiteHeaderMobileNav({ isAuthed, userEmail }: Props) {
             onClick={close}
           />
 
+          {/* Close — outside the panel, on the backdrop.
+              It used to own a 64px header band inside the drawer, which cost a
+              tenth of the screen to hold one 32px button and pushed the links
+              down. Out here the nav starts at the top edge and fills the whole
+              height.
+
+              Vertically centred on the drawer, so it reads as a handle on the
+              panel's edge rather than a stray control floating in the corner,
+              and it sits where a thumb already rests.
+
+              The offset clamps: `20rem` normally puts it just clear of the
+              drawer, but on a viewport narrower than the drawer itself (where
+              the panel goes full-width) `100% - 3rem` keeps it on screen at the
+              panel's right edge instead of off it. Escape and a backdrop tap
+              close too, so this is never the only way out. */}
+          <button
+            type="button"
+            className="absolute left-[min(calc(100%-3rem),20rem)] top-1/2 ml-2 inline-flex h-9 w-9 -translate-y-1/2 cursor-pointer items-center justify-center rounded-lg border border-border bg-background text-foreground shadow-lg transition-colors hover:bg-muted"
+            onClick={close}
+            aria-label="Close navigation menu"
+          >
+            <X className="h-4 w-4" aria-hidden />
+          </button>
+
           {/* Drawer */}
           <div
             id={panelId}
@@ -136,21 +160,6 @@ export function SiteHeaderMobileNav({ isAuthed, userEmail }: Props) {
             aria-label="Site navigation"
             className="absolute inset-y-0 left-0 flex w-[min(100%,20rem)] flex-col border-r border-border bg-card shadow-2xl"
           >
-            {/* Drawer header — close only.
-                The wordmark that used to sit here restated the one in the site
-                header the drawer opened from, which is still visible beside it.
-                A panel does not need to tell you which site you are on. */}
-            <div className="flex h-16 shrink-0 items-center justify-end border-b border-border px-5">
-              <button
-                type="button"
-                className="inline-flex h-8 w-8 cursor-pointer items-center justify-center rounded-lg border border-border bg-background transition-colors hover:bg-muted"
-                onClick={close}
-                aria-label="Close navigation menu"
-              >
-                <X className="h-4 w-4" aria-hidden />
-              </button>
-            </div>
-
             {/* Nav content */}
             <nav className="min-h-0 flex-1 overflow-y-auto p-4 space-y-6">
               {isLoggedIn ? (
