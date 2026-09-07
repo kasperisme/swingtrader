@@ -3,7 +3,7 @@
 import { useEffect, useId, useState } from "react";
 import { createPortal } from "react-dom";
 import Link from "next/link";
-import { Menu, X, LogOut } from "lucide-react";
+import { Menu, X, LogOut, UserCircle } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { cn } from "@/lib/utils";
 import { CavemanToggle } from "@/components/caveman-toggle";
@@ -189,7 +189,6 @@ export function SiteHeaderMobileNav({ isAuthed, userEmail }: Props) {
                       {publicLinks.map(({ href, label }) => (
                         <NavLink key={href} href={href} label={label} onClick={close} />
                       ))}
-                      <NavLink href="/protected/profile" label="Profile" onClick={close} />
                     </ul>
                   </div>
                 </>
@@ -223,47 +222,61 @@ export function SiteHeaderMobileNav({ isAuthed, userEmail }: Props) {
               )}
             </nav>
 
-            {/* Ask AI
-                Pinned to the footer rather than sitting in a "Help" section at
-                the top of the scroll area. It is not a destination like the
-                links above it — it is the thing you reach for when the links
-                did not answer you, which is after you have scrolled the list,
-                not before. Down here it never scrolls out of reach. */}
-            {isLoggedIn && (
-              <div className="shrink-0 border-t border-border px-4 py-3" onClick={close}>
-                <HelpChatTrigger
-                  className={cn(
-                    linkClass,
-                    "inline-flex w-full items-center gap-2 text-amber-600 dark:text-amber-400",
-                  )}
-                />
-              </div>
-            )}
-
-            {/* Caveman toggle */}
+            {/* Footer utilities — Ask AI and the reading-mode toggle share a row.
+                Both are controls rather than destinations, and neither needs a
+                line of its own: stacked they cost two bands plus a "Mode" label
+                to announce what the toggle already shows. Pinned below the
+                scroll area so they stay reachable at any scroll position. */}
             <div className="shrink-0 border-t border-border px-4 py-3">
-              <p className={cn(sectionLabelClass, "mb-2")}>Mode</p>
-              <CavemanToggle showLabels className="w-full justify-center" />
+              <div className="flex items-center justify-between gap-3">
+                {isLoggedIn ? (
+                  <span onClick={close}>
+                    <HelpChatTrigger className="-ml-2 inline-flex cursor-pointer items-center gap-2 rounded-xl px-2 py-2 text-sm font-medium text-amber-600 transition-colors hover:bg-muted dark:text-amber-400" />
+                  </span>
+                ) : (
+                  /* Holds the toggle hard right for signed-out users too. */
+                  <span aria-hidden />
+                )}
+                <CavemanToggle showLabels />
+              </div>
             </div>
 
             {/* Drawer footer */}
             <div className="shrink-0 border-t border-border p-4">
               {isLoggedIn ? (
-                <div className="space-y-2">
+                /* Profile sits here rather than under "More" with Pricing,
+                   Docs and Blog. Those are marketing pages any visitor can
+                   read; Profile is this account, which is what the rest of
+                   this footer is already about — the address above it and the
+                   way out below it. */
+                <div className="space-y-1">
                   {email && (
                     <p className="truncate px-3 text-xs text-muted-foreground">{email}</p>
                   )}
-                  <button
-                    type="button"
-                    onClick={handleLogout}
-                    className={cn(
-                      linkClass,
-                      "flex w-full items-center gap-2 text-muted-foreground hover:text-foreground",
-                    )}
-                  >
-                    <LogOut className="h-4 w-4" />
-                    Sign out
-                  </button>
+                  <div className="flex items-center justify-between gap-2">
+                    <Link
+                      href="/protected/profile"
+                      onClick={close}
+                      className={cn(
+                        linkClass,
+                        "flex items-center gap-2 text-muted-foreground hover:text-foreground",
+                      )}
+                    >
+                      <UserCircle className="h-4 w-4" />
+                      Profile
+                    </Link>
+                    <button
+                      type="button"
+                      onClick={handleLogout}
+                      className={cn(
+                        linkClass,
+                        "flex items-center gap-2 text-muted-foreground hover:text-foreground",
+                      )}
+                    >
+                      <LogOut className="h-4 w-4" />
+                      Sign out
+                    </button>
+                  </div>
                 </div>
               ) : (
                 <div className="flex flex-col gap-2">
