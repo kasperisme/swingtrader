@@ -141,8 +141,12 @@ export default function PricingPage() {
       {/* Header */}
       <section className="border-b border-border py-16 md:py-20">
         <div className="mx-auto max-w-3xl px-4 sm:px-6 lg:px-8 text-center">
+          {/* "Pricing" carries the h1 itself rather than sitting above one as an
+              eyebrow: the page needs exactly one h1, and a label plus a slogan
+              was two lines saying what the nav item the reader just clicked
+              already said. */}
           <h1 className="text-3xl font-bold tracking-tight sm:text-4xl">
-            One price, no countdown
+            Pricing
           </h1>
         </div>
       </section>
