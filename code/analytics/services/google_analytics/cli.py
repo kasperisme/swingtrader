@@ -9,6 +9,8 @@
     .venv/bin/python -m services.google_analytics.cli queries        # search queries (GSC)
     .venv/bin/python -m services.google_analytics.cli sc-pages       # search pages (GSC)
     .venv/bin/python -m services.google_analytics.cli opportunities  # striking-distance SEO wins
+    .venv/bin/python -m services.google_analytics.cli sitemaps        # registered sitemaps + last fetch (GSC)
+    .venv/bin/python -m services.google_analytics.cli resubmit-sitemap  # ask Google to re-download it
 
 Add --json to any data command for machine-readable output.
 """
@@ -205,6 +207,59 @@ def cmd_opportunities(args) -> int:
     return 0
 
 
+def cmd_sitemaps(args) -> int:
+    from . import sitemaps as sm
+    rows = sm.list_sitemaps()
+    if args.json:
+        print(json.dumps(rows, indent=2)); return 0
+    print(f"Search Console sitemaps — {gc.site_url()}  ({sm.permission_level()})\n" + "-" * 60)
+    if not rows:
+        print("  (none registered)"); return 0
+    for e in rows:
+        c = (e.get("contents") or [{}])[0]
+        print(f"  {e.get('path')}")
+        print(f"    last submitted   {e.get('lastSubmitted', '-')}")
+        print(f"    last downloaded  {e.get('lastDownloaded', '-')}")
+        print(f"    urls (at last download) {c.get('submitted', '-')}"
+              f"   errors {e.get('errors', '-')}  warnings {e.get('warnings', '-')}")
+        if e.get("isPending"):
+            print("    status           PENDING — Google has not processed the submit yet")
+    return 0
+
+
+def cmd_resubmit_sitemap(args) -> int:
+    """Force Google to re-download the sitemap.
+
+    Reports the before/after `lastDownloaded` because that — not the submit call
+    returning 200 — is the only evidence Google actually re-fetched anything.
+    """
+    from . import sitemaps as sm
+    path = args.path or sm.DEFAULT_SITEMAP
+    level = sm.permission_level()
+    print(f"Property   {gc.site_url()}  ({level})")
+    print(f"Sitemap    {path}")
+    if level not in ("siteOwner", "siteFullUser"):
+        print(f"\n  ✗ Permission '{level}' cannot submit sitemaps. The service account "
+              f"({gc.service_account_email()}) needs Full or Owner in Search Console.",
+              file=sys.stderr)
+        return 1
+
+    before = sm.get(path) or {}
+    print(f"Before     downloaded {before.get('lastDownloaded', 'never')} "
+          f"({(before.get('contents') or [{}])[0].get('submitted', '?')} urls)")
+    if args.dry_run:
+        print("\n  dry run — not submitting."); return 0
+
+    sm.submit(path)
+    after = sm.get(path) or {}
+    print(f"After      submitted  {after.get('lastSubmitted', '-')}")
+    print(f"           downloaded {after.get('lastDownloaded', 'never')}")
+    print("\n  ✓ Submitted. Google re-downloads on its own schedule (minutes to a day);")
+    print("    re-run `sitemaps` and watch `last downloaded` move to confirm.")
+    print("    A resubmit refreshes the URL LIST — it does not force per-page indexing.")
+    return 0
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(prog="google_analytics", description="GA4 + Search Console insight.")
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -223,6 +278,11 @@ def main() -> int:
     p = sub.add_parser("queries"); _common(p, 50); p.set_defaults(func=cmd_queries)
     p = sub.add_parser("sc-pages"); _common(p, 50); p.set_defaults(func=cmd_sc_pages)
     p = sub.add_parser("opportunities"); _common(p, 30); p.add_argument("--min-impr", type=float, default=100.0, dest="min_impr"); p.set_defaults(func=cmd_opportunities)
+    p = sub.add_parser("sitemaps"); p.add_argument("--json", action="store_true"); p.set_defaults(func=cmd_sitemaps)
+    p = sub.add_parser("resubmit-sitemap")
+    p.add_argument("--path", default=None, help="sitemap URL (default: the canonical www sitemap)")
+    p.add_argument("--dry-run", action="store_true", dest="dry_run")
+    p.set_defaults(func=cmd_resubmit_sitemap)
 
     args = ap.parse_args()
     try:

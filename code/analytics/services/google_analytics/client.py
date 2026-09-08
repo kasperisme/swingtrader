@@ -9,7 +9,12 @@ Credentials (in code/analytics/.env, gitignored):
   GOOGLE_SERVICE_ACCOUNT_JSON={"type":"service_account",...}   # raw or base64
 
 The same service account must be granted **Viewer** on the GA4 property and added
-as a **user** in Search Console. Read-only scopes only.
+as a **user** in Search Console.
+
+Everything here reads with read-only scopes. The ONE exception is sitemap
+submission (`sitemaps.py`), which needs the full `webmasters` scope AND a
+Search Console permission level of Full or Owner — restricted permission can
+read Search Analytics but cannot re-submit a sitemap.
 """
 
 from __future__ import annotations
@@ -22,6 +27,8 @@ from functools import lru_cache
 
 _GA4_SCOPE = "https://www.googleapis.com/auth/analytics.readonly"
 _GSC_SCOPE = "https://www.googleapis.com/auth/webmasters.readonly"
+# Write scope — only requested by `gsc_write_client()`, i.e. sitemap submission.
+_GSC_WRITE_SCOPE = "https://www.googleapis.com/auth/webmasters"
 
 
 class GoogleError(RuntimeError):
@@ -60,12 +67,12 @@ def site_url() -> str:
     return su
 
 
-@lru_cache(maxsize=1)
-def _credentials():
+@lru_cache(maxsize=2)
+def _credentials(write: bool = False):
     _load_env()
     from google.oauth2 import service_account
 
-    scopes = [_GA4_SCOPE, _GSC_SCOPE]
+    scopes = [_GA4_SCOPE, _GSC_WRITE_SCOPE if write else _GSC_SCOPE]
     inline = (os.environ.get("GOOGLE_SERVICE_ACCOUNT_JSON") or "").strip()
     if inline:
         try:
@@ -100,6 +107,19 @@ def ga4_client():
 
 @lru_cache(maxsize=1)
 def gsc_client():
-    """Search Console API (v3) client."""
+    """Search Console API (v3) client — read-only."""
     from googleapiclient.discovery import build
     return build("searchconsole", "v1", credentials=_credentials(), cache_discovery=False)
+
+
+@lru_cache(maxsize=1)
+def gsc_write_client():
+    """Search Console API (v3) client with the WRITE scope.
+
+    Separate from `gsc_client()` on purpose: every analytics path stays on the
+    read-only scope, and only the sitemap submit/delete calls ever hold a token
+    that can change anything in Search Console.
+    """
+    from googleapiclient.discovery import build
+    return build("searchconsole", "v1", credentials=_credentials(write=True),
+                 cache_discovery=False)

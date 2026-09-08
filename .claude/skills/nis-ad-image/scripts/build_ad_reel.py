@@ -86,6 +86,17 @@ def _blocks(spec, W, H):
         if impact and impact.get("items"):
             b.append(("impact", ai._impact_height(impact),
                       lambda d, x, y: ai._impact_list(d, x, y, W, T, accent, impact)))
+        # The priced-in blocks fly in like the rest, which is exactly the beat
+        # order the story wants: the distribution lands, THEN what the price pays
+        # for, then what it refuses.
+        rail = spec.get("price_rail")
+        if rail:
+            b.append(("rail", ai.RAIL_H,
+                      lambda d, x, y: ai._price_rail(d, x, y, W, T, accent, rail)))
+        ledger = spec.get("ledger")
+        if ledger and (ledger.get("pays") or ledger.get("refuses")):
+            b.append(("ledger", ai._ledger_height(measure, W, ledger),
+                      lambda d, x, y: ai._ledger(d, x, y, W, T, accent, ledger)))
         for bl in spec.get("bullets", []):
             b.append(("bullet", 54,
                       lambda d, x, y, bl=bl: ai._check(d, x, y + 22, T, accent, bl, maxw=maxw)))

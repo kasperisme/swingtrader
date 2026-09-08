@@ -197,3 +197,97 @@ export interface CardReelSpec {
 export type StockCardProps = {
   spec: CardReelSpec;
 };
+
+// ---------------------------------------------------------------------------
+// Format 4: The Arena — a league table (still) and the same table racing over a
+// season (video). Mirror of services/arena_creatives/spec.py — keep in sync.
+//
+// The two share `ArenaRow` on purpose: a weekly package only reads as a package
+// if the still and the video are visibly the same graphic.
+// ---------------------------------------------------------------------------
+
+export type FormResult = 'W' | 'L' | 'D';
+
+export interface ArenaRow {
+  rank: number;
+  slug: string;
+  name: string;
+  code: string; // three-letter table code, e.g. "BOG"
+  color: string; // club colour
+  isControl: boolean; // the non-LLM baselines, styled without a hue
+  nav: number;
+  return: number; // fraction, e.g. 0.0289
+  drawdown: number; // fraction, negative
+  sharpe: number | null;
+  trades: number; // CLOSED trades (not filled orders)
+  winRate: number | null; // fraction over closes; null when nothing has closed
+  positions: number;
+  move: number | null; // rank change vs the lookback; positive = climbed
+  form: FormResult[]; // oldest first
+  streak: number; // signed run length; 0 when the last session was flat
+}
+
+export interface ArenaHeader {
+  kicker: string;
+  title: string;
+  subtitle?: string;
+}
+
+export interface ArenaFooter {
+  asOf: string;
+  cta?: string;
+  disclaimer: string; // never optional — every arena asset carries it
+}
+
+export interface ArenaZones {
+  top: number; // rows tinted as the "promotion" band
+  bottom: number; // rows tinted as the "relegation" band
+}
+
+export interface ArenaTableSpec {
+  version: number;
+  kind: 'arenaTable';
+  format: ReelFormat;
+  theme: string;
+  header: ArenaHeader;
+  hook?: string; // the strap line across the top of the table
+  storyKey?: string;
+  zones: ArenaZones;
+  rows: ArenaRow[];
+  footer: ArenaFooter;
+}
+
+export interface ArenaAgent {
+  slug: string;
+  name: string;
+  code: string;
+  color: string;
+  isControl: boolean;
+}
+
+export interface ArenaKeyframe {
+  t: string; // ISO session date
+  label: string; // "Sep 4"
+  entries: {id: string; value: number}[]; // value = cumulative return, a fraction
+}
+
+export interface ArenaRaceSpec {
+  version: number;
+  kind: 'arenaRace';
+  format: ReelFormat;
+  theme: string;
+  header: ArenaHeader;
+  hook?: string;
+  storyKey?: string;
+  metricLabel: string;
+  agents: ArenaAgent[];
+  keyframes: ArenaKeyframe[];
+  finalRows: ArenaRow[];
+  captions?: Caption[];
+  outro?: OutroSpec;
+  footer: ArenaFooter;
+  sources?: string[];
+}
+
+export type ArenaTableProps = {spec: ArenaTableSpec};
+export type ArenaRaceProps = {spec: ArenaRaceSpec};

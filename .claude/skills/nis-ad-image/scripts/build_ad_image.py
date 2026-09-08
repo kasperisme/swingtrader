@@ -309,6 +309,154 @@ def _impact_list(d, x, y, W, T, accent, il):
     return ph
 
 
+# ---- priced-in blocks (used by the nis-priced-in-story skill) --------------
+#
+# Two optional blocks that draw the priced-in reconstruction the way the quote
+# page draws it, so the ad is a miniature of the page it clicks through to. Both
+# are pure layout: every number comes from `story.json`, which reads only the
+# GROUNDED tier of `swingtrader.research_priced_in` (arithmetic over published
+# analyst targets). The per-driver "% priced in" estimates are unvalidated and
+# are not on the quote page either — they must never reach a creative.
+
+RAIL_H = 268
+
+
+def _price_rail(d, x, y, W, T, accent, r):
+    """The distribution of published analyst models, with the share price marked
+    on it. This is the whole argument in one object: the price is not high or low,
+    it is somewhere specific among other people's published numbers.
+
+    Three positions are drawn because three are KNOWN — the lowest model, the
+    median and the highest. `research_priced_in` stores those and the count, not
+    the individual targets, so drawing N evenly spaced ticks would be inventing a
+    distribution the row does not contain. The count goes in the title instead.
+
+    The layout puts the price chip ABOVE the rail and the reference labels BELOW
+    it, so a price sitting on top of the low end (the usual case, and the whole
+    reason the ad exists) cannot collide with the low label."""
+    pw = W - 2 * MARGIN
+    d.rounded_rectangle([x, y, x + pw, y + RAIL_H], radius=24,
+                        fill=(*_mix(T["panel"], "#FFFFFF", 0.02 if T is THEMES["dark"] else 0), 235),
+                        outline=(*_hex(T["grid"]), 255), width=2)
+
+    lo, hi = float(r["low"]), float(r["high"])
+    med, price = float(r["median"]), float(r["price"])
+    span = max(hi - lo, 1e-9)
+    L, R = x + 56, x + pw - 56
+    rail_y = y + 156
+
+    def px(v):                       # clamp so a price outside the spread still draws
+        return L + max(0.0, min(1.0, (v - lo) / span)) * (R - L)
+
+    if r.get("title"):
+        d.text((x + 30, y + 38), str(r["title"]).upper(), font=_f(22, "mono"),
+               fill=(*_hex(T["mut"]), 255), anchor="lm")
+
+    d.rounded_rectangle([L, rail_y - 8, R, rail_y + 8], radius=8, fill=(*_hex(T["grid"]), 255))
+    for v, col, w in ((lo, T["mut2"], 3), (hi, T["mut2"], 3), (med, T["ink"], 4)):
+        vx = px(v)
+        d.line([(vx, rail_y - 22), (vx, rail_y + 22)], fill=(*_hex(col), 255), width=w)
+
+    # the price: a chip above the rail, tethered to a dot on it
+    ppx = px(price)
+    chip = f"${price:,.2f}"
+    cf = _f(36, "bold")
+    cw = d.textlength(chip, font=cf) + 36
+    cx0 = min(max(ppx - cw / 2, x + 24), x + pw - 24 - cw)
+    d.rounded_rectangle([cx0, y + 72, cx0 + cw, y + 128], radius=14, fill=(*_hex(accent), 255))
+    d.text((cx0 + cw / 2, y + 100), chip, font=cf, fill=(*_hex("#0A0F1C"), 255), anchor="mm")
+    d.line([(ppx, y + 128), (ppx, rail_y - 16)], fill=(*_hex(accent), 255), width=3)
+    d.ellipse([ppx - 15, rail_y - 15, ppx + 15, rail_y + 15], fill=(*_hex(accent), 255))
+
+    lab = _f(24, "mono")
+    d.text((L, rail_y + 48), f"${lo:,.0f}", font=lab, fill=(*_hex(T["mut"]), 255), anchor="lm")
+    d.text((R, rail_y + 48), f"${hi:,.0f}", font=lab, fill=(*_hex(T["mut"]), 255), anchor="rm")
+    mlab = f"median ${med:,.0f}"
+    mw = d.textlength(mlab, font=lab)
+    mcx = min(max(px(med), L + mw / 2 + 60), R - mw / 2 - 60)
+    d.text((mcx, rail_y + 48), mlab, font=lab, fill=(*_hex(T["ink"]), 255), anchor="mm")
+
+    if r.get("caption"):
+        d.text((x + 30, y + RAIL_H - 30), str(r["caption"]), font=_f(23, "reg"),
+               fill=(*_hex(T["mut"]), 255), anchor="lm")
+    return RAIL_H
+
+
+def _ledger_rows(lg):
+    """(pays, refuses shown, refuses withheld). The withheld tail is the curiosity
+    gap — and on the site it is the same tail: everything after 'the price pays
+    for' sits behind a free account, so the ad withholds exactly what the landing
+    page withholds. A gap that pays off is a promise; one that does not is bait."""
+    pays = [str(s) for s in (lg.get("pays") or [])]
+    ref = [str(s) for s in (lg.get("refuses") or [])]
+    reveal = (lg.get("reveal") or "partial").lower()
+    shown = int(lg.get("shown_refuses", 1)) if reveal == "partial" else len(ref)
+    shown = max(0, min(shown, len(ref)))
+    return pays, ref[:shown], (len(ref) - shown if reveal == "partial" else 0)
+
+
+def _ledger_lines(d, text, size, maxw):
+    return _wrap(d, text, _f(size, "reg"), maxw)
+
+
+def _ledger_height(d, W, lg):
+    pays, ref, hidden = _ledger_rows(lg)
+    maxw = W - 2 * MARGIN - 60 - 56
+    h = 28
+    for group in (pays, ref):
+        for t in group:
+            h += 14 + 40 * len(_ledger_lines(d, t, 30, maxw))
+    if lg.get("pays") and lg.get("refuses"):
+        h += 26                       # the divider between the two halves
+    if hidden:
+        h += 62
+    return h + 20
+
+
+def _ledger(d, x, y, W, T, accent, lg):
+    """What the price pays for, and what it refuses to. The two halves are the
+    story: the first is consensus (dull, and therefore credible), the second is
+    the surprise. Marks, not prose labels, so the eye reads the polarity first."""
+    pays, ref, hidden = _ledger_rows(lg)
+    pw = W - 2 * MARGIN
+    ph = _ledger_height(d, W, lg)
+    d.rounded_rectangle([x, y, x + pw, y + ph], radius=24,
+                        fill=(*_mix(T["panel"], "#FFFFFF", 0.02 if T is THEMES["dark"] else 0), 235),
+                        outline=(*_hex(T["grid"]), 255), width=2)
+    maxw = pw - 60 - 56
+    yy = y + 28
+
+    def rows(items, positive):
+        nonlocal yy
+        for t in items:
+            lines = _ledger_lines(d, t, 30, maxw)
+            cy = yy + 20
+            if positive:
+                d.ellipse([x + 30, cy - 15, x + 60, cy + 15], fill=(*_hex(POS), 255))
+                d.line([(x + 38, cy), (x + 44, cy + 7), (x + 53, cy - 8)],
+                       fill=(*_hex("#04140A"), 255), width=4, joint="curve")
+            else:
+                d.ellipse([x + 30, cy - 15, x + 60, cy + 15], fill=(*_hex(accent), 255))
+                d.line([(x + 38, cy - 8), (x + 52, cy + 8)], fill=(*_hex("#0A0F1C"), 255), width=4)
+                d.line([(x + 52, cy - 8), (x + 38, cy + 8)], fill=(*_hex("#0A0F1C"), 255), width=4)
+            for i, ln in enumerate(lines):
+                d.text((x + 86, cy + i * 40), ln, font=_f(30, "reg"),
+                       fill=(*_hex(T["ink"] if positive else T["ink"]), 255), anchor="lm")
+            yy += 14 + 40 * len(lines)
+
+    rows(pays, True)
+    if pays and ref:
+        d.line([(x + 30, yy + 12), (x + pw - 30, yy + 12)], fill=(*_hex(T["grid"]), 255), width=2)
+        yy += 26
+    rows(ref, False)
+    if hidden:
+        d.text((x + 30, yy + 30), f"+ {hidden} more it refuses to pay for", font=_f(30, "bold"),
+               fill=(*_hex(accent), 255), anchor="lm")
+        d.text((x + pw - 30, yy + 30), lg.get("more_label") or "read them free →",
+               font=_f(26, "mono"), fill=(*_hex(accent), 255), anchor="rm")
+    return ph
+
+
 def _cta(d, x, y, T, accent, label):
     f = _f(38, "bold")
     tw = d.textlength(label, font=f)
@@ -339,6 +487,8 @@ def render(spec, ratio, out_dir):
     bullets = spec.get("bullets", [])
     proof = spec.get("proof")
     impact = spec.get("impact_list")
+    rail = spec.get("price_rail")
+    ledger = spec.get("ledger")
     kicker = _kicker_text(spec)
     cta_note = spec.get("cta_note")
 
@@ -370,6 +520,11 @@ def render(spec, ratio, out_dir):
         if impact and impact.get("items"):
             blocks.append((_impact_height(impact),
                            lambda yy: _impact_list(d, x, yy, W, T, accent, impact)))
+        if rail:
+            blocks.append((RAIL_H, lambda yy: _price_rail(d, x, yy, W, T, accent, rail)))
+        if ledger and (ledger.get("pays") or ledger.get("refuses")):
+            blocks.append((_ledger_height(d, W, ledger),
+                           lambda yy: _ledger(d, x, yy, W, T, accent, ledger)))
         for b in bullets:
             blocks.append((54, lambda yy, b=b: _check(d, x, yy + 22, T, accent, b, maxw=maxw)))
         if proof:
@@ -402,7 +557,8 @@ def render(spec, ratio, out_dir):
         # spec has to lose a block (proof and impact_list compete for the same
         # space — pick one), so say so loudly instead of drawing the collision.
         print(f"  ⚠ {ratio}: content overflows the safe band by {total - band}px even at "
-              f"minimum scale — drop `proof` or shorten `impact_list`/`bullets`.",
+              f"minimum scale — drop `proof` or shorten `impact_list`/`ledger`/`bullets`. "
+              f"(A `price_rail` and a `ledger` in one frame usually need 9x16.)",
               file=sys.stderr)
 
     y = safe_top + max(0, (band - total) // 2)
@@ -435,6 +591,12 @@ def _derive_design(spec: dict, out_dir: pathlib.Path, ratios: list[str]) -> dict
     il_reveal = (il.get("reveal") or "full").lower() if il_items else "none"
     il_shown = (min(int(il.get("shown", 3)), len(il_items))
                 if il_reveal == "partial" else len(il_items)) if il_items else 0
+    lg = spec.get("ledger") or {}
+    lg_pays = lg.get("pays") or []
+    lg_ref = lg.get("refuses") or []
+    lg_reveal = (lg.get("reveal") or "partial").lower() if (lg_pays or lg_ref) else "none"
+    lg_shown = (min(int(lg.get("shown_refuses", 1)), len(lg_ref))
+                if lg_reveal == "partial" else len(lg_ref)) if lg_ref else 0
     # provenance from the saved-content convention: …/<campaign>/<lead-magnet>/
     lead_magnet = out_dir.name
     campaign = out_dir.parent.name
@@ -458,6 +620,14 @@ def _derive_design(spec: dict, out_dir: pathlib.Path, ratios: list[str]) -> dict
         "impact_list_reveal": il_reveal,          # full | partial | none
         "impact_list_shown": il_shown,
         "impact_list_total": len(il_items),
+        # priced-in levers (nis-priced-in-story): the distribution rail and the
+        # pays-for / refuses ledger, plus how much of the refusal half is withheld
+        "has_price_rail": bool(spec.get("price_rail")),
+        "has_ledger": bool(lg_pays or lg_ref),
+        "ledger_reveal": lg_reveal,               # full | partial | none
+        "ledger_pays": len(lg_pays),
+        "ledger_refuses_shown": lg_shown,
+        "ledger_refuses_total": len(lg_ref),
         "cta_label": spec.get("cta_label"),
         "cta_words": len((spec.get("cta_label") or "").split()),
         "has_cta_note": bool(spec.get("cta_note")),

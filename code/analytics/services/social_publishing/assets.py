@@ -64,6 +64,19 @@ def _resolve_slides(d: Path) -> list[Path]:
     return slides
 
 
+# Hard caption ceilings, per platform. Over the limit the network does not fail
+# loudly — it truncates, or the aggregator rejects the post — so a caption that
+# runs long is discovered as a mangled live post rather than as an error here.
+CAPTION_LIMITS = {
+    "instagram": 2200,
+    "facebook": 63206,
+    "tiktok": 2200,
+    "linkedin": 3000,
+    "x": 280,
+    "twitter": 280,
+}
+
+
 def _resolve_caption(d: Path, platform: str) -> tuple[str, str]:
     override = d / "social" / f"{platform}.txt"
     master = d / "caption.txt"
@@ -71,6 +84,14 @@ def _resolve_caption(d: Path, platform: str) -> tuple[str, str]:
         if src.is_file():
             text = src.read_text(encoding="utf-8").strip()
             if text:
+                limit = CAPTION_LIMITS.get(platform)
+                if limit and len(text) > limit:
+                    raise ValueError(
+                        f"{platform} caption is {len(text)} characters, over the "
+                        f"{limit} limit by {len(text) - limit} — {src.name} would be "
+                        f"truncated or rejected. Shorten it, or add a per-platform "
+                        f"override at {d / 'social' / f'{platform}.txt'}."
+                    )
                 return text, str(src.relative_to(config.SETUPS_DIR))
     raise FileNotFoundError(
         f"No caption for {platform}: neither {override} nor {master} has text."

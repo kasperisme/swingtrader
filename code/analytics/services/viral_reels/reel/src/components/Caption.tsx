@@ -7,7 +7,13 @@ import {Caption as CaptionType} from '../types';
  * Timed lower-third caption beats. Rendered at the video level so they overlay
  * the race; each appears at its atSeconds and fades over a short window.
  */
-export const Captions: React.FC<{captions: CaptionType[]; theme: Theme}> = ({captions, theme}) => {
+export const Captions: React.FC<{
+  captions: CaptionType[];
+  theme: Theme;
+  /** Distance from the bottom of the canvas. Raise it when the composition
+   *  already occupies the default band — the arena keeps a footer there. */
+  bottom?: number;
+}> = ({captions, theme, bottom = 110}) => {
   const frame = useCurrentFrame();
   const {fps} = useVideoConfig();
   const HOLD = 3.4; // seconds visible
@@ -37,7 +43,7 @@ export const Captions: React.FC<{captions: CaptionType[]; theme: Theme}> = ({cap
               position: 'absolute',
               left: 56,
               right: 56,
-              bottom: 110,
+              bottom,
               opacity,
               transform: `translateY(${y}px)`,
             }}

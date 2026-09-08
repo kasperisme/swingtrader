@@ -91,10 +91,12 @@ The caveman/businessman toggle is global (localStorage-backed via `lib/caveman-m
 | `ui-ux-pro-max` | Designing or reviewing UI components, layouts, styles |
 | `taste-skill` | Building any UI — enforces premium design standards, kills generic AI patterns |
 | `viral-reel` | Producing short vertical data-reels (bar chart race videos) from the news-impact data foundation; Claude directs the story, Remotion renders |
+| `nis-arena-report` | The Arena's weekly broadcast package — a still league TABLE (4:5/9:16/1:1) + the season RACE reel, reported in sports grammar (position, ▲▼ movement, W/L form guide, promotion/relegation bands, one strap line). Storyline is DETECTED, not chosen, so the unflattering hook (a control leading; the coinflip beating LLMs) ships. Read-only over the arena public views; renders through the shared Remotion project |
 | `nis-stock-breakdown` | Making an Instagram-ready swing-trade breakdown of one stock from its NIS Momentum setup — annotated price+volume chart, fundamentals, and a derived entry/stop/target trade, assembled into a carousel + caption |
 | `nis-breakout-alert` | Hourly (`/loop 1h`) auto-poster: reads the breakout-screening agent's latest result; when tickers have just CONFIRMED price+volume breakouts, renders ONE roundup reel (live board of all breakouts, most-significant one highlighted + featured) and posts it immediately to IG+TikTok via Zernio. Live/urgency framing; reuses the nis-stock-breakdown render scripts + the social_publishing publisher |
 | `nis-ad-image` | Single-image ad for Meta + TikTok (eToro pattern: brand mark → bold headline w/ one accent → subhead → green-check benefits → optional REAL proof stat → CTA, over a branded hero). Renders 4:5 / 9:16 / 1:1 + `ad_copy.txt` from a Claude-authored `ad.json`. The creative for ads (esp. trend-driven lead-magnet ads from `nis-trend-radar`); feeds `nis-ad-launch` as a single-image creative |
 | `nis-ad-launch` | The paid last mile: pushes a rendered `nis-ad-image` (its `1x1/ad.png` + `ad.json`) into Meta Ads Manager as **PAUSED** campaign drafts via the `meta_ads` module. `preflight` checks every account/permission gate; `draft --go` builds the feature A/B (1 campaign → 1 ad set/feature → 1 single-image ad/feature, isolated budgets), all PAUSED until you flip Active by hand. Also the measurement side (`insights`/`reconcile` → cost per REAL lead) |
+| `nis-priced-in-story` | The **priced-in** reconstruction of ONE company as a narrated vertical REEL (IG/TikTok): what its price already believes, every assumption it refuses to fund, and the question that settles it — nothing withheld, a long ledger becomes more scenes. Picks the name on how well it will TELL, **refuses rows whose target spread is corrupted by a stock split** (7 of 543 live rows are), animates at 1080×1920, voices via ElevenLabs, posts through `social_publishing`. Paid single-image variants via `nis-ad-image`. Grounded tier only — the judged `priced_in_pct` never reaches a creative |
 | `nis-trend-radar` | Find the single most talked-about news **topic/trend of the last week** — a data-backed "trend brief" for downstream ad generation. Reuses the `/articles` trend views (tag + ticker daily aggregates), buckets current-vs-prior 7-day windows, excludes generic process tags, and picks the dominant thematic story by volume × acceleration; pulls real evidence headlines + tickers in play, a distilled `lead_story`, and preset `lead_magnets` deep-links. Writes `output/trends/<date>/trend_brief.{json,md}`; feeds the headline of `nis-ad-image` |
 | `ticker-pair-divergence` | Making a viral reel about a ticker PAIR — the non-obvious relationship (from `ticker_pair_stats` + the relationship graph), normalized line charts with company logos riding each line, the divergence flagged, and the mean-reversion (pairs) trade voiced |
 | `nis-performance` | The whole-funnel performance foundation — wires GA4 + Search Console + Meta Ads + Supabase leads + PostHog into ONE snapshot joined on `utm_content`/feature (Supabase leads = conversion truth), computes cost-per-real-lead, and derives deterministic **routed** action flags. Writes `output/performance/<date>/snapshot.{json,md}`; the JSON is the data foundation the action skills consume (feeds `nis-ad-image` Step 0, SEO, CRO, conversion instrumentation). Read-only. Run before an ad/content push or weekly |
@@ -257,6 +259,58 @@ Key files:
 - `code/analytics/services/viral_reels/reel/src/compositions/BarChartRace.tsx` — bar-chart-race animation
 - `code/analytics/services/viral_reels/reel/src/compositions/PriceNewsChart.tsx` — OHLC candlestick + news events animation
 
+## Arena Creatives (the weekly broadcast package)
+
+See `code/analytics/services/arena_creatives/README.md` and the `nis-arena-report` skill.
+
+Turns the Arena's live standings into the two assets a sports league publishes every
+week: a still **league table** (4:5 / 9:16 / 1:1) and the season **race** reel (9:16).
+Read-only, and over the **public** views only (`arena_leaderboard_v`,
+`arena_nav_history_public_v`, `arena_championships_public_v`) — those filter on
+`is_published` in the view, so a creative cannot publish an agent still being tuned.
+
+```bash
+cd code/analytics
+.venv/bin/python -m services.arena_creatives.cli standings    # the table, with ▲▼ + form
+.venv/bin/python -m services.arena_creatives.cli storylines   # every hook it supports
+.venv/bin/python -m services.arena_creatives.cli commentary   # the voice-over beat sheet
+.venv/bin/python -m services.arena_creatives.cli package      # standings + table ×3 + race
+.venv/bin/python -m services.arena_creatives.cli race --voice --music   # voiced + scored
+```
+
+Lands in `output/arena/<season>/<as-of date>/`. Publishing goes through
+`social_publishing`'s **ad-hoc** mode (`--media` + `--caption-file`, `--ticker ARENA` as
+the storage label) — no per-ticker folder, nothing in the publisher needed changing.
+
+Four things to know before touching it:
+
+- **The story is detected, not chosen.** `storylines.py` ranks the hooks the table
+  supports. It exists because the best story is usually the least flattering one — a
+  control leading, a random number generator beating three LLM agents — and a human
+  picking week after week drifts toward the flattering read. The same detectors are the
+  trigger for a future event-fired upset alert.
+- **The race metric is return, not NAV**, drawn as bars diverging from a zero line on an
+  axis fixed for the whole video. Nine books between $90k and $103k are nine bars of
+  identical length; a rescaling axis makes every bar move on a day nothing happened.
+- **No club colour may be gain-green or loss-red** (`palette.py`). In the race the bar IS
+  the club colour and its direction carries the sign.
+- **The commentary is frame-locked.** `commentary.py` emits *beats* — an event, the
+  session it happened on, and the second of the reel that session is on screen (the
+  timeline mirrors `ArenaRace.tsx`, so `OUTRO_S` is duplicated in both and must stay in
+  step). One beat list drives the ElevenLabs voice-over, the burned-in captions (most
+  social video is watched muted) and the ducked music bed, which is **generated** via the
+  sound-effects endpoint and cached — not licensed from anywhere. Budgets are computed on
+  SPOKEN words ("plus 2.89%" is two written words and about six spoken) against a voice's
+  **measured** words-per-second, so a new commentator must be measured before it becomes
+  a default. Watch `speech coverage` in `cli commentary`: ~80% is the target.
+- **The renders live in the `viral_reels` Remotion project** (`ArenaTable.tsx`,
+  `ArenaRace.tsx`, registered in `Root.tsx`) — the repo's single render surface. A second
+  Remotion app would duplicate `node_modules`, the theme and the interpolation helpers,
+  and let the two drift apart visually.
+
+Trap: **`filled_orders` ≠ `closed_trades`.** The trade count and win rate on the table are
+over CLOSED positions — an agent can have 12 fills and 1 close.
+
 ## Social Publishing (Content Distribution)
 
 See `code/analytics/services/social_publishing/README.md`.
@@ -327,7 +381,16 @@ cd code/analytics
 .venv/bin/python -m services.google_analytics.cli verify        # green/red creds + both APIs
 .venv/bin/python -m services.google_analytics.cli discover      # list accessible GA4 props + GSC sites
 .venv/bin/python -m services.google_analytics.cli summary|channels|landing|conversions|queries|sc-pages|opportunities
+.venv/bin/python -m services.google_analytics.cli sitemaps          # registered sitemaps + last fetch
+.venv/bin/python -m services.google_analytics.cli resubmit-sitemap  # force Google to re-download it
 ```
+
+`resubmit-sitemap` is the only supported way left to make Google re-fetch the
+sitemap (the `google.com/ping?sitemap=` endpoint was retired in 2023). It needs
+the **write** `webmasters` scope — `client.gsc_write_client()`, requested nowhere
+else — plus Full/Owner permission in Search Console. It refreshes Google's copy
+of the URL LIST; it does not force per-page indexing, and `contents[].indexed`
+in the API response is a dead legacy field that always reads 0.
 
 Needs `GA4_PROPERTY_ID`, `GSC_SITE_URL`, and `GOOGLE_APPLICATION_CREDENTIALS` (path to the
 service-account JSON in the gitignored `secrets/`) or inline `GOOGLE_SERVICE_ACCOUNT_JSON`
