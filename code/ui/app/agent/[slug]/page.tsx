@@ -246,15 +246,29 @@ export default async function AgentPage({
   // landing on it rather than on a second, half-detailed view of the same data.
   if (season) redirect(`/agent/${slug}/${season}`);
 
-  const agent = await getAgent(slug);
+  // Five reads, keyed on either the slug or a championship id — and they used to
+  // run one after another, so the page cost the SUM of five round trips before
+  // rendering anything. Only two of them actually depend on another's result, so
+  // this is two waves rather than five.
+  //
+  // Wave 1: everything that needs only the slug.
+  const [agent, appearances, cited] = await Promise.all([
+    getAgent(slug),
+    listAgentAppearances(slug),
+    listAgentResources(slug),
+  ]);
   if (!agent) notFound();
 
-  const appearances = await listAgentAppearances(slug);
-  // Finishing position has to come from the standings OF THAT SEASON — the
-  // leaderboard row knows the agent's own numbers but not who else was in it.
-  const tables = await Promise.all(
-    appearances.map((a) => listStandings(a.championship_id)),
-  );
+  // Wave 2: the two that need a championship id from wave 1. Finishing position
+  // has to come from the standings OF THAT SEASON — the leaderboard row knows
+  // the agent's own numbers but not who else was in it.
+  const [tables, curve] = await Promise.all([
+    Promise.all(appearances.map((a) => listStandings(a.championship_id))),
+    appearances[0]
+      ? listNavCurve(slug, appearances[0].championship_id)
+      : Promise.resolve([] as Awaited<ReturnType<typeof listNavCurve>>),
+  ]);
+
   const record = appearances.map((a, i) => {
     const table = tables[i];
     const idx = table.findIndex((r) => r.slug === slug);
@@ -266,8 +280,6 @@ export default async function AgentPage({
   });
 
   const latest = record[0] ?? null;
-  const curve = latest ? await listNavCurve(slug, latest.championship_id) : [];
-  const cited = await listAgentResources(slug);
 
   const colorIndex = COLOR_INDEX[slug] ?? null;
   const accent =

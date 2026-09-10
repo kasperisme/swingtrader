@@ -86,12 +86,16 @@ function stripHtml(input: string): string {
 
 export default async function MarketScreeningDetailPage({ params }: Props) {
   const { slug } = await params;
-  const screening = await getMarketScreeningBySlug(slug);
-  if (!screening) notFound();
 
-  const supabase = await createClient();
-  const { data: claims } = await supabase.auth.getClaims();
-  const isAuthed = Boolean(claims?.claims?.sub);
+  // The screening lookup and the auth check have nothing to do with each other,
+  // so they cost one round trip between them rather than two in series. Only the
+  // reads below genuinely need the screening's id.
+  const [screening, claimsResult] = await Promise.all([
+    getMarketScreeningBySlug(slug),
+    createClient().then((supabase) => supabase.auth.getClaims()),
+  ]);
+  if (!screening) notFound();
+  const isAuthed = Boolean(claimsResult.data?.claims?.sub);
 
   const [results, subscription, latestRows] = await Promise.all([
     getMarketScreeningResults(screening.id, 10),

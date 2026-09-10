@@ -203,6 +203,59 @@ const DEFAULT_TICKER_THEMES = [
   "Dollar strength impact",
 ];
 
+/**
+ * Market screenings preview for the landing page.
+ *
+ * Extracted so it can be started alongside the CMS and narrative reads rather
+ * than after them. The two calls INSIDE it stay sequential because the second
+ * genuinely needs the first's id; the win is that this whole unit now overlaps
+ * with the other two reads instead of queueing behind them.
+ *
+ * `momentumExportHref` / `momentumPreview` are only set when the screening
+ * exists AND has published rows, so the download never lands on the export
+ * route's "no results" 404. Any failure degrades to an empty preview — every
+ * surface below is conditional on it.
+ */
+async function loadScreeningsPreview(): Promise<{
+  marketScreeningsPreview: Awaited<ReturnType<typeof listMarketScreenings>>;
+  momentumExportHref: string | null;
+  momentumPreview: {
+    slug: string;
+    name: string;
+    runAt: string | null;
+    rows: { symbol: string | null; rowData: Record<string, unknown> }[];
+  } | null;
+}> {
+  try {
+    const all = await listMarketScreenings();
+    const momentum = all.find(
+      (s) => /momentum/i.test(s.slug) || /momentum/i.test(s.name),
+    );
+    if (momentum) {
+      const { rows, runAt } = await getLatestMarketScreeningResultRows(momentum.id);
+      if (rows.length > 0) {
+        return {
+          marketScreeningsPreview: all.slice(0, 3),
+          momentumExportHref: `/marketscreenings/${momentum.slug}/export`,
+          momentumPreview: {
+            slug: momentum.slug,
+            name: momentum.name,
+            runAt,
+            rows: rows.map((r) => ({ symbol: r.symbol, rowData: r.rowData })),
+          },
+        };
+      }
+    }
+    return {
+      marketScreeningsPreview: all.slice(0, 3),
+      momentumExportHref: null,
+      momentumPreview: null,
+    };
+  } catch {
+    return { marketScreeningsPreview: [], momentumExportHref: null, momentumPreview: null };
+  }
+}
+
 // ── Page ──────────────────────────────────────────────────────────────────────
 
 export default async function Home() {
@@ -214,14 +267,19 @@ export default async function Home() {
     redirect("/protected");
   }
 
-  let cms: LandingPage | null = null;
-  if (isSanityConfigured) {
-    try {
-      cms = await sanityFetch<LandingPage>(landingPageQuery);
-    } catch {
-      cms = null;
-    }
-  }
+  // The three independent reads below — the CMS document, the narrative
+  // showcase, and the screenings preview — used to run one after another, and
+  // that serialisation was most of this page's server time: nothing renders
+  // until the last one lands, and `noStore()` means it happens on every single
+  // request. None of them needs another's result, so they go together.
+  const [cms, narrative, screenings] = await Promise.all([
+    isSanityConfigured
+      ? sanityFetch<LandingPage>(landingPageQuery).catch(() => null)
+      : Promise.resolve<LandingPage | null>(null),
+    getNarrativeShowcase(),
+    loadScreeningsPreview(),
+  ]);
+  const { marketScreeningsPreview, momentumExportHref, momentumPreview } = screenings;
 
   const heroBadgeText = cms?.heroBadgeText ?? "Narrative trading · for self-directed investors";
   const heroHeadlinePart1 = cms?.heroHeadlinePart1 ?? "Every price is a story.";
@@ -271,49 +329,6 @@ export default async function Home() {
   const tickerThemes = cms?.tickerThemes?.length ? cms.tickerThemes : DEFAULT_TICKER_THEMES;
   const doubledTicker = [...tickerThemes, ...tickerThemes];
 
-  // The live narrative-trading example. Self-healing by design: it reads the
-  // newest published reconstruction rather than a pinned ticker, so the card on
-  // the marketing page is always the same one a visitor lands on when they
-  // click it. Returns an empty showcase on any failure — every surface below is
-  // conditional on `featured`, so the page renders without it.
-  const narrative = await getNarrativeShowcase();
-
-  // Market screenings preview — up to 3 to highlight on the landing page.
-  let marketScreeningsPreview: Awaited<ReturnType<typeof listMarketScreenings>> = [];
-  // Direct CSV download + a rendered preview of the latest momentum screening,
-  // shown alongside the sample briefing PDF. momentumExportHref/momentumPreview
-  // are only set when the screening exists AND has published result rows, so the
-  // download never lands on the export route's "no results" 404.
-  let momentumExportHref: string | null = null;
-  let momentumPreview:
-    | {
-        slug: string;
-        name: string;
-        runAt: string | null;
-        rows: { symbol: string | null; rowData: Record<string, unknown> }[];
-      }
-    | null = null;
-  try {
-    const all = await listMarketScreenings();
-    marketScreeningsPreview = all.slice(0, 3);
-    const momentum = all.find(
-      (s) => /momentum/i.test(s.slug) || /momentum/i.test(s.name),
-    );
-    if (momentum) {
-      const { rows, runAt } = await getLatestMarketScreeningResultRows(momentum.id);
-      if (rows.length > 0) {
-        momentumExportHref = `/marketscreenings/${momentum.slug}/export`;
-        momentumPreview = {
-          slug: momentum.slug,
-          name: momentum.name,
-          runAt,
-          rows: rows.map((r) => ({ symbol: r.symbol, rowData: r.rowData })),
-        };
-      }
-    }
-  } catch {
-    marketScreeningsPreview = [];
-  }
 
   // Derived preview shape for the momentum results "document": top picks + the
   // first few priority-ordered data columns.
