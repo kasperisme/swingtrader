@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import { Suspense } from "react";
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import { unstable_noStore as noStore } from "next/cache";
+import { cacheLife, cacheTag, unstable_noStore as noStore } from "next/cache";
 import {
   ArrowRight,
   BarChart3,
@@ -204,6 +204,36 @@ const DEFAULT_TICKER_THEMES = [
 ];
 
 /**
+ * The landing page's two rarely-changing reads, cached across requests.
+ *
+ * `noStore()` below keeps the ROUTE dynamic — the screenings preview is meant to
+ * be live — but that is no reason to re-fetch a hand-edited CMS document and a
+ * nightly reconstruction on every anonymous hit. The two mechanisms are
+ * independent: an uncached route may still read cached values.
+ *
+ * The CMS gets minutes rather than hours so an edit in the Studio shows up in a
+ * reasonable time without a deploy; the showcase gets hours because the batch
+ * that produces it runs once a night.
+ */
+async function cachedLandingCms(): Promise<LandingPage | null> {
+  "use cache";
+  cacheLife("minutes");
+  cacheTag("landing-cms");
+  try {
+    return await sanityFetch<LandingPage>(landingPageQuery);
+  } catch {
+    return null;
+  }
+}
+
+async function cachedNarrativeShowcase() {
+  "use cache";
+  cacheLife("hours");
+  cacheTag("narrative-showcase");
+  return getNarrativeShowcase();
+}
+
+/**
  * Market screenings preview for the landing page.
  *
  * Extracted so it can be started alongside the CMS and narrative reads rather
@@ -226,6 +256,14 @@ async function loadScreeningsPreview(): Promise<{
     rows: { symbol: string | null; rowData: Record<string, unknown> }[];
   } | null;
 }> {
+  // Cached for minutes, not because staleness is desirable but because this is
+  // the landing page's whole server cost: two Supabase reads that ran on every
+  // anonymous hit, ~600ms of the ~650ms total. A screening preview that is a few
+  // minutes behind is indistinguishable to a first-time visitor; the live view
+  // is one click away on /marketscreenings, which is not cached.
+  "use cache";
+  cacheLife("minutes");
+  cacheTag("landing-screenings");
   try {
     const all = await listMarketScreenings();
     const momentum = all.find(
@@ -273,10 +311,8 @@ export default async function Home() {
   // until the last one lands, and `noStore()` means it happens on every single
   // request. None of them needs another's result, so they go together.
   const [cms, narrative, screenings] = await Promise.all([
-    isSanityConfigured
-      ? sanityFetch<LandingPage>(landingPageQuery).catch(() => null)
-      : Promise.resolve<LandingPage | null>(null),
-    getNarrativeShowcase(),
+    isSanityConfigured ? cachedLandingCms() : Promise.resolve<LandingPage | null>(null),
+    cachedNarrativeShowcase(),
     loadScreeningsPreview(),
   ]);
   const { marketScreeningsPreview, momentumExportHref, momentumPreview } = screenings;

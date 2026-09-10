@@ -9,6 +9,7 @@ import { CavemanToggle } from "@/components/caveman-toggle";
 import { HelpChatTrigger } from "@/components/help-chat";
 import { SiteHeaderPublicNav } from "@/components/site-header-public-nav";
 import { SiteHeaderNavDismiss } from "@/components/site-header-nav-dismiss";
+import { NavLink } from "@/components/nav-link";
 
 function Logo() {
   return (
@@ -48,9 +49,9 @@ export function SiteHeaderFallback() {
       </div>
       <div className="flex shrink-0 items-center gap-3">
         <SiteHeaderPublicNav />
-        <Link href="/pricing" className={`${navLinkClass} hidden md:inline`}>Pricing</Link>
-        <Link href="/docs" className={`${navLinkClass} hidden md:inline`}>Docs</Link>
-        <Link href="/blog" className={`${navLinkClass} hidden md:inline`}>Blog</Link>
+        <NavLink href="/pricing" className={`${navLinkClass} hidden md:inline`}>Pricing</NavLink>
+        <NavLink href="/docs" className={`${navLinkClass} hidden md:inline`}>Docs</NavLink>
+        <NavLink href="/blog" className={`${navLinkClass} hidden md:inline`}>Blog</NavLink>
         <Button asChild size="sm" variant="outline" className="hidden md:inline-flex">
           <Link href="/auth/login">Sign in</Link>
         </Button>
@@ -84,9 +85,9 @@ export async function SiteHeader() {
         <div className="flex shrink-0 items-center gap-3">
           <HelpChatTrigger className={`${navLinkClass} hidden md:inline-flex items-center gap-1.5`} />
           <SiteHeaderPublicNav />
-          <Link href="/pricing" className={`${navLinkClass} hidden md:inline`}>Pricing</Link>
-          <Link href="/docs" className={`${navLinkClass} hidden md:inline`}>Docs</Link>
-          <Link href="/blog" className={`${navLinkClass} hidden md:inline`}>Blog</Link>
+          <NavLink href="/pricing" className={`${navLinkClass} hidden md:inline`}>Pricing</NavLink>
+          <NavLink href="/docs" className={`${navLinkClass} hidden md:inline`}>Docs</NavLink>
+          <NavLink href="/blog" className={`${navLinkClass} hidden md:inline`}>Blog</NavLink>
           <CavemanToggle className="hidden md:flex" />
           <Link
             href="/protected/profile"
@@ -100,9 +101,9 @@ export async function SiteHeader() {
       ) : (
         <div className="flex shrink-0 items-center gap-3">
           <SiteHeaderPublicNav />
-          <Link href="/pricing" className={`${navLinkClass} hidden md:inline`}>Pricing</Link>
-          <Link href="/docs" className={`${navLinkClass} hidden md:inline`}>Docs</Link>
-          <Link href="/blog" className={`${navLinkClass} hidden md:inline`}>Blog</Link>
+          <NavLink href="/pricing" className={`${navLinkClass} hidden md:inline`}>Pricing</NavLink>
+          <NavLink href="/docs" className={`${navLinkClass} hidden md:inline`}>Docs</NavLink>
+          <NavLink href="/blog" className={`${navLinkClass} hidden md:inline`}>Blog</NavLink>
           <CavemanToggle className="hidden md:flex" />
           <Button asChild size="sm" variant="outline" className="hidden md:inline-flex">
             <Link href="/auth/login">Sign in</Link>

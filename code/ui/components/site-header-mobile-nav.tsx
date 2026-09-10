@@ -12,6 +12,7 @@ import {
   FREE_SERVICE_LINKS,
   INSIGHTS_LINKS,
 } from "@/components/site-header-public-nav";
+import { PendingDot } from "@/components/nav-link";
 
 /**
  * The authed user's own workspace, as one section.
@@ -47,6 +48,7 @@ function NavLink({ href, label, onClick }: { href: string; label: string; onClic
     <li>
       <Link href={href} className={linkClass} onClick={onClick}>
         {label}
+        <PendingDot />
       </Link>
     </li>
   );

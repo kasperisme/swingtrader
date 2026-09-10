@@ -123,6 +123,18 @@
   50%      { opacity: 0.45; transform: scale(0.85); }
 }
 
+/* Navigation pending dot (components/nav-link.tsx).
+   Two animations, both delayed: a click that resolves quickly never reveals the
+   dot at all, so fast navigations stay visually silent instead of flickering. */
+@keyframes nav-pending-in {
+  to { opacity: 1; }
+}
+
+@keyframes nav-pending-pulse {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: 0.35; }
+}
+
 @layer utilities {
   .animate-news-roll {
     animation: news-roll 40s linear infinite;

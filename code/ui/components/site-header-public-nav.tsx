@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { ChevronDown } from "lucide-react";
 import { navDropdownItemClass, navDropdownPanelRightClass } from "@/components/site-header-nav-classes";
+import { PendingDot } from "@/components/nav-link";
 
 /**
  * The public half of the desktop header: the two menus every visitor gets,
@@ -55,6 +56,7 @@ function NavDropLink({ href, children }: { href: string; children: React.ReactNo
       onClick={(e) => closeContainingDetails(e.currentTarget)}
     >
       {children}
+      <PendingDot />
     </Link>
   );
 }

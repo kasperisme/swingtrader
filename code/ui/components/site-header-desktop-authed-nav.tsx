@@ -7,6 +7,7 @@ import {
   navDropdownPanelClass,
   navDropdownTriggerClass,
 } from "@/components/site-header-nav-classes";
+import { PendingDot } from "@/components/nav-link";
 
 function closeContainingDetails(target: EventTarget | null) {
   if (!(target instanceof HTMLElement)) return;
@@ -28,6 +29,7 @@ function NavDropLink({
       onClick={(e) => closeContainingDetails(e.currentTarget)}
     >
       {children}
+      <PendingDot />
     </Link>
   );
 }
@@ -40,6 +42,7 @@ export function SiteHeaderDesktopAuthedNav() {
         className="text-sm font-medium text-foreground transition-colors hover:text-amber-500 cursor-pointer"
       >
         Overview
+        <PendingDot />
       </Link>
       <details className="group relative" name="desktop-main-nav">
         <summary className={navDropdownTriggerClass}>

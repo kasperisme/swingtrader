@@ -2,17 +2,20 @@ import { cache, Suspense } from "react";
 import type { Metadata } from "next";
 import Link from "next/link";
 import {
-  fmpGetCompanyProfile,
   fmpGetQuote,
-  fmpGetOhlc,
   type FmpOhlcBar,
 } from "@/app/actions/fmp";
 import {
-  getTickerImpactNewsResult,
   type ScoredNewsEvent,
 } from "@/lib/quote/ticker-impact";
-import { getPricedInVote } from "@/lib/quote/priced-in";
-import { getTickerPeers, peerLabel, type TickerPeer } from "@/lib/quote/peers";
+import {
+  cachedBars,
+  cachedEvents,
+  cachedPeers,
+  cachedPricedIn,
+  cachedProfile,
+} from "./_data";
+import { peerLabel, type TickerPeer } from "@/lib/quote/peers";
 import { PricedInPanel } from "./_components/priced-in-panel";
 import {
   TickerImpactChart,
@@ -89,15 +92,14 @@ function meanSentiment(events: ScoredNewsEvent[]): number | null {
  * indexability decision is made from them. `cache()` is request-scoped, so the
  * two passes share one round trip instead of doubling every query.
  */
-const profileOf = cache(async (symbol: string) => {
-  const res = await fmpGetCompanyProfile(symbol);
-  return res.ok ? res.data : null;
-});
-const eventsOf = cache((symbol: string) =>
-  getTickerImpactNewsResult(symbol, { days: 365, limit: 150, perBucket: 2 }),
-);
-const pricedInOf = cache((symbol: string) => getPricedInVote(symbol));
-const peersOf = cache((symbol: string) => getTickerPeers(symbol));
+// `cache()` on top of the cached readers in `_data.ts`: the inner directive
+// serves the same bytes to the NEXT visitor, this one stops metadata and the
+// body from asking for them twice inside a single render. They solve different
+// halves of the same problem and both are wanted.
+const profileOf = cache((symbol: string) => cachedProfile(symbol));
+const eventsOf = cache((symbol: string) => cachedEvents(symbol));
+const pricedInOf = cache((symbol: string) => cachedPricedIn(symbol));
+const peersOf = cache((symbol: string) => cachedPeers(symbol));
 
 /**
  * Is there anything here that Google can't already get from a thousand other
@@ -390,12 +392,11 @@ async function QuoteBody({
   profile: Awaited<ReturnType<typeof profileOf>>;
   quote: RawQuote | null;
 }) {
-  const [ohlcRes, pricedIn, peers] = await Promise.all([
-    fmpGetOhlc(symbol, "1day"),
+  const [bars, pricedIn, peers] = await Promise.all([
+    cachedBars(symbol),
     pricedInOf(symbol),
     peersOf(symbol),
   ]);
-  const bars: FmpOhlcBar[] = ohlcRes.ok ? ohlcRes.data : [];
   const price = qnum(quote, "price") ?? profile?.price ?? null;
 
   const chartEvents = attachBars(events, bars);
