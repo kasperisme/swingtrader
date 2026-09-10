@@ -88,9 +88,16 @@ function Session({
   return (
     <li className="border-l-2 pl-5" style={{ borderLeftColor: accent }}>
       <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1 font-mono text-[11px] uppercase tracking-widest text-muted-foreground">
+        {/* The session the agent READ, not the one its orders target — see
+            ArenaDecision. Falls back for pre-backfill rows. */}
         <span className="text-sm font-medium tracking-normal text-foreground">
-          {fmtDate(d.decision_date)}
+          {fmtDate(d.session_date ?? d.decision_date)}
         </span>
+        {d.orders_accepted > 0 && (
+          <span title="the session these orders fill in, at its open">
+            fills {fmtDate(d.decision_date)}
+          </span>
+        )}
         <span>
           {d.orders_accepted === 0 ? "no trades" : `${d.orders_accepted} placed`}
           {d.orders_rejected > 0 && ` · ${d.orders_rejected} refused`}

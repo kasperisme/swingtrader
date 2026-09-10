@@ -383,12 +383,30 @@ def cancel_stale_orders(before: date, agent_ids: Optional[list[str]] = None) -> 
 # ── Decisions ────────────────────────────────────────────────────────────────
 
 
-def open_decision(agent_id: str, decision_date: date, llm_model: Optional[str]) -> dict[str, Any]:
-    """Start (or restart) today's decision row. Unique per (agent, date), so a
-    re-run overwrites the attempt rather than doubling the record."""
+def open_decision(
+    agent_id: str,
+    decision_date: date,
+    llm_model: Optional[str],
+    session_date: Optional[date] = None,
+) -> dict[str, Any]:
+    """Start (or restart) a decision row. Unique per (agent, decision_date), so
+    a re-run overwrites the attempt rather than doubling the record.
+
+    The two dates are different things and both are stored:
+
+    ``decision_date``
+        The session the resulting orders are INTENDED FOR — the next open. It
+        is half the upsert key, which is why it stays the key even though its
+        name reads like the other one.
+    ``session_date``
+        The session whose close the agent actually READ. This is the date to
+        show a reader; ``decision_date`` labelled the agent page one session
+        late and put entries on days the market never opened.
+    """
     payload = {
         "agent_id": agent_id,
         "decision_date": decision_date.isoformat(),
+        "session_date": session_date.isoformat() if session_date else None,
         "status": "running",
         "llm_model": llm_model,
         "started_at": _now(),

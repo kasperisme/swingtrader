@@ -65,7 +65,7 @@ def run_control(
     if handler is None:
         raise ValueError(f"no deterministic handler for strategy_key {slug!r}")
 
-    decision = store.open_decision(agent["id"], intended_for, llm_model=None)
+    decision = store.open_decision(agent["id"], intended_for, llm_model=None, session_date=session)
     started = datetime.now(timezone.utc)
     if not dry_run:
         store.cancel_pending_for(agent["id"], intended_for)

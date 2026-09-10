@@ -302,7 +302,7 @@ async def run_decision(
         )
 
     model = resolve_model(agent)
-    decision = store.open_decision(agent["id"], intended_for, model)
+    decision = store.open_decision(agent["id"], intended_for, model, session_date=session)
     started = datetime.now(timezone.utc)
 
     # A re-run supersedes the previous attempt's un-filled orders rather than

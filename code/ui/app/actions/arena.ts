@@ -214,6 +214,17 @@ export type ArenaOrder = {
 export type ArenaDecision = {
   id: string;
   agent_slug: string;
+  /**
+   * The session whose close the agent READ. This is the one to show a reader.
+   * Null only for a decision with no preceding NAV mark.
+   */
+  session_date: string | null;
+  /**
+   * The session the resulting orders are INTENDED FOR (the next open) — not
+   * the session the agent read. Rendering this as the entry's heading labelled
+   * every log one session late and put entries on days the market never
+   * opened, such as Labor Day 2026-09-07.
+   */
   decision_date: string;
   status: string;
   narrative: string | null;
