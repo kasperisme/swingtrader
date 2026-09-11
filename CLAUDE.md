@@ -34,6 +34,12 @@ Load the **`supabase-schema`** skill for the workflow, the most-reinvented list,
 the join traps. Regenerate after any migration:
 `cd code/analytics && .venv/bin/python -m services.catalog.build`
 
+**Any new read path that lists articles must filter `has_analysis IS NOT FALSE`**
+(PostgREST: `.not("has_analysis", "is", false)`). 15% of `news_articles` are
+paywalled teasers the scorer found nothing in; `false` marks them, triggers on
+`news_impact_heads` keep it exact, and the article page 404s them. `null` =
+not scored yet, which stays visible. See migration `20260911150000`.
+
 ## Content Writing — Blog Posts & Documentation
 
 ### Always write two versions

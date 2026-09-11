@@ -2,7 +2,7 @@
 
 Generated 2026-09-11 by `python -m services.catalog.build`. **Do not hand-edit** — regenerate instead.
 
-109 tables/views, 1255 columns, 57 functions.
+111 tables/views, 1290 columns, 63 functions.
 
 `rows` is a planner estimate, not a count. `fresh` is the newest row's timestamp — an object with an old date is likely abandoned, and that is as important to know as whether it exists.
 
@@ -10,7 +10,7 @@ Generated 2026-09-11 by `python -m services.catalog.build`. **Do not hand-edit**
 
 ### `ticker_relationship_edge_evidence` (table)
 
-*~89,268 rows, fresh to 2026-09-11*
+*~89,177 rows, fresh to 2026-09-11*
 
 Ticker relationship edge traceability Goal: - Provide deterministic traceability from ticker_relationship_edges back to source articles and impact-vector dimensions.
 
@@ -266,9 +266,24 @@ Embedding setup for semantic retrieval over scored news.
 
 `status` values: `completed`, `failed`, `processing`
 
+### `news_impact_vectors` (table)
+
+*~225,284 rows, fresh to 2026-09-11*
+
+news_impact_vectors: aggregated impact dimension vectors
+
+| column | type |
+|---|---|
+| `id` | bigint |
+| `article_id` | bigint |
+| `impact_json` | jsonb |
+| `top_dimensions` | jsonb |
+| `created_at` | timestamp with time zone |
+| `impact_magnitude` | double precision |
+
 ### `news_articles` (table)
 
-*~226,391 rows, fresh to 2026-09-11*
+*~213,657 rows, fresh to 2026-09-11*
 
 news_articles: article content and metadata
 
@@ -289,25 +304,11 @@ news_articles: article content and metadata
 | `processing_status` | text |
 | `search_tags` | ARRAY |
 | `fts` | tsvector |
+| `has_analysis` | boolean |
 
 `article_stream` values: `fmp_general`, `fmp_stock`, `unknown`
 
 `processing_status` values: `complete`, `failed`, `partial`
-
-### `news_impact_vectors` (table)
-
-*~225,284 rows, fresh to 2026-09-11*
-
-news_impact_vectors: aggregated impact dimension vectors
-
-| column | type |
-|---|---|
-| `id` | bigint |
-| `article_id` | bigint |
-| `impact_json` | jsonb |
-| `top_dimensions` | jsonb |
-| `created_at` | timestamp with time zone |
-| `impact_magnitude` | double precision |
 
 ### `news_source_dry_days` (table)
 
@@ -454,7 +455,7 @@ Hourly / daily embedding clusters over swingtrader.news_article_embeddings (UTC 
 
 *view — row count n/a*
 
-1) Article-level base rows with parsed vectors + mean confidence.
+news_articles.has_analysis — hide articles the scorer found nothing in Why: 15.5% of the corpus (35,554 of 229,633 on 2026-09-11) was scored and came back with no claim and no ticker verdict. They are paywalled teasers — Seeking Alpha transcripts, WSJ / Barron's pieces — whose feed body is ~100 chars (scored articles: ~4,700). The page for one is a headline and some tags, yet The Tape, related articles, topic hubs, tag search, semantic search and the agents' RAG all served them, and Bing reported 88 of them for thin meta descriptions. sitemap_article_urls already leaves them out; this makes ev
 
 | column | type |
 |---|---|
@@ -593,7 +594,7 @@ Pre-aggregated views for News Trends charts. Goal: avoid scanning/parsing every 
 
 *view — row count n/a*
 
-2) Theme-tag frequency per day. search_tags holds lowercase theme/event slugs PLUS uppercase tickers in one array. Tickers are covered by view (1); here we keep theme slugs only via `tag = lower(tag)` (tickers are uppercase by construction).
+news_articles.has_analysis — hide articles the scorer found nothing in Why: 15.5% of the corpus (35,554 of 229,633 on 2026-09-11) was scored and came back with no claim and no ticker verdict. They are paywalled teasers — Seeking Alpha transcripts, WSJ / Barron's pieces — whose feed body is ~100 chars (scored articles: ~4,700). The page for one is a headline and some tags, yet The Tape, related articles, topic hubs, tag search, semantic search and the agents' RAG all served them, and Bing reported 88 of them for thin meta descriptions. sitemap_article_urls already leaves them out; this makes ev
 
 | column | type |
 |---|---|
@@ -656,7 +657,7 @@ Materialize the topic headline counts. getTopicStats ran an exact count over top
 
 *view — row count n/a*
 
-topic_article_v — the membership query, as a view. Deliberately NOT materialized: it resolves in ~30ms and materializing it would reintroduce the staleness the whole design exists to avoid. The heavy rollups (15-month arcs) are materialized separately below.
+news_articles.has_analysis — hide articles the scorer found nothing in Why: 15.5% of the corpus (35,554 of 229,633 on 2026-09-11) was scored and came back with no claim and no ticker verdict. They are paywalled teasers — Seeking Alpha transcripts, WSJ / Barron's pieces — whose feed body is ~100 chars (scored articles: ~4,700). The page for one is a headline and some tags, yet The Tape, related articles, topic hubs, tag search, semantic search and the agents' RAG all served them, and Bing reported 88 of them for thin meta descriptions. sitemap_article_urls already leaves them out; this makes ev
 
 | column | type |
 |---|---|
@@ -690,11 +691,11 @@ Ticker Sentiment Materialization (pre-exploded, indexed) Why: - swingtrader.tick
 | `article_ts` | timestamp with time zone |
 | `updated_at` | timestamp with time zone |
 
-`model` values: `gemma4:31b-cloud`, `gemma4:e4b`
+`model` values: `gemma4:31b-cloud`, `glm-5.1:cloud`
 
 ### `ticker_coverage_daily` (table)
 
-*~58,635 rows, fresh to 2026-09-11*
+*~58,600 rows, fresh to 2026-09-11*
 
 Materialize the /quote directory's daily rollup. get_top_covered_tickers read news_trends_ticker_daily_v directly, which rescans 120 days of news_article_tickers + news_articles + ticker_sentiment heads on every call: measured 4.6s for a plain page and 7.6s for a search — against the REST role's 8s statement_timeout. That is a page that breaks the first time the corpus grows. Same split the topic hubs use: membership stays live, the expensive rollup is materialized and rebuilt post-ingest. A table (not a matview) so it can carry RLS like its siblings. Only the daily rollup is stored, NOT the w
 
@@ -748,6 +749,36 @@ company_vectors: fundamental dimension vectors per ticker per date
 | `raw_json` | jsonb |
 | `metadata_json` | jsonb |
 | `fetched_at` | timestamp with time zone |
+
+### `company_ceos` (table)
+
+*~0 rows*
+
+company_ceos — who runs each company, and what they are paid The quote page has always printed a CEO name (FMP's `profile.ceo`) as dead text. This is the index that lets that name become a link: one row per symbol, holding the CEO as FMP names them plus the two things a CEO page is actually worth visiting for — the SEC proxy compensation history (`governance-executive-compensation`) and the rest of the leadership team (`key-executives`). WHY A TABLE AND NOT A LIVE FMP CALL. A CEO page is addressed by the PERSON (`/ceos/jensen-huang`), and nothing at FMP resolves a name back to a symbol. Someth
+
+| column | type |
+|---|---|
+| `symbol` | text |
+| `company_name` | text |
+| `exchange` | text |
+| `sector` | text |
+| `industry` | text |
+| `country` | text |
+| `market_cap` | bigint |
+| `ceo_name_raw` | text |
+| `ceo_name` | text |
+| `ceo_slug` | text |
+| `ceo_title` | text |
+| `year_born` | integer |
+| `title_since` | text |
+| `pay` | bigint |
+| `currency_pay` | text |
+| `compensation` | jsonb |
+| `executives` | jsonb |
+| `content_hash` | text |
+| `fetched_at` | timestamp with time zone |
+| `content_changed_at` | timestamp with time zone |
+| `updated_at` | timestamp with time zone |
 
 ## Screening & scans
 
@@ -1963,6 +1994,28 @@ Arena: championships and the title lineage Why: - An open-ended leaderboard has 
 | `championship_slugs` | ARRAY |
 | `is_current_holder` | boolean |
 
+### `ceo_directory_v` (view)
+
+*view — row count n/a*
+
+── The directory: one row per person ────────────────────────────────────── Ranked by the largest company they run, which is the order a reader expects ("the CEO of Apple" before "the CEO of a $40M biotech"). `latest_pay` is the newest proxy-year total across their companies.
+
+| column | type |
+|---|---|
+| `ceo_slug` | text |
+| `ceo_name` | text |
+| `ceo_title` | text |
+| `symbols` | ARRAY |
+| `companies` | ARRAY |
+| `primary_company` | text |
+| `sector` | text |
+| `market_cap` | bigint |
+| `year_born` | integer |
+| `latest_pay` | bigint |
+| `latest_pay_year` | integer |
+| `has_compensation` | boolean |
+| `content_changed_at` | timestamp with time zone |
+
 ### `daily_narratives` (table)
 
 *~0 rows*
@@ -2331,6 +2384,7 @@ Callable via PostgREST `.rpc(name, {...})` or directly in SQL.
 | `get_ticker_impact_news` | `p_ticker text, p_days integer, p_limit integer, p_per_bucket integer` | TABLE(article_id bigint, title text, url text, source text, slug text, published_at timestamp with time zone, sentiment double precision, impact_magnitude double precision, top_dimensions jsonb) |
 | `get_top_covered_tickers` | `p_days integer, p_limit integer, p_offset integer, p_search text` | TABLE(ticker text, mention_count bigint, scored_count bigint, avg_sentiment double precision, last_day date, company_name text, sector text, total_count bigint) |
 | `get_topic_visuals` | `p_slug text` | jsonb |
+| `head_carries_analysis` | `p_cluster text, p_scores jsonb, p_reasoning jsonb` | boolean |
 | `impact_vector_magnitude` | `p_impact jsonb` | double precision |
 | `increment_market_screening_download` | `p_id uuid` | bigint |
 | `link_subscription_on_signup` | `` | trigger |
@@ -2354,9 +2408,11 @@ Callable via PostgREST `.rpc(name, {...})` or directly in SQL.
 | `search_news_fulltext` | `query_text text, match_count integer, lookback_hours integer, stream_filter text` | TABLE(article_id bigint, title text, url text, source text, slug text, image_url text, article_stream text, published_at timestamp with time zone, snippet text, similarity double precision) |
 | `set_news_article_slug` | `` | trigger |
 | `set_user_profiles_updated_at` | `` | trigger |
+| `sync_article_has_analysis` | `p_article_ids bigint[]` | integer |
 | `topic_keywords` | `p_slug text` | text[] |
 | `touch_arena_championship` | `` | trigger |
 | `touch_arena_updated_at` | `` | trigger |
+| `touch_company_ceos_updated_at` | `` | trigger |
 | `touch_market_screenings_updated_at` | `` | trigger |
 | `touch_narrative_prefs_updated_at` | `` | trigger |
 | `touch_portfolio_alerts_updated_at` | `` | trigger |
@@ -2371,6 +2427,9 @@ Callable via PostgREST `.rpc(name, {...})` or directly in SQL.
 | `touch_user_trade_reviews_updated_at` | `` | trigger |
 | `touch_user_trades_updated_at` | `` | trigger |
 | `trg_set_impact_magnitude` | `` | trigger |
+| `trg_stmt_nih_has_analysis_del` | `` | trigger |
+| `trg_stmt_nih_has_analysis_ins` | `` | trigger |
+| `trg_stmt_nih_has_analysis_upd` | `` | trigger |
 | `trg_stmt_nih_rel_graph_del` | `` | trigger |
 | `trg_stmt_nih_rel_graph_ins` | `` | trigger |
 | `trg_stmt_nih_rel_graph_upd` | `` | trigger |
