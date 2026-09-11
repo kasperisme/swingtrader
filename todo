@@ -67,3 +67,6 @@ MVP Scope:
 
 [x] Expand market screening offerings
 [x] Rename internally from public to market screenings
+
+[ ] setup index now: 15 \* \* \* \* cd <repo>/code/analytics && .venv/bin/python -m services.seo.cli indexnow --new >> logs/indexnow.log 2>&1
+[ ] setup CEO directory: .venv/bin/python -m services.ceos.cli refresh --limit 500

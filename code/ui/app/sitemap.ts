@@ -8,6 +8,7 @@ import {
 } from "@/lib/sanity/queries";
 import { listMarketScreenings } from "@/app/actions/market-screenings";
 import { listCoveredTickers } from "@/app/actions/quotes";
+import { listCeoSitemapEntries } from "@/lib/ceos";
 import { createServiceClient } from "@/lib/supabase/service";
 import { SITE_URL } from "@/lib/site";
 
@@ -215,6 +216,22 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
     console.warn("[sitemap] failed to list traders", e);
   }
 
+  // CEO pages — only people whose page carries a proxy pay history (the rest
+  // are noindex), largest company first. `content_changed_at` moves only when
+  // something on the page changed, never on a mere re-fetch.
+  let ceoRoutes: MetadataRoute.Sitemap = [];
+  try {
+    const rows = await listCeoSitemapEntries(1000);
+    ceoRoutes = rows.map((r) => ({
+      url: `${baseUrl}/ceos/${r.slug}`,
+      lastModified: toDate(r.contentChangedAt),
+      changeFrequency: "monthly" as const,
+      priority: 0.5,
+    }));
+  } catch (e) {
+    console.warn("[sitemap] failed to list ceos", e);
+  }
+
   // Per-article pages, freshest first — read from the pre-gated rollup rather
   // than scanning news_articles.
   //
@@ -354,6 +371,9 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
     { url: `${baseUrl}/research`, lastModified: newest(researchRoutes), changeFrequency: "weekly", priority: 0.7 },
     { url: `${baseUrl}/arena`, lastModified: newest(arenaRoutes), changeFrequency: "daily", priority: 0.8 },
     { url: `${baseUrl}/traders`, lastModified: newest(traderRoutes), changeFrequency: "weekly", priority: 0.7 },
+    ...(ceoRoutes.length
+      ? [{ url: `${baseUrl}/ceos`, lastModified: newest(ceoRoutes), changeFrequency: "weekly" as const, priority: 0.7 }]
+      : []),
     // /docs redirects to the first page — list the destination, not the hop.
     // It is also a Sanity docPage, so drop that duplicate from docRoutes.
     {
@@ -380,5 +400,6 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
     ...researchRoutes,
     ...arenaRoutes,
     ...traderRoutes,
+    ...ceoRoutes,
   ];
 }

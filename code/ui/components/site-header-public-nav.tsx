@@ -26,6 +26,9 @@ export const INSIGHTS_LINKS = [
   { href: "/arena", label: "The Arena" },
   // The reference layer behind the arena: who each agent is modelled on.
   { href: "/traders", label: "Famous Traders" },
+  // Who runs every company on a quote page, and what they are paid — reached
+  // mostly from the CEO name on /quote/<symbol>.
+  { href: "/ceos", label: "CEOs" },
   // The strategy lab's published write-ups. Last because it is the most
   // specialist of the five, and unlike the others it is mostly negative
   // results — worth finding, not worth leading with.

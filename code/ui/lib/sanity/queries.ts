@@ -174,6 +174,25 @@ export const traderBySlugQuery = `
   }
 `;
 
+// ── CEOs ─────────────────────────────────────────────────────────────────────
+// Optional editorial layer over the data-built /ceos pages, joined by slug.
+
+export const ceoProfileBySlugQuery = `
+  *[_type == "ceo" && slug.current == $slug][0] {
+    "slug": slug.current,
+    name,
+    knownFor,
+    summary,
+    links[]{label, url},
+    body,
+    cavemanBody,
+    "imageUrl": image.asset->url,
+    "imageAlt": image.alt,
+    "imageCredit": image.credit,
+    "imageCreditUrl": image.creditUrl
+  }
+`;
+
 export const traderSlugListQuery = `
   *[_type == "trader" && defined(slug.current)] {
     "slug": slug.current,

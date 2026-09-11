@@ -149,3 +149,20 @@ export type Trader = TraderPreview & {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   cavemanBody?: any[];
 };
+
+/** Editorial layer over a data-built /ceos page; every field optional in use. */
+export type CeoProfile = {
+  slug: string;
+  name?: string;
+  knownFor?: string;
+  summary?: string;
+  links?: { label?: string; url?: string }[];
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  body?: any[];
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  cavemanBody?: any[];
+  imageUrl?: string;
+  imageAlt?: string;
+  imageCredit?: string;
+  imageCreditUrl?: string;
+};

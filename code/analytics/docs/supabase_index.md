@@ -1,8 +1,8 @@
 # swingtrader schema index (generated 2026-09-11)
 
 ## Relationships & graph
-- `ticker_relationship_edge_evidence` (table, ~88,764 @2026-09-11) Ticker relationship edge traceability Goal: - Provide deterministic traceability from ticker_relationship_edge
-- `ticker_relationship_edges` (table, ~39,962 @2026-09-11) Ticker Relationship Network (graph-ready adjacency structure) Why: - Avoid scanning/parsing JSONB relationship
+- `ticker_relationship_edge_evidence` (table, ~89,268 @2026-09-11) Ticker relationship edge traceability Goal: - Provide deterministic traceability from ticker_relationship_edge
+- `ticker_relationship_edges` (table, ~39,986 @2026-09-11) Ticker Relationship Network (graph-ready adjacency structure) Why: - Avoid scanning/parsing JSONB relationship
 - `ticker_relationship_network_resolved_mv` (matview, ~21,734) Relationship network materialization Problem (statement timeout on /protected/relations): ticker_relationship_
 - `ticker_pair_stats` (table, ~795 @2026-09-03) Ticker Pair Stats (cointegration / pairs-trading metrics on the graph) Why: - The news-derived relationship gr
 - `ticker_pair_candidates_v` (view) Candidate pairs: order-normalized, deduped across rel_types, off the canonicalized graph
@@ -20,7 +20,7 @@
 - `news_impact_vectors` (table, ~225,284 @2026-09-11) news_impact_vectors: aggregated impact dimension vectors
 - `news_source_dry_days` (table, ~695) Track calendar days where a news source stream has been fully exhausted (all available articles fetched/proces
 - `news_embedding_hourly_cluster_articles` (table, ~57) Hourly / daily embedding clusters over swingtrader.news_article_embeddings (UTC buckets)
-- `news_briefing_subscriptions` (table, ~34 @2026-09-10) News briefing subscriptions: the free, no-account email service that sends a nicely structured PDF of the last
+- `news_briefing_subscriptions` (table, ~34 @2026-09-11) News briefing subscriptions: the free, no-account email service that sends a nicely structured PDF of the last
 - `news_embedding_daily_cluster_articles` (table, ~0) Hourly / daily embedding clusters over swingtrader.news_article_embeddings (UTC buckets)
 - `news_embedding_daily_cluster_centroids` (table, ~0) Hourly / daily embedding clusters over swingtrader.news_article_embeddings (UTC buckets)
 - `news_embedding_daily_cluster_runs` (table, ~0) ── Daily ───────────────────────────────────────────────────────────────────
@@ -39,13 +39,13 @@
 - `news_trends_ticker_daily_v` (view) 1) Ticker mentions per day, with sentiment overlay
 
 ## News: topics & claims
-- `topic_claim_stats` (table, ~1,517 @2026-09-11) topic_claim_stats — the materialized half
+- `topic_claim_stats` (table, ~1,520 @2026-09-11) topic_claim_stats — the materialized half
 - `topic_stats` (table, ~2) Materialize the topic headline counts
 - `topic_article_v` (view) topic_article_v — the membership query, as a view
 
 ## Tickers: sentiment & coverage
-- `ticker_sentiment_heads` (table, ~367,509 @2026-09-11) Ticker Sentiment Materialization (pre-exploded, indexed) Why: - swingtrader.ticker_sentiment_heads_v explodes 
-- `ticker_coverage_daily` (table, ~58,513 @2026-09-11) Materialize the /quote directory's daily rollup
+- `ticker_sentiment_heads` (table, ~367,854 @2026-09-11) Ticker Sentiment Materialization (pre-exploded, indexed) Why: - swingtrader.ticker_sentiment_heads_v explodes 
+- `ticker_coverage_daily` (table, ~58,635 @2026-09-11) Materialize the /quote directory's daily rollup
 - `ticker_sentiment_heads_v` (view) Ticker Sentiment View (article-level, parsed from TICKER_SENTIMENT heads) Why: - Expose sentiment by (article,
 
 ## Company factor vectors
@@ -63,8 +63,8 @@
 - `user_scan_row_notes` (table, ~21,384 @2026-09-10) 
 - `user_ticker_chart_workspace` (table, ~4,871 @2026-09-10) Per-user chart workspace: annotations + Chart AI conversation, keyed by ticker
 - `user_screening_results` (table, ~2,748 @2026-09-11) ── user_screening_results ──────────────────────────────────────────────────
-- `user_scan_jobs` (table, ~306 @2026-09-10) 
-- `user_scan_runs` (table, ~216 @2026-09-10) 
+- `user_scan_jobs` (table, ~306 @2026-09-11) 
+- `user_scan_runs` (table, ~216 @2026-09-11) 
 - `user_trades` (table, ~36 @2026-08-15) user_trades: per-user trade ledger (buy/sell × long/short) Semantics: side            : 'buy' | 'sell' (execut
 - `user_profiles` (table, ~15 @2026-09-07) user_profiles Per-user app state that doesn't belong in auth.users.user_metadata
 - `user_bulk_analysis_jobs` (table, ~6 @2026-06-02) user_bulk_analysis_jobs Tracks fire-and-forget bulk per-ticker technical-analysis jobs
@@ -82,7 +82,7 @@
 - `job_health` (table, ~15) 
 
 ## Other
-- `sitemap_article_urls` (table, ~31,146 @2026-09-05) sitemap_article_urls: which article URLs are worth asking Google to index The sitemap shipped the newest 5,000
+- `sitemap_article_urls` (table, ~30,674 @2026-09-11) sitemap_article_urls: which article URLs are worth asking Google to index The sitemap shipped the newest 5,000
 - `tickers` (table, ~5,810 @2026-08-08) tickers: universe of actively-traded NYSE and NASDAQ stocks Seeded via scripts/seed_tickers.py (FMP company-sc
 - `research_priced_in_universe` (table, ~5,807 @2026-09-11) 1) The working universe and its schedule.
 - `security_identity_map` (table, ~2,019 @2026-04-15) Unified security identity map + graph integration Goal: - Keep ticker aliases and company-name aliases in one 

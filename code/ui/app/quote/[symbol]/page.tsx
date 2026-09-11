@@ -17,6 +17,7 @@ import {
   cachedProfile,
 } from "./_data";
 import { peerLabel, type TickerPeer } from "@/lib/quote/peers";
+import { getCeoForSymbol } from "@/lib/ceos";
 import { PricedInPanel } from "./_components/priced-in-panel";
 import {
   TickerImpactChart,
@@ -396,12 +397,20 @@ async function QuoteBody({
   profile: Awaited<ReturnType<typeof profileOf>>;
   quote: RawQuote | null;
 }) {
-  const [bars, pricedIn, peers, networkTaggedIds] = await Promise.all([
+  const [bars, pricedIn, peers, networkTaggedIds, ceo] = await Promise.all([
     cachedBars(symbol),
     pricedInOf(symbol),
     peersOf(symbol),
     cachedNetworkTaggedEventIds(symbol),
+    getCeoForSymbol(symbol),
   ]);
+  // Link the CEO only while the directory still agrees with the live profile.
+  // After a succession the row lags the profile until the next refresh, and a
+  // link from the new CEO's name to the predecessor's page is worse than none.
+  const ceoHref =
+    ceo && profile?.ceo && ceo.ceoNameRaw.trim() === profile.ceo.trim()
+      ? `/ceos/${ceo.slug}`
+      : null;
   const price = qnum(quote, "price") ?? profile?.price ?? null;
 
   const chartEvents = attachBars(events, bars);
@@ -543,7 +552,18 @@ async function QuoteBody({
                       <dt className="text-muted-foreground">Industry</dt>
                       <dd className="text-right">{profile?.industry ?? "—"}</dd>
                       <dt className="text-muted-foreground">CEO</dt>
-                      <dd className="text-right">{profile?.ceo ?? "—"}</dd>
+                      <dd className="text-right">
+                        {ceoHref ? (
+                          <Link
+                            href={ceoHref}
+                            className="font-medium text-foreground underline decoration-amber-500/40 underline-offset-2 transition-colors hover:text-amber-600 hover:decoration-amber-500 dark:hover:text-amber-400"
+                          >
+                            {ceo?.ceoName}
+                          </Link>
+                        ) : (
+                          profile?.ceo ?? "—"
+                        )}
+                      </dd>
                       <dt className="text-muted-foreground">Employees</dt>
                       <dd className="text-right tabular-nums">{profile?.fullTimeEmployees ?? "—"}</dd>
                       <dt className="text-muted-foreground">Country</dt>

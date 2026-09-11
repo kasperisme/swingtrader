@@ -311,6 +311,22 @@ Four things to know before touching it:
 Trap: **`filled_orders` ≠ `closed_trades`.** The trade count and win rate on the table are
 over CLOSED positions — an agent can have 12 fills and 1 close.
 
+## CEO Directory (`/ceos`)
+
+See `code/analytics/services/ceos/README.md`. The CEO name on `/quote/<symbol>`
+links to `/ceos/<slug>`: title, SEC proxy pay history, leadership team, and the
+headlines that name them. Data is `swingtrader.company_ceos` (one row per symbol,
+filled from FMP by `services.ceos.cli refresh`), and `ceo_directory_v` groups it
+into people. An optional Sanity `ceo` document (portrait + `body`/`cavemanBody`)
+adds editorial content to a page. It is joined by slug, which must be copied from
+the page URL.
+
+```bash
+cd code/analytics
+.venv/bin/python -m services.ceos.cli refresh --limit 500   # largest first, skips rows < 30d old
+.venv/bin/python -m services.ceos.cli stats
+```
+
 ## Social Publishing (Content Distribution)
 
 See `code/analytics/services/social_publishing/README.md`.
@@ -383,7 +399,17 @@ cd code/analytics
 .venv/bin/python -m services.google_analytics.cli summary|channels|landing|conversions|queries|sc-pages|opportunities
 .venv/bin/python -m services.google_analytics.cli sitemaps          # registered sitemaps + last fetch
 .venv/bin/python -m services.google_analytics.cli resubmit-sitemap  # force Google to re-download it
+.venv/bin/python -m services.google_analytics.cli inspect --since 24h   # URL Inspection triage of new URLs
+.venv/bin/python -m services.seo.cli indexnow --since 24h               # push new URLs to Bing/Yandex
 ```
+
+**New-page workflow:** there is no API for GSC's "Request indexing" button (the
+Indexing API is licensed for JobPosting/livestream pages only — using it for
+anything else is spam). `inspect` reads the sitemap's `<lastmod>`, runs the URL
+Inspection API (2,000/day) and sorts URLs into request / fix / quality /
+indexed; only the **request** bucket is worth the UI's ~10 manual requests a
+day, and each row carries its GSC deep link. Both `--since` flags depend on
+`app/sitemap.ts` emitting only TRUE lastmods — never stamp `now`.
 
 `resubmit-sitemap` is the only supported way left to make Google re-fetch the
 sitemap (the `google.com/ping?sitemap=` endpoint was retired in 2023). It needs

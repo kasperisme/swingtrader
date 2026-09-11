@@ -10,7 +10,7 @@ Generated 2026-09-11 by `python -m services.catalog.build`. **Do not hand-edit**
 
 ### `ticker_relationship_edge_evidence` (table)
 
-*~88,764 rows, fresh to 2026-09-11*
+*~89,268 rows, fresh to 2026-09-11*
 
 Ticker relationship edge traceability Goal: - Provide deterministic traceability from ticker_relationship_edges back to source articles and impact-vector dimensions.
 
@@ -32,7 +32,7 @@ Ticker relationship edge traceability Goal: - Provide deterministic traceability
 
 ### `ticker_relationship_edges` (table)
 
-*~39,962 rows, fresh to 2026-09-11*
+*~39,986 rows, fresh to 2026-09-11*
 
 Ticker Relationship Network (graph-ready adjacency structure) Why: - Avoid scanning/parsing JSONB relationship heads for every narrative run. - Materialize ticker->ticker edges with indexed lookup for multi-hop traversal. - Keep provenance + recency so downstream ranking can prioritize fresh edges.
 
@@ -215,6 +215,8 @@ news_impact_heads: per-cluster LLM scoring results
 
 `cluster` values: `ARTICLE_TAGS`, `BUSINESS_MODEL`, `FINANCIAL_STRUCTURE`, `GEOGRAPHY_TRADE`, `GROWTH_PROFILE`, `MACRO_SENSITIVITY`, `MARKET_BEHAVIOUR`, `SECTOR_ROTATION`, `STORY_KEY_POINTS`, `SUPPLY_CHAIN_EXPOSURE`, `TICKER_RELATIONSHIPS`, `TICKER_SENTIMENT`, `VALUATION_POSITIONING`
 
+`model` values: `gemma4:31b-cloud`, `glm-5.1:cloud`
+
 ### `news_article_embeddings` (table)
 
 *~1,853,533 rows*
@@ -340,7 +342,7 @@ Hourly / daily embedding clusters over swingtrader.news_article_embeddings (UTC 
 
 ### `news_briefing_subscriptions` (table)
 
-*~34 rows, fresh to 2026-09-10*
+*~34 rows, fresh to 2026-09-11*
 
 News briefing subscriptions: the free, no-account email service that sends a nicely structured PDF of the last 24h of news, summaries and impact for the tickers / tags a visitor cares about. Mirrors market_screening_email_subscriptions (email-only, soft-unsubscribe, service-role access) but the unit a visitor subscribes to is their OWN watchlist of tickers + tags rather than a curated screening. One briefing per email — editing the watchlist is an in-place update via a signed manage link, no login required. Delivery: * On signup we set initial_briefing_requested_at; the Python briefing tick ge
 
@@ -618,7 +620,7 @@ Pre-aggregated views for News Trends charts. Goal: avoid scanning/parsing every 
 
 ### `topic_claim_stats` (table)
 
-*~1,517 rows, fresh to 2026-09-11*
+*~1,520 rows, fresh to 2026-09-11*
 
 topic_claim_stats — the materialized half. Ranked STORY_KEY_POINTS across a topic's whole arc. This CANNOT be live: it scans every matching article's heads, and the REST role (`authenticator`) caps statements at 8s. Refreshed after each ingest, exactly like ticker_sentiment_heads / ticker_relationship_edges. Every claim keeps `article_ts`. A permanent page that aggregates claims will otherwise enshrine stale numbers as evergreen fact — observed repeatedly: NVIDIA "$119B supply commitments / $91B guide" (pre-quarter, reports Aug 26) and Micron "+346% to $41.46B" (a prior quarter) both resurface
 
@@ -670,7 +672,7 @@ topic_article_v — the membership query, as a view. Deliberately NOT materializ
 
 ### `ticker_sentiment_heads` (table)
 
-*~367,509 rows, fresh to 2026-09-11*
+*~367,854 rows, fresh to 2026-09-11*
 
 Ticker Sentiment Materialization (pre-exploded, indexed) Why: - swingtrader.ticker_sentiment_heads_v explodes EVERY TICKER_SENTIMENT head's scores_json (text->jsonb cast + jsonb_each_text) and joins news_articles on every request. The `ticker` column is derived from JSON keys and `article_ts` from a join, so neither a `ticker IN (...)` nor a date filter can be pushed down or indexed — the view is O(all sentiment heads) per call and was taking 4–8s for a single ticker (and growing with ingestion). - This pre-explodes the same data into a real table keyed by (head_id, ticker) with an index on (t
 
@@ -688,11 +690,11 @@ Ticker Sentiment Materialization (pre-exploded, indexed) Why: - swingtrader.tick
 | `article_ts` | timestamp with time zone |
 | `updated_at` | timestamp with time zone |
 
-`model` values: `claude-haiku-4-5`, `do-agent`, `gemma4:31b-cloud`, `gemma4:e4b`, `glm-5.1:cloud`
+`model` values: `gemma4:31b-cloud`, `gemma4:e4b`
 
 ### `ticker_coverage_daily` (table)
 
-*~58,513 rows, fresh to 2026-09-11*
+*~58,635 rows, fresh to 2026-09-11*
 
 Materialize the /quote directory's daily rollup. get_top_covered_tickers read news_trends_ticker_daily_v directly, which rescans 120 days of news_article_tickers + news_articles + ticker_sentiment heads on every call: measured 4.6s for a plain page and 7.6s for a search — against the REST role's 8s statement_timeout. That is a page that breaks the first time the corpus grows. Same split the topic hubs use: membership stays live, the expensive rollup is materialized and rebuilt post-ingest. A table (not a matview) so it can carry RLS like its siblings. Only the daily rollup is stored, NOT the w
 
@@ -938,7 +940,7 @@ Per-user chart workspace: annotations + Chart AI conversation, keyed by ticker. 
 
 ### `user_scan_jobs` (table)
 
-*~306 rows, fresh to 2026-09-10*
+*~306 rows, fresh to 2026-09-11*
 
 | column | type |
 |---|---|
@@ -965,7 +967,7 @@ Per-user chart workspace: annotations + Chart AI conversation, keyed by ticker. 
 
 ### `user_scan_runs` (table)
 
-*~216 rows, fresh to 2026-09-10*
+*~216 rows, fresh to 2026-09-11*
 
 | column | type |
 |---|---|
@@ -1242,11 +1244,13 @@ user_trade_reviews: AI post-trade review chats keyed by the closing trade A "rev
 | `expected_interval` | interval |
 | `metadata` | jsonb |
 
+`last_status` values: `running`, `success`
+
 ## Other
 
 ### `sitemap_article_urls` (table)
 
-*~31,146 rows, fresh to 2026-09-05*
+*~30,674 rows, fresh to 2026-09-11*
 
 sitemap_article_urls: which article URLs are worth asking Google to index The sitemap shipped the newest 5,000 /articles/* URLs with no filter at all, which made 74% of everything offered to a crawler a wrapper around a third-party headline. Sampling that set returned, verbatim: "A.C.L. Construction Secures Civil Package for Linda's Friendship Center in Fort Nelson BC", "ASICS Europe Expands Global Partnership with Teamwork Commerce", and three separate securities-class-action notices. Search Console's verdict on the whole domain was consistent with that: every hub page sat at "Crawled - curre
 

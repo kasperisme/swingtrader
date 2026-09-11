@@ -663,21 +663,78 @@ function firstClaimSummary(heads: HeadRow[]): string {
   return top ? (text[top[0]] ?? "").trim() : "";
 }
 
-/** "[Ticker] scores [sentiment] on this story. [lead claim]." — the meta
- *  description and the NewsArticle description, so the two never disagree. */
-function articleDescription(
-  title: string,
-  primary: { ticker: string; score: number } | null,
-  leadClaim: string,
-): string {
-  const descPrefix = primary
-    ? `${primary.ticker} scores ${sentimentLabel(primary.score)} on this story.`
-    : "";
-  return clampText(
-    [descPrefix, leadClaim].filter(Boolean).join(" ") ||
-      `News-impact analysis of "${title}".`,
-    155,
-  );
+/** The model's one-line reason for a ticker's sentiment score. */
+function tickerReason(heads: HeadRow[], ticker: string): string {
+  const head = heads.find((h) => h.cluster === "TICKER_SENTIMENT");
+  const reasons = asStringMap(head?.reasoning_json ?? {});
+  const key = Object.keys(reasons).find((k) => k.trim().toUpperCase() === ticker);
+  return key ? reasons[key].trim() : "";
+}
+
+// Bing flagged 88 article descriptions as too short. They were 33-88 chars:
+// either the bare "BAC scores neutral on this story." (a ticker verdict with no
+// claim behind it) or the `News-impact analysis of "<title>"` fallback. Search
+// engines show ~155-160; below ~120 the snippet is mostly empty space.
+const DESC_MIN = 120;
+const DESC_MAX = 158;
+
+/**
+ * The meta description, the NewsArticle description and the index decision,
+ * from one place so the three never disagree.
+ *
+ * `thin` = the scorer found neither a ticker verdict nor a single claim. That
+ * happens when the feed carried only a teaser — paywalled transcripts and
+ * WSJ/Barron's pieces arrive with ~100 chars of body (scored articles: ~4,700)
+ * — so the page is a headline and some tags. sitemap_article_urls already
+ * leaves these out; the page's robots tag now agrees with it.
+ */
+function describeArticle(
+  article: { title: string | null; publisher: string | null; search_tags: string[] | null },
+  heads: HeadRow[],
+): { description: string; thin: boolean } {
+  const title = (article.title || "Untitled article").trim();
+  const primary = primaryTickerSentiment(heads);
+  const leadClaim = firstClaimSummary(heads);
+  const thin = !primary && !leadClaim;
+
+  const tags = article.search_tags?.length
+    ? article.search_tags
+    : buildSearchTagsFromHeads(heads);
+  const themes = tags
+    .filter((t) => !/^[A-Z]{1,6}$/.test(t))
+    .slice(0, 4)
+    .map(formatTagLabel);
+  const tickers = tags.filter((t) => /^[A-Z]{1,6}$/.test(t)).slice(0, 4);
+
+  // Lead with the most specific thing the page can say.
+  const lead: string[] = [];
+  if (primary) {
+    lead.push(`${primary.ticker} scores ${sentimentLabel(primary.score)} on this story.`);
+  }
+  if (leadClaim) {
+    lead.push(leadClaim);
+  } else if (primary) {
+    const reason = tickerReason(heads, primary.ticker);
+    if (reason) lead.push(reason);
+  } else {
+    lead.push(`${title.replace(/[\s.!?…]+$/, "")}.`);
+    if (article.publisher) lead.push(`Via ${article.publisher}.`);
+  }
+
+  // Then top up with real context until the snippet is worth showing — each
+  // piece only if it fits whole, so nothing is cut mid-phrase to pad.
+  const pads = [
+    themes.length ? `Themes: ${themes.join(", ")}.` : "",
+    !primary && tickers.length ? `Tickers: ${tickers.join(", ")}.` : "",
+    "Scored for market impact: which stocks it moves and why.",
+    "Scored for market impact.",
+  ].filter(Boolean);
+  let text = lead.join(" ");
+  for (const pad of pads) {
+    if (text.length >= DESC_MIN) break;
+    if (text.length + 1 + pad.length <= DESC_MAX) text = `${text} ${pad}`;
+  }
+  return { description: clampText(text, DESC_MAX), thin };
 }
 
 /** Company name + listing exchange for the tickers a story is about. Empty on
@@ -734,7 +791,6 @@ export async function generateMetadata({
     .eq("article_id", article.id);
   const heads = (headsData ?? []) as HeadRow[];
   const primary = primaryTickerSentiment(heads);
-  const leadClaim = firstClaimSummary(heads);
 
   // Absolute canonical → always the newsimpactscreener.com URL, never the source.
   const canonical = `${SITE_BASE_URL.replace(/\/$/, "")}/articles/${slug}`;
@@ -746,7 +802,7 @@ export async function generateMetadata({
     : "";
   const title = buildBoundedTitle(article.title, tickerTag);
 
-  const description = articleDescription(article.title, primary, leadClaim);
+  const { description, thin } = describeArticle(article, heads);
 
   const publishedTime = article.published_at ?? article.created_at;
   const images = article.image_url ? [{ url: article.image_url }] : undefined;
@@ -759,6 +815,8 @@ export async function generateMetadata({
     title,
     description,
     alternates: { canonical },
+    // Nothing to index on a thin page, but its links still lead somewhere.
+    ...(thin ? { robots: { index: false, follow: true } } : {}),
     openGraph: {
       type: "article",
       title: article.title,
@@ -919,11 +977,7 @@ async function ArticleData({ params }: { params: Promise<{ slug?: string }> }) {
   const articleJsonLd = buildArticleJsonLd({
     canonicalUrl,
     headline: clampText(article.title || "Untitled article", 110),
-    description: articleDescription(
-      article.title || "Untitled article",
-      primaryTickerSentiment(heads),
-      firstClaimSummary(heads),
-    ),
+    description: describeArticle(article, heads).description,
     datePublished: publishedIso,
     dateModified: article.created_at ?? publishedIso,
     imageUrl: article.image_url,
