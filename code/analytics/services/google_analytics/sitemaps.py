@@ -26,6 +26,9 @@ Search Console permission level of Full or Owner.
 
 from __future__ import annotations
 
+import re
+import urllib.request
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from . import client as gc
@@ -64,3 +67,55 @@ def submit(path: str = DEFAULT_SITEMAP, site: str | None = None) -> None:
     sitemap is the documented way to nudge a re-download."""
     su = site or gc.site_url()
     gc.gsc_write_client().sitemaps().submit(siteUrl=su, feedpath=path).execute()
+
+
+# ── Reading the sitemap itself ──────────────────────────────────────────────
+#
+# "What is new?" is answered from the sitemap's own <lastmod>, which is why
+# code/ui/app/sitemap.ts only emits a lastmod it can stand behind: a URL with
+# none is never treated as new, and one stamped with the request time would
+# make every URL look new on every run.
+
+_URL_BLOCK = re.compile(r"<url>(.*?)</url>", re.S)
+_LOC = re.compile(r"<loc>\s*([^<]+?)\s*</loc>")
+_LASTMOD = re.compile(r"<lastmod>\s*([^<]+?)\s*</lastmod>")
+
+
+def _parse_lastmod(raw: str) -> datetime | None:
+    try:
+        dt = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+
+
+def entries(sitemap_url: str = DEFAULT_SITEMAP) -> list[tuple[str, datetime | None]]:
+    """(loc, lastmod) for every <url> in the sitemap, in sitemap order."""
+    with urllib.request.urlopen(sitemap_url, timeout=60) as resp:
+        xml = resp.read().decode("utf-8", "replace")
+    out: list[tuple[str, datetime | None]] = []
+    for block in _URL_BLOCK.findall(xml):
+        loc = _LOC.search(block)
+        if not loc:
+            continue
+        lm = _LASTMOD.search(block)
+        out.append((loc.group(1).replace("&amp;", "&"),
+                    _parse_lastmod(lm.group(1)) if lm else None))
+    return out
+
+
+def parse_since(spec: str) -> timedelta:
+    """'90m' / '24h' / '7d' → timedelta."""
+    m = re.fullmatch(r"\s*(\d+)\s*([mhd])\s*", spec or "")
+    if not m:
+        raise ValueError(f"bad duration {spec!r} — use e.g. 90m, 24h, 7d")
+    n, unit = int(m.group(1)), m.group(2)
+    return {"m": timedelta(minutes=n), "h": timedelta(hours=n), "d": timedelta(days=n)}[unit]
+
+
+def changed_since(since: timedelta, sitemap_url: str = DEFAULT_SITEMAP) -> list[str]:
+    """URLs whose <lastmod> falls inside the window, newest first."""
+    cutoff = datetime.now(timezone.utc) - since
+    fresh = [(loc, lm) for loc, lm in entries(sitemap_url) if lm and lm >= cutoff]
+    fresh.sort(key=lambda e: e[1], reverse=True)
+    return [loc for loc, _ in fresh]

@@ -3,6 +3,11 @@
 import { useState } from "react";
 import Link from "next/link";
 import { Lock } from "lucide-react";
+import {
+  CLUSTER_FREE_ROWS,
+  CLUSTER_NONZERO_EPS,
+  GATED_CLASS,
+} from "../_structured-data";
 
 export type ClusterRow = {
   id: string;
@@ -12,8 +17,8 @@ export type ClusterRow = {
 };
 
 // How many cluster rows are visible before the gate. The rest are blurred +
-// locked behind the early-access CTA.
-const FREE_ROWS = 4;
+// locked behind the early-access CTA. Shared with the page's paywall markup.
+const FREE_ROWS = CLUSTER_FREE_ROWS;
 
 function toneClass(score: number): string {
   if (score > 0.03) return "text-emerald-500";
@@ -74,7 +79,7 @@ function ClusterLine({ row }: { row: ClusterRow }) {
 export function ClusterScoreCard({ rows }: { rows: ClusterRow[] }) {
   const [showAll, setShowAll] = useState(false);
 
-  const nonZero = rows.filter((r) => Math.abs(r.score) > 0.03);
+  const nonZero = rows.filter((r) => Math.abs(r.score) > CLUSTER_NONZERO_EPS);
   const hasZero = nonZero.length < rows.length;
   const visible = showAll ? rows : nonZero;
 
@@ -102,7 +107,7 @@ export function ClusterScoreCard({ rows }: { rows: ClusterRow[] }) {
           {/* Blurred preview of the gated rows. */}
           <ul
             aria-hidden
-            className="space-y-3.5 select-none blur-[5px] [mask-image:linear-gradient(to_bottom,black,transparent)]"
+            className={`${GATED_CLASS} space-y-3.5 select-none blur-[5px] [mask-image:linear-gradient(to_bottom,black,transparent)]`}
           >
             {locked.map((c) => (
               <ClusterLine key={c.id} row={c} />

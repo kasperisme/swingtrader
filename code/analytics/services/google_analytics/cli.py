@@ -11,6 +11,8 @@
     .venv/bin/python -m services.google_analytics.cli opportunities  # striking-distance SEO wins
     .venv/bin/python -m services.google_analytics.cli sitemaps        # registered sitemaps + last fetch (GSC)
     .venv/bin/python -m services.google_analytics.cli resubmit-sitemap  # ask Google to re-download it
+    .venv/bin/python -m services.google_analytics.cli inspect --since 24h   # which new URLs Google hasn't indexed
+    .venv/bin/python -m services.google_analytics.cli inspect https://www.newsimpactscreener.com/quote/NVDA
 
 Add --json to any data command for machine-readable output.
 """
@@ -260,6 +262,68 @@ def cmd_resubmit_sitemap(args) -> int:
     return 0
 
 
+_BUCKET_ORDER = ("request", "fix", "quality", "error", "indexed")
+
+
+def cmd_inspect(args) -> int:
+    """Triage new URLs through the URL Inspection API.
+
+    Cannot request indexing (no public API does). Prints the short list worth
+    spending the GSC UI's ~10 daily manual requests on, each with a deep link.
+    """
+    from . import sitemaps as sm
+    from . import url_inspection as ui
+
+    if args.urls:
+        urls = list(dict.fromkeys(args.urls))
+        origin = "given"
+    else:
+        try:
+            window = sm.parse_since(args.since)
+        except ValueError as e:
+            print(f"  ✗ {e}", file=sys.stderr); return 2
+        urls = sm.changed_since(window, args.sitemap or sm.DEFAULT_SITEMAP)
+        origin = f"sitemap lastmod within {args.since}"
+    if args.match:
+        urls = [u for u in urls if args.match in u]
+    urls = urls[: args.limit]
+    if not urls:
+        print(f"  no URLs to inspect ({origin}{', matching ' + args.match if args.match else ''})")
+        return 0
+
+    if not args.json:
+        print(f"Inspecting {len(urls)} URL(s) — {origin}. Quota 2,000/day per property.\n")
+
+    def _progress(i, n, row):
+        if not args.json:
+            print(f"  [{i:>3}/{n}] {row['bucket']:<8} {row['url']}", flush=True)
+
+    rows = ui.inspect_many(urls, progress=_progress)
+    if args.json:
+        print(json.dumps(rows, indent=2)); return 0
+
+    by = {b: [r for r in rows if r["bucket"] == b] for b in _BUCKET_ORDER}
+    print("\n" + "  ".join(f"{b} {len(by[b])}" for b in _BUCKET_ORDER))
+
+    if by["request"]:
+        print("\nRequest indexing by hand — uncrawled, or last crawled before a fix (UI allows ~10/day):")
+        for r in by["request"]:
+            print(f"  · {r['url']}\n      {r['reason']}\n      {r['gsc_link']}")
+    if by["fix"]:
+        print("\nFix first — a request can't help until the cause is gone:")
+        for r in by["fix"]:
+            print(f"  · {r['url']}\n      {r['reason']}")
+    if by["quality"]:
+        print("\nCrawled, not indexed — Google declined; improve the page, don't re-request:")
+        for r in by["quality"]:
+            print(f"  · {r['url']}  (last crawl {r.get('last_crawl') or '?'})")
+    if by["error"]:
+        print("\nErrors:")
+        for r in by["error"]:
+            print(f"  · {r['url']}\n      {r['error']}")
+    return 0
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(prog="google_analytics", description="GA4 + Search Console insight.")
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -283,6 +347,14 @@ def main() -> int:
     p.add_argument("--path", default=None, help="sitemap URL (default: the canonical www sitemap)")
     p.add_argument("--dry-run", action="store_true", dest="dry_run")
     p.set_defaults(func=cmd_resubmit_sitemap)
+    p = sub.add_parser("inspect", help="URL Inspection triage for new URLs")
+    p.add_argument("urls", nargs="*", help="URLs to inspect (default: recently-changed sitemap URLs)")
+    p.add_argument("--since", default="7d", help="sitemap lastmod window when no URLs are given (90m/24h/7d)")
+    p.add_argument("--sitemap", default=None, help="sitemap URL (default: the canonical www sitemap)")
+    p.add_argument("--match", default=None, help="only URLs containing this substring, e.g. /articles/")
+    p.add_argument("--limit", type=int, default=50)
+    p.add_argument("--json", action="store_true")
+    p.set_defaults(func=cmd_inspect)
 
     args = ap.parse_args()
     try:

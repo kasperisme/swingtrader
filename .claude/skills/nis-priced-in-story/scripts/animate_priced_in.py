@@ -186,9 +186,7 @@ def scene_number(ax, S, p):
     if a > 0:
         ax.text(0.5, 0.47, f"{S['n_targets']} published analyst targets",
                 color=MUT, fontsize=34, ha="center", va="center", alpha=a)
-        agree = S["n_endorsed"]
-        line = "it agrees with none of them" if agree == 0 else f"it agrees with {agree} of them"
-        ax.text(0.5, 0.405, line, color=AMBER, fontsize=44, fontweight="bold",
+        ax.text(0.5, 0.405, S["number_line"], color=AMBER, fontsize=44, fontweight="bold",
                 ha="center", va="center", alpha=a)
     _caption(ax, S["caps"]["number"], alpha=ease(seg(p, 0.25, 0.45)))
 
@@ -384,6 +382,8 @@ def scene_crux(ax, S, p):
         ax.add_patch(Rectangle((0.075, base - 0.045), 0.5 * u, 0.008, color=AMBER))
     t = ease(seg(p, 0.72, 0.92))
     if t > 0:
+        # ~44 characters is the width of the column at this size; the old
+        # 52-character default ran off the frame on NVDA and GOOGL alike.
         ax.text(0.075, base - 0.10, S["crux_testable"], color=MUT, fontsize=30,
                 va="center", alpha=t)
     _caption(ax, S["caps"]["crux"], alpha=ease(seg(p, 0.15, 0.3)))
@@ -572,7 +572,7 @@ def build_scene_spec(story: dict, max_rows: int | None) -> dict:
     # readable size, the measurability note sits under it as its own line.
     head, tail = crux, ""
     m = re.search(r"^(.*?)(?:,\s+(?:and|but|which)\s+(?:the\s+)?"
-                  r"(?:wired|available|only|this)\b|\s+—\s+|(?<=[?.])\s+)(.*)$", crux)
+                  r"(?:wired|available|only|this|while)\b|\s+—\s+|(?<=[?.])\s+)(.*)$", crux)
     if m and m.group(1):
         head, tail = m.group(1).strip(), m.group(2).strip()
     head = head.rstrip(" ,")
@@ -583,17 +583,41 @@ def build_scene_spec(story: dict, max_rows: int | None) -> dict:
     # capital commitments" contains "measur" and means the exact opposite of
     # measurable; a plain keyword match prints a claim the reconstruction denies.
     note = tail or crux
-    if re.search(r"\b(cannot|can't|can not|no|nothing|not)\b[^.]{0,60}"
-                 r"(settle|test|measur|answer)", note, re.I):
-        testable = "Nothing wired can settle it — which is worth saying."
+    denied = re.search(r"\b(cannot|can't|can not|no|nothing|not)\b[^.]{0,60}"
+                       r"(settle|test|measur|answer)", note, re.I)
+    # "while unit volumes can be measured, the margin … cannot be tested" is
+    # half of each — reporting it as wholly unsettleable understates the data.
+    affirmed = re.search(r"(?<!not )(?<!cannot )(?:can be (?:tested|measured)|measurable)",
+                         note, re.I)
+    if denied and affirmed and affirmed.start() < denied.start():
+        testable = "Partly measurable. The rest isn't."
+    elif denied:
+        testable = "Nothing wired can settle it. Worth saying."
     elif re.search(r"can be tested|testable|can be measured|measurable|measure[sd]? (?:via|with|using)",
                    note, re.I):
         testable = "Measurable with the wired data."
     else:
-        testable = "Nothing wired can settle it — which is worth saying."
+        testable = "Nothing wired can settle it. Worth saying."
+
+    # A price outside the whole spread is the checkable fact, and it beats the
+    # endorsement count: "agrees with 1 of them" beside a marker sitting under
+    # all 18 targets reads as a contradiction (GOOGL, Sep 2026).
+    if price < sp["low"]:
+        number_line, vo_position = ("it sits below all of them",
+                                    "The share price sits below every one of them.")
+    elif price > sp["high"]:
+        number_line, vo_position = ("it sits above all of them",
+                                    "The share price sits above every one of them.")
+    elif sp["n_endorsed"] == 0:
+        number_line, vo_position = ("it agrees with none of them",
+                                    "The share price agrees with none of them.")
+    else:
+        number_line = f"it agrees with {sp['n_endorsed']} of them"
+        vo_position = f"The share price agrees with {sp['n_endorsed']} of them."
 
     as_of = dt.date.fromisoformat(story["as_of"])
     return {
+        "number_line": number_line,
         "ticker": story["ticker"],
         "company": story["company"],
         "as_of_label": as_of.strftime("%-d %b %Y"),
@@ -619,10 +643,7 @@ def build_scene_spec(story: dict, max_rows: int | None) -> dict:
             "outro": "The whole reading, free. Link in bio.",
         },
         "vo_number": (
-            f"{sp['n_targets']} analysts publish a price target on {company}. "
-            + ("The share price agrees with none of them."
-               if sp["n_endorsed"] == 0 else
-               f"The share price agrees with {sp['n_endorsed']} of them.")),
+            f"{sp['n_targets']} analysts publish a price target on {company}. " + vo_position),
         "vo_rail": (
             f"They range from {sp['low']:,.0f} dollars to {sp['high']:,.0f} dollars. The median "
             f"is {sp['median']:,.0f}. The price is {price:,.2f} — {abs(gap):.0f} percent "
@@ -668,7 +689,8 @@ def _speakable(s: str, lower_first: bool = False) -> str:
         return f"{m.group(1)} {m.group(2)} dollar{'s' if standalone else ''}{nxt}"
 
     s = re.sub(rf"\$(\d[\d,.]*)\s*{_MAG}(\s*\S*)", _mag, s, flags=re.I)
-    s = re.sub(r"\$(\d[\d,.]*)(\s+(?:target|price|level|model))", r"\1 dollar\2", s)
+    s = re.sub(r"\$(\d[\d,.]*)(\s+(?:target|price|level|model|median|consensus|floor|ceiling))",
+               r"\1 dollar\2", s)
     s = re.sub(r"\$(\d[\d,.]*)", r"\1 dollars", s)
     s = re.sub(r"(\d(?:\.\d+)?)%\+", r"\1 percent or better", s)
     s = re.sub(r"(\d)%", r"\1 percent", s)

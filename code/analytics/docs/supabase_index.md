@@ -1,8 +1,8 @@
-# swingtrader schema index (generated 2026-09-07)
+# swingtrader schema index (generated 2026-09-11)
 
 ## Relationships & graph
-- `ticker_relationship_edge_evidence` (table, ~88,538 @2026-09-05) Ticker relationship edge traceability Goal: - Provide deterministic traceability from ticker_relationship_edge
-- `ticker_relationship_edges` (table, ~39,730 @2026-09-05) Ticker Relationship Network (graph-ready adjacency structure) Why: - Avoid scanning/parsing JSONB relationship
+- `ticker_relationship_edge_evidence` (table, ~88,764 @2026-09-11) Ticker relationship edge traceability Goal: - Provide deterministic traceability from ticker_relationship_edge
+- `ticker_relationship_edges` (table, ~39,962 @2026-09-11) Ticker Relationship Network (graph-ready adjacency structure) Why: - Avoid scanning/parsing JSONB relationship
 - `ticker_relationship_network_resolved_mv` (matview, ~21,734) Relationship network materialization Problem (statement timeout on /protected/relations): ticker_relationship_
 - `ticker_pair_stats` (table, ~795 @2026-09-03) Ticker Pair Stats (cointegration / pairs-trading metrics on the graph) Why: - The news-derived relationship gr
 - `ticker_pair_candidates_v` (view) Candidate pairs: order-normalized, deduped across rel_types, off the canonicalized graph
@@ -12,15 +12,15 @@
 - `ticker_relationship_network_v` (view) Ticker Relationship Network (graph-ready adjacency structure) Why: - Avoid scanning/parsing JSONB relationship
 
 ## News: articles & scoring
-- `news_impact_heads` (table, ~2,651,283 @2026-09-06) news_impact_heads: per-cluster LLM scoring results
+- `news_impact_heads` (table, ~2,651,283 @2026-09-11) news_impact_heads: per-cluster LLM scoring results
 - `news_article_embeddings` (table, ~1,853,533) Embedding setup for semantic retrieval over scored news.
 - `news_article_tickers` (table, ~739,882) news_article_tickers: ticker mentions extracted from articles
-- `news_articles` (table, ~226,391 @2026-09-06) news_articles: article content and metadata
-- `news_article_embedding_jobs` (table, ~225,591 @2026-09-05) Embedding setup for semantic retrieval over scored news.
-- `news_impact_vectors` (table, ~225,284 @2026-09-06) news_impact_vectors: aggregated impact dimension vectors
-- `news_source_dry_days` (table, ~691) Track calendar days where a news source stream has been fully exhausted (all available articles fetched/proces
+- `news_article_embedding_jobs` (table, ~228,302 @2026-09-11) Embedding setup for semantic retrieval over scored news.
+- `news_articles` (table, ~226,391 @2026-09-11) news_articles: article content and metadata
+- `news_impact_vectors` (table, ~225,284 @2026-09-11) news_impact_vectors: aggregated impact dimension vectors
+- `news_source_dry_days` (table, ~695) Track calendar days where a news source stream has been fully exhausted (all available articles fetched/proces
 - `news_embedding_hourly_cluster_articles` (table, ~57) Hourly / daily embedding clusters over swingtrader.news_article_embeddings (UTC buckets)
-- `news_briefing_subscriptions` (table, ~34 @2026-09-04) News briefing subscriptions: the free, no-account email service that sends a nicely structured PDF of the last
+- `news_briefing_subscriptions` (table, ~34 @2026-09-10) News briefing subscriptions: the free, no-account email service that sends a nicely structured PDF of the last
 - `news_embedding_daily_cluster_articles` (table, ~0) Hourly / daily embedding clusters over swingtrader.news_article_embeddings (UTC buckets)
 - `news_embedding_daily_cluster_centroids` (table, ~0) Hourly / daily embedding clusters over swingtrader.news_article_embeddings (UTC buckets)
 - `news_embedding_daily_cluster_runs` (table, ~0) ── Daily ───────────────────────────────────────────────────────────────────
@@ -39,38 +39,38 @@
 - `news_trends_ticker_daily_v` (view) 1) Ticker mentions per day, with sentiment overlay
 
 ## News: topics & claims
-- `topic_claim_stats` (table, ~1,501 @2026-09-05) topic_claim_stats — the materialized half
+- `topic_claim_stats` (table, ~1,517 @2026-09-11) topic_claim_stats — the materialized half
 - `topic_stats` (table, ~2) Materialize the topic headline counts
 - `topic_article_v` (view) topic_article_v — the membership query, as a view
 
 ## Tickers: sentiment & coverage
-- `ticker_sentiment_heads` (table, ~364,935 @2026-09-05) Ticker Sentiment Materialization (pre-exploded, indexed) Why: - swingtrader.ticker_sentiment_heads_v explodes 
-- `ticker_coverage_daily` (table, ~60,248 @2026-09-05) Materialize the /quote directory's daily rollup
+- `ticker_sentiment_heads` (table, ~367,509 @2026-09-11) Ticker Sentiment Materialization (pre-exploded, indexed) Why: - swingtrader.ticker_sentiment_heads_v explodes 
+- `ticker_coverage_daily` (table, ~58,513 @2026-09-11) Materialize the /quote directory's daily rollup
 - `ticker_sentiment_heads_v` (view) Ticker Sentiment View (article-level, parsed from TICKER_SENTIMENT heads) Why: - Expose sentiment by (article,
 
 ## Company factor vectors
 - `company_vectors` (table, ~3,401 @2026-04-29) company_vectors: fundamental dimension vectors per ticker per date
 
 ## Screening & scans
-- `market_screening_result_rows` (table, ~134,149 @2026-09-05) 
-- `market_screening_results` (table, ~4,296 @2026-09-05) 
+- `market_screening_result_rows` (table, ~145,294 @2026-09-11) 
+- `market_screening_results` (table, ~4,660 @2026-09-11) 
 - `market_screening_email_subscriptions` (table, ~23 @2026-08-19) Market screening EMAIL subscriptions: the lightweight, email-only delivery list that powers the "Send me the r
-- `market_screenings` (table, ~10 @2026-09-07) 
+- `market_screenings` (table, ~12 @2026-09-11) 
 - `market_screening_subscriptions` (table, ~0) 
 
 ## Users, plans & billing
-- `user_scan_rows` (table, ~68,397 @2026-09-04) 
-- `user_scan_row_notes` (table, ~21,384 @2026-09-04) 
-- `user_ticker_chart_workspace` (table, ~5,319 @2026-09-05) Per-user chart workspace: annotations + Chart AI conversation, keyed by ticker
-- `user_screening_results` (table, ~2,492 @2026-09-05) ── user_screening_results ──────────────────────────────────────────────────
-- `user_scan_jobs` (table, ~306 @2026-09-04) 
-- `user_scan_runs` (table, ~216 @2026-09-04) 
+- `user_scan_rows` (table, ~68,397 @2026-09-10) 
+- `user_scan_row_notes` (table, ~21,384 @2026-09-10) 
+- `user_ticker_chart_workspace` (table, ~4,871 @2026-09-10) Per-user chart workspace: annotations + Chart AI conversation, keyed by ticker
+- `user_screening_results` (table, ~2,748 @2026-09-11) ── user_screening_results ──────────────────────────────────────────────────
+- `user_scan_jobs` (table, ~306 @2026-09-10) 
+- `user_scan_runs` (table, ~216 @2026-09-10) 
 - `user_trades` (table, ~36 @2026-08-15) user_trades: per-user trade ledger (buy/sell × long/short) Semantics: side            : 'buy' | 'sell' (execut
-- `user_profiles` (table, ~15 @2026-08-31) user_profiles Per-user app state that doesn't belong in auth.users.user_metadata
+- `user_profiles` (table, ~15 @2026-09-07) user_profiles Per-user app state that doesn't belong in auth.users.user_metadata
 - `user_bulk_analysis_jobs` (table, ~6 @2026-06-02) user_bulk_analysis_jobs Tracks fire-and-forget bulk per-ticker technical-analysis jobs
-- `user_scheduled_screenings` (table, ~5 @2026-09-05) ── user_scheduled_screenings ────────────────────────────────────────────────
+- `user_scheduled_screenings` (table, ~5 @2026-09-11) ── user_scheduled_screenings ────────────────────────────────────────────────
 - `user_api_keys` (table, ~2 @2026-04-12) user_api_keys
-- `user_subscriptions` (table, ~1 @2026-08-31) user_subscriptions Tracks Stripe subscriptions per user
+- `user_subscriptions` (table, ~1 @2026-09-07) user_subscriptions Tracks Stripe subscriptions per user
 - `user_narrative_preferences` (table, ~0 @2026-04-12) ── user_narrative_preferences ────────────────────────────────────────────────
 - `user_portfolio_alerts` (table, ~0) ── user_portfolio_alerts ─────────────────────────────────────────────────────
 - `user_telegram_connections` (table, ~0 @2026-08-06) user_telegram_connections: general-purpose Telegram account linkage Decoupled from user_narrative_preferences 
@@ -78,24 +78,25 @@
 - `user_trading_strategy` (table, ~0 @2026-08-18) 
 
 ## Agents & jobs
-- `job_runs` (table, ~256,091 @2026-09-05) 
+- `job_runs` (table, ~256,091 @2026-09-11) 
 - `job_health` (table, ~15) 
 
 ## Other
+- `sitemap_article_urls` (table, ~31,146 @2026-09-05) sitemap_article_urls: which article URLs are worth asking Google to index The sitemap shipped the newest 5,000
 - `tickers` (table, ~5,810 @2026-08-08) tickers: universe of actively-traded NYSE and NASDAQ stocks Seeded via scripts/seed_tickers.py (FMP company-sc
-- `research_priced_in_universe` (table, ~5,807 @2026-09-05) 1) The working universe and its schedule.
+- `research_priced_in_universe` (table, ~5,807 @2026-09-11) 1) The working universe and its schedule.
 - `security_identity_map` (table, ~2,019 @2026-04-15) Unified security identity map + graph integration Goal: - Keep ticker aliases and company-name aliases in one 
 - `telegram_message_log` (table, ~1,253) telegram_message_log — record every Telegram message sent by the platform Populated by the Mac Mini cron (run_
-- `research_priced_in` (table, ~732 @2026-09-05) 1) What a price already contains, reconstructed at a point in time.
-- `arena_orders` (table, ~512 @2026-09-05) ── 3) Orders — the only thing an agent writes ────────────────────────────── An order is an INTENT until the f
-- `arena_decisions` (table, ~410 @2026-09-05) ── 2) The decision record ────────────────────────────────────────────────── One row per agent per trading day
-- `arena_nav_history` (table, ~407 @2026-09-05) Arena: competing AI paper-trading agents What: - A set of autonomous agents, each funded with the same startin
+- `research_priced_in` (table, ~853 @2026-09-11) 1) What a price already contains, reconstructed at a point in time.
+- `arena_orders` (table, ~512 @2026-09-10) ── 3) Orders — the only thing an agent writes ────────────────────────────── An order is an INTENT until the f
+- `arena_decisions` (table, ~439 @2026-09-10) ── 2) The decision record ────────────────────────────────────────────────── One row per agent per trading day
+- `arena_nav_history` (table, ~407 @2026-09-10) Arena: competing AI paper-trading agents What: - A set of autonomous agents, each funded with the same startin
 - `research_predictions` (table, ~65 @2026-08-25) 2) Forward predictions
-- `arena_positions` (table, ~62 @2026-09-05) ── 4) Positions — current book, one row per (agent, ticker) ────────────────
-- `early_access_signups` (table, ~54 @2026-08-23) Early access signups: waitlist captured when a visitor (anonymous OR authenticated) clicks "Subscribe" on a pu
+- `arena_positions` (table, ~61 @2026-09-10) ── 4) Positions — current book, one row per (agent, ticker) ────────────────
+- `early_access_signups` (table, ~54 @2026-09-10) Early access signups: waitlist captured when a visitor (anonymous OR authenticated) clicks "Subscribe" on a pu
 - `research_charts` (table, ~40 @2026-08-19) Charts for the research lab
 - `research_strategies` (table, ~35 @2026-08-19) The strategies themselves: everything needed to re-run one exactly.
-- `arena_accounts` (table, ~18 @2026-09-05) ── 5) Cash + NAV history ─────────────────────────────────────────────────── `arena_accounts` is the single mu
+- `arena_accounts` (table, ~18 @2026-09-09) ── 5) Cash + NAV history ─────────────────────────────────────────────────── `arena_accounts` is the single mu
 - `arena_agents` (table, ~9 @2026-09-06) ── 1) The competitors ──────────────────────────────────────────────────────
 - `podcast_episodes` (table, ~6 @2026-05-14) 
 - `telegram_update_requests` (table, ~5 @2026-05-08) telegram_update_requests Queue table for on-demand Telegram /update requests
@@ -111,7 +112,7 @@
 - `topics` (table, ~0 @2026-08-03) Topic hubs — permanent, auto-updating deep-dive pages over the scraped corpus
 - `arena_agents_public_v` (view) The assembled system prompt, published
 - `arena_championships_public_v` (view) Arena: championships and the title lineage Why: - An open-ended leaderboard has no drama and no end state
-- `arena_decisions_public_v` (view) arena public views: expose championship_id The championships migration added `championship_id` to the base tab
+- `arena_decisions_public_v` (view) arena_decisions.session_date — the session the agent actually READ `decision_date` does not hold the date the 
 - `arena_leaderboard_v` (view) Arena: championships and the title lineage Why: - An open-ended leaderboard has no drama and no end state
 - `arena_nav_history_public_v` (view) arena public views: expose championship_id The championships migration added `championship_id` to the base tab
 - `arena_orders_public_v` (view) arena_orders.position_effect — what a fill DID to the book `side` alone stopped being readable the day every a
@@ -128,6 +129,7 @@
 
 ## Functions
 - `arena_orders_immutable()`
+- `exec_sitemap_article_refresh()`
 - `exec_ticker_coverage_refresh()`
 - `exec_ticker_relationship_heads_refresh()`
 - `exec_ticker_sentiment_heads_refresh()`
@@ -146,6 +148,7 @@
 - `news_articles_fts_maintain()`
 - `recompute_market_screenings_next_run_at()`
 - `refresh_relationship_network_mv()`
+- `refresh_sitemap_article_urls(p_days integer, p_min_scored integer)`
 - `refresh_ticker_coverage_daily()`
 - `refresh_ticker_relationship_edge_evidence(p_lookback interval)`
 - `refresh_ticker_relationship_edges(p_lookback interval)`

@@ -117,3 +117,35 @@ export async function getTickerImpactNewsResult(
   }
   return { ok: true, events };
 }
+
+/**
+ * Which of `articleIds` carry at least one of `tickers` in their search tags.
+ *
+ * The impact RPC selects on `ticker_sentiment_heads`, and the model hands out a
+ * sentiment score — often exactly 0 — to macro pieces that never name the
+ * company. On NVDA, 37 of 106 events had no NVDA tag, and they were the loudest
+ * ones: "Dow sinks 800 points as stagflation panic…" led "What moved NVDA".
+ * The tag is what the article page shows and what /articles?tag= filters on, so
+ * it is the bar for claiming a story moved a stock.
+ *
+ * Returns null on failure so the caller can tell "none matched" from "could
+ * not check".
+ */
+export async function articleIdsTaggedWith(
+  articleIds: number[],
+  tickers: string[],
+): Promise<number[] | null> {
+  if (articleIds.length === 0 || tickers.length === 0) return [];
+  const supabase = createServiceClient();
+  const { data, error } = await supabase
+    .schema(SCHEMA)
+    .from("news_articles")
+    .select("id")
+    .in("id", articleIds)
+    .overlaps("search_tags", tickers);
+  if (error || !Array.isArray(data)) {
+    if (error) console.warn("[quote/ticker-impact] tag lookup failed", error);
+    return null;
+  }
+  return data.map((r) => Number(r.id)).filter(Number.isFinite);
+}

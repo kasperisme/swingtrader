@@ -7,18 +7,23 @@ import { createClient as createSupabaseClient } from "@supabase/supabase-js";
 
 import { createClient } from "@/lib/supabase/server";
 import { getTrendingLookup, type TrendingLookupEntry } from "@/lib/trends";
-import { CLUSTERS, DIMENSION_MAP } from "@/app/protected/vectors/dimensions";
 import { ShareButtons } from "@/app/blog/[slug]/share-buttons";
-import { ClusterScoreCard } from "./_components/cluster-score-card";
 import { BriefingBanner } from "@/components/briefing-banner";
 import { getTopicsForArticle } from "@/app/actions/topics";
 import { ArticleBriefingCTA } from "./_components/article-briefing-cta";
 import { ArticleEngagementTracker } from "./_components/article-engagement-tracker";
 import {
   fetchRelatedArticles,
+  RecommendedArticle,
   RelatedArticles,
+  type RelatedArticle,
 } from "./_components/related-articles";
 import { SITE_URL, AUTHOR } from "@/lib/site";
+import {
+  buildArticleJsonLd,
+  GATED_CLASS,
+  type AboutCompany,
+} from "./_structured-data";
 
 const SITE_BASE_URL = SITE_URL;
 
@@ -77,22 +82,11 @@ type ArticleRow = {
   search_tags: string[] | null;
 };
 
-type CompanyVectorRow = {
-  ticker: string;
-  dimensions_json: unknown;
-  metadata_json: unknown;
-};
-
-type RankedStock = { ticker: string; score: number; sector: string };
 type HeadRow = {
   cluster: string;
   scores_json: unknown;
   reasoning_json: unknown;
 };
-
-function clusterDocSlug(clusterId: string): string {
-  return "/docs/cluster-" + clusterId.toLowerCase().replace(/_/g, "-");
-}
 
 function asNumberMap(v: unknown): Record<string, number> {
   if (!v) return {};
@@ -180,74 +174,6 @@ function formatAgeSince(iso: string): string {
   return `${Math.floor(diffMs / week)}w ago`;
 }
 
-function computeClusterProfile(impact: Record<string, number>) {
-  return CLUSTERS.map((cluster) => {
-    const vals = cluster.dimensions
-      .map((d) => impact[d.key])
-      .filter((v): v is number => Number.isFinite(v));
-    const score = vals.length
-      ? vals.reduce((a, b) => a + b, 0) / vals.length
-      : 0;
-    return {
-      id: cluster.id,
-      label: cluster.label,
-      score,
-      docSlug: clusterDocSlug(cluster.id),
-    };
-  }).sort((a, b) => Math.abs(b.score) - Math.abs(a.score));
-}
-
-async function fetchRankedStocks(impact: Record<string, number>) {
-  if (Object.keys(impact).length === 0)
-    return { winners: [] as RankedStock[], losers: [] as RankedStock[] };
-  // Service-role client so logged-out visitors get the ranked exposures too
-  // (RLS blocks anon reads on the swingtrader schema).
-  const supabase = await createServerDataClient();
-  const { data, error } = await supabase
-    .schema("swingtrader")
-    .from("company_vectors")
-    .select("ticker, dimensions_json, metadata_json")
-    .order("ticker", { ascending: true })
-    .order("vector_date", { ascending: false });
-  if (error || !data) return { winners: [], losers: [] };
-
-  const seen = new Set<string>();
-  const rows: CompanyVectorRow[] = [];
-  for (const row of data as CompanyVectorRow[]) {
-    if (seen.has(row.ticker)) continue;
-    seen.add(row.ticker);
-    rows.push(row);
-  }
-
-  const ranked: RankedStock[] = [];
-  for (const row of rows) {
-    const dims = asNumberMap(row.dimensions_json);
-    let total = 0;
-    let used = 0;
-    for (const [k, s] of Object.entries(impact)) {
-      const d = dims[k];
-      if (!Number.isFinite(d) || !Number.isFinite(s)) continue;
-      total += d * s;
-      used += 1;
-    }
-    if (!used) continue;
-    const meta = asObject(row.metadata_json);
-    ranked.push({
-      ticker: row.ticker,
-      score: total / used,
-      sector: String(meta.sector ?? ""),
-    });
-  }
-  ranked.sort((a, b) => b.score - a.score);
-  return {
-    winners: ranked.filter((r) => r.score > 0).slice(0, 10),
-    losers: ranked
-      .filter((r) => r.score < 0)
-      .sort((a, b) => a.score - b.score)
-      .slice(0, 10),
-  };
-}
-
 function Eyebrow({ label, meta }: { label: string; meta?: string }) {
   return (
     <div className="mb-5 flex flex-wrap items-baseline gap-x-4 gap-y-1">
@@ -264,52 +190,6 @@ function Eyebrow({ label, meta }: { label: string; meta?: string }) {
   );
 }
 
-function SignedBar({ score, max }: { score: number; max: number }) {
-  const denom = Math.max(max, 0.0001);
-  const pct = Math.min(50, (Math.abs(score) / denom) * 50);
-  const isPos = score >= 0;
-  return (
-    <div className="relative h-1.5 w-full overflow-hidden rounded-sm bg-muted/50">
-      <div className="absolute left-1/2 top-0 h-full w-px bg-border" />
-      <div
-        className={
-          isPos
-            ? "absolute top-0 h-full bg-emerald-500/80"
-            : "absolute top-0 h-full bg-rose-500/80"
-        }
-        style={{
-          left: isPos ? "50%" : `${50 - pct}%`,
-          width: `${pct}%`,
-        }}
-      />
-    </div>
-  );
-}
-
-function MagnitudeBar({
-  value,
-  max,
-  tone,
-}: {
-  value: number;
-  max: number;
-  tone: "pos" | "neg";
-}) {
-  const pct = Math.min(100, (Math.abs(value) / Math.max(max, 0.0001)) * 100);
-  return (
-    <div className="h-[3px] w-full overflow-hidden rounded-sm bg-muted/40">
-      <div
-        className={
-          tone === "pos"
-            ? "h-full bg-emerald-500/75"
-            : "h-full bg-rose-500/75"
-        }
-        style={{ width: `${pct}%` }}
-      />
-    </div>
-  );
-}
-
 function ScoreText({ value, digits = 3 }: { value: number; digits?: number }) {
   const sign = value >= 0 ? "+" : "";
   return (
@@ -322,7 +202,7 @@ function ScoreText({ value, digits = 3 }: { value: number; digits?: number }) {
 
 /**
  * Lock overlay for gated list rows — sits over the blurred preview and routes to
- * the early-access CTA on the same page. Shared by the claim and stock gates.
+ * the early-access CTA on the same page.
  */
 function GateOverlay({ count, noun }: { count: number; noun: string }) {
   return (
@@ -335,148 +215,6 @@ function GateOverlay({ count, noun }: { count: number; noun: string }) {
         Unlock {count} more {noun}
         {count === 1 ? "" : "s"}
       </Link>
-    </div>
-  );
-}
-
-function DimensionList({
-  rows,
-}: {
-  rows: Array<{ key: string; score: number }>;
-}) {
-  if (rows.length === 0) {
-    return (
-      <p className="text-sm text-muted-foreground/80">
-        No impact vector found for this article yet.
-      </p>
-    );
-  }
-  const max = rows.reduce((m, r) => Math.max(m, Math.abs(r.score)), 0);
-  return (
-    <ul className="space-y-3">
-      {rows.map((d) => {
-        const dim = DIMENSION_MAP[d.key];
-        const clusterKey = CLUSTERS.find((c) =>
-          c.dimensions.some((x) => x.key === d.key),
-        )?.id;
-        const href = clusterKey
-          ? clusterDocSlug(clusterKey)
-          : "/docs/news-impact-scores";
-        return (
-          <li key={d.key}>
-            <div className="mb-1 flex items-baseline justify-between gap-3">
-              <Link
-                href={href}
-                className="truncate text-[13px] text-foreground/85 hover:text-amber-400"
-              >
-                {dim?.label ?? d.key}
-              </Link>
-              <ScoreText value={d.score} />
-            </div>
-            <SignedBar score={d.score} max={max} />
-          </li>
-        );
-      })}
-    </ul>
-  );
-}
-
-function StockRow({
-  s,
-  idx,
-  tone,
-  max,
-}: {
-  s: RankedStock;
-  idx: number;
-  tone: "pos" | "neg";
-  max: number;
-}) {
-  return (
-    <li className="grid grid-cols-[1.25rem_1fr_auto] items-baseline gap-3">
-      <span className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground/70">
-        {String(idx + 1).padStart(2, "0")}
-      </span>
-      <div className="min-w-0">
-        <div className="mb-1 flex items-baseline justify-between gap-3">
-          <span className="truncate text-sm">
-            <Link
-              href={quoteHref(s.ticker)}
-              title={`${s.ticker} price chart and news catalysts`}
-              className="font-semibold tracking-tight text-foreground transition-colors hover:text-amber-400"
-            >
-              {s.ticker}
-            </Link>
-            {s.sector ? (
-              <span className="ml-2 text-xs text-muted-foreground">
-                {s.sector}
-              </span>
-            ) : null}
-          </span>
-        </div>
-        <MagnitudeBar value={s.score} max={max} tone={tone} />
-      </div>
-      <span
-        className={
-          tone === "pos"
-            ? "font-mono text-xs tabular-nums text-emerald-500"
-            : "font-mono text-xs tabular-nums text-rose-500"
-        }
-      >
-        {tone === "pos" ? "+" : ""}
-        {s.score.toFixed(3)}
-      </span>
-    </li>
-  );
-}
-
-function StockLedger({
-  rows,
-  tone,
-  lockAfter,
-}: {
-  rows: RankedStock[];
-  tone: "pos" | "neg";
-  /** Show this many rows free, then blur + gate the rest behind early access. */
-  lockAfter?: number;
-}) {
-  if (rows.length === 0) {
-    return (
-      <p className="text-sm text-muted-foreground/80">
-        No stock impact ranking available yet.
-      </p>
-    );
-  }
-  const max = rows.reduce((m, r) => Math.max(m, Math.abs(r.score)), 0);
-  const limit = lockAfter ?? rows.length;
-  const free = rows.slice(0, limit);
-  const locked = rows.slice(limit);
-  return (
-    <div>
-      <ol className="space-y-3">
-        {free.map((s, idx) => (
-          <StockRow key={s.ticker} s={s} idx={idx} tone={tone} max={max} />
-        ))}
-      </ol>
-      {locked.length > 0 && (
-        <div className="relative mt-3">
-          <ol
-            aria-hidden
-            className="space-y-3 select-none blur-[5px] [mask-image:linear-gradient(to_bottom,black,transparent)]"
-          >
-            {locked.map((s, idx) => (
-              <StockRow
-                key={s.ticker}
-                s={s}
-                idx={limit + idx}
-                tone={tone}
-                max={max}
-              />
-            ))}
-          </ol>
-          <GateOverlay count={locked.length} noun="ticker" />
-        </div>
-      )}
     </div>
   );
 }
@@ -711,7 +449,7 @@ function KeyPointsList({
         <div className="relative mt-3.5">
           <ol
             aria-hidden
-            className="divide-y divide-border/40 select-none blur-[5px] [mask-image:linear-gradient(to_bottom,black,transparent)]"
+            className={`${GATED_CLASS} divide-y divide-border/40 select-none blur-[5px] [mask-image:linear-gradient(to_bottom,black,transparent)]`}
           >
             {locked.map((row, idx) => (
               <KeyPointRow key={row.id} row={row} idx={limit + idx} />
@@ -795,29 +533,14 @@ function TickerRelationshipList({
 }
 
 function AnalyticsRegion({
-  clusterProfile,
-  topDimensions,
-  winners,
-  losers,
   storyKeyPoints,
   tickerSentiment,
   tickerRelationships,
   ctaTickers,
   ctaTags,
   claimLockAfter,
-  loserLockAfter,
-  sourceUrl,
-  sourceLabel,
+  recommended,
 }: {
-  clusterProfile: Array<{
-    id: string;
-    label: string;
-    score: number;
-    docSlug: string;
-  }>;
-  topDimensions: Array<{ key: string; score: number }>;
-  winners: RankedStock[];
-  losers: RankedStock[];
   storyKeyPoints: Array<{ id: string; impact: number; text: string }>;
   tickerSentiment: Array<{ ticker: string; score: number; reason: string }>;
   tickerRelationships: Array<{
@@ -831,19 +554,12 @@ function AnalyticsRegion({
   ctaTags: string[];
   /** Gate claims after N (set when the story has 6+ claims). */
   claimLockAfter?: number;
-  /** Gate the negatively-impacted ledger after N (set on short/cold stories). */
-  loserLockAfter?: number;
-  /** Original-source URL + label, rendered as an attribution badge above the gate. */
-  sourceUrl: string | null;
-  sourceLabel: string;
+  /** Top related article, shown as a single pick under the ticker section. */
+  recommended: RelatedArticle | null;
 }) {
   const hasSentiment = tickerSentiment.length > 0;
   const hasRelationships = tickerRelationships.length > 0;
   const hasTickerAttribution = hasSentiment || hasRelationships;
-  const hasImpactVectors =
-    clusterProfile.some((c) => Math.abs(c.score) > 0.03) ||
-    topDimensions.length > 0;
-  const hasMarketReaction = winners.length > 0 || losers.length > 0;
   return (
     <div className="space-y-12">
         {storyKeyPoints.length > 0 ? (
@@ -897,87 +613,11 @@ function AnalyticsRegion({
           </section>
         ) : null}
 
-        {/* Source attribution (moved off the top of the page) sits just above
-            the Tier-2 "go deeper" block, as a quiet badge rather than a CTA. */}
-        {sourceUrl ? (
-          <div className="-mb-6">
-            <Link
-              href={sourceUrl}
-              target="_blank"
-              rel="noreferrer"
-              className="group inline-flex items-center gap-1.5 rounded-full border border-border/60 bg-muted/20 px-3 py-1 font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground transition-colors hover:border-border hover:text-foreground"
-            >
-              Read original · {sourceLabel}
-              <ArrowUpRight
-                size={11}
-                className="transition-transform duration-200 group-hover:-translate-y-px group-hover:translate-x-px"
-              />
-            </Link>
-          </div>
-        ) : null}
+        {/* One on-site "read next" pick, right after the tickers — the next
+            click a reader makes here should stay on the platform. */}
+        {recommended ? <RecommendedArticle article={recommended} /> : null}
 
         <ArticleBriefingCTA tickers={ctaTickers} tags={ctaTags} />
-
-        {hasImpactVectors ? (
-          <section>
-            <Eyebrow
-              label="How the impact breaks down"
-              meta="Where the story's weight lands"
-            />
-            <div className="grid gap-10 lg:grid-cols-5">
-              <div className="lg:col-span-3">
-                <h2 className="mb-5 text-base font-semibold tracking-tight text-foreground/90">
-                  Impact by category
-                </h2>
-                <ClusterScoreCard rows={clusterProfile} />
-              </div>
-              <div className="lg:col-span-2 lg:border-l lg:border-border/40 lg:pl-10">
-                <h2 className="mb-5 text-base font-semibold tracking-tight text-foreground/90">
-                  Biggest drivers
-                </h2>
-                <DimensionList rows={topDimensions} />
-              </div>
-            </div>
-          </section>
-        ) : null}
-
-        {hasMarketReaction ? (
-          <section>
-            <Eyebrow
-              label="Stocks most exposed"
-              meta="Modeled from each name's sensitivity to this story"
-            />
-            <div className="grid gap-10 md:grid-cols-2">
-              <div>
-                <div className="mb-5 flex items-baseline justify-between">
-                  <h2 className="text-base font-semibold tracking-tight text-foreground/90">
-                    Most positively impacted
-                  </h2>
-                  <span className="font-mono text-[10px] uppercase tracking-widest text-emerald-500/80">
-                    Upside
-                  </span>
-                </div>
-                <StockLedger rows={winners} tone="pos" />
-              </div>
-              <div className="md:border-l md:border-border/40 md:pl-10">
-                <div className="mb-5 flex items-baseline justify-between">
-                  <h2 className="text-base font-semibold tracking-tight text-foreground/90">
-                    Most negatively impacted
-                  </h2>
-                  <span className="font-mono text-[10px] uppercase tracking-widest text-rose-500/80">
-                    Downside
-                  </span>
-                </div>
-                <StockLedger
-                  rows={losers}
-                  tone="neg"
-                  lockAfter={loserLockAfter}
-                />
-              </div>
-            </div>
-          </section>
-        ) : null}
-
     </div>
   );
 }
@@ -1023,6 +663,46 @@ function firstClaimSummary(heads: HeadRow[]): string {
   return top ? (text[top[0]] ?? "").trim() : "";
 }
 
+/** "[Ticker] scores [sentiment] on this story. [lead claim]." — the meta
+ *  description and the NewsArticle description, so the two never disagree. */
+function articleDescription(
+  title: string,
+  primary: { ticker: string; score: number } | null,
+  leadClaim: string,
+): string {
+  const descPrefix = primary
+    ? `${primary.ticker} scores ${sentimentLabel(primary.score)} on this story.`
+    : "";
+  return clampText(
+    [descPrefix, leadClaim].filter(Boolean).join(" ") ||
+      `News-impact analysis of "${title}".`,
+    155,
+  );
+}
+
+/** Company name + listing exchange for the tickers a story is about. Empty on
+ *  any failure — the markup degrades to bare ticker symbols, never breaks. */
+async function fetchAboutCompanies(
+  dataClient: Awaited<ReturnType<typeof createServerDataClient>>,
+  tickers: string[],
+): Promise<AboutCompany[]> {
+  if (tickers.length === 0) return [];
+  const { data } = await dataClient
+    .schema("swingtrader")
+    .from("tickers")
+    .select("symbol, exchange, company_name")
+    .in("symbol", tickers);
+  const bySymbol = new Map(
+    (data ?? []).map((r) => [String(r.symbol).toUpperCase(), r]),
+  );
+  return tickers.map((ticker) => {
+    const row = bySymbol.get(ticker);
+    const name = typeof row?.company_name === "string" ? row.company_name.trim() : "";
+    const exchange = typeof row?.exchange === "string" ? row.exchange.trim() : "";
+    return { ticker, name: name || null, exchange: exchange || null };
+  });
+}
+
 export async function generateMetadata({
   params,
 }: {
@@ -1066,15 +746,7 @@ export async function generateMetadata({
     : "";
   const title = buildBoundedTitle(article.title, tickerTag);
 
-  // Description: "[Ticker] scores [sentiment] on this story. [lead claim]."
-  const descPrefix = primary
-    ? `${primary.ticker} scores ${sentimentLabel(primary.score)} on this story.`
-    : "";
-  const description = clampText(
-    [descPrefix, leadClaim].filter(Boolean).join(" ") ||
-      `News-impact analysis of "${article.title}".`,
-    155,
-  );
+  const description = articleDescription(article.title, primary, leadClaim);
 
   const publishedTime = article.published_at ?? article.created_at;
   const images = article.image_url ? [{ url: article.image_url }] : undefined;
@@ -1124,13 +796,7 @@ async function ArticleData({ params }: { params: Promise<{ slug?: string }> }) {
   const article = bySlug.data;
   if (!article || bySlug.error) notFound();
 
-  const [vector, headsRes, articleTopics] = await Promise.all([
-    dataClient
-      .schema("swingtrader")
-      .from("news_impact_vectors")
-      .select("impact_json")
-      .eq("article_id", article.id)
-      .single<{ impact_json: unknown }>(),
+  const [headsRes, articleTopics] = await Promise.all([
     dataClient
       .schema("swingtrader")
       .from("news_impact_heads")
@@ -1141,13 +807,6 @@ async function ArticleData({ params }: { params: Promise<{ slug?: string }> }) {
     // hubs are orphaned from the ~5k article pages that should feed them.
     getTopicsForArticle(article.id).catch(() => []),
   ]);
-  const impact = asNumberMap(vector.data?.impact_json ?? {});
-  const topDimensions = Object.entries(impact)
-    .map(([key, score]) => ({ key, score }))
-    .sort((a, b) => Math.abs(b.score) - Math.abs(a.score))
-    .slice(0, 12);
-  const clusterProfile = computeClusterProfile(impact);
-  const { winners, losers } = await fetchRankedStocks(impact);
   const heads = (headsRes.data ?? []) as HeadRow[];
   const keyPointsHead = heads.find((h) => h.cluster === "STORY_KEY_POINTS");
   const sentimentHead = heads.find((h) => h.cluster === "TICKER_SENTIMENT");
@@ -1202,10 +861,19 @@ async function ArticleData({ params }: { params: Promise<{ slug?: string }> }) {
     (article.search_tags?.length ? article.search_tags : null) ??
     buildSearchTagsFromHeads(heads);
 
+  // Every ticker the story touches (sentiment heads + ticker search tags),
+  // deduped — emitted as schema.org `about` Corporations for entity SEO.
+  const aboutTickers = [
+    ...new Set([
+      ...tickerSentiment.map((t) => t.ticker.toUpperCase()),
+      ...searchTags.filter((t) => /^[A-Z]{1,6}$/.test(t)),
+    ]),
+  ].slice(0, 12);
+
   // Related articles: shares ≥1 search_tag, within last 30 days, ranked by
   // overlap count + recency. Returns [] when no tags exist or no matches found
   // — the component renders nothing in that case, so no layout shift.
-  const [relatedArticles, trendingLookup] = await Promise.all([
+  const [relatedArticles, trendingLookup, aboutCompanies] = await Promise.all([
     fetchRelatedArticles({
       articleId: article.id,
       tags: searchTags,
@@ -1215,6 +883,9 @@ async function ArticleData({ params }: { params: Promise<{ slug?: string }> }) {
     // Which of this story's own tags are hot right now → flame chips that pull
     // SEO arrivals deeper into the platform.
     getTrendingLookup({ windowDays: 7, topN: 40 }),
+    fetchAboutCompanies(dataClient, aboutTickers).catch(() =>
+      aboutTickers.map((ticker) => ({ ticker, name: null, exchange: null })),
+    ),
   ]);
   const siteBaseUrl = SITE_BASE_URL;
   const canonicalUrl = `${siteBaseUrl.replace(/\/$/, "")}/articles/${article.slug ?? slug}`;
@@ -1230,60 +901,45 @@ async function ArticleData({ params }: { params: Promise<{ slug?: string }> }) {
   // CTA so a reader can follow the story's themes, not just its tickers.
   const ctaTags = searchTags.filter((t) => !/^[A-Z]{1,6}$/.test(t)).slice(0, 4);
 
-  // Every ticker the story touches (sentiment heads + ticker search tags),
-  // deduped — emitted as schema.org `about` Corporations for entity SEO.
-  const aboutTickers = [
-    ...new Set([
-      ...tickerSentiment.map((t) => t.ticker.toUpperCase()),
-      ...searchTags.filter((t) => /^[A-Z]{1,6}$/.test(t)),
-    ]),
-  ].slice(0, 12);
-
-  // NewsArticle structured data — lets Google render this as a news result and
-  // attributes the analysis to us while crediting the original source.
-  const articleJsonLd = {
-    "@context": "https://schema.org",
-    "@type": "NewsArticle",
-    headline: clampText(article.title || "Untitled article", 110),
-    datePublished: publishedIso,
-    dateModified: article.created_at ?? publishedIso,
-    image: article.image_url ? [article.image_url] : undefined,
-    url: canonicalUrl,
-    mainEntityOfPage: { "@type": "WebPage", "@id": canonicalUrl },
-    author: {
-      "@type": "Person",
-      "@id": `${SITE_BASE_URL}/#author`,
-      name: AUTHOR.name,
-      url: `${SITE_BASE_URL}/about`,
-    },
-    publisher: {
-      "@type": "Organization",
-      "@id": `${SITE_BASE_URL}/#organization`,
-      name: "NewsImpactScreener",
-      url: SITE_BASE_URL,
-    },
-    about: aboutTickers.length
-      ? aboutTickers.map((ticker) => ({
-          "@type": "Corporation",
-          tickerSymbol: ticker,
-        }))
-      : undefined,
-    isBasedOn: article.url || undefined,
-    description: clampText(
-      `News-impact analysis: which stocks "${article.title}" moves, key claims, sentiment, and market reaction.`,
-      200,
-    ),
-  };
-
   // Gate calibration for cold organic traffic. Short stories (≤5 claims) show
-  // all claims free but gate the high-value payoff rows (the negatively-impacted
-  // ledger; the cluster profile already gates its own top-4). Longer stories
-  // (6+ claims) gate the claim list itself from claim 5 onward.
-  const coldGate = storyKeyPoints.length <= 5;
-  const claimLockAfter = coldGate ? undefined : 4;
-  const loserLockAfter = coldGate ? 2 : undefined;
+  // every claim free; longer stories (6+ claims) gate the claim list from
+  // claim 5 onward.
+  const claimLockAfter = storyKeyPoints.length <= 5 ? undefined : 4;
+
+  // Whether any blurred block actually renders — mirrors the gate's own
+  // condition, so the paywall markup never claims a gate the page doesn't have.
+  const hasGatedContent =
+    claimLockAfter !== undefined && storyKeyPoints.length > claimLockAfter;
 
   const sourceLabel = article.source || article.publisher || "feed";
+
+  // NewsArticle + BreadcrumbList — lets Google render this as a news result,
+  // attributes the analysis to us while crediting the original source, and
+  // declares the blurred rows as gated rather than cloaked.
+  const articleJsonLd = buildArticleJsonLd({
+    canonicalUrl,
+    headline: clampText(article.title || "Untitled article", 110),
+    description: articleDescription(
+      article.title || "Untitled article",
+      primaryTickerSentiment(heads),
+      firstClaimSummary(heads),
+    ),
+    datePublished: publishedIso,
+    dateModified: article.created_at ?? publishedIso,
+    imageUrl: article.image_url,
+    companies: aboutCompanies,
+    keywords: searchTags
+      .filter((t) => !/^[A-Z]{1,6}$/.test(t))
+      .map(formatTagLabel),
+    sections: articleTopics.map((t) => t.title),
+    sourceUrl: article.url,
+    sourceName: article.publisher || article.source,
+    hasGatedContent,
+  });
+
+  // The top-ranked related article is lifted out as the mid-page "Read next"
+  // pick; the grid at the bottom gets the rest so it never repeats.
+  const [recommendedArticle = null, ...moreRelated] = relatedArticles;
 
   return (
     <div className="mx-auto w-full max-w-5xl px-4 py-8 sm:px-6 sm:py-10">
@@ -1360,9 +1016,9 @@ async function ArticleData({ params }: { params: Promise<{ slug?: string }> }) {
           <span className="text-muted-foreground/60"> · {AUTHOR.role}</span>
         </p>
 
-        {/* The "Read original" attribution link is deliberately not here — it's
-            moved down to just above the gate (see AnalyticsRegion) so it isn't
-            the first interactive element a cold visitor sees. */}
+        {/* The "Read original" attribution link is deliberately not here — it
+            sits at the very bottom of the page so it isn't the first (or an
+            early) interactive element a visitor sees. */}
         <div className="mt-5">
           <ShareButtons title={article.title || "Article"} url={canonicalUrl} />
         </div>
@@ -1383,23 +1039,36 @@ async function ArticleData({ params }: { params: Promise<{ slug?: string }> }) {
 
       <div className="mt-12">
         <AnalyticsRegion
-          clusterProfile={clusterProfile}
-          topDimensions={topDimensions}
-          winners={winners}
-          losers={losers}
           storyKeyPoints={storyKeyPoints}
           tickerSentiment={tickerSentiment}
           tickerRelationships={tickerRelationships}
           ctaTickers={ctaTickers}
           ctaTags={ctaTags}
           claimLockAfter={claimLockAfter}
-          loserLockAfter={loserLockAfter}
-          sourceUrl={article.url}
-          sourceLabel={sourceLabel}
+          recommended={recommendedArticle}
         />
       </div>
 
-      <RelatedArticles related={relatedArticles} baseUrl={siteBaseUrl} />
+      <RelatedArticles related={moreRelated} baseUrl={siteBaseUrl} />
+
+      {/* Source attribution is the last thing on the page: credited, but only
+          reached once the reader has been through the analysis. */}
+      {article.url ? (
+        <footer className="mt-16 border-t border-border/60 pt-6">
+          <Link
+            href={article.url}
+            target="_blank"
+            rel="noreferrer"
+            className="group inline-flex items-center gap-1.5 rounded-full border border-border/60 bg-muted/20 px-3 py-1 font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground transition-colors hover:border-border hover:text-foreground"
+          >
+            Read original · {sourceLabel}
+            <ArrowUpRight
+              size={11}
+              className="transition-transform duration-200 group-hover:-translate-y-px group-hover:translate-x-px"
+            />
+          </Link>
+        </footer>
+      ) : null}
 
       <ArticleEngagementTracker
         articleId={article.id}

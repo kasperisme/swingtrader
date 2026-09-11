@@ -4,6 +4,7 @@
     .venv/bin/python -m services.seo.cli submit-sitemap
     .venv/bin/python -m services.seo.cli drop-sitemap --url https://newsimpactscreener.com/sitemap.xml
     .venv/bin/python -m services.seo.cli indexnow --limit 500 [--dry-run]
+    .venv/bin/python -m services.seo.cli indexnow --since 24h       # only URLs whose lastmod is recent
 """
 
 from __future__ import annotations
@@ -46,7 +47,18 @@ def cmd_drop_sitemap(args) -> int:
 
 
 def cmd_indexnow(args) -> int:
-    urls = indexnow.urls_from_sitemap(args.sitemap, limit=args.limit)
+    if args.since:
+        # Only what actually changed, by the sitemap's own <lastmod> — the
+        # sitemap only emits a lastmod it can stand behind, so this is the
+        # "new pages since the last push" set rather than the first N rows.
+        from services.google_analytics import sitemaps as sm
+
+        urls = sm.changed_since(sm.parse_since(args.since), args.sitemap)[: args.limit]
+        if not urls:
+            print(f"  no sitemap URLs changed within {args.since}")
+            return 0
+    else:
+        urls = indexnow.urls_from_sitemap(args.sitemap, limit=args.limit)
     if not urls:
         print("  sitemap returned no URLs")
         return 1
@@ -79,6 +91,8 @@ def main() -> int:
     # Default to the freshest slice — the sitemap leads with the hubs and the
     # newest articles, and a 6.7k-URL blast every deploy is noise.
     p.add_argument("--limit", type=int, default=500)
+    p.add_argument("--since", default=None,
+                   help="only URLs whose sitemap lastmod is within this window (90m/24h/7d)")
     p.add_argument("--dry-run", action="store_true")
     p.set_defaults(func=cmd_indexnow)
 

@@ -24,13 +24,15 @@ export const docPageBySlugQuery = `
 
 export const docPageSlugListQuery = `
   *[_type == "docPage" && defined(slug.current)] {
-    "slug": slug.current
+    "slug": slug.current,
+    "updatedAt": _updatedAt
   }
 `;
 
 export const blogPostSlugListQuery = `
   *[_type == "post" && defined(slug.current)] {
-    "slug": slug.current
+    "slug": slug.current,
+    "updatedAt": _updatedAt
   }
 `;
 
@@ -174,6 +176,7 @@ export const traderBySlugQuery = `
 
 export const traderSlugListQuery = `
   *[_type == "trader" && defined(slug.current)] {
-    "slug": slug.current
+    "slug": slug.current,
+    "updatedAt": _updatedAt
   }
 `;

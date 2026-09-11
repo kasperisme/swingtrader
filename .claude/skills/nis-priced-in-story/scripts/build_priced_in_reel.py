@@ -197,7 +197,11 @@ def main() -> None:
         out = d / "reel.mp4"
         subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-f", "concat", "-safe", "0",
                         "-i", str(lst), "-c", "copy", str(out)], check=True)
-        subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-ss", "1.2", "-i", str(out),
+        # The cover is the SETTLED number scene: a fixed 1.2s landed mid count-up
+        # once that scene stretched to its narration, and GOOGL's cover read
+        # $286.62 — a price the stock never had on the as-of date.
+        poster_t = max(dur(segs[0]) - 0.3, 0.0)
+        subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-ss", f"{poster_t:.2f}", "-i", str(out),
                         "-frames:v", "1", str(d / "reel_poster.png")], check=True)
     finally:
         shutil.rmtree(tmp, ignore_errors=True)

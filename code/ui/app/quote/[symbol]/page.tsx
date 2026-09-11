@@ -11,6 +11,7 @@ import {
 import {
   cachedBars,
   cachedEvents,
+  cachedNetworkTaggedEventIds,
   cachedPeers,
   cachedPricedIn,
   cachedProfile,
@@ -326,6 +327,9 @@ function CatalystLede({
  * the database; this puts one hop of it in the HTML, with the link type as the
  * context rather than a bare ticker chip.
  */
+/** `peers` is the whole network (see cachedPeers); the link block shows the head. */
+const PEER_LINKS_SHOWN = 12;
+
 function PeerLinks({
   symbol,
   companyName,
@@ -392,17 +396,23 @@ async function QuoteBody({
   profile: Awaited<ReturnType<typeof profileOf>>;
   quote: RawQuote | null;
 }) {
-  const [bars, pricedIn, peers] = await Promise.all([
+  const [bars, pricedIn, peers, networkTaggedIds] = await Promise.all([
     cachedBars(symbol),
     pricedInOf(symbol),
     peersOf(symbol),
+    cachedNetworkTaggedEventIds(symbol),
   ]);
   const price = qnum(quote, "price") ?? profile?.price ?? null;
 
   const chartEvents = attachBars(events, bars);
 
-  // "What moved" — rank by impact, breaking ties by absolute price move.
-  const moved = [...chartEvents]
+  // "What moved" — only stories tagged with this ticker or a company in its
+  // network (the chart keeps every scored event). Null means the tag lookup
+  // failed; fail open rather than render an empty list for the cache window.
+  const networkTagged = networkTaggedIds ? new Set(networkTaggedIds) : null;
+  // Rank by impact, breaking ties by absolute price move.
+  const moved = chartEvents
+    .filter((e) => !networkTagged || networkTagged.has(e.articleId))
     .sort(
       (a, b) =>
         b.impactMagnitude - a.impactMagnitude ||
@@ -472,7 +482,7 @@ async function QuoteBody({
                   </h2>
                   {moved.length === 0 ? (
                     <p className="rounded-lg border border-border bg-card p-4 text-sm text-muted-foreground">
-                      No scored catalysts in the window yet.
+                      No scored news tagged {symbol} or its network in the window yet.
                     </p>
                   ) : (
                     <ol className="flex flex-col gap-2">
@@ -481,14 +491,21 @@ async function QuoteBody({
                           <div className="flex items-start gap-2">
                             <span className="mt-0.5 font-mono text-xs text-muted-foreground">{i + 1}</span>
                             <div className="min-w-0 flex-1">
-                              <a
-                                href={e.url ?? "#"}
-                                target="_blank"
-                                rel="noreferrer"
-                                className="line-clamp-2 text-sm font-medium text-foreground hover:underline"
-                              >
-                                {e.title}
-                              </a>
+                              {/* Links to our own analysis page, not the third-party
+                                  source — keeps the reader (and the link equity) on
+                                  the site. No slug → plain text, never an out-link. */}
+                              {e.slug ? (
+                                <Link
+                                  href={`/articles/${e.slug}`}
+                                  className="line-clamp-2 text-sm font-medium text-foreground hover:underline"
+                                >
+                                  {e.title}
+                                </Link>
+                              ) : (
+                                <p className="line-clamp-2 text-sm font-medium text-foreground">
+                                  {e.title}
+                                </p>
+                              )}
                               <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px] text-muted-foreground">
                                 {e.sentiment != null ? (
                                   <span className={e.sentiment > 0 ? "text-emerald-500" : e.sentiment < 0 ? "text-rose-500" : ""}>
@@ -616,7 +633,11 @@ async function QuoteBody({
       />
 
       {/* ── Connected tickers (server-rendered link graph) ────────── */}
-      <PeerLinks symbol={symbol} companyName={companyName} peers={peers} />
+      <PeerLinks
+        symbol={symbol}
+        companyName={companyName}
+        peers={peers.slice(0, PEER_LINKS_SHOWN)}
+      />
 
       {lastCatalystAt ? (
         <p className="text-xs text-muted-foreground">

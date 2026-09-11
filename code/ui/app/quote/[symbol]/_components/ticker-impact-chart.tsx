@@ -15,6 +15,8 @@ export type ChartEvent = {
   articleId: number;
   title: string | null;
   url: string | null;
+  /** Our /articles/<slug> analysis page for this event (null if unslugged). */
+  slug: string | null;
   source: string | null;
   publishedAt: string | null;
   sentiment: number | null;

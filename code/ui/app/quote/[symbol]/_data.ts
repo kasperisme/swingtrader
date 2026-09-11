@@ -4,7 +4,10 @@ import { cacheLife, cacheTag } from "next/cache";
 import { fmpGetCompanyProfile, fmpGetOhlc, type FmpOhlcBar } from "@/app/actions/fmp";
 import { getPricedInVote } from "@/lib/quote/priced-in";
 import { getTickerPeers } from "@/lib/quote/peers";
-import { getTickerImpactNewsResult } from "@/lib/quote/ticker-impact";
+import {
+  articleIdsTaggedWith,
+  getTickerImpactNewsResult,
+} from "@/lib/quote/ticker-impact";
 
 /**
  * The quote page's cross-request cache.
@@ -59,11 +62,33 @@ export async function cachedPricedIn(symbol: string) {
   return getPricedInVote(symbol);
 }
 
+/** The whole one-hop ring, strongest first. The RPC returns it anyway; the
+ *  page's link block shows the head, the "What moved" filter uses all of it. */
 export async function cachedPeers(symbol: string) {
   "use cache";
   cacheLife("hours");
   cacheTag(`quote:${symbol}`);
-  return getTickerPeers(symbol);
+  return getTickerPeers(symbol, 400);
+}
+
+/**
+ * Event article ids tagged with `symbol` or any company in its network — the
+ * only stories "What moved {symbol}" may list. Null when the tag lookup failed.
+ */
+export async function cachedNetworkTaggedEventIds(
+  symbol: string,
+): Promise<number[] | null> {
+  "use cache";
+  cacheLife("minutes");
+  cacheTag(`quote:${symbol}`);
+  const [{ events }, peers] = await Promise.all([
+    cachedEvents(symbol),
+    cachedPeers(symbol),
+  ]);
+  return articleIdsTaggedWith(
+    events.map((e) => e.articleId),
+    [symbol, ...peers.map((p) => p.ticker)],
+  );
 }
 
 export async function cachedBars(symbol: string): Promise<FmpOhlcBar[]> {

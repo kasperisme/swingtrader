@@ -180,6 +180,66 @@ function formatTagLabel(tag: string): string {
   return tag.replace(/_/g, " ");
 }
 
+/**
+ * One in-line "Read next" pick, placed mid-page right after the ticker
+ * section — the point where a reader has the story's tickers in their head
+ * and is most likely to follow a thread. The page passes the top-ranked
+ * related article here and the rest to <RelatedArticles>, so the pick is
+ * never repeated in the grid below.
+ */
+export function RecommendedArticle({ article }: { article: RelatedArticle }) {
+  return (
+    <aside aria-label="Recommended article">
+      <Link
+        href={`/articles/${article.slug}`}
+        className="group flex items-stretch gap-4 overflow-hidden rounded-xl border border-border/60 bg-card/30 p-3 transition-colors hover:border-amber-500/40 hover:bg-card/60 sm:gap-5 sm:p-4"
+      >
+        {article.image_url ? (
+          <div className="relative aspect-[4/3] w-24 shrink-0 overflow-hidden rounded-lg bg-muted sm:w-40">
+            <img
+              src={article.image_url}
+              alt=""
+              loading="lazy"
+              className="h-full w-full object-cover transition-transform duration-200 group-hover:scale-[1.02]"
+            />
+          </div>
+        ) : null}
+        <div className="flex min-w-0 flex-1 flex-col gap-1.5">
+          <p className="inline-flex items-center gap-2 font-mono text-[10px] uppercase tracking-[0.2em] text-amber-500/80">
+            <span className="h-px w-6 bg-amber-500/60" />
+            Read next
+          </p>
+          <h3 className="line-clamp-2 text-sm font-semibold leading-snug text-foreground/95 transition-colors group-hover:text-amber-400 sm:text-base">
+            {article.title}
+          </h3>
+          <p className="font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground">
+            {article.publisher || "Feed"}
+            {formatAgeSince(article.published_at)
+              ? ` · ${formatAgeSince(article.published_at)}`
+              : ""}
+          </p>
+          {article.shared_tags.length > 0 ? (
+            <ul className="mt-auto hidden flex-wrap gap-1.5 pt-1 sm:flex">
+              {article.shared_tags.slice(0, 3).map((tag) => (
+                <li
+                  key={tag}
+                  className="inline-flex items-center rounded-sm border border-border/50 bg-muted/30 px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground"
+                >
+                  {formatTagLabel(tag)}
+                </li>
+              ))}
+            </ul>
+          ) : null}
+        </div>
+        <ArrowUpRight
+          size={14}
+          className="mt-0.5 shrink-0 text-muted-foreground transition-all duration-200 group-hover:-translate-y-px group-hover:translate-x-px group-hover:text-amber-400"
+        />
+      </Link>
+    </aside>
+  );
+}
+
 type Props = {
   /**
    * Absolute base URL used for the JSON-LD ItemList entries. Crawlers prefer

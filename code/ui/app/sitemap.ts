@@ -64,33 +64,38 @@ async function fetchAllRows<T>(
   return out;
 }
 
+/**
+ * `<lastmod>` is only worth emitting when it is true.
+ *
+ * Every static page and several dynamic ones used to be stamped with the
+ * request time, so each fetch told Google that /terms, /privacy and every
+ * trader profile had changed since the last one. Google's documented response
+ * is to stop trusting the site's lastmod altogether — which also discards the
+ * accurate values on the article and topic URLs, the only signal that says
+ * "this one is new, crawl it first". So: a real timestamp, or none at all.
+ */
+function toDate(v: string | null | undefined): Date | undefined {
+  if (!v) return undefined;
+  const d = new Date(v);
+  return Number.isNaN(d.getTime()) ? undefined : d;
+}
+
+/** A hub changes when its newest child does. */
+function newest(...sets: MetadataRoute.Sitemap[]): Date | undefined {
+  let best: number | undefined;
+  for (const routes of sets) {
+    for (const r of routes) {
+      const t = r.lastModified ? new Date(r.lastModified).getTime() : NaN;
+      if (Number.isFinite(t) && (best === undefined || t > best)) best = t;
+    }
+  }
+  return best === undefined ? undefined : new Date(best);
+}
+
 export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
   // Built from live DB + Sanity data, so generate at request time rather than
   // during the static prerender (which tears down the in-flight fetches).
   await connection();
-
-  const now = new Date();
-  const staticRoutes: MetadataRoute.Sitemap = [
-    { url: baseUrl, lastModified: now, changeFrequency: "weekly", priority: 1 },
-    { url: `${baseUrl}/marketscreenings`, lastModified: now, changeFrequency: "daily", priority: 0.9 },
-    { url: `${baseUrl}/articles`, lastModified: now, changeFrequency: "hourly", priority: 0.9 },
-    { url: `${baseUrl}/topics`, lastModified: now, changeFrequency: "daily", priority: 0.9 },
-    { url: `${baseUrl}/quote`, lastModified: now, changeFrequency: "daily", priority: 0.8 },
-    { url: `${baseUrl}/blog`, lastModified: now, changeFrequency: "weekly", priority: 0.8 },
-    // The free lead magnet, and the highest-intent page on the site — it was
-    // indexable, canonicalised and taking real traffic, but had never been
-    // listed here, so the sitemap offered no path to it at all.
-    { url: `${baseUrl}/briefings`, lastModified: now, changeFrequency: "weekly", priority: 0.8 },
-    { url: `${baseUrl}/about`, lastModified: now, changeFrequency: "monthly", priority: 0.7 },
-    { url: `${baseUrl}/research`, lastModified: now, changeFrequency: "weekly", priority: 0.7 },
-    { url: `${baseUrl}/arena`, lastModified: now, changeFrequency: "daily", priority: 0.8 },
-    { url: `${baseUrl}/traders`, lastModified: now, changeFrequency: "weekly", priority: 0.7 },
-    // /docs redirects to the first page — list the destination, not the hop.
-    { url: `${baseUrl}/docs/getting-started`, lastModified: now, changeFrequency: "weekly", priority: 0.8 },
-    { url: `${baseUrl}/pricing`, lastModified: now, changeFrequency: "monthly", priority: 0.7 },
-    { url: `${baseUrl}/terms`, lastModified: now, changeFrequency: "yearly", priority: 0.3 },
-    { url: `${baseUrl}/privacy`, lastModified: now, changeFrequency: "yearly", priority: 0.3 },
-  ];
 
   // Per-screening pages — independent of Sanity config.
   let screeningRoutes: MetadataRoute.Sitemap = [];
@@ -98,7 +103,7 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
     const screenings = await listMarketScreenings();
     screeningRoutes = screenings.map((s) => ({
       url: `${baseUrl}/marketscreenings/${s.slug}`,
-      lastModified: s.last_run_at ? new Date(s.last_run_at) : now,
+      lastModified: toDate(s.last_run_at),
       changeFrequency: "daily",
       priority: 0.7,
     }));
@@ -131,7 +136,7 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
           .maybeSingle();
         return {
           url: `${baseUrl}/topics/${t.slug}`,
-          lastModified: latest?.article_ts ? new Date(latest.article_ts as string) : now,
+          lastModified: toDate(latest?.article_ts as string | undefined),
           changeFrequency: "daily" as const,
           priority: 0.9,
         };
@@ -154,7 +159,7 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
     if (error) throw error;
     researchRoutes = (data ?? []).map((r) => ({
       url: `${baseUrl}/research/${r.slug as string}`,
-      lastModified: r.updated_at ? new Date(r.updated_at as string) : now,
+      lastModified: toDate(r.updated_at as string | undefined),
       changeFrequency: "monthly" as const,
       priority: 0.6,
     }));
@@ -164,17 +169,29 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
 
   // One page per competing arena agent. Reads the public view, so an agent that
   // is still being tuned (is_published = false) never reaches the sitemap.
+  // An agent page changes when its book is marked, so lastmod is the agent's
+  // newest NAV session — the window covers ~50 sessions of the whole roster.
   let arenaRoutes: MetadataRoute.Sitemap = [];
   try {
     const supabase = createServiceClient();
-    const { data, error } = await supabase
-      .schema("swingtrader")
-      .from("arena_agents_public_v")
-      .select("slug");
+    const [{ data, error }, { data: navRows }] = await Promise.all([
+      supabase.schema("swingtrader").from("arena_agents_public_v").select("slug"),
+      supabase
+        .schema("swingtrader")
+        .from("arena_nav_history_public_v")
+        .select("agent_slug, as_of")
+        .order("as_of", { ascending: false })
+        .limit(500),
+    ]);
     if (error) throw error;
+    const lastMarked = new Map<string, string>();
+    for (const r of navRows ?? []) {
+      const slug = r.agent_slug as string;
+      if (!lastMarked.has(slug)) lastMarked.set(slug, r.as_of as string);
+    }
     arenaRoutes = (data ?? []).map((a) => ({
       url: `${baseUrl}/agent/${a.slug as string}`,
-      lastModified: now,
+      lastModified: toDate(lastMarked.get(a.slug as string)),
       changeFrequency: "daily" as const,
       priority: 0.6,
     }));
@@ -186,11 +203,11 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
   let traderRoutes: MetadataRoute.Sitemap = [];
   try {
     const rows = isSanityConfigured
-      ? await sanityFetch<{ slug: string }[]>(traderSlugListQuery)
+      ? await sanityFetch<{ slug: string; updatedAt?: string }[]>(traderSlugListQuery)
       : [];
     traderRoutes = rows.map((r) => ({
       url: `${baseUrl}/traders/${r.slug}`,
-      lastModified: now,
+      lastModified: toDate(r.updatedAt),
       changeFrequency: "monthly" as const,
       priority: 0.6,
     }));
@@ -224,7 +241,7 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
       .filter((r) => typeof r.slug === "string" && r.slug.length > 0)
       .map((r) => ({
         url: `${baseUrl}/articles/${r.slug}`,
-        lastModified: r.published_at ? new Date(r.published_at) : now,
+        lastModified: toDate(r.published_at),
         changeFrequency: "monthly" as const,
         priority: 0.6,
       }));
@@ -247,7 +264,7 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
   let quoteRoutes: MetadataRoute.Sitemap = [];
   const quoteIndexRoutes: MetadataRoute.Sitemap = [];
   try {
-    const seen = new Map<string, Date>();
+    const seen = new Map<string, Date | undefined>();
     let total = 0;
     for (let offset = 0; offset < QUOTE_SITEMAP_LIMIT; offset += QUOTE_RPC_PAGE) {
       const page = await listCoveredTickers({
@@ -260,7 +277,7 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
       for (const item of page.items) {
         const ticker = item.ticker.trim().toUpperCase();
         if (!ticker || !/^[A-Z][A-Z0-9.\-]{0,11}$/.test(ticker) || seen.has(ticker)) continue;
-        seen.set(ticker, item.lastDay ? new Date(item.lastDay) : now);
+        seen.set(ticker, toDate(item.lastDay));
         if (seen.size >= QUOTE_SITEMAP_LIMIT) break;
       }
       if (seen.size >= QUOTE_SITEMAP_LIMIT) break;
@@ -281,10 +298,11 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
       QUOTE_HUB_PAGE_CAP,
       Math.max(1, Math.ceil(total / QUOTE_HUB_PAGE_SIZE)),
     );
+    const quotesUpdated = newest(quoteRoutes);
     for (let page = 2; page <= lastPage; page++) {
       quoteIndexRoutes.push({
         url: `${baseUrl}/quote?page=${page}`,
-        lastModified: now,
+        lastModified: quotesUpdated,
         changeFrequency: "daily" as const,
         priority: 0.5,
       });
@@ -293,35 +311,62 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
     console.warn("[sitemap] failed to list quote tickers", e);
   }
 
-
-  if (!isSanityConfigured) {
-    return [
-    ...staticRoutes,
-    ...screeningRoutes,
-    ...articleRoutes,
-    ...quoteRoutes,
-    ...quoteIndexRoutes,
-  ];
+  // Docs + blog, from Sanity. This used to early-return the whole sitemap when
+  // Sanity was unconfigured, which also dropped the topic, research, arena and
+  // trader URLs — none of which depend on Sanity.
+  let docRoutes: MetadataRoute.Sitemap = [];
+  let blogRoutes: MetadataRoute.Sitemap = [];
+  if (isSanityConfigured) {
+    const [docSlugs, blogSlugs] = await Promise.all([
+      sanityFetch<{ slug: string; updatedAt?: string }[]>(docPageSlugListQuery),
+      sanityFetch<{ slug: string; updatedAt?: string }[]>(blogPostSlugListQuery),
+    ]);
+    docRoutes = docSlugs.map(({ slug, updatedAt }) => ({
+      url: `${baseUrl}/docs/${slug}`,
+      lastModified: toDate(updatedAt),
+      changeFrequency: "monthly",
+      priority: 0.7,
+    }));
+    blogRoutes = blogSlugs.map(({ slug, updatedAt }) => ({
+      url: `${baseUrl}/blog/${slug}`,
+      lastModified: toDate(updatedAt),
+      changeFrequency: "monthly",
+      priority: 0.6,
+    }));
   }
 
-  const [docSlugs, blogSlugs] = await Promise.all([
-    sanityFetch<{ slug: string }[]>(docPageSlugListQuery),
-    sanityFetch<{ slug: string }[]>(blogPostSlugListQuery),
-  ]);
-
-  const docRoutes: MetadataRoute.Sitemap = docSlugs.map(({ slug }) => ({
-    url: `${baseUrl}/docs/${slug}`,
-    lastModified: now,
-    changeFrequency: "monthly",
-    priority: 0.7,
-  }));
-
-  const blogRoutes: MetadataRoute.Sitemap = blogSlugs.map(({ slug }) => ({
-    url: `${baseUrl}/blog/${slug}`,
-    lastModified: now,
-    changeFrequency: "monthly",
-    priority: 0.6,
-  }));
+  // Hubs take their lastmod from their newest child. Pages with no content
+  // clock of their own (about, pricing, legal, the briefing sign-up) carry
+  // none rather than a fabricated one.
+  const gettingStarted = `${baseUrl}/docs/getting-started`;
+  const staticRoutes: MetadataRoute.Sitemap = [
+    { url: baseUrl, lastModified: newest(screeningRoutes), changeFrequency: "weekly", priority: 1 },
+    { url: `${baseUrl}/marketscreenings`, lastModified: newest(screeningRoutes), changeFrequency: "daily", priority: 0.9 },
+    { url: `${baseUrl}/articles`, lastModified: newest(articleRoutes), changeFrequency: "hourly", priority: 0.9 },
+    { url: `${baseUrl}/topics`, lastModified: newest(topicRoutes), changeFrequency: "daily", priority: 0.9 },
+    { url: `${baseUrl}/quote`, lastModified: newest(quoteRoutes), changeFrequency: "daily", priority: 0.8 },
+    { url: `${baseUrl}/blog`, lastModified: newest(blogRoutes), changeFrequency: "weekly", priority: 0.8 },
+    // The free lead magnet, and the highest-intent page on the site — it was
+    // indexable, canonicalised and taking real traffic, but had never been
+    // listed here, so the sitemap offered no path to it at all.
+    { url: `${baseUrl}/briefings`, changeFrequency: "weekly", priority: 0.8 },
+    { url: `${baseUrl}/about`, changeFrequency: "monthly", priority: 0.7 },
+    { url: `${baseUrl}/research`, lastModified: newest(researchRoutes), changeFrequency: "weekly", priority: 0.7 },
+    { url: `${baseUrl}/arena`, lastModified: newest(arenaRoutes), changeFrequency: "daily", priority: 0.8 },
+    { url: `${baseUrl}/traders`, lastModified: newest(traderRoutes), changeFrequency: "weekly", priority: 0.7 },
+    // /docs redirects to the first page — list the destination, not the hop.
+    // It is also a Sanity docPage, so drop that duplicate from docRoutes.
+    {
+      url: gettingStarted,
+      lastModified: newest(docRoutes.filter((r) => r.url === gettingStarted)),
+      changeFrequency: "weekly",
+      priority: 0.8,
+    },
+    { url: `${baseUrl}/pricing`, changeFrequency: "monthly", priority: 0.7 },
+    { url: `${baseUrl}/terms`, changeFrequency: "yearly", priority: 0.3 },
+    { url: `${baseUrl}/privacy`, changeFrequency: "yearly", priority: 0.3 },
+  ];
+  docRoutes = docRoutes.filter((r) => r.url !== gettingStarted);
 
   return [
     ...staticRoutes,
