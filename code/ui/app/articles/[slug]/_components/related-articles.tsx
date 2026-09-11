@@ -101,6 +101,7 @@ export async function fetchRelatedArticles({
     )
     .neq("id", articleId)
     .eq("processing_status", "complete")
+    .not("has_analysis", "is", false)
     .overlaps("search_tags", tags)
     .gte("published_at", sinceIso)
     .not("slug", "is", null)

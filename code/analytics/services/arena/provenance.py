@@ -265,6 +265,8 @@ def _article_resources(ids: list[int]) -> list[dict[str, Any]]:
             .select("id,title,slug,source,published_at")
             .in_("id", seen)
             .not_.is_("slug", "null")
+            # A scored-and-empty article 404s — never link a decision to one.
+            .not_.is_("has_analysis", "false")
             .execute()
             .data
             or []

@@ -64,6 +64,7 @@ export async function getNewsImpactHeatmapData(
       .from("news_articles")
       .select("id, published_at")
       .gte("published_at", since.toISOString())
+      .not("has_analysis", "is", false)
       .order("published_at", { ascending: false })
       .range(from, to),
   );

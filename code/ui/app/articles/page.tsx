@@ -24,6 +24,9 @@ async function ArticlesData({ initialTag }: { initialTag?: string }) {
     .schema("swingtrader")
     .from("news_articles")
     .select("id, slug, title, url, source, image_url, published_at, created_at")
+    // Scored-and-empty articles (paywalled teasers) are hidden site-wide — see
+    // migration 20260911150000_news_articles_has_analysis.
+    .not("has_analysis", "is", false)
     .order("published_at", { ascending: false, nullsFirst: false })
     .order("created_at", { ascending: false })
     .limit(24);

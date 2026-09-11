@@ -132,6 +132,9 @@ def get_top_articles(
         .table("news_articles")
         .select("id, title, url, source, created_at, published_at")
         .gte(time_col, since_iso)
+        # Scored-and-empty teasers carry nothing to retrieve — see migration
+        # 20260911150000_news_articles_has_analysis.
+        .not_.is_("has_analysis", "false")
         .order(time_col, desc=True)
         .limit(limit * 3)
     )

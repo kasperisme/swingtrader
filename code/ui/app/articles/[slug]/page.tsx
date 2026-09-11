@@ -80,6 +80,7 @@ type ArticleRow = {
   created_at: string;
   image_url: string | null;
   search_tags: string[] | null;
+  has_analysis: boolean | null;
 };
 
 type HeadRow = {
@@ -631,6 +632,7 @@ type ArticleMetaRow = {
   published_at: string | null;
   created_at: string;
   search_tags: string[] | null;
+  has_analysis: boolean | null;
 };
 
 function sentimentLabel(score: number): string {
@@ -773,7 +775,7 @@ export async function generateMetadata({
     .schema("swingtrader")
     .from("news_articles")
     .select(
-      "id, slug, title, image_url, publisher, published_at, created_at, search_tags",
+      "id, slug, title, image_url, publisher, published_at, created_at, search_tags, has_analysis",
     )
     .eq("slug", slug)
     .single<ArticleMetaRow>();
@@ -781,6 +783,12 @@ export async function generateMetadata({
   if (!article?.title) {
     return { title: "Article not found" };
   }
+
+  // Scored and found empty (a paywalled teaser): the page has nothing to show,
+  // so it is gone, not merely unindexed. Thrown HERE rather than only in the
+  // page body because the body renders inside <Suspense> — once the shell has
+  // streamed, notFound() there can no longer change the status from 200.
+  if (article.has_analysis === false) notFound();
 
   // Pull the model heads so the title/description can carry the primary ticker's
   // sentiment and the lead claim — the highest-signal copy for SEO snippets.
@@ -847,12 +855,12 @@ async function ArticleData({ params }: { params: Promise<{ slug?: string }> }) {
     .schema("swingtrader")
     .from("news_articles")
     .select(
-      "id, slug, title, url, source, published_at, created_at, image_url, publisher, search_tags",
+      "id, slug, title, url, source, published_at, created_at, image_url, publisher, search_tags, has_analysis",
     )
     .eq("slug", slug)
     .single<ArticleRow>();
   const article = bySlug.data;
-  if (!article || bySlug.error) notFound();
+  if (!article || bySlug.error || article.has_analysis === false) notFound();
 
   const [headsRes, articleTopics] = await Promise.all([
     dataClient

@@ -188,7 +188,9 @@ async function linkSources(
     .schema(SCHEMA)
     .from("news_articles")
     .select("title, slug")
-    .in("title", titles);
+    .in("title", titles)
+    // An empty article 404s, so a citation to one should not link.
+    .not("has_analysis", "is", false);
 
   if (error) {
     // A citation that does not link is a smaller failure than a quote page
