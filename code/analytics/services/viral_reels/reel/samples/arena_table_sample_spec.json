@@ -214,8 +214,8 @@
     },
     {
       "rank": 9,
-      "slug": "chris-cameo",
-      "name": "Chris Cameo",
+      "slug": "jim-chaos",
+      "name": "Jim Chaos",
       "nav": 90152.62,
       "return": -0.098474,
       "drawdown": -0.103889,
@@ -232,7 +232,7 @@
         "W"
       ],
       "streak": 1,
-      "code": "CAM",
+      "code": "CHA",
       "color": "#FF8FB1",
       "isControl": false
     }

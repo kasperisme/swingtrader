@@ -14,7 +14,7 @@ export const ARENA_COLOR_INDEX: Record<string, number> = {
   "barren-wuffett": 4,
   "philip-fissure": 5,
   "jim-sigmons": 6,
-  "chris-cameo": 7,
+  "jim-chaos": 7, // was chris-cameo — same agent row, same hue
 };
 
 /** The CSS colour for an agent, or `null` for the controls (no hue). */

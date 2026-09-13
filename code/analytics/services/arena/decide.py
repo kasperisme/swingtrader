@@ -55,7 +55,7 @@ _OLLAMA_URL_ENV = "OLLAMA_BASE_URL"
 #:
 #:     jim-clamor       glm-5.1:cloud     46/46
 #:     barren-wuffett   gemma4:31b-cloud  32  + glm-5.1:cloud  14
-#:     chris-cameo      gemma4:31b-cloud  45  + glm-5.1:cloud   1
+#:     chris-cameo      gemma4:31b-cloud  45  + glm-5.1:cloud   1   (now jim-chaos)
 #:     howard-marx (now philip-fissure) / jim-sigmons / mark-minervine /
 #:     michael-beary
 #:                      gemma4:31b-cloud  46/46

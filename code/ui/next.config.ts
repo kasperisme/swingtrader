@@ -32,6 +32,11 @@ const nextConfig: NextConfig = {
       // nesting the agent under it made the URL claim otherwise. These URLs are
       // in the sitemap and carry structured data, so the move is a 308 rather
       // than a fresh set of 404s.
+      // An agent renamed in place keeps its row, so its old URL points at the
+      // same entity — a 308, not a 404. Listed BEFORE the /arena/:slug rule so
+      // the old /arena path lands on the new slug in one hop.
+      { source: "/agent/chris-cameo", destination: "/agent/jim-chaos", permanent: true },
+      { source: "/arena/chris-cameo", destination: "/agent/jim-chaos", permanent: true },
       {
         source: "/arena/:slug",
         destination: "/agent/:slug",

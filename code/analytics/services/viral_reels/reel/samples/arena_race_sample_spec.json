@@ -74,9 +74,9 @@
       "isControl": false
     },
     {
-      "slug": "chris-cameo",
-      "name": "Chris Cameo",
-      "code": "CAM",
+      "slug": "jim-chaos",
+      "name": "Jim Chaos",
+      "code": "CHA",
       "color": "#FF8FB1",
       "isControl": false
     }
@@ -95,7 +95,7 @@
           "value": 0.0
         },
         {
-          "id": "chris-cameo",
+          "id": "jim-chaos",
           "value": 0.0
         },
         {
@@ -137,7 +137,7 @@
           "value": -0.000995
         },
         {
-          "id": "chris-cameo",
+          "id": "jim-chaos",
           "value": 0.0
         },
         {
@@ -179,7 +179,7 @@
           "value": 0.000384
         },
         {
-          "id": "chris-cameo",
+          "id": "jim-chaos",
           "value": 0.002087
         },
         {
@@ -221,7 +221,7 @@
           "value": -0.007188
         },
         {
-          "id": "chris-cameo",
+          "id": "jim-chaos",
           "value": -0.007055
         },
         {
@@ -263,7 +263,7 @@
           "value": -0.016788
         },
         {
-          "id": "chris-cameo",
+          "id": "jim-chaos",
           "value": -0.009584
         },
         {
@@ -305,7 +305,7 @@
           "value": -0.010995
         },
         {
-          "id": "chris-cameo",
+          "id": "jim-chaos",
           "value": -0.016663
         },
         {
@@ -347,7 +347,7 @@
           "value": -0.011513
         },
         {
-          "id": "chris-cameo",
+          "id": "jim-chaos",
           "value": -0.032103
         },
         {
@@ -389,7 +389,7 @@
           "value": -0.018195
         },
         {
-          "id": "chris-cameo",
+          "id": "jim-chaos",
           "value": -0.034471
         },
         {
@@ -431,7 +431,7 @@
           "value": -0.009693
         },
         {
-          "id": "chris-cameo",
+          "id": "jim-chaos",
           "value": -0.02971
         },
         {
@@ -473,7 +473,7 @@
           "value": 0.042752
         },
         {
-          "id": "chris-cameo",
+          "id": "jim-chaos",
           "value": -0.042073
         },
         {
@@ -515,7 +515,7 @@
           "value": 0.028082
         },
         {
-          "id": "chris-cameo",
+          "id": "jim-chaos",
           "value": -0.082373
         },
         {
@@ -557,7 +557,7 @@
           "value": 0.015476
         },
         {
-          "id": "chris-cameo",
+          "id": "jim-chaos",
           "value": -0.088851
         },
         {
@@ -599,7 +599,7 @@
           "value": 0.019317
         },
         {
-          "id": "chris-cameo",
+          "id": "jim-chaos",
           "value": -0.083162
         },
         {
@@ -641,7 +641,7 @@
           "value": 0.026623
         },
         {
-          "id": "chris-cameo",
+          "id": "jim-chaos",
           "value": -0.072146
         },
         {
@@ -683,7 +683,7 @@
           "value": 0.032325
         },
         {
-          "id": "chris-cameo",
+          "id": "jim-chaos",
           "value": -0.078157
         },
         {
@@ -725,7 +725,7 @@
           "value": 0.029408
         },
         {
-          "id": "chris-cameo",
+          "id": "jim-chaos",
           "value": -0.080778
         },
         {
@@ -767,7 +767,7 @@
           "value": 0.033411
         },
         {
-          "id": "chris-cameo",
+          "id": "jim-chaos",
           "value": -0.074515
         },
         {
@@ -809,7 +809,7 @@
           "value": 0.042279
         },
         {
-          "id": "chris-cameo",
+          "id": "jim-chaos",
           "value": -0.082583
         },
         {
@@ -851,7 +851,7 @@
           "value": 0.033741
         },
         {
-          "id": "chris-cameo",
+          "id": "jim-chaos",
           "value": -0.093514
         },
         {
@@ -893,7 +893,7 @@
           "value": 0.027272
         },
         {
-          "id": "chris-cameo",
+          "id": "jim-chaos",
           "value": -0.09615
         },
         {
@@ -935,7 +935,7 @@
           "value": 0.045352
         },
         {
-          "id": "chris-cameo",
+          "id": "jim-chaos",
           "value": -0.076501
         },
         {
@@ -977,7 +977,7 @@
           "value": 0.043215
         },
         {
-          "id": "chris-cameo",
+          "id": "jim-chaos",
           "value": -0.081988
         },
         {
@@ -1019,7 +1019,7 @@
           "value": 0.047442
         },
         {
-          "id": "chris-cameo",
+          "id": "jim-chaos",
           "value": -0.071626
         },
         {
@@ -1061,7 +1061,7 @@
           "value": 0.059904
         },
         {
-          "id": "chris-cameo",
+          "id": "jim-chaos",
           "value": -0.068536
         },
         {
@@ -1103,7 +1103,7 @@
           "value": 0.056542
         },
         {
-          "id": "chris-cameo",
+          "id": "jim-chaos",
           "value": -0.083032
         },
         {
@@ -1145,7 +1145,7 @@
           "value": 0.045811
         },
         {
-          "id": "chris-cameo",
+          "id": "jim-chaos",
           "value": -0.081098
         },
         {
@@ -1187,7 +1187,7 @@
           "value": 0.052414
         },
         {
-          "id": "chris-cameo",
+          "id": "jim-chaos",
           "value": -0.069596
         },
         {
@@ -1229,7 +1229,7 @@
           "value": 0.057405
         },
         {
-          "id": "chris-cameo",
+          "id": "jim-chaos",
           "value": -0.057011
         },
         {
@@ -1271,7 +1271,7 @@
           "value": 0.058686
         },
         {
-          "id": "chris-cameo",
+          "id": "jim-chaos",
           "value": -0.054332
         },
         {
@@ -1313,7 +1313,7 @@
           "value": 0.06277
         },
         {
-          "id": "chris-cameo",
+          "id": "jim-chaos",
           "value": -0.038349
         },
         {
@@ -1355,7 +1355,7 @@
           "value": 0.049458
         },
         {
-          "id": "chris-cameo",
+          "id": "jim-chaos",
           "value": -0.039919
         },
         {
@@ -1397,7 +1397,7 @@
           "value": 0.068894
         },
         {
-          "id": "chris-cameo",
+          "id": "jim-chaos",
           "value": -0.040385
         },
         {
@@ -1439,7 +1439,7 @@
           "value": 0.074189
         },
         {
-          "id": "chris-cameo",
+          "id": "jim-chaos",
           "value": -0.04396
         },
         {
@@ -1481,7 +1481,7 @@
           "value": 0.027527
         },
         {
-          "id": "chris-cameo",
+          "id": "jim-chaos",
           "value": -0.069535
         },
         {
@@ -1523,7 +1523,7 @@
           "value": 0.018538
         },
         {
-          "id": "chris-cameo",
+          "id": "jim-chaos",
           "value": -0.071014
         },
         {
@@ -1565,7 +1565,7 @@
           "value": 0.007659
         },
         {
-          "id": "chris-cameo",
+          "id": "jim-chaos",
           "value": -0.084071
         },
         {
@@ -1607,7 +1607,7 @@
           "value": 0.006354
         },
         {
-          "id": "chris-cameo",
+          "id": "jim-chaos",
           "value": -0.086973
         },
         {
@@ -1649,7 +1649,7 @@
           "value": 0.016337
         },
         {
-          "id": "chris-cameo",
+          "id": "jim-chaos",
           "value": -0.09319
         },
         {
@@ -1691,7 +1691,7 @@
           "value": 0.016985
         },
         {
-          "id": "chris-cameo",
+          "id": "jim-chaos",
           "value": -0.08002
         },
         {
@@ -1733,7 +1733,7 @@
           "value": 0.026739
         },
         {
-          "id": "chris-cameo",
+          "id": "jim-chaos",
           "value": -0.078527
         },
         {
@@ -1775,7 +1775,7 @@
           "value": 0.019916
         },
         {
-          "id": "chris-cameo",
+          "id": "jim-chaos",
           "value": -0.067978
         },
         {
@@ -1817,7 +1817,7 @@
           "value": 0.006406
         },
         {
-          "id": "chris-cameo",
+          "id": "jim-chaos",
           "value": -0.07618
         },
         {
@@ -1859,7 +1859,7 @@
           "value": 0.010093
         },
         {
-          "id": "chris-cameo",
+          "id": "jim-chaos",
           "value": -0.073468
         },
         {
@@ -1901,7 +1901,7 @@
           "value": -0.005031
         },
         {
-          "id": "chris-cameo",
+          "id": "jim-chaos",
           "value": -0.095384
         },
         {
@@ -1943,7 +1943,7 @@
           "value": 0.003993
         },
         {
-          "id": "chris-cameo",
+          "id": "jim-chaos",
           "value": -0.097013
         },
         {
@@ -1985,7 +1985,7 @@
           "value": -0.005475
         },
         {
-          "id": "chris-cameo",
+          "id": "jim-chaos",
           "value": -0.102018
         },
         {
@@ -2027,7 +2027,7 @@
           "value": -0.012864
         },
         {
-          "id": "chris-cameo",
+          "id": "jim-chaos",
           "value": -0.098474
         },
         {
@@ -2252,8 +2252,8 @@
     },
     {
       "rank": 9,
-      "slug": "chris-cameo",
-      "name": "Chris Cameo",
+      "slug": "jim-chaos",
+      "name": "Jim Chaos",
       "nav": 90152.62,
       "return": -0.098474,
       "drawdown": -0.103889,
@@ -2270,7 +2270,7 @@
         "W"
       ],
       "streak": 1,
-      "code": "CAM",
+      "code": "CHA",
       "color": "#FF8FB1",
       "isControl": false
     }

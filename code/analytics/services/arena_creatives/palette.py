@@ -43,7 +43,7 @@ AGENT_STYLE: dict[str, tuple[str, str]] = {
     "barren-wuffett":  ("WUF", "#FFD166"),
     "philip-fissure":  ("FIS", "#2BC4D9"),
     "jim-sigmons":     ("SIG", "#7A8CFF"),
-    "chris-cameo":     ("CAM", "#E0709B"),
+    "jim-chaos":       ("CHA", "#E0709B"),  # was chris-cameo; hue follows the agent row
     # ── the controls: deliberately unbranded ────────────────────────────────
     "jack-boggle":     ("BOG", "#C7D0E0"),  # steel
     "burton-malarkey": ("MAL", "#8A93A4"),  # slate

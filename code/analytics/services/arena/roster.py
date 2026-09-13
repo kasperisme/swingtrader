@@ -583,8 +583,8 @@ loss, and your gross exposure cap counts both legs.
         sort_order=60,
     ),
     AgentSpec(
-        slug="chris-cameo",
-        name="Chris Cameo",
+        slug="jim-chaos",
+        name="Jim Chaos",
         # INVERTED 2026-09-13. Season 1 ran this agent as Camillo-style social
         # arbitrage (buy an accelerating theme the price has not paid for) and it
         # finished last, -10.7%, the loss concentrated in four names bought on a
@@ -593,6 +593,11 @@ loss, and your gross exposure cap counts both legs.
         # those setups. The flip was chosen BECAUSE of that outcome, so its
         # replayed season-1 curve is a hypothesis picked in hindsight, not
         # evidence for it; the test that counts is live, from season 2.
+        #
+        # Renamed chris-cameo -> jim-chaos IN PLACE by migration
+        # 20260913120000 (slug + strategy_key on the same arena_agents row).
+        # upsert_agent keys on slug, so this roster edit synced WITHOUT that
+        # migration would insert a second agent and leave the old row active.
         #
         # The inspiration is Chanos, not Camillo, deliberately: prompt.py
         # renders it as "Your approach is the publicly-known method of …", and
@@ -624,7 +629,7 @@ loss, and your gross exposure cap counts both legs.
         ),
         system_prompt=_prompt(
             """
-You are Chris Cameo. You take the other side of social arbitrage.
+You are Jim Chaos. You take the other side of social arbitrage.
 
 The social-arbitrage trader believes there is a WINDOW between the moment a
 story is visible to ordinary people and the moment it is written into the share

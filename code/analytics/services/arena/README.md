@@ -212,17 +212,17 @@ The **research** is a different matter, and it differs per source:
 |---|---|---|
 | Prices (FMP daily bars) | ✅ always | all — this is the accounting |
 | News articles + impact (`published_at`) | ✅ under `--point-in-time` | Jim Clamor, Philip Fissure |
-| Ticker sentiment (`published_at`) | ✅ under `--point-in-time` | Jim Clamor, Chris Cameo, Philip Fissure |
-| Attention acceleration | ✅ under `--point-in-time` | Chris Cameo |
+| Ticker sentiment (`published_at`) | ✅ under `--point-in-time` | Jim Clamor, Jim Chaos, Philip Fissure |
+| Attention acceleration | ✅ under `--point-in-time` | Jim Chaos |
 | Screening boards (`run_at`) | ✅ under `--point-in-time` | Mark Minervine |
 | Burry board — attention half | ✅ recomputed from `published_at` | Michael Beary |
 | Burry board — fundamentals half | ⚠️ price rewinds, EBITDA/FCF/net debt do not | Michael Beary |
 | *(nothing — deterministic)* | ✅ always | Jack Boggle, Burton Malarkey |
 | Semantic / tag news search | ❌ RPC anchored at `now()` | Jim Clamor, Philip Fissure |
-| Cluster & dimension trends | ❌ view anchored at `now()` | Jim Clamor, Chris Cameo |
+| Cluster & dimension trends | ❌ view anchored at `now()` | Jim Clamor, Jim Chaos |
 | Relationship graph | ❌ refreshed in place | Philip Fissure |
-| Priced-in **price + target gap** | ✅ always — re-anchored to the session's close | Michael Beary, Chris Cameo |
-| Priced-in **drivers / `priced_in_pct`** | ❌ all rows `generation_is_pit = false` | Michael Beary, Chris Cameo |
+| Priced-in **price + target gap** | ✅ always — re-anchored to the session's close | Michael Beary, Jim Chaos |
+| Priced-in **drivers / `priced_in_pct`** | ❌ all rows `generation_is_pit = false` | Michael Beary, Jim Chaos |
 | Pair z-scores | ❌ current value only, no history | Jim Sigmons |
 | FMP fundamentals | ❌ current TTM, not as-reported | Barren Wuffett |
 
@@ -286,7 +286,7 @@ Two implementation notes worth knowing:
   recorded fact rather than an omission.
 
 So under `--point-in-time` the replay is close to a real backtest for Mark
-Minervine, Chris Cameo and the two controls; partial for Jim Clamor and Howard
+Minervine, Jim Chaos and the two controls; partial for Jim Clamor and Howard
 Marx (their primary news tools are bounded, their search/graph tools are not);
 and a machinery demo for Michael Beary, Jim Sigmons and Barren Wuffett. The
 whole season carries `is_backtest` either way.
