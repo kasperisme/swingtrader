@@ -246,23 +246,29 @@ def scene_rail(ax, S, p):
     _kicker(ax, f"{S['n_targets']} published models")
 
     lo, hi, med, price = S["low"], S["high"], S["median"], S["price"]
-    span = max(hi - lo, 1e-9)
+    # The axis must CONTAIN the price. Clamping a price that sits outside the
+    # spread onto the end tick drew AMZN's $251.89 exactly on its $305 low —
+    # an 18% gap rendered as zero, which is the one fact this beat exists to show.
+    ax_lo, ax_hi = min(lo, price), max(hi, price)
+    span = max(ax_hi - ax_lo, 1e-9)
     L, R, y = 0.11, 0.89, 0.60
 
     def px(v):
-        return L + max(0.0, min(1.0, (v - lo) / span)) * (R - L)
+        return L + max(0.0, min(1.0, (v - ax_lo) / span)) * (R - L)
 
     w = ease(seg(p, 0.0, 0.35))
-    ax.add_patch(FancyBboxPatch((L, y - 0.007), (R - L) * w, 0.014,
+    ax.add_patch(FancyBboxPatch((px(lo), y - 0.007), (px(hi) - px(lo)) * w, 0.014,
                                 boxstyle="round,pad=0.002", fc=GRID, ec="none"))
     if w > 0.98:
         for v, col, lw in ((lo, MUT2, 3), (hi, MUT2, 3)):
             ax.plot([px(v), px(v)], [y - 0.020, y + 0.020], color=col, lw=lw)
         # below the price chip, not beside it: the price sits on the low end in
-        # most of these stories, which is exactly where the low label lives
-        ax.text(L, y - 0.118, f"${lo:,.0f}", color=MUT, fontsize=26, family="monospace", va="center")
-        ax.text(R, y - 0.118, f"${hi:,.0f}", color=MUT, fontsize=26, family="monospace",
-                ha="right", va="center")
+        # most of these stories, which is exactly where the low label lives.
+        # An end tick sits flush with its label; an inner one is centred on it.
+        for v, edge, ha in ((lo, L, "left"), (hi, R, "right")):
+            at_edge = abs(px(v) - edge) < 1e-6
+            ax.text(px(v), y - 0.118, f"${v:,.0f}", color=MUT, fontsize=26,
+                    family="monospace", ha=ha if at_edge else "center", va="center")
 
     m = ease(seg(p, 0.35, 0.55))
     if m > 0:
@@ -277,8 +283,8 @@ def scene_rail(ax, S, p):
         ax.plot([cur], [y], marker="o", markersize=26, color=AMBER, zorder=5)
         chip = ease(seg(p, 0.78, 0.92))
         if chip > 0:
-            cx = min(max(cur, L + 0.06), R - 0.06)
-            ax.add_patch(FancyBboxPatch((cx - 0.085, y - 0.088), 0.17, 0.042,
+            cx = min(max(cur, L + 0.07), R - 0.07)
+            ax.add_patch(FancyBboxPatch((cx - 0.095, y - 0.088), 0.19, 0.042,
                                         boxstyle="round,pad=0.006", fc=AMBER, ec="none",
                                         mutation_aspect=0.5, alpha=chip))
             ax.text(cx, y - 0.067, f"${price:,.2f}", color="#0A0E1A", fontsize=32,
@@ -368,7 +374,10 @@ def scene_crux(ax, S, p):
     for width, size, lh in ((22, 48, 0.068), (26, 42, 0.058),
                             (30, 36, 0.050), (34, 31, 0.044), (38, 27, 0.039)):
         lines = textwrap.wrap(S["crux_short"], width=width)
-        if len(lines) * lh <= 0.40:
+        # the measurability note sits 0.10 under the last line and must clear the
+        # caption at ~0.30; the old `n * lh <= 0.40` let a seven-line crux run
+        # the note straight into it (AMZN, Sep 2026)
+        if (len(lines) - 1) * lh <= 0.28:
             break
     top = 0.72
     step = max(0.06, 0.85 / max(len(lines), 1))

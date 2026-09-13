@@ -3,6 +3,14 @@ import type { NextConfig } from "next";
 const nextConfig: NextConfig = {
   cacheComponents: true,
   skipTrailingSlashRedirect: true,
+  // Bots matching this get <title>, description, canonical and robots in <head>
+  // instead of streamed in after it. Next's default list (html-bots.js) catches
+  // Google-InspectionTool but NOT plain Googlebot, so Search Console's live test
+  // saw the metadata while the real crawler got a head with none of it — the
+  // thin-article noindex and every canonical existed only in the RSC payload.
+  // This setting REPLACES the default, so it is the default plus Googlebot.
+  htmlLimitedBots:
+    /Googlebot|[\w-]+-Google|Google-[\w-]+|Chrome-Lighthouse|Slurp|DuckDuckBot|baiduspider|yandex|sogou|bitlybot|tumblr|vkShare|quora link preview|redditbot|ia_archiver|Bingbot|BingPreview|applebot|facebookexternalhit|facebookcatalog|Twitterbot|LinkedInBot|Slackbot|Discordbot|WhatsApp|SkypeUriPreview|Yeti|googleweblight/i,
   images: {
     // next/image refuses any host not listed here, so without this a portrait
     // uploaded in the Studio 500s rather than rendering — the failure looks

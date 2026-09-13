@@ -51,6 +51,12 @@ class FmpQuotaError(FmpError):
     further call only digs deeper, so the run stops rather than backing off."""
 
 
+class FmpPlanError(FmpError):
+    """HTTP 402: the plan does not cover this endpoint for this symbol. Starter
+    serves governance-executive-compensation for FMP's sample symbols (AAPL,
+    NVDA, ...) only — GOOG, CROX and the rest come back 402."""
+
+
 class Fmp:
     def __init__(self, per_minute: int = 600):
         self.key = os.environ["APIKEY"]
@@ -69,6 +75,8 @@ class Fmp:
                 continue
             if r.status_code == 429 and "limit reach" in r.text.lower():
                 raise FmpQuotaError(f"{path}: {r.text.strip()[:160]}")
+            if r.status_code == 402:
+                raise FmpPlanError(f"{path} 402: {r.text[:200]}")
             if r.status_code == 429 or r.status_code >= 500:
                 time.sleep(5 * (attempt + 1))
                 continue
@@ -157,7 +165,12 @@ def fetch_company(fmp: Fmp, symbol: str) -> dict | None:
         return None
 
     executives = fmp.get("key-executives", symbol=symbol)
-    comp = fmp.get("governance-executive-compensation", symbol=symbol)
+    try:
+        comp = fmp.get("governance-executive-compensation", symbol=symbol)
+    except FmpPlanError:
+        # Pay history is the one optional part of the row: without it the page
+        # still has the CEO, title, key-executives pay and the team.
+        comp = []
 
     me = _pick_ceo(executives, ceo) or {}
     since = me.get("titleSince")
