@@ -9,8 +9,13 @@ const nextConfig: NextConfig = {
   // saw the metadata while the real crawler got a head with none of it — the
   // thin-article noindex and every canonical existed only in the RSC payload.
   // This setting REPLACES the default, so it is the default plus Googlebot.
+  //
+  // Googlebot must NOT be the first (or last) alternative. The same string is
+  // the Vercel edge's cache-bypass rule, which anchors the pattern: as the first
+  // alternative it matched only a UA that STARTS with "Googlebot", so the real
+  // "Mozilla/5.0 (compatible; Googlebot/2.1 …)" got the cached streamed page.
   htmlLimitedBots:
-    /Googlebot|[\w-]+-Google|Google-[\w-]+|Chrome-Lighthouse|Slurp|DuckDuckBot|baiduspider|yandex|sogou|bitlybot|tumblr|vkShare|quora link preview|redditbot|ia_archiver|Bingbot|BingPreview|applebot|facebookexternalhit|facebookcatalog|Twitterbot|LinkedInBot|Slackbot|Discordbot|WhatsApp|SkypeUriPreview|Yeti|googleweblight/i,
+    /[\w-]+-Google|Google-[\w-]+|Chrome-Lighthouse|Slurp|DuckDuckBot|baiduspider|yandex|sogou|bitlybot|tumblr|vkShare|quora link preview|redditbot|ia_archiver|Googlebot|Bingbot|BingPreview|applebot|facebookexternalhit|facebookcatalog|Twitterbot|LinkedInBot|Slackbot|Discordbot|WhatsApp|SkypeUriPreview|Yeti|googleweblight/i,
   images: {
     // next/image refuses any host not listed here, so without this a portrait
     // uploaded in the Studio 500s rather than rendering — the failure looks
