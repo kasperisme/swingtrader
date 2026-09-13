@@ -64,6 +64,20 @@ class AgentSpec:
     #: (28 schemas in the context) so it is opt-in per agent.
     include_fmp: bool = False
 
+    #: A NAMED subset of the FMP MCP tools (e.g. ("statements", "secFilings")).
+    #: Non-empty implies FMP and restricts it to these — the data-slice rule
+    #: applied to FMP, which ``include_fmp`` hands over all-or-nothing.
+    fmp_tools: tuple[str, ...] = ()
+
+    #: Run every order that opens or enlarges a short through the squeeze
+    #: screen (``crowding.py``); the broker rejects on any failure. Also gives
+    #: the agent ``get_short_crowding`` so it can see the rule it is held to.
+    short_gate: bool = False
+
+    #: Refuse a short unless ``place_order`` carries a named defect, the filing
+    #: evidence, a catalyst, and the dated disclosure that would falsify it.
+    short_thesis_required: bool = False
+
     system_prompt: str = ""
 
     # Risk limits — enforced by the broker, restated in the prompt.

@@ -187,7 +187,8 @@ def _warm_fmp_catalogue(agents: list[dict[str, Any]]) -> None:
     from .roster import BY_SLUG
 
     wants_fmp = any(
-        (spec := BY_SLUG.get(a.get("strategy_key") or a["slug"])) and spec.include_fmp
+        (spec := BY_SLUG.get(a.get("strategy_key") or a["slug"]))
+        and (spec.include_fmp or spec.fmp_tools)
         for a in agents
     )
     if not wants_fmp or not os.environ.get("FMP_API_KEY"):

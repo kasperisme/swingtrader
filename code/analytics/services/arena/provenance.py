@@ -452,6 +452,38 @@ TOOL_SURFACE: dict[str, dict[str, str]] = {
         "reads": "Read the text of a public web page.",
         "href": "",
     },
+    "get_short_crowding": {
+        "label": "Squeeze screen",
+        "reads": "Float, liquidity, run-up and retail crowding — the broker refuses a short that fails it.",
+        "href": "",
+    },
+    # A NAMED FMP subset (AgentSpec.fmp_tools), described one surface at a time
+    # so the page does not claim the whole FMP catalogue.
+    "fmp:statements": {
+        "label": "Financial statements (FMP)",
+        "reads": "Income, balance sheet and cash flow statements, as reported and TTM, plus financial scores.",
+        "href": "",
+    },
+    "fmp:secFilings": {
+        "label": "SEC filings (FMP)",
+        "reads": "8-Ks, late and amended filings, and each company's filing history.",
+        "href": "",
+    },
+    "fmp:calendar": {
+        "label": "Earnings calendar (FMP)",
+        "reads": "When each company reports next — the dated disclosures a thesis is tested against.",
+        "href": "",
+    },
+    "fmp:company": {
+        "label": "Company profile & float (FMP)",
+        "reads": "Profile, executives and share float.",
+        "href": "",
+    },
+    "fmp:insiderTrades": {
+        "label": "Insider trades (FMP)",
+        "reads": "Form 4 insider buying and selling.",
+        "href": "",
+    },
 }
 
 

@@ -17,6 +17,9 @@ The rules it enforces, and why each one exists:
     on its next run — the prompt is a hint, this is the rule.
   - **Shorts only where allowed.** A sell that would take a position below zero
     is rejected unless the agent's spec permits shorting.
+  - **Squeeze screen, where a spec asks for one.** An order that opens or
+    enlarges a short is refused when the caller's ``short_gate`` says so
+    (``crowding.py``). Covers are never gated.
   - **Fill at the next open, with slippage against the agent.** An agent decides
     after Monday's close and fills at Tuesday's open. Filling at the decision
     session's close would hand every agent a free overnight gap, which is the
@@ -30,7 +33,7 @@ from __future__ import annotations
 
 import logging
 from datetime import date, datetime, timezone
-from typing import Any, Optional
+from typing import Any, Callable, Optional
 
 from . import store
 from .marks import PriceBook
@@ -117,8 +120,15 @@ class Broker:
         decision_id: Optional[str],
         intended_for: date,
         reference_price: Optional[float],
+        short_gate: Optional[Callable[[str], Optional[str]]] = None,
     ) -> dict[str, Any]:
         """Validate an intent and record it, pending or rejected.
+
+        ``short_gate``, when given, is asked about any order that OPENS or
+        ENLARGES a short and returns a refusal reason or None. It is how a spec
+        turns a squeeze screen into a rule rather than a suggestion (see
+        ``crowding.py``); the broker stays free of I/O because the caller owns
+        the gate.
 
         Returns the stored order row. Never raises for a bad intent — an invalid
         order is a recorded rejection, because silently dropping it would hide
@@ -146,7 +156,7 @@ class Broker:
         }
 
         try:
-            self._validate(agent, intent, portfolio, reference_price)
+            self._validate(agent, intent, portfolio, reference_price, short_gate)
         except OrderRejected as exc:
             return store.insert_order(
                 {**base, "status": "rejected", "reject_reason": str(exc)[:500]}
@@ -162,6 +172,7 @@ class Broker:
         intent: OrderIntent,
         portfolio: PortfolioSnapshot,
         reference_price: Optional[float],
+        short_gate: Optional[Callable[[str], Optional[str]]] = None,
     ) -> None:
         if intent.side not in ("buy", "sell"):
             raise OrderRejected(f"side must be 'buy' or 'sell', got {intent.side!r}")
@@ -247,6 +258,16 @@ class Broker:
                 f"gross exposure limit: order would take exposure to ${gross_after:,.0f} "
                 f"({gross_after / nav:.0%} of NAV), over the {max_gross:.0%} cap"
             )
+
+        # The short gate runs LAST: it is the only check that may do I/O, so an
+        # order the cheap rules already refuse never pays for it. Covering or
+        # reducing a short is never gated — an agent must always be able to get
+        # out of a squeeze, which is the one moment the screen would say no.
+        opens_or_adds_short = resulting < -MIN_QUANTITY and abs(resulting) > abs(held)
+        if short_gate is not None and opens_or_adds_short:
+            reason = short_gate(intent.ticker)
+            if reason:
+                raise OrderRejected(f"short screen: {reason}")
 
     def _reserve(
         self, portfolio: PortfolioSnapshot, intent: OrderIntent, reference_price: float

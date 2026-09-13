@@ -194,6 +194,78 @@ def test_allows_a_short_when_the_agent_may_short(store):
     assert row["status"] == "pending"
 
 
+SHORTER = {**AGENT, "allow_shorts": True}
+
+
+def _gate(calls, reason):
+    def gate(ticker):
+        calls.append(ticker)
+        return reason
+    return gate
+
+
+def test_the_short_gate_rejects_a_new_short(store):
+    brk = Broker(FakePrices({"AAA": 100.0}), universe={"AAA"})
+    calls: list[str] = []
+    row = brk.submit(
+        SHORTER, OrderIntent(ticker="AAA", side="sell", quantity=10, thesis="t"),
+        portfolio=make_portfolio(), decision_id=None, intended_for=SESSION,
+        reference_price=100.0, short_gate=_gate(calls, "float too small"),
+    )
+    assert row["status"] == "rejected"
+    assert row["reject_reason"] == "short screen: float too small"
+    assert calls == ["AAA"]
+
+
+def test_the_short_gate_also_blocks_adding_to_a_short(store):
+    brk = Broker(FakePrices({"AAA": 100.0}), universe={"AAA"})
+    held = PositionRow(ticker="AAA", quantity=-10, avg_cost=100.0, last_price=100.0)
+    row = brk.submit(
+        SHORTER, OrderIntent(ticker="AAA", side="sell", quantity=10, thesis="t"),
+        portfolio=make_portfolio(cash=101_000.0, positions=[held]), decision_id=None,
+        intended_for=SESSION, reference_price=100.0, short_gate=_gate([], "crowded"),
+    )
+    assert row["status"] == "rejected"
+
+
+def test_a_cover_is_never_gated(store):
+    """The screen says no exactly when a squeeze is on — the one moment an
+    agent most needs to be able to get out."""
+    brk = Broker(FakePrices({"AAA": 100.0}), universe={"AAA"})
+    held = PositionRow(ticker="AAA", quantity=-10, avg_cost=100.0, last_price=100.0)
+    calls: list[str] = []
+    row = brk.submit(
+        SHORTER, OrderIntent(ticker="AAA", side="buy", quantity=10, thesis="t"),
+        portfolio=make_portfolio(cash=101_000.0, positions=[held]), decision_id=None,
+        intended_for=SESSION, reference_price=100.0, short_gate=_gate(calls, "crowded"),
+    )
+    assert row["status"] == "pending"
+    assert calls == []
+
+
+def test_a_passing_gate_lets_the_short_through(store):
+    brk = Broker(FakePrices({"AAA": 100.0}), universe={"AAA"})
+    row = brk.submit(
+        SHORTER, OrderIntent(ticker="AAA", side="sell", quantity=10, thesis="t"),
+        portfolio=make_portfolio(), decision_id=None, intended_for=SESSION,
+        reference_price=100.0, short_gate=_gate([], None),
+    )
+    assert row["status"] == "pending"
+
+
+def test_the_gate_is_not_consulted_for_an_order_the_cheap_rules_refuse(store):
+    brk = Broker(FakePrices({"AAA": 100.0}), universe={"AAA"})
+    calls: list[str] = []
+    # 300 x $100 = 30% of NAV, over the 20% cap — refused before any I/O.
+    row = brk.submit(
+        SHORTER, OrderIntent(ticker="AAA", side="sell", quantity=300, thesis="t"),
+        portfolio=make_portfolio(), decision_id=None, intended_for=SESSION,
+        reference_price=100.0, short_gate=_gate(calls, "crowded"),
+    )
+    assert "position limit" in row["reject_reason"]
+    assert calls == []
+
+
 def test_rejects_a_new_name_over_the_position_count_cap(store):
     brk = Broker(FakePrices({}), universe={"AAA", "BBB", "CCC", "DDD", "EEE", "FFF"})
     held = [

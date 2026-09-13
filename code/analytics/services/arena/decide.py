@@ -130,11 +130,17 @@ def build_registry(spec: AgentSpec, account: AccountTools) -> ToolRegistry:
     registry.extend(build_strategy_registry(spec.tools))
     registry.extend(build_account_registry(account))
 
-    if spec.include_fmp and os.environ.get("FMP_API_KEY"):
+    if (spec.include_fmp or spec.fmp_tools) and os.environ.get("FMP_API_KEY"):
         try:
             from services.agent.fmp_tools import call_fmp_tool, get_fmp_tool_schemas
 
             schemas = get_fmp_tool_schemas()
+            if spec.fmp_tools:
+                schemas = [s for s in schemas if s["function"]["name"] in spec.fmp_tools]
+                absent = set(spec.fmp_tools) - {s["function"]["name"] for s in schemas}
+                if absent:
+                    log.warning("arena: %s asks for FMP tools the server does not offer: %s",
+                                spec.slug, sorted(absent))
             if schemas:
                 registry.add_schemas(schemas, call_fmp_tool)
         except Exception as exc:  # a dead MCP must not take the whole run down
@@ -333,6 +339,8 @@ async def run_decision(
         intended_for=intended_for,
         reference_prices=reference_prices,
         as_of=session,
+        short_gate=spec.short_gate,
+        short_thesis_required=spec.short_thesis_required,
     )
     registry = build_registry(spec, account)
 

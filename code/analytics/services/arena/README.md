@@ -211,20 +211,22 @@ The **research** is a different matter, and it differs per source:
 | Source | Rewindable? | Agents relying on it |
 |---|---|---|
 | Prices (FMP daily bars) | ✅ always | all — this is the accounting |
-| News articles + impact (`published_at`) | ✅ under `--point-in-time` | Jim Clamor, Philip Fissure |
+| News articles + impact (`published_at`) | ✅ under `--point-in-time` | Jim Clamor, Philip Fissure, Jim Chaos |
 | Ticker sentiment (`published_at`) | ✅ under `--point-in-time` | Jim Clamor, Jim Chaos, Philip Fissure |
-| Attention acceleration | ✅ under `--point-in-time` | Jim Chaos |
+| Attention acceleration | ✅ under `--point-in-time` | Jim Chaos (squeeze timing only) |
 | Screening boards (`run_at`) | ✅ under `--point-in-time` | Mark Minervine |
 | Burry board — attention half | ✅ recomputed from `published_at` | Michael Beary |
 | Burry board — fundamentals half | ⚠️ price rewinds, EBITDA/FCF/net debt do not | Michael Beary |
 | *(nothing — deterministic)* | ✅ always | Jack Boggle, Burton Malarkey |
-| Semantic / tag news search | ❌ RPC anchored at `now()` | Jim Clamor, Philip Fissure |
-| Cluster & dimension trends | ❌ view anchored at `now()` | Jim Clamor, Jim Chaos |
+| Semantic / tag news search | ❌ RPC anchored at `now()` | Jim Clamor, Philip Fissure, Jim Chaos |
+| Cluster & dimension trends | ❌ view anchored at `now()` | Jim Clamor |
 | Relationship graph | ❌ refreshed in place | Philip Fissure |
 | Priced-in **price + target gap** | ✅ always — re-anchored to the session's close | Michael Beary, Jim Chaos |
 | Priced-in **drivers / `priced_in_pct`** | ❌ all rows `generation_is_pit = false` | Michael Beary, Jim Chaos |
 | Pair z-scores | ❌ current value only, no history | Jim Sigmons |
 | FMP fundamentals | ❌ current TTM, not as-reported | Barren Wuffett |
+| FMP statements / filings / calendar / insiders | ❌ every period FMP holds, incl. after the session — the prompt says to ignore them, nothing enforces it | Jim Chaos |
+| Squeeze screen (`crowding.py`) | ⚠️ prices, volume, attention rewind; float is today's | Jim Chaos (broker-enforced) |
 
 **The Burry board is backfilled, and only partly point-in-time.** Screening
 boards are the one research source that rewinds honestly, so `burry-deep-value`
@@ -286,9 +288,10 @@ Two implementation notes worth knowing:
   recorded fact rather than an omission.
 
 So under `--point-in-time` the replay is close to a real backtest for Mark
-Minervine, Jim Chaos and the two controls; partial for Jim Clamor and Howard
+Minervine and the two controls; partial for Jim Clamor and Howard
 Marx (their primary news tools are bounded, their search/graph tools are not);
-and a machinery demo for Michael Beary, Jim Sigmons and Barren Wuffett. The
+and a machinery demo for Michael Beary, Jim Sigmons, Barren Wuffett and Jim
+Chaos (its thesis is built from FMP filings, which do not rewind). The
 whole season carries `is_backtest` either way.
 
 ## Known limitations

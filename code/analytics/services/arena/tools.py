@@ -92,6 +92,12 @@ UNBOUNDED_IN_REPLAY = {
     "get_priced_in_case": "every row is generation_is_pit = false",
     "search_priced_in_drivers": "every row is generation_is_pit = false",
     "get_pair_signals": "ticker_pair_stats holds only a current z-score, no history",
+    "get_short_crowding": "float is FMP's current shares-float (prices, volume and attention ARE bounded)",
+    "fmp:statements": "returns every period FMP holds, including ones filed after the session",
+    "fmp:secFilings": "search windows are the agent's own from/to; nothing stops a date past the session",
+    "fmp:calendar": "earnings history includes reports after the session",
+    "fmp:company": "current profile and float, no history",
+    "fmp:insiderTrades": "returns trades filed after the session",
 }
 
 
@@ -238,6 +244,8 @@ class AccountTools:
         intended_for: date,
         reference_prices: dict[str, float],
         as_of: date,
+        short_gate: bool = False,
+        short_thesis_required: bool = False,
     ) -> None:
         self.agent = agent
         self.broker = broker
@@ -246,6 +254,10 @@ class AccountTools:
         self.intended_for = intended_for
         self.reference_prices = reference_prices
         self.as_of = as_of
+        # Both from the spec (see AgentSpec.short_gate / short_thesis_required).
+        self.short_gate = short_gate
+        self.short_thesis_required = short_thesis_required
+        self._crowding: dict[str, dict[str, Any]] = {}
         self.accepted: list[dict[str, Any]] = []
         self.rejected: list[dict[str, Any]] = []
         self.finished = False
@@ -346,11 +358,34 @@ class AccountTools:
                         float(r["realized_pnl"]) if r.get("realized_pnl") is not None else None
                     ),
                     "reject_reason": r.get("reject_reason"),
-                    "thesis": (r.get("thesis") or "")[:300] or None,
+                    # A structured short thesis carries its own exit condition
+                    # (the disclosure that would falsify it). Cut at 300 it lost
+                    # exactly that part, so the agent could not check it.
+                    "thesis": (r.get("thesis") or "")[: 1200 if self.short_thesis_required else 300]
+                    or None,
                 }
                 for r in rows
             ]
         }
+
+    def get_short_crowding(self, ticker: str = "") -> dict[str, Any]:
+        """The squeeze screen the broker will apply to a short in ``ticker``.
+
+        Cached per run, and the SAME result the gate reads — an agent is never
+        shown a pass that the broker then overturns.
+        """
+        from . import crowding
+
+        sym = str(ticker or "").upper().strip()
+        if not sym:
+            return {"ok": False, "error": "ticker is required"}
+        if sym not in self._crowding:
+            self._crowding[sym] = crowding.screen(sym, self.as_of, self.broker.prices)
+        return {"ok": True, **self._crowding[sym]}
+
+    def _short_gate(self, ticker: str) -> Optional[str]:
+        result = self.get_short_crowding(ticker)
+        return "; ".join(result.get("reasons") or []) or None
 
     # -- the write -----------------------------------------------------------
 
@@ -382,12 +417,62 @@ class AccountTools:
         conviction: Any = None,
         stop_price: Any = None,
         target_price: Any = None,
+        defect: str = "",
+        evidence: str = "",
+        catalyst: str = "",
+        falsified_by: str = "",
+        falsify_by_date: str = "",
     ) -> dict[str, Any]:
         """Queue a market order for the next session's open."""
         try:
             qty = float(quantity)
         except (TypeError, ValueError):
             return {"ok": False, "error": f"quantity must be a number, got {quantity!r}"}
+
+        # A spec that demands a structured short thesis gets it BEFORE the order
+        # exists: a short with no named defect, no filing behind it, no catalyst
+        # or no dated disclosure that would prove it wrong is not placed at all.
+        # Checked here rather than in the broker because it is a property of the
+        # request, like the free-text thesis below, not a risk limit.
+        sym = str(ticker or "").upper().strip()
+        held_pos = self.portfolio.position(sym) if sym else None
+        held = held_pos.quantity if held_pos else 0.0
+        signed = qty if str(side).lower().strip() == "buy" else -qty
+        opens_or_adds_short = (held + signed) < 0 and abs(held + signed) > abs(held)
+        if self.short_thesis_required and opens_or_adds_short:
+            fields = {
+                "defect": defect, "evidence": evidence, "catalyst": catalyst,
+                "falsified_by": falsified_by, "falsify_by_date": falsify_by_date,
+            }
+            missing = [k for k, v in fields.items() if not str(v or "").strip()]
+            if missing:
+                return {
+                    "ok": False,
+                    "error": (
+                        "a short needs a structured thesis before it can be placed; "
+                        f"missing: {', '.join(missing)}"
+                    ),
+                }
+            try:
+                falsify_on = date.fromisoformat(str(falsify_by_date).strip()[:10])
+            except ValueError:
+                return {"ok": False, "error": "falsify_by_date must be YYYY-MM-DD"}
+            if falsify_on <= self.as_of:
+                return {
+                    "ok": False,
+                    "error": (
+                        f"falsify_by_date {falsify_on} is not in the future — name the "
+                        f"NEXT disclosure that could prove this short wrong"
+                    ),
+                }
+            # Stored in the thesis column so it is on the order row, on the site
+            # and in get_my_recent_trades without a migration.
+            thesis = (
+                f"DEFECT: {defect.strip()} | EVIDENCE: {evidence.strip()} | "
+                f"CATALYST: {catalyst.strip()} | FALSIFIED BY: {falsified_by.strip()} "
+                f"(by {falsify_on.isoformat()})"
+                + (f" | {str(thesis).strip()}" if str(thesis or "").strip() else "")
+            )
 
         intent = OrderIntent(
             ticker=str(ticker or ""),
@@ -418,6 +503,7 @@ class AccountTools:
             decision_id=self.decision_id,
             intended_for=self.intended_for,
             reference_price=reference,
+            short_gate=self._short_gate if self.short_gate else None,
         )
 
         if row.get("status") == "rejected":
@@ -619,9 +705,71 @@ ACCOUNT_TOOL_SCHEMAS: list[dict] = [
 ]
 
 
+#: Extra ``place_order`` fields for a spec with ``short_thesis_required``. Only
+#: that agent's schema carries them — adding five fields to every agent's order
+#: tool would change what the rest of the roster is told, which is the one thing
+#: the experiment holds constant.
+SHORT_THESIS_FIELDS: dict[str, dict] = {
+    "defect": {
+        "type": "string",
+        "description": (
+            "REQUIRED to open or add to a short. The specific accounting or "
+            "business-model defect, e.g. 'receivables growing 3x revenue for four "
+            "quarters' or 'operating cash flow negative while net income positive'."
+        ),
+    },
+    "evidence": {
+        "type": "string",
+        "description": (
+            "REQUIRED for a short. Where the defect is in the FILINGS: the statement, "
+            "period and numbers (e.g. 'cashflow-statement Q2 2026: CFO -$41M vs net "
+            "income +$18M'), or the filing form and date."
+        ),
+    },
+    "catalyst": {
+        "type": "string",
+        "description": (
+            "REQUIRED for a short. What forces the market to recognise the defect, "
+            "and roughly when: an earnings print, a debt maturity or refinancing, a "
+            "covenant test, an auditor change, a late filing, a cash crunch."
+        ),
+    },
+    "falsified_by": {
+        "type": "string",
+        "description": (
+            "REQUIRED for a short. The specific future DISCLOSURE that would prove "
+            "this short wrong (not a price level), e.g. 'Q3 10-Q shows CFO positive "
+            "and receivables days falling'."
+        ),
+    },
+    "falsify_by_date": {
+        "type": "string",
+        "description": "REQUIRED for a short. YYYY-MM-DD, when that disclosure is due. Must be in the future.",
+    },
+}
+
+
+def _place_order_schema(short_thesis_required: bool) -> dict:
+    base = next(s for s in ACCOUNT_TOOL_SCHEMAS if s["function"]["name"] == "place_order")
+    if not short_thesis_required:
+        return base
+    import copy
+
+    schema = copy.deepcopy(base)
+    schema["function"]["parameters"]["properties"].update(SHORT_THESIS_FIELDS)
+    schema["function"]["description"] += (
+        " Opening or adding to a SHORT additionally requires defect, evidence, "
+        "catalyst, falsified_by and falsify_by_date; without them the order is "
+        "refused before it reaches the broker."
+    )
+    return schema
+
+
 def build_account_registry(account: AccountTools):
-    """Registry of the three account-bound tools for one agent."""
+    """Registry of the account-bound tools for one agent."""
     from services.agent_core import Tool, ToolRegistry
+
+    from .crowding import SHORT_CROWDING_SCHEMA
 
     fns: dict[str, Callable[..., Any]] = {
         "get_my_portfolio": lambda **kw: account.get_my_portfolio(),
@@ -633,7 +781,16 @@ def build_account_registry(account: AccountTools):
     registry = ToolRegistry()
     for schema in ACCOUNT_TOOL_SCHEMAS:
         name = schema["function"]["name"]
+        if name == "place_order":
+            schema = _place_order_schema(account.short_thesis_required)
         registry.add(Tool(name=name, schema=schema, fn=fns[name]))
+    # The screen the broker enforces is readable by the agent it is enforced on,
+    # and by nobody else — it is part of that agent's rules, not its data slice.
+    if account.short_gate:
+        registry.add(Tool(
+            name="get_short_crowding", schema=SHORT_CROWDING_SCHEMA,
+            fn=account.get_short_crowding,
+        ))
     return registry
 
 
