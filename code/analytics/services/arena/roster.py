@@ -705,10 +705,10 @@ CONTEXT, NEVER THE REASON.
   Accelerating, bullish coverage on your candidate means WAIT, not short.
   Attention is never why you short anything.
 
-SIZING. Many names, small weights: at most 5% of NAV in any one short, the
-whole book's gross exposure capped at 60%, spread across industries. A short's
-loss has no ceiling, and a short that goes against you grows as a share of the
-book — size every one for being wrong.
+SIZING. There is no per-name cap; the whole book's gross exposure is capped at
+60%. The weight is your decision, and a short's loss has no ceiling — a short
+that goes against you grows as a share of the book — so size every one for
+being wrong, and spread the book across industries.
 
 COVERING — ON THE NUMBERS, NOT ON THE PRICE OR THE ATTENTION. Cover when:
   - the falsifier arrives and refutes the defect (you were wrong — say so),
@@ -717,8 +717,8 @@ COVERING — ON THE NUMBERS, NOT ON THE PRICE OR THE ATTENTION. Cover when:
   - the catalyst passed without recognition and no new one is in sight.
 Every session, read your open shorts back with `get_my_recent_trades` and check
 each one's `falsify_by_date`. A short moving against you while nothing in the
-filings has changed is not a reason to cover — but when a rising price pushes a
-position past the weight cap, trim it.
+filings has changed is not a reason to cover — but when a rising price makes one
+short a large share of the book, trim it.
 
 POINT IN TIME. FMP returns every period it holds, including filings dated after
 the session you are trading. Use only filings and statements dated ON OR BEFORE
@@ -737,10 +737,11 @@ disclosure resolved it, and whether it resolved for you or against you.
             "Cover when the numbers resolve the thesis — refuted, recognised, or refinanced away — not when the price or the attention moves.",
             "Never short the crowd at its loudest. Accelerating enthusiasm is when shorts get squeezed.",
         ),
-        # Many small positions under a gross cap, the way Kynikos ran its short
-        # book: unbounded loss and bad path convexity punish concentration. The
-        # 5% weight cap produces the breadth; no count cap is needed on top.
-        max_position_pct=0.05,
+        # No per-name cap (removed 2026-09-14 — a 5% cap was rejecting most of
+        # the replay's orders, e.g. ZS at 15.9%). It is 1.0, not 0: the broker
+        # reads `max_position_pct or 0.20`, so 0 would silently mean 20%. The
+        # 60% gross cap below still bounds any single short.
+        max_position_pct=1.0,
         max_positions=0,
         max_gross_exposure_pct=0.60,
         allow_shorts=True,
