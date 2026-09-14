@@ -10,10 +10,11 @@ import json
 import logging
 import os
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Optional, Union
 
 from services.news.scoring.article_tags import parse_article_tags, tag_prompt_guidance
+from services.news.scoring.claim_rationale import normalize_novelty, rationale_adds_information
 from services.news.scoring.dimensions import CLUSTERS, DIMENSION_MAP
 from shared.llm import chat as _chat, LLMError
 
@@ -240,6 +241,9 @@ class HeadOutput:
     latency_ms:   int
     raw_response: str
     error:        Optional[str] = None
+    # Per-key extras stored in news_impact_heads.meta_json (e.g. a claim's
+    # novelty). Empty for heads that produce none.
+    meta:         dict[str, dict] = field(default_factory=dict)
 
 
 def _build_dimensions_block(cluster: str) -> str:
@@ -639,16 +643,53 @@ _KEY_POINTS_SYSTEM = (
     "You are a financial news analyst. "
     "Decompose articles into distinct, factual key points and rate each point's "
     "potential market impact — how much the point would move prices or risk appetite "
-    "if investors fully digested it. Focus on material claims, not background color."
+    "if investors fully digested it. Focus on material claims, not background color. "
+    "For every point you also judge whether the market already has it, and you explain "
+    "the point with something the reader could not get from the point itself."
 )
 
 _KEY_POINTS_USER = """\
-Extract the story's key points and rate the market impact of each.
+Extract the story's key points, rate the market impact of each, and say whether the
+market already knows it.
+
+Headline: {title}
+Published: {published}
 
 For each point:
-- **point**: one clear sentence (the claim or development)
-- **impact**: -1.0 (strongly negative for risk assets / affected names) to +1.0 (strongly positive)
-- **rationale**: one sentence explaining why that impact score
+- **point**: one clear sentence — the claim or development, with the article's own figures.
+- **impact**: -1.0 (strongly negative for the affected names) to +1.0 (strongly positive).
+- **novelty**: "new" or "priced_in".
+    new        first disclosed in this news cycle — a result, guidance change, deal, filing,
+               ruling or data release made public at most ~1 trading day before the
+               publication date, or an original finding this article itself establishes.
+    priced_in  public before this article — results released days or weeks earlier that the
+               piece re-analyses, multi-quarter or multi-year trends, standing guidance,
+               consensus views, background the market has already traded on.
+    "new" needs EVIDENCE IN THE TEXT that the information just became public: the article
+    is the announcement itself (press release, filing, wire report of it), or it says so
+    ("today", "on Monday", "announced", "reported after the bell", a date within a day of
+    publication). Do not infer recency from how results are "typically" released.
+    An opinion or analysis piece (e.g. Seeking Alpha, Motley Fool) discussing a company's
+    quarter is re-analysing an earlier report: those facts are priced_in.
+    No timing evidence → priced_in. "new" asserts the price has not reacted yet.
+- **novelty_basis**: at most 12 words citing that evidence (e.g. "press release dated Sep 14",
+  "analysis of Q2 results reported earlier").
+- **rationale**: ONE sentence the reader cannot get from the point. It MUST add at least one of:
+    • a number not in the point (arithmetic on the article's figures is welcome)
+    • a horizon — when it bites (next quarter, Q4, FY2027, the next print, within weeks)
+    • a consequence one step further down the chain — margins, EPS, guidance, estimates,
+      the multiple, dividend, buyback, financing, dilution
+  Never restate or paraphrase the point. Never invent a figure the article does not support.
+  If you cannot add anything, return "" — an empty rationale beats a restatement.
+
+  BAD   point "Gross margin fell 240bps to 38.1% on freight costs."
+        rationale "Lower margins signal pressure on profitability."            (restates)
+  GOOD  rationale "The 40% full-year margin guide now needs ~200bps of H2 recovery, so a
+        Q3 miss likely forces a guidance cut."                                  (number + horizon + consequence)
+  BAD   point "The company holds $210M of cash and no debt."
+        rationale "A strong balance sheet provides financial flexibility."     (restates)
+  GOOD  rationale "At the $70M annual burn the article cites, cash covers three years — no
+        dilution needed before 2028."                                           (number + horizon + consequence)
 
 Rules:
 - Extract 3–7 points. Prefer fewer, higher-signal points over laundry lists.
@@ -668,6 +709,8 @@ Return ONLY valid JSON:
       "id": "kp_1",
       "point": "...",
       "impact": 0.75,
+      "novelty": "priced_in",
+      "novelty_basis": "...",
       "rationale": "..."
     }}
   ],
@@ -678,11 +721,24 @@ confidence = how clearly the article supports scored key points (0.0–1.0).
 Return {{"key_points": [], "confidence": 0.0}} if the article has no analyzable claims."""
 
 
-def _parse_key_points_response(raw: str) -> tuple[dict[str, float], dict[str, str], float]:
+@dataclass
+class KeyPointsParse:
+    scores: dict[str, float]
+    reasoning: dict[str, str]
+    confidence: float
+    meta: dict[str, dict]
+    rationales_dropped: int = 0
+
+
+def _parse_key_points_payload(raw: str) -> KeyPointsParse:
     """
     Parse the story key-points head.
-    Returns (scores, reasoning, confidence) where scores = {kp_id: impact_float}
-    and reasoning = {kp_id: "point — rationale"}.
+
+    scores    = {kp_id: impact}
+    reasoning = {kp_id: "point — rationale"}, or just "point" when the rationale
+                fails ``rationale_adds_information`` (a restatement is dropped,
+                not stored — see claim_rationale.py)
+    meta      = {kp_id: {"novelty": "new"|"priced_in", "novelty_basis": str}}
     """
     cleaned = _extract_json_object(raw)
     data = json.loads(cleaned)
@@ -694,6 +750,8 @@ def _parse_key_points_response(raw: str) -> tuple[dict[str, float], dict[str, st
 
     scores: dict[str, float] = {}
     reasoning: dict[str, str] = {}
+    meta: dict[str, dict] = {}
+    dropped = 0
 
     for i, item in enumerate(data.get("key_points", [])):
         if not isinstance(item, dict):
@@ -707,17 +765,54 @@ def _parse_key_points_response(raw: str) -> tuple[dict[str, float], dict[str, st
             impact = 0.0
         if not point:
             continue
+        if rationale and not rationale_adds_information(point, rationale):
+            dropped += 1
+            rationale = ""
         scores[kp_id] = impact
         reasoning[kp_id] = point if not rationale else f"{point} — {rationale}"
 
-    return scores, reasoning, confidence
+        novelty = normalize_novelty(item.get("novelty"))
+        if novelty:
+            entry: dict = {"novelty": novelty}
+            basis = str(item.get("novelty_basis", "") or "").strip()
+            if basis:
+                entry["novelty_basis"] = basis[:140]
+            meta[kp_id] = entry
+
+    return KeyPointsParse(scores, reasoning, confidence, meta, dropped)
 
 
-async def _run_key_points_head(article_text: str) -> HeadOutput:
+def _parse_key_points_response(raw: str) -> tuple[dict[str, float], dict[str, str], float]:
+    """(scores, reasoning, confidence) — the pre-meta shape, kept for callers that
+    only need the claims."""
+    parsed = _parse_key_points_payload(raw)
+    return parsed.scores, parsed.reasoning, parsed.confidence
+
+
+def _published_label(published_at: object) -> str:
+    """The date the novelty judgement is made against. Unknown is said out loud
+    so the model does not assume "today"."""
+    if published_at is None or published_at == "":
+        return "unknown — judge novelty from the text alone"
+    if hasattr(published_at, "isoformat"):
+        return published_at.isoformat()[:16].replace("T", " ") + " UTC"
+    return str(published_at)[:16].replace("T", " ") + " UTC"
+
+
+async def _run_key_points_head(
+    article_text: str,
+    *,
+    title: Optional[str] = None,
+    published_at: object = None,
+) -> HeadOutput:
     """Run the per-story key-points head."""
     model = _default_model()
     timeout = _default_timeout()
-    prompt = _KEY_POINTS_USER.format(article=article_text[:6000])
+    prompt = _KEY_POINTS_USER.format(
+        title=(title or "").strip() or "(none)",
+        published=_published_label(published_at),
+        article=article_text[:6000],
+    )
 
     async with _get_semaphore():
         try:
@@ -733,7 +828,7 @@ async def _run_key_points_head(article_text: str) -> HeadOutput:
             )
 
         try:
-            scores, reasoning, confidence = _parse_key_points_response(raw)
+            parsed = _parse_key_points_payload(raw)
         except (json.JSONDecodeError, KeyError, ValueError) as exc:
             logger.warning(
                 "[impact_scorer] STORY_KEY_POINTS parse error: %s | raw=%r", exc, raw[:200]
@@ -744,14 +839,21 @@ async def _run_key_points_head(article_text: str) -> HeadOutput:
                 raw_response=raw, error=f"parse error: {exc}",
             )
 
+        if parsed.rationales_dropped:
+            logger.info(
+                "[impact_scorer] STORY_KEY_POINTS dropped %d/%d restating rationale(s)",
+                parsed.rationales_dropped, len(parsed.scores),
+            )
+
         return HeadOutput(
             cluster="STORY_KEY_POINTS",
-            scores=scores,
-            reasoning=reasoning,
-            confidence=confidence,
+            scores=parsed.scores,
+            reasoning=parsed.reasoning,
+            confidence=parsed.confidence,
             model=model,
             latency_ms=latency_ms,
             raw_response=raw,
+            meta=parsed.meta,
         )
 
 
@@ -884,7 +986,13 @@ async def extract_tickers(article_text: str) -> list[str]:
         return []
 
 
-async def _run_cluster_head(article_text: str, cluster: str) -> HeadOutput:
+async def _run_cluster_head(
+    article_text: str,
+    cluster: str,
+    *,
+    title: Optional[str] = None,
+    published_at: object = None,
+) -> HeadOutput:
     """Dispatch a single head by canonical cluster name."""
     if cluster in CLUSTERS:
         return await _run_head(article_text, cluster)
@@ -893,7 +1001,9 @@ async def _run_cluster_head(article_text: str, cluster: str) -> HeadOutput:
     if cluster == "TICKER_SENTIMENT":
         return await _run_sentiment_head(article_text)
     if cluster == "STORY_KEY_POINTS":
-        return await _run_key_points_head(article_text)
+        return await _run_key_points_head(
+            article_text, title=title, published_at=published_at
+        )
     if cluster == "ARTICLE_TAGS":
         return await _run_tags_head(article_text)
     raise ValueError(f"Unknown head cluster: {cluster}")
@@ -902,6 +1012,9 @@ async def _run_cluster_head(article_text: str, cluster: str) -> HeadOutput:
 async def score_article(
     article_text: str,
     clusters: Optional[list[str]] = None,
+    *,
+    title: Optional[str] = None,
+    published_at: object = None,
 ) -> list[HeadOutput]:
     """
     Run LLM heads in parallel.
@@ -909,12 +1022,21 @@ async def score_article(
     When ``clusters`` is None, runs every head (dimension clusters + special heads).
     Otherwise runs only the requested canonical cluster names (see ``normalize_head_clusters``).
 
+    ``title`` and ``published_at`` reach the STORY_KEY_POINTS head only: its
+    "new vs priced in" judgement is meaningless without knowing WHEN the piece
+    ran — a commentary on last week's earnings reads exactly like the release.
+
     Failed heads have error set and confidence=0.0 with empty scores.
     """
     run_clusters = list(ALL_HEAD_CLUSTERS) if clusters is None else list(clusters)
 
     results = await asyncio.gather(
-        *[_run_cluster_head(article_text, cluster) for cluster in run_clusters],
+        *[
+            _run_cluster_head(
+                article_text, cluster, title=title, published_at=published_at
+            )
+            for cluster in run_clusters
+        ],
         return_exceptions=True,
     )
 

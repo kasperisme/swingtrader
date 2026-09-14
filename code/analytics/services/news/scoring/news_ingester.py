@@ -216,6 +216,7 @@ def _persist(
                 "cluster": head.cluster,
                 "scores_json": head.scores,
                 "reasoning_json": head.reasoning,
+                "meta_json": head.meta or None,
                 "confidence": head.confidence,
                 "model": head.model,
                 "latency_ms": head.latency_ms,
@@ -279,7 +280,7 @@ async def ingest_article(
         "[news_ingester] %s article (hash=%s…)",
         "refreshing" if existing else "scoring", article_hash[:12],
     )
-    heads = await score_article(body)
+    heads = await score_article(body, title=title, published_at=published_at)
     impact = aggregate_heads(heads)
 
     scored_heads = sum(1 for h in heads if not h.error)

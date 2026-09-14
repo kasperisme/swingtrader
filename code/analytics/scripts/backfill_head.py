@@ -18,6 +18,8 @@ Usage (from code/analytics):
     python -m scripts.backfill_head --head tags --rescore --limit 500   # re-run existing ARTICLE_TAGS rows
     python -m scripts.backfill_head --head STORY_KEY_POINTS --concurrency 8
     python -m scripts.backfill_head --dry-run --limit 5
+    python -m scripts.backfill_head --head key_points --since-days 14    # re-run after a prompt change
+    python -m scripts.backfill_head --head key_points --ids 232494
 """
 from __future__ import annotations
 
@@ -129,6 +131,32 @@ def _fetch_rescore_ids(head_cluster: str) -> list[int]:
     return ids
 
 
+def _fetch_recent_ids(head_cluster: str, days: int) -> list[int]:
+    """Articles published in the last ``days`` that already have ``head_cluster``
+    (newest first) — the pages readers actually land on, for re-running a head
+    after its prompt changes. Implies --rescore."""
+    sql = """
+        select distinct h.article_id
+        from swingtrader.news_impact_heads h
+        join swingtrader.news_articles a on a.id = h.article_id
+        where h.cluster = %s
+          and a.published_at > now() - make_interval(days => %s)
+          and a.has_analysis is not false
+        order by h.article_id desc
+    """
+    conn = get_pg_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(sql, (head_cluster, days))
+            ids = [row[0] for row in cur.fetchall()]
+    finally:
+        conn.close()
+    console.print(
+        f"[dim]Articles from the last {days}d with {head_cluster}: [bold]{len(ids)}[/bold][/dim]"
+    )
+    return ids
+
+
 def _delete_head_rows(client, article_id: int, head_cluster: str) -> None:
     _tbl(client, "news_impact_heads").delete().eq("article_id", article_id).eq(
         "cluster", head_cluster
@@ -139,7 +167,7 @@ def _fetch_articles(client, ids: list[int]) -> list[dict]:
     res = (
         client.schema("swingtrader")
         .table("news_articles")
-        .select("id, body, title")
+        .select("id, body, title, published_at")
         .in_("id", ids)
         .execute()
     )
@@ -181,6 +209,7 @@ def _insert_head_row(client, article_id: int, head: HeadOutput) -> None:
             "cluster": head.cluster,
             "scores_json": head.scores,
             "reasoning_json": head.reasoning,
+            "meta_json": head.meta or None,
             "confidence": head.confidence,
             "model": head.model,
             "latency_ms": head.latency_ms,
@@ -231,7 +260,12 @@ async def _backfill_one(
             f"[bold cyan][{index}/{total}][/bold cyan] id={article_id}  {title[:65]}"
         )
         try:
-            new_heads = await score_article(body, clusters=[head_cluster])
+            new_heads = await score_article(
+                body,
+                clusters=[head_cluster],
+                title=title,
+                published_at=row.get("published_at"),
+            )
         except Exception as exc:
             console.print(f"  [red]id={article_id} scoring failed: {exc}[/red]")
             return False
@@ -293,11 +327,17 @@ async def main(args: argparse.Namespace) -> None:
     )
 
     client = get_supabase_client()
-    ids = (
-        _fetch_rescore_ids(head_cluster)
-        if args.rescore
-        else _fetch_missing_ids(head_cluster)
-    )
+    if args.ids:
+        ids = sorted({int(x) for x in args.ids.split(",") if x.strip()}, reverse=True)
+        console.print(f"[dim]--ids: {len(ids)} article(s)[/dim]")
+    elif args.since_days:
+        ids = _fetch_recent_ids(head_cluster, args.since_days)
+    else:
+        ids = (
+            _fetch_rescore_ids(head_cluster)
+            if args.rescore
+            else _fetch_missing_ids(head_cluster)
+        )
 
     if args.limit is not None and args.limit > 0:
         ids = ids[: args.limit]
@@ -415,6 +455,18 @@ def _build_parser() -> argparse.ArgumentParser:
         ),
     )
     p.add_argument(
+        "--ids",
+        default=None,
+        help="Comma-separated article ids to run (implies --rescore for ids that have the head).",
+    )
+    p.add_argument(
+        "--since-days",
+        dest="since_days",
+        type=int,
+        default=None,
+        help="Re-run the head for articles published in the last N days (implies --rescore).",
+    )
+    p.add_argument(
         "--dry-run",
         dest="dry_run",
         action="store_true",
@@ -435,5 +487,7 @@ def _build_parser() -> argparse.ArgumentParser:
 
 if __name__ == "__main__":
     args = _build_parser().parse_args()
+    if args.ids or args.since_days:
+        args.rescore = True
     logging.basicConfig(level=logging.DEBUG if args.verbose else logging.WARNING)
     asyncio.run(main(args))

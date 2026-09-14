@@ -24,6 +24,23 @@ import {
   GATED_CLASS,
   type AboutCompany,
 } from "./_structured-data";
+import {
+  buildVerdict,
+  claimMetaOf,
+  percentileAnchor,
+  rationaleAddsInformation,
+  splitClaim,
+  type Anchor,
+  type Novelty,
+} from "@/lib/news/article-verdict";
+import { getScoreDistribution } from "@/lib/news/score-distribution";
+import { AnchorCaption, ScoreRail } from "./_components/score-rail";
+import {
+  NoPriceCard,
+  PriceReactionCard,
+  PriceReactionSkeleton,
+  VerdictBanner,
+} from "./_components/verdict-banner";
 
 const SITE_BASE_URL = SITE_URL;
 
@@ -87,7 +104,22 @@ type HeadRow = {
   cluster: string;
   scores_json: unknown;
   reasoning_json: unknown;
+  /** Per-key extras (claim novelty). Only selected by the page body. */
+  meta_json?: unknown;
 };
+
+type KeyPoint = {
+  id: string;
+  impact: number;
+  claim: string;
+  /** Empty when the stored rationale only restated the claim. */
+  rationale: string;
+  novelty: Novelty | null;
+  noveltyBasis: string;
+  anchor: Anchor | null;
+};
+
+type TickerScoreRow = { ticker: string; score: number; reason: string; anchor: Anchor | null };
 
 function asNumberMap(v: unknown): Record<string, number> {
   if (!v) return {};
@@ -220,11 +252,7 @@ function GateOverlay({ count, noun }: { count: number; noun: string }) {
   );
 }
 
-function TickerSentimentList({
-  rows,
-}: {
-  rows: Array<{ ticker: string; score: number; reason: string }>;
-}) {
+function TickerSentimentList({ rows }: { rows: TickerScoreRow[] }) {
   if (rows.length === 0) {
     return (
       <p className="text-sm text-muted-foreground/80">
@@ -246,6 +274,8 @@ function TickerSentimentList({
             </Link>
             <ScoreText value={row.score} digits={2} />
           </div>
+          <ScoreRail value={row.score} className="mt-2" />
+          <AnchorCaption anchor={row.anchor} className="mt-1" />
           {row.reason ? (
             <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
               {row.reason}
@@ -395,25 +425,54 @@ function ArticleTagsRow({
   );
 }
 
-function KeyPointRow({
-  row,
-  idx,
-}: {
-  row: { id: string; impact: number; text: string };
-  idx: number;
-}) {
+const NOVELTY_LABEL: Record<Novelty, string> = { new: "New", priced_in: "Priced in" };
+
+/**
+ * "Priced in" vs "New" — more decision-relevant than the score itself: a −0.8
+ * claim the market has held for a quarter is not a reason to act today. New
+ * gets the page's attention colour; priced-in stays quiet on purpose.
+ */
+function NoveltyTag({ novelty, basis }: { novelty: Novelty; basis: string }) {
+  const cls =
+    novelty === "new"
+      ? "border-amber-500/50 bg-amber-500/10 text-amber-700 dark:text-amber-300"
+      : "border-border bg-muted/40 text-muted-foreground";
   return (
-    <li className="py-3 first:pt-0 last:pb-0">
+    <p className="mt-1.5 flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
+      <span
+        className={`rounded-sm border px-1.5 py-px font-mono text-[9px] font-semibold uppercase tracking-wider ${cls}`}
+      >
+        {NOVELTY_LABEL[novelty]}
+      </span>
+      {basis ? <span className="text-[11px] text-muted-foreground">{basis}</span> : null}
+    </p>
+  );
+}
+
+function KeyPointRow({ row, idx }: { row: KeyPoint; idx: number }) {
+  return (
+    <li className="py-4 first:pt-0 last:pb-0">
       <div className="flex items-start gap-3">
         <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full border border-border/60 bg-muted/30 font-mono text-[10px] text-muted-foreground">
           {idx + 1}
         </span>
-        <div className="min-w-0 flex-1">
-          <div className="flex items-baseline justify-between gap-3">
-            <p className="text-sm leading-relaxed text-foreground/90">
-              {row.text}
-            </p>
+        <div className="flex min-w-0 flex-1 flex-col gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-6">
+          <div className="min-w-0 flex-1">
+            <p className="text-sm leading-relaxed text-foreground/90">{row.claim}</p>
+            {row.novelty ? <NoveltyTag novelty={row.novelty} basis={row.noveltyBasis} /> : null}
+            {row.rationale ? (
+              <p className="mt-1.5 text-xs leading-relaxed text-muted-foreground">
+                <span className="mr-1.5 font-mono text-[9px] uppercase tracking-wider text-foreground/60">
+                  So what
+                </span>
+                {row.rationale}
+              </p>
+            ) : null}
+          </div>
+          <div className="w-full shrink-0 sm:w-36 sm:text-right">
             <ScoreText value={row.impact} digits={2} />
+            <ScoreRail value={row.impact} className="mt-1.5" />
+            <AnchorCaption anchor={row.anchor} className="mt-1" />
           </div>
         </div>
       </div>
@@ -425,7 +484,7 @@ function KeyPointsList({
   rows,
   lockAfter,
 }: {
-  rows: Array<{ id: string; impact: number; text: string }>;
+  rows: KeyPoint[];
   /** Show this many claims free, then blur + gate the rest. */
   lockAfter?: number;
 }) {
@@ -481,6 +540,7 @@ function TickerRelationshipList({
     relType: string;
     score: number;
     reason: string;
+    anchor: Anchor | null;
   }>;
 }) {
   if (rows.length === 0) {
@@ -522,6 +582,8 @@ function TickerRelationshipList({
             </div>
             <ScoreText value={row.score} digits={2} />
           </div>
+          <ScoreRail value={row.score} className="mt-2" />
+          <AnchorCaption anchor={row.anchor} className="mt-1" />
           {row.reason ? (
             <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
               {row.reason}
@@ -533,6 +595,15 @@ function TickerRelationshipList({
   );
 }
 
+function claimsMeta(rows: KeyPoint[]): string {
+  const n = rows.length;
+  const parts = [`${n} claim${n === 1 ? "" : "s"}`, "scored −1 bearish … +1 bullish"];
+  const fresh = rows.filter((r) => r.novelty === "new").length;
+  const known = rows.filter((r) => r.novelty === "priced_in").length;
+  if (fresh + known > 0) parts.push(`${fresh} new · ${known} priced in`);
+  return parts.join(" · ");
+}
+
 function AnalyticsRegion({
   storyKeyPoints,
   tickerSentiment,
@@ -542,14 +613,15 @@ function AnalyticsRegion({
   claimLockAfter,
   recommended,
 }: {
-  storyKeyPoints: Array<{ id: string; impact: number; text: string }>;
-  tickerSentiment: Array<{ ticker: string; score: number; reason: string }>;
+  storyKeyPoints: KeyPoint[];
+  tickerSentiment: TickerScoreRow[];
   tickerRelationships: Array<{
     from: string;
     to: string;
     relType: string;
     score: number;
     reason: string;
+    anchor: Anchor | null;
   }>;
   ctaTickers: string[];
   ctaTags: string[];
@@ -567,9 +639,7 @@ function AnalyticsRegion({
           <section>
             <Eyebrow
               label="What the story claims"
-              meta={`${storyKeyPoints.length} claim${
-                storyKeyPoints.length === 1 ? "" : "s"
-              } · each scored for market impact`}
+              meta={claimsMeta(storyKeyPoints)}
             />
             <h2 className="mb-5 text-base font-semibold tracking-tight text-foreground/90">
               What matters in this story
@@ -862,16 +932,19 @@ async function ArticleData({ params }: { params: Promise<{ slug?: string }> }) {
   const article = bySlug.data;
   if (!article || bySlug.error || article.has_analysis === false) notFound();
 
-  const [headsRes, articleTopics] = await Promise.all([
+  const [headsRes, articleTopics, scoreDistribution] = await Promise.all([
     dataClient
       .schema("swingtrader")
       .from("news_impact_heads")
-      .select("cluster, scores_json, reasoning_json")
+      .select("cluster, scores_json, reasoning_json, meta_json")
       .eq("article_id", article.id),
     // Which long-running stories this piece belongs to. Cheap (~37ms) and the
     // upward half of the hub-and-spoke link structure — without it the topic
     // hubs are orphaned from the ~5k article pages that should feed them.
     getTopicsForArticle(article.id).catch(() => []),
+    // This week's score histograms → "more negative than 85% of claims".
+    // Cached for hours; {} on failure, which drops the captions, not the page.
+    getScoreDistribution(7),
   ]);
   const heads = (headsRes.data ?? []) as HeadRow[];
   const keyPointsHead = heads.find((h) => h.cluster === "STORY_KEY_POINTS");
@@ -882,23 +955,35 @@ async function ArticleData({ params }: { params: Promise<{ slug?: string }> }) {
 
   const keyPointScores = asNumberMap(keyPointsHead?.scores_json ?? {});
   const keyPointReasoning = asStringMap(keyPointsHead?.reasoning_json ?? {});
-  const storyKeyPoints = Object.entries(keyPointScores)
-    .map(([id, impact]) => ({
-      id,
-      impact,
-      text: keyPointReasoning[id] ?? "",
-    }))
-    .filter((r) => r.text)
+  const keyPointMeta = asObject(keyPointsHead?.meta_json ?? {});
+  const storyKeyPoints: KeyPoint[] = Object.entries(keyPointScores)
+    .map(([id, impact]) => {
+      const { claim, rationale } = splitClaim(keyPointReasoning[id] ?? "");
+      const meta = claimMetaOf(keyPointMeta, id);
+      return {
+        id,
+        impact,
+        claim,
+        // The scorer gates new rows at write time; rows scored before the
+        // gate get the same rule here, so a restatement never renders.
+        rationale: rationaleAddsInformation(claim, rationale) ? rationale : "",
+        novelty: meta.novelty,
+        noveltyBasis: meta.basis,
+        anchor: percentileAnchor(scoreDistribution.claim, impact, "claim"),
+      };
+    })
+    .filter((r) => r.claim)
     .sort((a, b) => Math.abs(b.impact) - Math.abs(a.impact))
     .slice(0, 10);
 
   const sentimentScores = asNumberMap(sentimentHead?.scores_json ?? {});
   const sentimentReasoning = asStringMap(sentimentHead?.reasoning_json ?? {});
-  const tickerSentiment = Object.entries(sentimentScores)
+  const tickerSentiment: TickerScoreRow[] = Object.entries(sentimentScores)
     .map(([ticker, score]) => ({
       ticker,
       score,
       reason: sentimentReasoning[ticker] ?? "",
+      anchor: percentileAnchor(scoreDistribution.ticker, score, "ticker"),
     }))
     .sort((a, b) => Math.abs(b.score) - Math.abs(a.score))
     .slice(0, 12);
@@ -916,6 +1001,7 @@ async function ArticleData({ params }: { params: Promise<{ slug?: string }> }) {
         relType,
         score,
         reason: relationshipReasoning[key] ?? "",
+        anchor: percentileAnchor(scoreDistribution.relationship, score, "relationship"),
       };
     })
     .filter((r) => r.from && r.to)
@@ -979,6 +1065,22 @@ async function ArticleData({ params }: { params: Promise<{ slug?: string }> }) {
 
   const sourceLabel = article.source || article.publisher || "feed";
 
+  // One line of stance above the fold. The subject is the ticker the story
+  // moves most — the same pick the <title> and meta description lead with.
+  const primary = tickerSentiment[0]
+    ? { ticker: tickerSentiment[0].ticker.toUpperCase().trim(), score: tickerSentiment[0].score }
+    : null;
+  const verdict = buildVerdict({
+    title: article.title,
+    primary,
+    claimImpacts: storyKeyPoints.map((k) => k.impact),
+  });
+  const verdictAnchor = verdict
+    ? primary
+      ? tickerSentiment[0].anchor
+      : percentileAnchor(scoreDistribution.claim, verdict.net, "claim")
+    : null;
+
   // NewsArticle + BreadcrumbList — lets Google render this as a news result,
   // attributes the analysis to us while crediting the original source, and
   // declares the blurred rows as gated rather than cloaked.
@@ -1032,6 +1134,27 @@ async function ArticleData({ params }: { params: Promise<{ slug?: string }> }) {
         <h1 className="text-3xl font-bold leading-[1.05] tracking-tight md:text-5xl">
           {article.title || "Untitled article"}
         </h1>
+
+        {verdict ? (
+          <VerdictBanner
+            verdict={verdict}
+            subject={primary?.ticker ?? null}
+            anchor={verdictAnchor}
+            priceSlot={
+              primary ? (
+                <Suspense fallback={<PriceReactionSkeleton />}>
+                  <PriceReactionCard
+                    ticker={primary.ticker}
+                    publishedIso={publishedIso}
+                    expected={primary.score}
+                  />
+                </Suspense>
+              ) : (
+                <NoPriceCard />
+              )
+            }
+          />
+        ) : null}
 
         {/* Continuing-story context. Placed directly under the headline because
             it is genuinely useful to a reader landing cold on one dated item —

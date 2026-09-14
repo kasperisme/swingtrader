@@ -172,6 +172,7 @@ def _insert_head_rows(client, article_id: int, heads: list[HeadOutput]) -> None:
             "cluster": head.cluster,
             "scores_json": head.scores,
             "reasoning_json": head.reasoning,
+            "meta_json": head.meta or None,
             "confidence": head.confidence,
             "model": head.model,
             "latency_ms": head.latency_ms,
@@ -252,6 +253,8 @@ async def _score_merge_and_persist(
         heads_filter=heads_filter,
         ticker_alias_map=ticker_alias_map,
         company_alias_map=company_alias_map,
+        title=persist_kwargs.get("title"),
+        published_at=persist_kwargs.get("published_at"),
     )
 
     if existing is not None and heads_filter is not None:
@@ -437,15 +440,22 @@ async def _score_article_heads(
     heads_filter: list[str] | None,
     ticker_alias_map: dict[str, str],
     company_alias_map: dict[str, str],
+    title: str | None = None,
+    published_at: object = None,
 ) -> tuple[list[HeadOutput], list[str]]:
-    """Score article (optionally subset of heads) and canonicalize ticker outputs."""
+    """Score article (optionally subset of heads) and canonicalize ticker outputs.
+
+    ``title`` / ``published_at`` feed the key-points head's novelty judgement.
+    """
     if heads_filter is None:
         heads, extracted = await asyncio.gather(
-            score_article(body),
+            score_article(body, title=title, published_at=published_at),
             extract_tickers(body),
         )
     else:
-        heads = await score_article(body, clusters=heads_filter)
+        heads = await score_article(
+            body, clusters=heads_filter, title=title, published_at=published_at
+        )
         extracted = []
     _normalize_relationship_and_sentiment_heads(
         heads, ticker_alias_map, company_alias_map
@@ -1329,6 +1339,7 @@ async def _main(args: argparse.Namespace) -> None:
             heads_filter=heads_filter,
             ticker_alias_map=ticker_alias_map,
             company_alias_map=company_alias_map,
+            title=getattr(args, "title", None),
         )
         impact = aggregate_heads(heads)
     else:
@@ -1356,6 +1367,7 @@ async def _main(args: argparse.Namespace) -> None:
                 heads_filter=heads_filter,
                 ticker_alias_map=ticker_alias_map,
                 company_alias_map=company_alias_map,
+                title=getattr(args, "title", None),
             )
             merged = _merge_heads(_heads_from_db(article_id), heads_new)
             impact = aggregate_heads(merged)
@@ -1387,6 +1399,7 @@ async def _main(args: argparse.Namespace) -> None:
                 heads_filter=heads_filter,
                 ticker_alias_map=ticker_alias_map,
                 company_alias_map=company_alias_map,
+                title=getattr(args, "title", None),
             )
             impact = aggregate_heads(heads)
             if heads_filter is not None:
@@ -2526,6 +2539,8 @@ async def _rescore_one_article(
                 heads_filter=heads_filter,
                 ticker_alias_map=ticker_alias_map,
                 company_alias_map=company_alias_map,
+                title=row.get("title"),
+                published_at=row.get("published_at"),
             )
         except Exception as exc:
             console.print(f"  [red]id={article_id} scoring failed: {exc}[/red]")
