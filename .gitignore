@@ -176,3 +176,5 @@ content/
 .DS_Store
 
 secrets/
+# FMP usage tally (code/analytics/shared/fmp_usage.py)
+/logs/fmp_usage/

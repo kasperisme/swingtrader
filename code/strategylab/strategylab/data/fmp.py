@@ -19,6 +19,26 @@ from ..config import fmp_key
 
 log = logging.getLogger(__name__)
 
+
+def _install_usage_tally() -> None:
+    """Tally this process's FMP calls into the shared usage log. The module
+    lives in code/analytics (a different venv), so it is loaded by path; a
+    checkout without it just goes uncounted."""
+    import importlib.util
+    from pathlib import Path
+
+    path = Path(__file__).resolve().parents[3] / "analytics" / "shared" / "fmp_usage.py"
+    try:
+        spec = importlib.util.spec_from_file_location("_fmp_usage", path)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        mod.install()
+    except Exception:
+        pass
+
+
+_install_usage_tally()
+
 _BASE_V3 = "https://financialmodelingprep.com/api/v3"
 _BASE_V4 = "https://financialmodelingprep.com/api/v4"
 _BASE_STABLE = "https://financialmodelingprep.com/stable"
