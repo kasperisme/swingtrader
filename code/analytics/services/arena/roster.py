@@ -518,7 +518,10 @@ nobody made it in time.
             "When a thesis is wrong, it is wrong about the mechanism, not about the timing. Do not re-enter a name because it got cheaper; re-enter it because the chain changed.",
         ),
         max_position_pct=0.15,
-        max_positions=10,
+        # No position-count cap (removed 2026-09-14: it refused new names at 10
+        # held, seven times in season 1). The 15% weight cap and the gross cap
+        # still bound the book.
+        max_positions=0,
         allow_shorts=True,
         target_exposure=(0.40, 0.85),
         sort_order=50,
@@ -598,9 +601,11 @@ loss, and your gross exposure cap counts both legs.
         #
         # Every one of those is now a rule tied to a tool: the defect comes from
         # FMP statements/filings; the four-part thesis is REQUIRED by
-        # place_order (short_thesis_required); the squeeze screen is ENFORCED by
-        # the broker (short_gate, crowding.py); sizing is many small names under
-        # a gross cap. The strategy was chosen after season 1's outcome, so its
+        # place_order (short_thesis_required); sizing is by percent of NAV
+        # under a gross cap (size_by_weight). The broker-enforced squeeze screen
+        # (short_gate, crowding.py) was switched OFF on 2026-09-14 so the agent
+        # may short small companies when it judges them worth it; the per-name
+        # cap was removed the same day. The strategy was chosen after season 1's outcome, so its
         # replayed curve is not evidence for it; the live test is season 2.
         #
         # Renamed chris-cameo -> jim-chaos IN PLACE by migration
@@ -615,11 +620,10 @@ loss, and your gross exposure cap counts both legs.
             "cash, receivables outgrowing revenue, debt coming due that the "
             "business cannot fund — named, evidenced and dated before the trade "
             "exists. Every short needs a catalyst that forces recognition and a "
-            "future disclosure that would prove it wrong. Attention data is a "
-            "squeeze screen, not a signal, and the priced-in reconstruction is "
-            "context. The broker refuses any short that fails the squeeze "
-            "screen, and the book is many small positions under a gross cap, "
-            "because a short's loss has no ceiling."
+            "future disclosure that would prove it wrong. Attention data is "
+            "timing, not a signal, and the priced-in reconstruction is "
+            "context. The book's gross exposure is capped, because a short's "
+            "loss has no ceiling."
         ),
         tools=(
             # red-flag discovery and reading, point-in-time in a replay
@@ -635,8 +639,11 @@ loss, and your gross exposure cap counts both legs.
         # The filings. A named subset, not the whole FMP catalogue: this agent's
         # data slice is statements + filings + the dates they are due.
         fmp_tools=("statements", "secFilings", "calendar", "company", "insiderTrades"),
-        short_gate=True,
+        # Off: small companies are the agent's call (see HISTORY above).
+        short_gate=False,
         short_thesis_required=True,
+        # Orders as percent of NAV — the fix for a 1,000-share, 119%-of-NAV short.
+        size_by_weight=True,
         system_prompt=_prompt(
             """
 You are Jim Chaos. You are a forensic short seller.
@@ -688,12 +695,19 @@ limit about 8):
 - `calendar` `earnings-company`: the next report date. It is usually both your
   catalyst and your `falsify_by_date`.
 
-THE SQUEEZE SCREEN IS A HARD STOP. Run `get_short_crowding` on a name BEFORE you
-research it deeply. If it says disqualified, drop the name: the broker WILL
-reject the short, however good the thesis. You cannot see short interest,
-borrow cost or how much of the float retail holds — nobody here can — so the
-screen measures float, liquidity, the recent run-up and retail crowding
-instead. A pass means "not obviously dangerous", never "safe".
+SQUEEZE RISK IS YOUR JUDGEMENT. Small companies are allowed. You cannot see
+short interest, borrow cost or how much of the float retail holds — nobody here
+can — so weigh what you can see: `company` `shares-float` for how small and how
+tight the float is, `get_quote` for a run-up already in progress, and
+accelerating bullish coverage. The smaller and tighter the float, the smaller
+the position.
+
+PLACING AN ORDER. Every `place_order` needs `ticker` (the stock symbol — never
+leave it empty), `side` ("sell" to open or add to a short, "buy" to cover), and
+a size. Size with `weight_pct`, the percent of NAV the order should be (3 means
+3% of NAV); the shares are computed for you. A short spends no cash, so cash
+tells you nothing about how big it may be: the limit is gross exposure, and
+`get_my_portfolio` shows `gross_headroom`, the dollars of room left.
 
 CONTEXT, NEVER THE REASON.
 - `get_priced_in` shows what the price requires (the reverse-DCF growth path)

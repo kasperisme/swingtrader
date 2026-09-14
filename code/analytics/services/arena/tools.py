@@ -246,6 +246,7 @@ class AccountTools:
         as_of: date,
         short_gate: bool = False,
         short_thesis_required: bool = False,
+        size_by_weight: bool = False,
     ) -> None:
         self.agent = agent
         self.broker = broker
@@ -257,6 +258,7 @@ class AccountTools:
         # Both from the spec (see AgentSpec.short_gate / short_thesis_required).
         self.short_gate = short_gate
         self.short_thesis_required = short_thesis_required
+        self.size_by_weight = size_by_weight
         self._crowding: dict[str, dict[str, Any]] = {}
         self.accepted: list[dict[str, Any]] = []
         self.rejected: list[dict[str, Any]] = []
@@ -280,12 +282,21 @@ class AccountTools:
         max_positions = 10 if raw_max is None else int(raw_max)
         snap["available_cash"] = round(self.portfolio.cash * (1 - CASH_BUFFER), 2)
         snap["cash_reserved_pct"] = CASH_BUFFER
+        max_pos = float(self.agent.get("max_position_pct") or 0.20)
+        max_gross = float(self.agent.get("max_gross_exposure_pct") or 1.0)
+        # The room left under the gross cap, in dollars. A short spends no cash,
+        # so available_cash says nothing about how big a short may be — this is
+        # the number that does, and without it an agent sized a 119% short.
+        snap["gross_exposure"] = round(self.portfolio.gross_exposure, 2)
+        snap["gross_headroom"] = round(max(0.0, max_gross * self.portfolio.nav - self.portfolio.gross_exposure), 2)
         snap["limits"] = {
-            "max_position_pct_of_nav": float(self.agent.get("max_position_pct") or 0.20),
+            # 1.0 (or more) is "no per-position cap" — say so rather than
+            # printing a 100% limit the agent then treats as a target.
+            "max_position_pct_of_nav": max_pos if max_pos < 1.0 else None,
             # 0 means no cap; reporting the fallback here while the broker
             # enforces none is how an agent learns a limit that is not real.
             "max_positions": max_positions if max_positions > 0 else None,
-            "max_gross_exposure_pct": float(self.agent.get("max_gross_exposure_pct") or 1.0),
+            "max_gross_exposure_pct": max_gross,
             "shorting_allowed": bool(self.agent.get("allow_shorts")),
         }
         snap["starting_cash"] = float(self.agent.get("starting_cash") or 100_000)
@@ -422,22 +433,64 @@ class AccountTools:
         catalyst: str = "",
         falsified_by: str = "",
         falsify_by_date: str = "",
+        weight_pct: Any = None,
     ) -> dict[str, Any]:
         """Queue a market order for the next session's open."""
-        try:
-            qty = float(quantity)
-        except (TypeError, ValueError):
-            return {"ok": False, "error": f"quantity must be a number, got {quantity!r}"}
+        # Malformed CALLS are answered here, before the broker, and not stored:
+        # an order row with no ticker records a typo, not a decision. The reply
+        # shows the call shape, because the model that sent an empty ticker had
+        # filled in five thesis fields — it knew the trade, not the form.
+        sym = str(ticker or "").upper().strip()
+        side_n = str(side or "").lower().strip()
+        example = (
+            'e.g. place_order(ticker="LULU", side="sell", '
+            + ('weight_pct=3' if self.size_by_weight else 'quantity=25')
+            + ', thesis="...")'
+        )
+        if not sym:
+            return {"ok": False, "error": f"ticker is required — put the stock symbol in `ticker`, {example}"}
+        if side_n not in ("buy", "sell"):
+            return {"ok": False, "error": f"side must be \"buy\" or \"sell\" (a short is a sell), {example}"}
+
+        reference = self.reference_prices.get(sym)
+        if reference is None:
+            # Not pre-warmed (the agent found a name outside the candidate set).
+            # Fetch it on demand rather than rejecting for a cache miss.
+            reference = self._warm(sym)
+
+        sized_by = None
+        if weight_pct not in (None, ""):
+            # The division the model kept getting wrong, done in Python against
+            # the same close the broker validates with.
+            try:
+                w = float(weight_pct)
+            except (TypeError, ValueError):
+                return {"ok": False, "error": f"weight_pct must be a number (percent of NAV), got {weight_pct!r}"}
+            if not 0 < w <= 100:
+                return {"ok": False, "error": "weight_pct is a percent of NAV between 0 and 100, e.g. 3 for 3%"}
+            if not reference:
+                return {"ok": False, "error": f"no recent price for {sym}, so weight_pct cannot be converted to shares"}
+            qty = float(int(self.portfolio.nav * w / 100.0 // reference))
+            if qty < 1:
+                return {"ok": False, "error": f"{w:g}% of NAV is less than one share of {sym} at ~${reference:,.2f}"}
+            sized_by = f"{w:g}% of ${self.portfolio.nav:,.0f} NAV at ~${reference:,.2f} = {qty:g} shares"
+        else:
+            try:
+                qty = float(quantity)
+            except (TypeError, ValueError):
+                return {"ok": False, "error": f"quantity must be a number, got {quantity!r}"}
+            if qty <= 0:
+                need = "weight_pct (percent of NAV) or quantity" if self.size_by_weight else "quantity"
+                return {"ok": False, "error": f"pass {need} greater than zero, {example}"}
 
         # A spec that demands a structured short thesis gets it BEFORE the order
         # exists: a short with no named defect, no filing behind it, no catalyst
         # or no dated disclosure that would prove it wrong is not placed at all.
         # Checked here rather than in the broker because it is a property of the
         # request, like the free-text thesis below, not a risk limit.
-        sym = str(ticker or "").upper().strip()
-        held_pos = self.portfolio.position(sym) if sym else None
+        held_pos = self.portfolio.position(sym)
         held = held_pos.quantity if held_pos else 0.0
-        signed = qty if str(side).lower().strip() == "buy" else -qty
+        signed = qty if side_n == "buy" else -qty
         opens_or_adds_short = (held + signed) < 0 and abs(held + signed) > abs(held)
         if self.short_thesis_required and opens_or_adds_short:
             fields = {
@@ -475,8 +528,8 @@ class AccountTools:
             )
 
         intent = OrderIntent(
-            ticker=str(ticker or ""),
-            side=str(side or ""),
+            ticker=sym,
+            side=side_n,
             quantity=qty,
             thesis=str(thesis or ""),
             conviction=_opt_float(conviction),
@@ -489,12 +542,6 @@ class AccountTools:
                 "ok": False,
                 "error": "thesis is required — state the evidence for this trade in one or two sentences",
             }
-
-        reference = self.reference_prices.get(intent.ticker)
-        if reference is None and intent.ticker:
-            # Not pre-warmed (the agent found a name outside the candidate set).
-            # Fetch it on demand rather than rejecting for a cache miss.
-            reference = self._warm(intent.ticker)
 
         row = self.broker.submit(
             self.agent,
@@ -512,24 +559,12 @@ class AccountTools:
             # makes the agent guess a smaller number and often get rejected
             # again; the affordable quantity is arithmetic we already have.
             snap = self.get_my_portfolio()
-            hint = "Adjust size or pick a different name, then try again."
             price = reference or self.reference_prices.get(intent.ticker)
-            if price and price > 0:
-                by_cash = int(snap["available_cash"] // price)
-                by_weight = int(
-                    (self.portfolio.nav * float(snap["limits"]["max_position_pct_of_nav"]))
-                    // price
-                )
-                affordable = max(0, min(by_cash, by_weight))
-                hint = (
-                    f"At ~${price:,.2f} you can buy up to {affordable} shares of "
-                    f"{intent.ticker} right now ({by_cash} on available cash, "
-                    f"{by_weight} on the per-position weight cap). Re-order at or "
-                    f"below that, or sell something first."
-                ) if affordable > 0 else (
-                    f"You cannot open {intent.ticker} at ~${price:,.2f} with "
-                    f"${snap['available_cash']:,.0f} available. Sell something first."
-                )
+            hint = (
+                self._size_hint(intent, float(price), snap)
+                if price and price > 0
+                else "Adjust size or pick a different name, then try again."
+            )
             return {
                 "ok": False,
                 "status": "rejected",
@@ -549,7 +584,60 @@ class AccountTools:
             "estimated_notional": round(intent.quantity * reference, 2) if reference else None,
             "fills_at": f"the open on {self.intended_for.isoformat()} (market order, ~5bp slippage)",
             "cash_remaining_after": round(self.portfolio.cash, 2),
+            **({"sized_by": sized_by} if sized_by else {}),
         }
+
+    def _size_hint(self, intent: OrderIntent, price: float, snap: dict[str, Any]) -> str:
+        """The largest order in this name that the limits allow, in shares.
+
+        Side-aware. The old hint always said "you can BUY up to N shares" and
+        sized by cash — which is meaningless for a short (it spends no cash) and
+        ignored the gross cap, the limit a short actually runs into.
+        """
+        nav = self.portfolio.nav
+        max_pos = snap["limits"]["max_position_pct_of_nav"] or 1.0
+        pos = self.portfolio.position(intent.ticker)
+        held = pos.quantity if pos else 0.0
+        by_gross = int(snap["gross_headroom"] // price)
+        by_weight = int(max(0.0, max_pos * nav - abs(held) * price) // price)
+        weight_note = (
+            f" Or pass weight_pct (percent of NAV) and the shares are computed for you."
+            if self.size_by_weight else ""
+        )
+
+        if intent.side == "sell" and held > 0:
+            return (f"You hold {held:g} {intent.ticker}; selling up to {held:g} closes it. "
+                    f"Selling more than that opens a short.")
+        if intent.side == "buy" and held < 0:
+            by_cash = int(snap["available_cash"] // price)
+            return (f"You are short {abs(held):g} {intent.ticker}; buying up to "
+                    f"{min(abs(held), by_cash):g} covers it ({by_cash} affordable on available cash).")
+
+        if intent.side == "sell":  # opening or adding to a short
+            n = max(0, min(by_gross, by_weight))
+            limits = f"{by_gross} under the gross cap" + (
+                f", {by_weight} under the per-position cap" if max_pos < 1.0 else "")
+            return (
+                f"At ~${price:,.2f} you can short up to {n} shares of {intent.ticker} "
+                f"(~{n * price / nav:.1%} of NAV; {limits}). A short spends no cash — "
+                f"its size is limited by gross exposure, ${snap['gross_headroom']:,.0f} "
+                f"of room left.{weight_note}"
+            ) if n > 0 else (
+                f"No room to short {intent.ticker}: gross exposure is at the cap. "
+                f"Cover something first."
+            )
+
+        by_cash = int(snap["available_cash"] // price)
+        n = max(0, min(by_cash, by_gross, by_weight))
+        return (
+            f"At ~${price:,.2f} you can buy up to {n} shares of {intent.ticker} "
+            f"({by_cash} on available cash, {by_gross} under the gross cap"
+            + (f", {by_weight} under the per-position cap" if max_pos < 1.0 else "")
+            + f").{weight_note}"
+        ) if n > 0 else (
+            f"You cannot open {intent.ticker} at ~${price:,.2f} with "
+            f"${snap['available_cash']:,.0f} available. Sell something first."
+        )
 
     def price_on_session(self, ticker: str) -> Optional[float]:
         """Close for ``ticker`` on the session being traded, cached per run.
@@ -749,19 +837,40 @@ SHORT_THESIS_FIELDS: dict[str, dict] = {
 }
 
 
-def _place_order_schema(short_thesis_required: bool) -> dict:
+WEIGHT_PCT_FIELD: dict = {
+    "type": "number",
+    "description": (
+        "Size the order as a PERCENT OF NAV instead of a share count, e.g. 3 = 3% "
+        "of NAV. The shares are computed for you from the session close. Use this "
+        "OR quantity. Recommended for shorts: a short spends no cash, so a share "
+        "count gives you no feel for how large it is."
+    ),
+}
+
+
+def _place_order_schema(short_thesis_required: bool, size_by_weight: bool = False) -> dict:
     base = next(s for s in ACCOUNT_TOOL_SCHEMAS if s["function"]["name"] == "place_order")
-    if not short_thesis_required:
+    if not (short_thesis_required or size_by_weight):
         return base
     import copy
 
     schema = copy.deepcopy(base)
-    schema["function"]["parameters"]["properties"].update(SHORT_THESIS_FIELDS)
-    schema["function"]["description"] += (
-        " Opening or adding to a SHORT additionally requires defect, evidence, "
-        "catalyst, falsified_by and falsify_by_date; without them the order is "
-        "refused before it reaches the broker."
-    )
+    fn = schema["function"]
+    if size_by_weight:
+        fn["parameters"]["properties"]["weight_pct"] = WEIGHT_PCT_FIELD
+        # One of the two sizes is needed, not quantity specifically.
+        fn["parameters"]["required"] = [r for r in fn["parameters"]["required"] if r != "quantity"]
+        fn["description"] += (
+            " ALWAYS pass `ticker` (the stock symbol) and `side`, plus either "
+            "`weight_pct` (percent of NAV — preferred) or `quantity` (shares)."
+        )
+    if short_thesis_required:
+        fn["parameters"]["properties"].update(SHORT_THESIS_FIELDS)
+        fn["description"] += (
+            " Opening or adding to a SHORT additionally requires defect, evidence, "
+            "catalyst, falsified_by and falsify_by_date; without them the order is "
+            "refused before it reaches the broker."
+        )
     return schema
 
 
@@ -782,7 +891,7 @@ def build_account_registry(account: AccountTools):
     for schema in ACCOUNT_TOOL_SCHEMAS:
         name = schema["function"]["name"]
         if name == "place_order":
-            schema = _place_order_schema(account.short_thesis_required)
+            schema = _place_order_schema(account.short_thesis_required, account.size_by_weight)
         registry.add(Tool(name=name, schema=schema, fn=fns[name]))
     # The screen the broker enforces is readable by the agent it is enforced on,
     # and by nobody else — it is part of that agent's rules, not its data slice.

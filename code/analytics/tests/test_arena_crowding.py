@@ -130,3 +130,54 @@ def test_a_long_needs_no_short_thesis():
 def test_only_the_requiring_agent_sees_the_extra_fields():
     assert "defect" in _place_order_schema(True)["function"]["parameters"]["properties"]
     assert "defect" not in _place_order_schema(False)["function"]["parameters"]["properties"]
+
+
+# ── order mechanics ─────────────────────────────────────────────────────────
+
+
+def test_an_empty_ticker_is_answered_before_the_broker_and_not_stored():
+    acct = _account()
+    out = acct.place_order(ticker="", side="sell", quantity=200, **FULL)
+    assert out["ok"] is False and "ticker is required" in out["error"]
+    assert "place_order(ticker=" in out["error"]      # shows the call shape
+    assert acct.broker.submitted == []
+
+
+def test_weight_pct_is_converted_to_whole_shares_at_the_session_close():
+    acct = _account()
+    acct.size_by_weight = True
+    out = acct.place_order(ticker="AAA", side="sell", weight_pct=3, **FULL)
+    intent, _ = acct.broker.submitted[0]
+    # 3% of $100,000 at $50 = 60 shares
+    assert intent.quantity == 60
+    assert "= 60 shares" in out["sized_by"]
+
+
+def test_weight_pct_out_of_range_is_refused():
+    acct = _account()
+    out = acct.place_order(ticker="AAA", side="sell", weight_pct=250, **FULL)
+    assert out["ok"] is False and "between 0 and 100" in out["error"]
+
+
+def test_sizing_by_weight_drops_quantity_from_required():
+    fn = _place_order_schema(True, size_by_weight=True)["function"]
+    assert "weight_pct" in fn["parameters"]["properties"]
+    assert "quantity" not in fn["parameters"]["required"]
+    assert "ticker" in fn["parameters"]["required"]
+
+
+class _RejectingBroker(_Broker):
+    def submit(self, agent, intent, **kw):
+        return {"status": "rejected", "reject_reason": "gross exposure limit"}
+
+
+def test_a_rejected_short_gets_a_short_hint_sized_by_the_gross_cap():
+    acct = _account()
+    acct.agent = {"id": "a", "allow_shorts": True, "max_position_pct": 1.0,
+                  "max_gross_exposure_pct": 0.6}
+    acct.broker = _RejectingBroker()
+    out = acct.place_order(ticker="AAA", side="sell", quantity=1000, **FULL)
+    # $60,000 of gross headroom at $50 = 1,200 shares; never "you can buy".
+    assert "short up to 1200 shares" in out["hint"]
+    assert "buy up to" not in out["hint"]
+    assert out["portfolio"]["gross_headroom"] == 60000.0

@@ -341,6 +341,7 @@ async def run_decision(
         as_of=session,
         short_gate=spec.short_gate,
         short_thesis_required=spec.short_thesis_required,
+        size_by_weight=spec.size_by_weight,
     )
     registry = build_registry(spec, account)
 

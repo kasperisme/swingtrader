@@ -78,6 +78,12 @@ class AgentSpec:
     #: evidence, a catalyst, and the dated disclosure that would falsify it.
     short_thesis_required: bool = False
 
+    #: Let ``place_order`` take ``weight_pct`` (percent of NAV) instead of a
+    #: share count; the tool does the division. For an agent whose orders keep
+    #: failing on arithmetic — a short consumes no cash, so nothing tells the
+    #: model 1,000 shares of a $120 stock is 120% of its book.
+    size_by_weight: bool = False
+
     system_prompt: str = ""
 
     # Risk limits — enforced by the broker, restated in the prompt.
