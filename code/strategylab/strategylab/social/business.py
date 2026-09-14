@@ -27,7 +27,7 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
 from ..config import CACHE_ROOT
-from ..data import fmp
+from ..data import fmp, yfin
 
 log = logging.getLogger(__name__)
 
@@ -174,6 +174,17 @@ class BusinessStore:
         except Exception as exc:                              # noqa: BLE001
             log.debug("income statement unavailable for %s: %s", ticker, exc)
 
+        # yfinance fills the profile and statements but has no segments. A
+        # profile built without FMP is therefore used for this run and NOT
+        # cached: `ensure` never rebuilds a cached file, so writing it would
+        # leave the name segment-less for good once FMP came back.
+        from_fmp = bool(prof or inc)
+        if not prof:
+            rows = yfin.profile(ticker)
+            prof = rows[0] if rows else {}
+        if not inc:
+            inc = yfin.income_statement(ticker, limit=3)
+
         rev = revyoy = gm = om = None
         fy = ""
         if inc:
@@ -199,7 +210,8 @@ class BusinessStore:
             product_segments=prod[0] if prod else [],
             geographic_segments=geo[0] if geo else [],
             brands=list(brands or []))
-        self._path(ticker).write_text(json.dumps(bp.to_dict(), indent=1, default=str))
+        if from_fmp:
+            self._path(ticker).write_text(json.dumps(bp.to_dict(), indent=1, default=str))
         return bp
 
     def ensure(self, ticker: str, brands: list[str] | None = None) -> BusinessProfile:

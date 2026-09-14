@@ -39,7 +39,7 @@ from __future__ import annotations
 import logging
 from dataclasses import asdict, dataclass, field
 
-from ..data import fmp
+from ..data import fmp, yfin
 
 log = logging.getLogger(__name__)
 
@@ -64,6 +64,7 @@ class Financials:
     ev_ebitda: float | None = None
     fcf_yield: float | None = None
     fiscal_year: str = ""
+    source: str = "fmp"             # or "yfinance: <endpoints it stood in for>"
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -88,12 +89,14 @@ class ImpliedExpectations:
 
     def brief(self) -> str:
         f = self.financials
-        out = [f"{self.ticker} — what the price assumes",
-               f"  price ${f.price:,.2f}, market cap ${(f.market_cap or 0)/1e9:.1f}bn, "
+        out = [f"{self.ticker} — what the price assumes"
+               + (f"  [{f.source}]" if f.source != "fmp" else ""),
+               f"  price ${f.price or 0:,.2f}, market cap ${(f.market_cap or 0)/1e9:.1f}bn, "
                f"EV ${(f.enterprise_value or 0)/1e9:.1f}bn"]
         if f.revenue:
+            yoy = f"{f.revenue_yoy:+.1%}" if f.revenue_yoy is not None else "n/a"
             out.append(f"  FY{f.fiscal_year} revenue ${f.revenue/1e9:.2f}bn "
-                       f"({f.revenue_yoy:+.1%} YoY), FCF ${(f.free_cash_flow or 0)/1e9:.2f}bn "
+                       f"({yoy} YoY), FCF ${(f.free_cash_flow or 0)/1e9:.2f}bn "
                        f"({(f.fcf_margin or 0):.1%} margin)")
         mult = []
         if f.pe:
@@ -195,18 +198,32 @@ def fetch_financials_as_of(ticker: str, as_of) -> Financials:
 
 
 def fetch_financials(ticker: str) -> Financials:
-    def get(ep, params=None):
+    fell_back = []
+
+    def get(ep, params=None, fallback=None):
         try:
-            return fmp._get(f"{_V3}/{ep}", params or {}) or []
+            rows = fmp._get(f"{_V3}/{ep}", params or {}) or []
         except Exception as exc:                              # noqa: BLE001
             log.debug("%s failed for %s: %s", ep, ticker, exc)
-            return []
+            rows = []
+        if not rows and fallback:
+            rows = fallback()
+            if rows:
+                fell_back.append(ep.split("/")[0])
+        return rows
 
-    km = get(f"key-metrics-ttm/{ticker}")
-    ev_rows = get(f"enterprise-values/{ticker}", {"limit": 1})
-    inc = get(f"income-statement/{ticker}", {"period": "annual", "limit": 2})
-    cf = get(f"cash-flow-statement/{ticker}", {"period": "annual", "limit": 1})
-    prof = get(f"profile/{ticker}")
+    km = get(f"key-metrics-ttm/{ticker}",
+             fallback=lambda: yfin.key_metrics_ttm(ticker))
+    ev_rows = get(f"enterprise-values/{ticker}", {"limit": 1},
+                  fallback=lambda: yfin.enterprise_values(ticker))
+    inc = get(f"income-statement/{ticker}", {"period": "annual", "limit": 2},
+              fallback=lambda: yfin.income_statement(ticker, limit=2))
+    cf = get(f"cash-flow-statement/{ticker}", {"period": "annual", "limit": 1},
+             fallback=lambda: yfin.cash_flow_statement(ticker, limit=1))
+    prof = get(f"profile/{ticker}", fallback=lambda: yfin.profile(ticker))
+    if fell_back:
+        log.info("%s financials: yfinance stood in for %s", ticker,
+                 ", ".join(fell_back))
 
     k = km[0] if km else {}
     e = ev_rows[0] if ev_rows else {}
@@ -240,7 +257,8 @@ def fetch_financials(ticker: str) -> Financials:
         ev_sales=float(k.get("evToSalesTTM") or 0) or None,
         ev_ebitda=float(k.get("enterpriseValueOverEBITDATTM") or 0) or None,
         fcf_yield=float(k.get("freeCashFlowYieldTTM") or 0) or None,
-        fiscal_year=str(i.get("calendarYear") or i.get("date", ""))[:4])
+        fiscal_year=str(i.get("calendarYear") or i.get("date", ""))[:4],
+        source=("yfinance: " + ", ".join(fell_back)) if fell_back else "fmp")
 
 
 def implied(ticker: str, discount_rate: float = 0.09,

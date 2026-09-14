@@ -59,6 +59,7 @@ The engine creates its own `scan_jobs` row so the run still appears in Supabase.
 |---|---|
 | `engine.py` | Orchestrates the scan. Pulls eligible tickers, runs fundamentals + technical filters, computes market regime, uploads results. |
 | `fmp.py` | Thin FMP REST client (`requests` + pandas). Quotes, statements, technical indicators. |
+| `bar_cache.py` | On-disk store behind `fmp.daily_chart` (every screening board, arena marks, pairs, bulk analysis). Keeps each ticker's daily bars and fetches only the missing head/tail, so a daily re-run costs a few hundred bytes per ticker instead of a year of bars (`historical-price-full` was ~89% of the FMP bandwidth cap). Today's bar stays provisional until 20:00 ET; a split is detected on the overlap and refetches the window whole. |
 | `fundamentals.py` | Fundamentals screen (earnings growth, ROE, debt levels, sales acceleration). |
 | `technical.py` | Trend-template screen (multi-SMA stack, RS rank, distance from 52w high). |
 | `api_client.py` | Posts qualifying rows + market regime to the swingtrader screenings HTTP API. |
@@ -80,6 +81,8 @@ The scan produces three things, persisted in different places:
 | Variable | Default | Description |
 |---|---|---|
 | `APIKEY` | required | FMP API key (note: this service uses `APIKEY`, not `FMP_API_KEY` — historical). |
+| `FMP_BAR_CACHE` | `1` | `0` bypasses the daily-bar store — every `daily_chart` call fetches the full window, as before. |
+| `FMP_BAR_CACHE_DIR` | `code/analytics/.cache/fmp_bars` | Where the store lives (~85 KB per ticker at 3 years; gitignored). |
 | `SWINGTRADER_JOB_ID` | unset | When set (by job_runner), engine attaches to the existing job row instead of creating a new one. |
 | `SWINGTRADER_API_BASE_URL` | `https://www.newsimpactscreener.com` | Origin for the screenings HTTP API. |
 | `SWINGTRADER_API_KEY` | required | Bearer token for the screenings API. Must include `screenings:write` scope. |

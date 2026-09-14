@@ -3,6 +3,8 @@ import requests
 import pandas as pd
 from shared.logging import logger
 
+from .bar_cache import BarCache
+
 
 class RequestError(Exception):
     def __init__(self, content):
@@ -214,6 +216,25 @@ class fmp:
         return rsi
 
     def daily_chart(self, ticker, startdate, enddate):
+        """Daily bars for [startdate, enddate], ascending.
+
+        Served from the shared on-disk bar store and topped up from FMP with only
+        the days it lacks — see bar_cache.py for why and for the freshness rules.
+        Raises when FMP errors or the ticker has no bars in the window, as the
+        uncached call always did.
+        """
+        chart = self._bar_cache.get(ticker, startdate, enddate)
+        if chart.empty:
+            raise RequestError(f"no daily bars for {ticker} {startdate}..{enddate}")
+        return chart
+
+    @property
+    def _bar_cache(self) -> BarCache:
+        if not hasattr(self, "_bars"):
+            self._bars = BarCache(self._fetch_daily_chart)
+        return self._bars
+
+    def _fetch_daily_chart(self, ticker, startdate, enddate) -> pd.DataFrame:
         url = f"https://financialmodelingprep.com/api/v3/historical-price-full/{ticker}?from={startdate}&to={enddate}"
 
         response = requests.get(url, params={"apikey": self.APIKEY})
@@ -222,11 +243,8 @@ class fmp:
             raise Exception("API response on chart: " + str(response.status_code))
 
         data = response.json()
-
-        chart = pd.DataFrame(data["historical"])
-        chart["date"] = pd.to_datetime(chart["date"])
-        chart = chart.sort_values(by="date", ascending=True).reset_index(drop=True)
-        return chart
+        rows = data.get("historical") if isinstance(data, dict) else None
+        return pd.DataFrame(rows or [])
 
     def intraday_chart(self, interval, ticker, startdate, enddate):
         url = f"https://financialmodelingprep.com/api/v3/historical-chart/{interval}/{ticker}?from={startdate}&to={enddate}"

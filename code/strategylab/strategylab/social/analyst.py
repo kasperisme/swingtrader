@@ -36,7 +36,7 @@ from datetime import date
 
 import numpy as np
 
-from ..data import fmp
+from ..data import fmp, yfin
 
 log = logging.getLogger(__name__)
 
@@ -127,7 +127,13 @@ def targets(ticker: str, as_of: date | None = None, window_days: int = 120) -> l
         rows = fmp._get(f"{_V4}/price-target", {"symbol": ticker}) or []
     except Exception as exc:                                  # noqa: BLE001
         log.debug("price targets unavailable for %s: %s", ticker, exc)
-        return []
+        rows = []
+    if not rows:
+        # Latest-per-firm and unnamed; see `yfin.price_targets` for what that
+        # costs the vote.
+        rows = yfin.price_targets(ticker, as_of, window_days)
+        if rows:
+            log.info("%s targets: yfinance stood in (%d firms)", ticker, len(rows))
     cutoff = (as_of or date.today())
     out = []
     for r in rows:
