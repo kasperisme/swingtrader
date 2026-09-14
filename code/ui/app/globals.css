@@ -135,7 +135,30 @@
   50%      { opacity: 0.35; }
 }
 
+/* Score rail (app/articles/[slug]/_components/score-rail.tsx). The marker
+   travels out from zero and the fill grows from the zero line, so the eye reads
+   "how far from nothing" before it reads the number. Transform only; the
+   overshoot in the curve is the spring. */
+@keyframes rail-marker-in {
+  from { transform: translateX(0); }
+  to   { transform: translateX(var(--rail-x)); }
+}
+
+@keyframes rail-fill-in {
+  from { transform: scaleX(0); }
+  to   { transform: scaleX(1); }
+}
+
 @layer utilities {
+  .animate-rail-marker {
+    transform: translateX(var(--rail-x));
+    animation: rail-marker-in 900ms cubic-bezier(0.22, 1.25, 0.36, 1) both;
+  }
+
+  .animate-rail-fill {
+    animation: rail-fill-in 900ms cubic-bezier(0.22, 1.25, 0.36, 1) both;
+  }
+
   .animate-news-roll {
     animation: news-roll 40s linear infinite;
   }
@@ -153,7 +176,9 @@
      is collapsed to an instant step rather than removed. */
   @media (prefers-reduced-motion: reduce) {
     .animate-news-roll,
-    .animate-signal-pulse {
+    .animate-signal-pulse,
+    .animate-rail-marker,
+    .animate-rail-fill {
       animation: none;
     }
 

@@ -1,8 +1,8 @@
 # Supabase `swingtrader` catalog
 
-Generated 2026-09-11 by `python -m services.catalog.build`. **Do not hand-edit** — regenerate instead.
+Generated 2026-09-14 by `python -m services.catalog.build`. **Do not hand-edit** — regenerate instead.
 
-111 tables/views, 1290 columns, 63 functions.
+111 tables/views, 1291 columns, 64 functions.
 
 `rows` is a planner estimate, not a count. `fresh` is the newest row's timestamp — an object with an old date is likely abandoned, and that is as important to know as whether it exists.
 
@@ -10,7 +10,7 @@ Generated 2026-09-11 by `python -m services.catalog.build`. **Do not hand-edit**
 
 ### `ticker_relationship_edge_evidence` (table)
 
-*~89,177 rows, fresh to 2026-09-11*
+*~89,973 rows, fresh to 2026-09-14*
 
 Ticker relationship edge traceability Goal: - Provide deterministic traceability from ticker_relationship_edges back to source articles and impact-vector dimensions.
 
@@ -32,7 +32,7 @@ Ticker relationship edge traceability Goal: - Provide deterministic traceability
 
 ### `ticker_relationship_edges` (table)
 
-*~39,986 rows, fresh to 2026-09-11*
+*~40,241 rows, fresh to 2026-09-14*
 
 Ticker Relationship Network (graph-ready adjacency structure) Why: - Avoid scanning/parsing JSONB relationship heads for every narrative run. - Materialize ticker->ticker edges with indexed lookup for multi-hop traversal. - Keep provenance + recency so downstream ranking can prioritize fresh edges.
 
@@ -197,7 +197,7 @@ Ticker Relationship Network (graph-ready adjacency structure) Why: - Avoid scann
 
 ### `news_impact_heads` (table)
 
-*~2,651,283 rows, fresh to 2026-09-11*
+*~2,651,283 rows, fresh to 2026-09-14*
 
 news_impact_heads: per-cluster LLM scoring results
 
@@ -212,6 +212,7 @@ news_impact_heads: per-cluster LLM scoring results
 | `model` | character varying |
 | `latency_ms` | integer |
 | `created_at` | timestamp with time zone |
+| `meta_json` | jsonb |
 
 `cluster` values: `ARTICLE_TAGS`, `BUSINESS_MODEL`, `FINANCIAL_STRUCTURE`, `GEOGRAPHY_TRADE`, `GROWTH_PROFILE`, `MACRO_SENSITIVITY`, `MARKET_BEHAVIOUR`, `SECTOR_ROTATION`, `STORY_KEY_POINTS`, `SUPPLY_CHAIN_EXPOSURE`, `TICKER_RELATIONSHIPS`, `TICKER_SENTIMENT`, `VALUATION_POSITIONING`
 
@@ -219,7 +220,7 @@ news_impact_heads: per-cluster LLM scoring results
 
 ### `news_article_embeddings` (table)
 
-*~1,853,533 rows*
+*~1,864,998 rows*
 
 Embedding setup for semantic retrieval over scored news.
 
@@ -237,7 +238,7 @@ Embedding setup for semantic retrieval over scored news.
 
 ### `news_article_tickers` (table)
 
-*~739,882 rows*
+*~766,447 rows*
 
 news_article_tickers: ticker mentions extracted from articles
 
@@ -249,7 +250,7 @@ news_article_tickers: ticker mentions extracted from articles
 
 ### `news_article_embedding_jobs` (table)
 
-*~228,302 rows, fresh to 2026-09-11*
+*~231,502 rows, fresh to 2026-09-14*
 
 Embedding setup for semantic retrieval over scored news.
 
@@ -264,11 +265,11 @@ Embedding setup for semantic retrieval over scored news.
 | `created_at` | timestamp with time zone |
 | `updated_at` | timestamp with time zone |
 
-`status` values: `completed`, `failed`, `processing`
+`status` values: `completed`, `processing`
 
 ### `news_impact_vectors` (table)
 
-*~225,284 rows, fresh to 2026-09-11*
+*~225,284 rows, fresh to 2026-09-14*
 
 news_impact_vectors: aggregated impact dimension vectors
 
@@ -283,7 +284,7 @@ news_impact_vectors: aggregated impact dimension vectors
 
 ### `news_articles` (table)
 
-*~213,657 rows, fresh to 2026-09-11*
+*~213,657 rows, fresh to 2026-09-14*
 
 news_articles: article content and metadata
 
@@ -312,7 +313,7 @@ news_articles: article content and metadata
 
 ### `news_source_dry_days` (table)
 
-*~695 rows*
+*~718 rows*
 
 Track calendar days where a news source stream has been fully exhausted (all available articles fetched/processed, no new content from the API). Used to skip re-polling dry days in future runs.
 
@@ -343,7 +344,7 @@ Hourly / daily embedding clusters over swingtrader.news_article_embeddings (UTC 
 
 ### `news_briefing_subscriptions` (table)
 
-*~34 rows, fresh to 2026-09-11*
+*~35 rows, fresh to 2026-09-14*
 
 News briefing subscriptions: the free, no-account email service that sends a nicely structured PDF of the last 24h of news, summaries and impact for the tickers / tags a visitor cares about. Mirrors market_screening_email_subscriptions (email-only, soft-unsubscribe, service-role access) but the unit a visitor subscribes to is their OWN watchlist of tickers + tags rather than a curated screening. One briefing per email — editing the watchlist is an in-place update via a signed manage link, no login required. Delivery: * On signup we set initial_briefing_requested_at; the Python briefing tick ge
 
@@ -621,7 +622,7 @@ news_articles.has_analysis — hide articles the scorer found nothing in Why: 15
 
 ### `topic_claim_stats` (table)
 
-*~1,520 rows, fresh to 2026-09-11*
+*~1,539 rows, fresh to 2026-09-14*
 
 topic_claim_stats — the materialized half. Ranked STORY_KEY_POINTS across a topic's whole arc. This CANNOT be live: it scans every matching article's heads, and the REST role (`authenticator`) caps statements at 8s. Refreshed after each ingest, exactly like ticker_sentiment_heads / ticker_relationship_edges. Every claim keeps `article_ts`. A permanent page that aggregates claims will otherwise enshrine stale numbers as evergreen fact — observed repeatedly: NVIDIA "$119B supply commitments / $91B guide" (pre-quarter, reports Aug 26) and Micron "+346% to $41.46B" (a prior quarter) both resurface
 
@@ -673,7 +674,7 @@ news_articles.has_analysis — hide articles the scorer found nothing in Why: 15
 
 ### `ticker_sentiment_heads` (table)
 
-*~367,854 rows, fresh to 2026-09-11*
+*~371,050 rows, fresh to 2026-09-14*
 
 Ticker Sentiment Materialization (pre-exploded, indexed) Why: - swingtrader.ticker_sentiment_heads_v explodes EVERY TICKER_SENTIMENT head's scores_json (text->jsonb cast + jsonb_each_text) and joins news_articles on every request. The `ticker` column is derived from JSON keys and `article_ts` from a join, so neither a `ticker IN (...)` nor a date filter can be pushed down or indexed — the view is O(all sentiment heads) per call and was taking 4–8s for a single ticker (and growing with ingestion). - This pre-explodes the same data into a real table keyed by (head_id, ticker) with an index on (t
 
@@ -691,11 +692,11 @@ Ticker Sentiment Materialization (pre-exploded, indexed) Why: - swingtrader.tick
 | `article_ts` | timestamp with time zone |
 | `updated_at` | timestamp with time zone |
 
-`model` values: `gemma4:31b-cloud`, `glm-5.1:cloud`
+`model` values: `claude-haiku-4-5`, `do-agent`, `gemma4:31b-cloud`, `gemma4:e4b`
 
 ### `ticker_coverage_daily` (table)
 
-*~58,600 rows, fresh to 2026-09-11*
+*~58,226 rows, fresh to 2026-09-14*
 
 Materialize the /quote directory's daily rollup. get_top_covered_tickers read news_trends_ticker_daily_v directly, which rescans 120 days of news_article_tickers + news_articles + ticker_sentiment heads on every call: measured 4.6s for a plain page and 7.6s for a search — against the REST role's 8s statement_timeout. That is a page that breaks the first time the corpus grows. Same split the topic hubs use: membership stays live, the expensive rollup is materialized and rebuilt post-ingest. A table (not a matview) so it can carry RLS like its siblings. Only the daily rollup is stored, NOT the w
 
@@ -752,7 +753,7 @@ company_vectors: fundamental dimension vectors per ticker per date
 
 ### `company_ceos` (table)
 
-*~0 rows*
+*~192 rows, fresh to 2026-09-13*
 
 company_ceos — who runs each company, and what they are paid The quote page has always printed a CEO name (FMP's `profile.ceo`) as dead text. This is the index that lets that name become a link: one row per symbol, holding the CEO as FMP names them plus the two things a CEO page is actually worth visiting for — the SEC proxy compensation history (`governance-executive-compensation`) and the rest of the leadership team (`key-executives`). WHY A TABLE AND NOT A LIVE FMP CALL. A CEO page is addressed by the PERSON (`/ceos/jensen-huang`), and nothing at FMP resolves a name back to a symbol. Someth
 
@@ -784,7 +785,7 @@ company_ceos — who runs each company, and what they are paid The quote page ha
 
 ### `market_screening_result_rows` (table)
 
-*~145,294 rows, fresh to 2026-09-11*
+*~145,294 rows, fresh to 2026-09-14*
 
 | column | type |
 |---|---|
@@ -800,7 +801,7 @@ company_ceos — who runs each company, and what they are paid The quote page ha
 
 ### `market_screening_results` (table)
 
-*~4,660 rows, fresh to 2026-09-11*
+*~4,739 rows, fresh to 2026-09-14*
 
 | column | type |
 |---|---|
@@ -853,7 +854,7 @@ Market screening EMAIL subscriptions: the lightweight, email-only delivery list 
 
 ### `market_screenings` (table)
 
-*~12 rows, fresh to 2026-09-11*
+*~12 rows, fresh to 2026-09-14*
 
 | column | type |
 |---|---|
@@ -932,7 +933,7 @@ Market screening EMAIL subscriptions: the lightweight, email-only delivery list 
 
 ### `user_ticker_chart_workspace` (table)
 
-*~4,871 rows, fresh to 2026-09-10*
+*~4,871 rows, fresh to 2026-09-13*
 
 Per-user chart workspace: annotations + Chart AI conversation, keyed by ticker. Used by protected/charts; RLS restricts rows to the owning user.
 
@@ -947,7 +948,7 @@ Per-user chart workspace: annotations + Chart AI conversation, keyed by ticker. 
 
 ### `user_screening_results` (table)
 
-*~2,748 rows, fresh to 2026-09-11*
+*~2,748 rows, fresh to 2026-09-14*
 
 ── user_screening_results ──────────────────────────────────────────────────
 
@@ -971,7 +972,7 @@ Per-user chart workspace: annotations + Chart AI conversation, keyed by ticker. 
 
 ### `user_scan_jobs` (table)
 
-*~306 rows, fresh to 2026-09-11*
+*~306 rows, fresh to 2026-09-14*
 
 | column | type |
 |---|---|
@@ -998,7 +999,7 @@ Per-user chart workspace: annotations + Chart AI conversation, keyed by ticker. 
 
 ### `user_scan_runs` (table)
 
-*~216 rows, fresh to 2026-09-11*
+*~216 rows, fresh to 2026-09-14*
 
 | column | type |
 |---|---|
@@ -1086,7 +1087,7 @@ user_bulk_analysis_jobs Tracks fire-and-forget bulk per-ticker technical-analysi
 
 ### `user_scheduled_screenings` (table)
 
-*~5 rows, fresh to 2026-09-11*
+*~5 rows, fresh to 2026-09-14*
 
 ── user_scheduled_screenings ────────────────────────────────────────────────
 
@@ -1245,7 +1246,7 @@ user_trade_reviews: AI post-trade review chats keyed by the closing trade A "rev
 
 ### `job_runs` (table)
 
-*~256,091 rows, fresh to 2026-09-11*
+*~256,091 rows, fresh to 2026-09-14*
 
 | column | type |
 |---|---|
@@ -1275,13 +1276,11 @@ user_trade_reviews: AI post-trade review chats keyed by the closing trade A "rev
 | `expected_interval` | interval |
 | `metadata` | jsonb |
 
-`last_status` values: `running`, `success`
-
 ## Other
 
 ### `sitemap_article_urls` (table)
 
-*~30,674 rows, fresh to 2026-09-11*
+*~31,010 rows, fresh to 2026-09-14*
 
 sitemap_article_urls: which article URLs are worth asking Google to index The sitemap shipped the newest 5,000 /articles/* URLs with no filter at all, which made 74% of everything offered to a crawler a wrapper around a third-party headline. Sampling that set returned, verbatim: "A.C.L. Construction Secures Civil Package for Linda's Friendship Center in Fort Nelson BC", "ASICS Europe Expands Global Partnership with Teamwork Commerce", and three separate securities-class-action notices. Search Console's verdict on the whole domain was consistent with that: every hub page sat at "Crawled - curre
 
@@ -1314,7 +1313,7 @@ tickers: universe of actively-traded NYSE and NASDAQ stocks Seeded via scripts/s
 
 ### `research_priced_in_universe` (table)
 
-*~5,807 rows, fresh to 2026-09-11*
+*~5,807 rows, fresh to 2026-09-13*
 
 1) The working universe and its schedule.
 
@@ -1387,7 +1386,7 @@ telegram_message_log — record every Telegram message sent by the platform Popu
 
 ### `research_priced_in` (table)
 
-*~853 rows, fresh to 2026-09-11*
+*~1,025 rows, fresh to 2026-09-13*
 
 1) What a price already contains, reconstructed at a point in time.
 
@@ -1424,7 +1423,7 @@ telegram_message_log — record every Telegram message sent by the platform Popu
 
 ### `arena_orders` (table)
 
-*~512 rows, fresh to 2026-09-10*
+*~501 rows, fresh to 2026-09-13*
 
 ── 3) Orders — the only thing an agent writes ────────────────────────────── An order is an INTENT until the fill pass runs. `status` walks pending -> filled | rejected | cancelled. Rejections keep their reason.
 
@@ -1462,7 +1461,7 @@ telegram_message_log — record every Telegram message sent by the platform Popu
 
 ### `arena_decisions` (table)
 
-*~439 rows, fresh to 2026-09-10*
+*~443 rows, fresh to 2026-09-13*
 
 ── 2) The decision record ────────────────────────────────────────────────── One row per agent per trading day. This is the public "why" — the narrative the agent gives for what it did, alongside the machine trace (which tools it called, how many rounds, how long) so a bad day can be diagnosed.
 
@@ -1498,7 +1497,7 @@ telegram_message_log — record every Telegram message sent by the platform Popu
 
 ### `arena_nav_history` (table)
 
-*~407 rows, fresh to 2026-09-10*
+*~406 rows, fresh to 2026-09-13*
 
 Arena: competing AI paper-trading agents What: - A set of autonomous agents, each funded with the same starting cash, each restricted to a DIFFERENT slice of the platform's data (news impact scores, the priced-in decomposition, the NIS Momentum screenings, FMP fundamentals, the relationship graph, pair z-scores, sentiment trends), trading against each other on a daily clock. The point is not to make money — it is to make the comparison between approaches falsifiable and public. Why the accounting lives here and not in the model: - The LLM's only write is an ORDER INTENT (arena_orders). Cash, p
 
@@ -1553,7 +1552,7 @@ Arena: competing AI paper-trading agents What: - A set of autonomous agents, eac
 
 ### `arena_positions` (table)
 
-*~61 rows, fresh to 2026-09-10*
+*~60 rows, fresh to 2026-09-13*
 
 ── 4) Positions — current book, one row per (agent, ticker) ────────────────
 
@@ -1646,7 +1645,7 @@ The strategies themselves: everything needed to re-run one exactly.
 
 ### `arena_accounts` (table)
 
-*~18 rows, fresh to 2026-09-09*
+*~18 rows, fresh to 2026-09-13*
 
 ── 5) Cash + NAV history ─────────────────────────────────────────────────── `arena_accounts` is the single mutable cash row per agent; `arena_nav_history` is the append-only daily curve the leaderboard and charts read.
 
@@ -1659,7 +1658,7 @@ The strategies themselves: everything needed to re-run one exactly.
 
 ### `arena_agents` (table)
 
-*~9 rows, fresh to 2026-09-06*
+*~9 rows, fresh to 2026-09-13*
 
 ── 1) The competitors ──────────────────────────────────────────────────────
 
@@ -2385,6 +2384,7 @@ Callable via PostgREST `.rpc(name, {...})` or directly in SQL.
 | `get_top_covered_tickers` | `p_days integer, p_limit integer, p_offset integer, p_search text` | TABLE(ticker text, mention_count bigint, scored_count bigint, avg_sentiment double precision, last_day date, company_name text, sector text, total_count bigint) |
 | `get_topic_visuals` | `p_slug text` | jsonb |
 | `head_carries_analysis` | `p_cluster text, p_scores jsonb, p_reasoning jsonb` | boolean |
+| `impact_score_distribution` | `p_days integer` | TABLE(kind text, score numeric, n bigint) |
 | `impact_vector_magnitude` | `p_impact jsonb` | double precision |
 | `increment_market_screening_download` | `p_id uuid` | bigint |
 | `link_subscription_on_signup` | `` | trigger |

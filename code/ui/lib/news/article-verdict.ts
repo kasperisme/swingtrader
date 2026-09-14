@@ -158,9 +158,21 @@ export function signed(n: number, digits = 2): string {
   return `${n >= 0 ? "+" : "−"}${Math.abs(n).toFixed(digits)}`;
 }
 
+/** "slightly bearish", "strongly bullish", "neutral" — the score in words. */
+export function readOf(score: number): string {
+  const dir = directionOf(score);
+  if (dir === "neutral") return "neutral";
+  const m = Math.abs(score);
+  const strength = m < 0.25 ? "slightly" : m < 0.5 ? "moderately" : "strongly";
+  return `${strength} ${dir}`;
+}
+
 export type Verdict = {
   stance: HeadlineStance;
   agreement: Agreement;
+  /** readOf(net) */
+  read: string;
+  claimCount: number;
   /** "Source says Buy." / "Headline leans bearish." / "Headline takes no side." */
   headline: string;
   /** "We score DLTH −0.20 across four claims." */
@@ -196,7 +208,10 @@ export function buildVerdict(args: {
   const across = n > 0 ? ` across ${countWord(n, true)} claim${n === 1 ? "" : "s"}` : "";
   const score = primary
     ? `We score ${primary.ticker} ${signed(net)}${across}.`
-    : `${countWord(n)} claim${n === 1 ? "" : "s"} average ${signed(net)}.`;
+    : n === 1
+      ? `One claim, scored ${signed(net)}.`
+      : `${countWord(n)} claims average ${signed(net)}.`;
+  const read = readOf(net);
 
   const scoreDir = directionOf(net);
   const conclusion = {
@@ -204,11 +219,10 @@ export function buildVerdict(args: {
     contradicts: "Score contradicts the headline.",
     unbacked: "Score is neutral — the claims don't back the headline's call.",
     diverges: `Score leans ${scoreDir}; the headline says ${stance.label}.`,
-    "no-call":
-      scoreDir === "neutral" ? "Our read: neutral." : `Our read: ${scoreDir}.`,
+    "no-call": `Our read: ${read}.`,
   }[agreement];
 
-  return { stance, agreement, headline, score, conclusion, net };
+  return { stance, agreement, read, claimCount: n, headline, score, conclusion, net };
 }
 
 // ── Percentile anchors ───────────────────────────────────────────────────────

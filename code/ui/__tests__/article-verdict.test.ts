@@ -67,7 +67,14 @@ describe("buildVerdict", () => {
     const v = buildVerdict({ title: "Company Announces Board Changes", primary: null, claimImpacts: [-0.4, -0.2] })!;
     expect(v.headline).toBe("Headline takes no side.");
     expect(v.score).toBe("Two claims average −0.30.");
-    expect(v.conclusion).toBe("Our read: bearish.");
+    expect(v.conclusion).toBe("Our read: moderately bearish.");
+  });
+
+  it("does not average a single claim", () => {
+    const v = buildVerdict({ title: "Boy, We Were Wrong About SpaceX", primary: null, claimImpacts: [0.3] })!;
+    expect(v.headline).toBe("Headline takes no side.");
+    expect(v.score).toBe("One claim, scored +0.30.");
+    expect(v.conclusion).toBe("Our read: moderately bullish.");
   });
 
   it("returns null with nothing to stand on", () => {

@@ -7,7 +7,6 @@ import { createClient as createSupabaseClient } from "@supabase/supabase-js";
 
 import { createClient } from "@/lib/supabase/server";
 import { getTrendingLookup, type TrendingLookupEntry } from "@/lib/trends";
-import { ShareButtons } from "@/app/blog/[slug]/share-buttons";
 import { BriefingBanner } from "@/components/briefing-banner";
 import { getTopicsForArticle } from "@/app/actions/topics";
 import { ArticleBriefingCTA } from "./_components/article-briefing-cta";
@@ -18,7 +17,7 @@ import {
   RelatedArticles,
   type RelatedArticle,
 } from "./_components/related-articles";
-import { SITE_URL, AUTHOR } from "@/lib/site";
+import { SITE_URL } from "@/lib/site";
 import {
   buildArticleJsonLd,
   GATED_CLASS,
@@ -36,9 +35,8 @@ import {
 import { getScoreDistribution } from "@/lib/news/score-distribution";
 import { AnchorCaption, ScoreRail } from "./_components/score-rail";
 import {
-  NoPriceCard,
-  PriceReactionCard,
-  PriceReactionSkeleton,
+  PricePart,
+  PricePartSkeleton,
   VerdictBanner,
 } from "./_components/verdict-banner";
 
@@ -274,7 +272,7 @@ function TickerSentimentList({ rows }: { rows: TickerScoreRow[] }) {
             </Link>
             <ScoreText value={row.score} digits={2} />
           </div>
-          <ScoreRail value={row.score} className="mt-2" />
+          <ScoreRail value={row.score} className="mt-2 max-w-64" />
           <AnchorCaption anchor={row.anchor} className="mt-1" />
           {row.reason ? (
             <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
@@ -582,7 +580,7 @@ function TickerRelationshipList({
             </div>
             <ScoreText value={row.score} digits={2} />
           </div>
-          <ScoreRail value={row.score} className="mt-2" />
+          <ScoreRail value={row.score} className="mt-2 max-w-64" />
           <AnchorCaption anchor={row.anchor} className="mt-1" />
           {row.reason ? (
             <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
@@ -1142,16 +1140,14 @@ async function ArticleData({ params }: { params: Promise<{ slug?: string }> }) {
             anchor={verdictAnchor}
             priceSlot={
               primary ? (
-                <Suspense fallback={<PriceReactionSkeleton />}>
-                  <PriceReactionCard
+                <Suspense fallback={<PricePartSkeleton />}>
+                  <PricePart
                     ticker={primary.ticker}
                     publishedIso={publishedIso}
                     expected={primary.score}
                   />
                 </Suspense>
-              ) : (
-                <NoPriceCard />
-              )
+              ) : null
             }
           />
         ) : null}
@@ -1180,33 +1176,10 @@ async function ArticleData({ params }: { params: Promise<{ slug?: string }> }) {
           </nav>
         )}
 
-        {/* One-line product explainer above the fold — intentionally quiet
-            (13px, secondary color, no bold) so it never competes with the H1. */}
-        <p className="mt-3 text-[13px] text-muted-foreground">
-          NewsImpactScreener rates every claim in this story for market impact
-          and maps it to the tickers most exposed.
-        </p>
-
-        {/* Named byline. Stock analysis is a YMYL topic — an anonymous page
-            making per-ticker calls has no way to clear the trust bar, and the
-            site had no attribution anywhere. Links to the methodology. */}
-        <p className="mt-2 text-[13px] text-muted-foreground">
-          Analysis by{" "}
-          <Link
-            href="/about"
-            className="text-foreground underline underline-offset-4 hover:text-amber-400"
-          >
-            {AUTHOR.name}
-          </Link>
-          <span className="text-muted-foreground/60"> · {AUTHOR.role}</span>
-        </p>
-
-        {/* The "Read original" attribution link is deliberately not here — it
-            sits at the very bottom of the page so it isn't the first (or an
-            early) interactive element a visitor sees. */}
-        <div className="mt-5">
-          <ShareButtons title={article.title || "Article"} url={canonicalUrl} />
-        </div>
+        {/* The byline and share row used to sit here. The verdict's own
+            credit line ("Scored by the NIS engine · methodology") replaced
+            them: the page's claim to trust is the method, and it links to it.
+            The "Read original" attribution stays at the very bottom. */}
 
         {article.image_url ? (
           <div className="relative mt-8 overflow-hidden rounded-xl border border-border/60 bg-muted">
