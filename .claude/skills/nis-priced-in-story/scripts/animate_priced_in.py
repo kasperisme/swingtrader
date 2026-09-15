@@ -43,6 +43,11 @@ import matplotlib.pyplot as plt                      # noqa: E402
 import matplotlib.patheffects as pe                  # noqa: E402
 from matplotlib.patches import FancyBboxPatch, Rectangle  # noqa: E402
 
+# Every string drawn here is prose with dollar amounts in it. With mathtext on,
+# "worth roughly $140 to $189" renders the span between the two signs as math:
+# "140to189", italic. Nothing in these scenes uses mathtext.
+matplotlib.rcParams["text.parse_math"] = False
+
 BG = "#0A0E1A"; INK = "#F5F7FF"; MUT = "#9AA3BC"; MUT2 = "#6B7488"; GRID = "#1C2740"
 PANEL = "#111A2C"; AMBER = "#F5A623"; POS = "#3DD68C"; NEG = "#FF6B6B"
 W, H, FPS = 1080, 1920, 30
@@ -211,14 +216,14 @@ def _stake_card(ax, y, h, S, side, p, t0, t1):
 
     ax.text(0.115, y - 0.038, st["label"], color=col, fontsize=44, fontweight="bold",
             va="center", alpha=a)
-    ax.text(0.925, y - 0.038, st["move"], color=col, fontsize=40, fontweight="bold",
+    ax.text(0.905, y - 0.038, st["move"], color=col, fontsize=40, fontweight="bold",
             family="monospace", ha="right", va="center", alpha=a)
     ax.text(0.115, y - 0.082, "if you believe", color=MUT2, fontsize=25, va="center", alpha=a)
     # two lines, hard: a third runs into the basis line below it, and a BUY/SELL
     # card that needs three lines of reading is not doing its job anyway
     for j, ln in enumerate(textwrap.wrap(st["condition"], width=38)[:2]):
-        ax.text(0.115, y - 0.118 - j * 0.032, ln, color=INK, fontsize=29, va="center", alpha=a)
-    ax.text(0.115, y - h + 0.030, st["basis"], color=MUT, fontsize=24,
+        ax.text(0.115, y - 0.114 - j * 0.030, ln, color=INK, fontsize=29, va="center", alpha=a)
+    ax.text(0.115, y - h + 0.020, st["basis"], color=MUT, fontsize=24,
             family="monospace", va="center", alpha=a)
 
 
@@ -467,7 +472,7 @@ def build_scenes(S: dict) -> list[tuple[str, object, float, str, str]]:
     for i, ch in enumerate(pay_chunks, 1):
         cap = (S["caps"]["believes"] if i == 1 else f"…and {len(ch)} more it already pays for.")
         lead = "So what does that price actually believe? " if i == 1 else "It also pays for: "
-        vo = lead + " ".join(_speakable(t, lower_first=(i > 1 and j == 0))
+        vo = lead + " ".join(_speakable(S["full"].get(t, t), lower_first=(i > 1 and j == 0))
                              for j, t in enumerate(ch))
         scenes.append((f"believes{i}", make_ledger_scene(ch, True, i, len(pay_chunks), cap),
                        vo_seconds(vo), vo, cap))
@@ -477,7 +482,7 @@ def build_scenes(S: dict) -> list[tuple[str, object, float, str, str]]:
         cap = (S["caps"]["refuses"] if i == 1 else f"…and {len(ch)} more it will not fund.")
         lead = ("Here is what it refuses to pay for — the interesting half. " if i == 1
                 else "It also refuses to pay for: ")
-        vo = lead + " ".join(_speakable(t, lower_first=(i > 1 and j == 0))
+        vo = lead + " ".join(_speakable(S["full"].get(t, t), lower_first=(i > 1 and j == 0))
                              for j, t in enumerate(ch))
         scenes.append((f"refuses{i}", make_ledger_scene(ch, False, i, len(ref_chunks), cap),
                        vo_seconds(vo), vo, cap))
@@ -552,7 +557,7 @@ def build_stakes(story: dict, pays: list[str], refuses: list[str],
         "vo": (
             f"So, the decision, up front. If you believe {_speakable(bull, True)[:-1]}, "
             + (f"you are a buyer: {up_label} sits at {up_target:,.0f} dollars, "
-               f"{(up_target / price - 1) * 100:.0f} percent above today. "
+               f"{(up_target / price - 1) * 100:.0f} percent above the price. "
                if up_target else "you are a buyer, though no published model sits above the price. ")
             + f"If instead you believe {_speakable(bear, True)[:-1]}, "
             + (f"you are a seller: the lowest of the {n} is {lo:,.0f} dollars, "
@@ -569,19 +574,37 @@ def build_scene_spec(story: dict, max_rows: int | None) -> dict:
     gap = sp["median_gap_pct"]
     price = story["price_at_as_of"]
 
-    # Everything the reconstruction found, unless a cap is passed deliberately.
-    pays = [clause(s, 160) for s in (story["pays_for"][:max_rows] if max_rows
-                                     else story["pays_for"])]
-    refuses = [clause(s, 160) for s in (story["declines"][:max_rows] if max_rows
-                                        else story["declines"])]
+    # The reconstruction writes "{price}" where the UI substitutes the quote
+    # (pipeline /2). Left raw, `clause` cuts the row at the token and the
+    # narration reads "a premium over…".
+    def fill(s: str) -> str:
+        return str(s).replace("{price}", f"${price:,.2f}")
 
-    crux = re.sub(r"\s+", " ", story["crux"]).strip()
+    # Everything the reconstruction found, unless a cap is passed deliberately.
+    # The screen gets a clause that fits; the narration gets the whole row
+    # (`full`), since a spoken "rather…" is a broken line, not a shorter one.
+    pays_full = [fill(s) for s in (story["pays_for"][:max_rows] if max_rows
+                                   else story["pays_for"])]
+    refuses_full = [fill(s) for s in (story["declines"][:max_rows] if max_rows
+                                      else story["declines"])]
+    # A row the clause cutter can only end on "…" is shown whole instead: the
+    # ledger chunks by row height, so a long row costs a scene, where a clipped
+    # one ("…trajectory rather…") reads as a broken render.
+    def fit(s: str) -> str:
+        c = clause(s, 160)
+        return s.strip().rstrip(".") if c.endswith("…") and len(s) <= 260 else c
+
+    pays = [fit(s) for s in pays_full]
+    refuses = [fit(s) for s in refuses_full]
+    full = dict(zip(pays + refuses, pays_full + refuses_full))
+
+    crux = re.sub(r"\s+", " ", fill(story["crux"])).strip()
     # The crux carries TWO things: the question, and a clause about whether any
     # wired series can settle it. Split them — the question goes on screen at a
     # readable size, the measurability note sits under it as its own line.
     head, tail = crux, ""
     m = re.search(r"^(.*?)(?:,\s+(?:and|but|which)\s+(?:the\s+)?"
-                  r"(?:wired|available|only|this|while)\b|\s+—\s+|(?<=[?.])\s+)(.*)$", crux)
+                  r"(?:wired|available|only|this|while)\b|\s*—\s*(?=(?:and|but|which)\b)|\s+—\s+|(?<=[?.])\s+)(.*)$", crux)
     if m and m.group(1):
         head, tail = m.group(1).strip(), m.group(2).strip()
     head = head.rstrip(" ,")
@@ -596,7 +619,7 @@ def build_scene_spec(story: dict, max_rows: int | None) -> dict:
                        r"(settle|test|measur|answer)", note, re.I)
     # "while unit volumes can be measured, the margin … cannot be tested" is
     # half of each — reporting it as wholly unsettleable understates the data.
-    affirmed = re.search(r"(?<!not )(?<!cannot )(?:can be (?:tested|measured)|measurable)",
+    affirmed = re.search(r"(?<!not )(?<!cannot )(?:can be (?:tested|measured)|can track|measurable)",
                          note, re.I)
     if denied and affirmed and affirmed.start() < denied.start():
         testable = "Partly measurable. The rest isn't."
@@ -636,6 +659,7 @@ def build_scene_spec(story: dict, max_rows: int | None) -> dict:
         "gap_line": f"{abs(gap):.0f}% {'below' if gap < 0 else 'above'} the median model",
         "pays": pays,
         "refuses": refuses,
+        "full": full,
         "crux_short": head.strip(),
         "crux_testable": testable,
         "coverage": f"{story['coverage_published_now']} US companies",
@@ -643,7 +667,13 @@ def build_scene_spec(story: dict, max_rows: int | None) -> dict:
         # Sound-off captions, keyed by beat so inserting a beat cannot silently
         # shift every caption onto the wrong scene.
         "caps": {
-            "number": f"{sp['n_targets']} analysts priced {company}. The market ignored them.",
+            # "The market ignored them" is only true when it endorses none —
+            # beside "agrees with 12 of them" (MSFT, Sep 2026) it contradicts
+            # the narration. Name the refused count instead.
+            "number": (f"{sp['n_targets']} analysts priced {company}. The market ignored them."
+                       if not sp["n_endorsed"] else
+                       f"{sp['n_targets']} analysts priced {company}. "
+                       f"It won't pay {sp['n_refused_bull'] + sp['n_refused_bear']} of them."),
             "stakes": "Two published cases. Pick the one you believe.",
             "rail": f"The price sits {abs(gap):.0f}% {'below' if gap < 0 else 'above'} the median target.",
             "believes": f"All {len(pays)} things it already believes.",
@@ -680,10 +710,15 @@ def _speakable(s: str, lower_first: bool = False) -> str:
     #   "$96.22 billion in Q2 revenue"  → STANDALONE: "…billion dollars in Q2"
     # The last distinction is the one a naive rule gets wrong in both directions,
     # and it is audible: "the one trillion dollars projection" is not English.
+    # "$678bn" → "$678 billion" first, or it reads as "678 dollarsbn"
+    s = re.sub(r"\$(\d(?:[\d,]*\d)?(?:\.\d+)?)\s*(bn|tn|mn|m)\b",
+               lambda m: f"${m.group(1)} " + {"bn": "billion", "tn": "trillion",
+                                              "mn": "million", "m": "million"}[m.group(2)],
+               s)
     _MAG = r"(trillion|billion|million)"
-    s = re.sub(rf"\$(\d[\d,.]*)\s*[–—-]\s*(\d[\d,.]*)\s*{_MAG}",
+    s = re.sub(rf"\$(\d(?:[\d,]*\d)?(?:\.\d+)?)\s*[–—-]\s*(\d(?:[\d,]*\d)?(?:\.\d+)?)\s*{_MAG}",
                r"\1 to \2 \3 dollars", s, flags=re.I)
-    s = re.sub(rf"\$(\d[\d,.]*)\s*{_MAG}-per-(\w+)",
+    s = re.sub(rf"\$(\d(?:[\d,]*\d)?(?:\.\d+)?)\s*{_MAG}-per-(\w+)",
                r"\1 \2 dollars per \3", s, flags=re.I)
 
     # words that mean the amount stands alone rather than qualifying a noun
@@ -697,10 +732,10 @@ def _speakable(s: str, lower_first: bool = False) -> str:
         standalone = (not first) or first in _STANDALONE or probe.startswith("(")
         return f"{m.group(1)} {m.group(2)} dollar{'s' if standalone else ''}{nxt}"
 
-    s = re.sub(rf"\$(\d[\d,.]*)\s*{_MAG}(\s*\S*)", _mag, s, flags=re.I)
-    s = re.sub(r"\$(\d[\d,.]*)(\s+(?:target|price|level|model|median|consensus|floor|ceiling))",
+    s = re.sub(rf"\$(\d(?:[\d,]*\d)?(?:\.\d+)?)\s*{_MAG}(\s*\S*)", _mag, s, flags=re.I)
+    s = re.sub(r"\$(\d(?:[\d,]*\d)?(?:\.\d+)?)(\s+(?:target|price|level|model|median|consensus|floor|ceiling))",
                r"\1 dollar\2", s)
-    s = re.sub(r"\$(\d[\d,.]*)", r"\1 dollars", s)
+    s = re.sub(r"\$(\d(?:[\d,]*\d)?(?:\.\d+)?)", r"\1 dollars", s)
     s = re.sub(r"(\d(?:\.\d+)?)%\+", r"\1 percent or better", s)
     s = re.sub(r"(\d)%", r"\1 percent", s)
     s = re.sub(r"\bFY(\d{4})\b", r"fiscal \1", s)

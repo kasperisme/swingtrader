@@ -7,9 +7,14 @@ positions consistent, books realised P&L on closes, and appends the NAV curve.
 
 The rules it enforces, and why each one exists:
 
-  - **Universe.** Only actively-traded NYSE/NASDAQ names (plus SPY/QQQ). Without
-    this an agent can win or lose on the data quality of illiquid tickers rather
-    than on its approach.
+  - **Universe: any symbol with a price.** OTC included, since 2026-09-15. The
+    only gate is a recent daily close to size against, then a printed open to
+    fill at. This was an actively-traded NYSE/NASDAQ allowlist until Jim Chaos
+    found a short in an OTC name (LRDC) and the broker refused it. What was
+    given up: thin names fill at a flat 5bp and shorts need no borrow, so an
+    OTC short is filled here that a real broker would usually refuse. The same
+    rule holds for every agent. An explicit ``universe`` still restricts a
+    Broker (tests, or a future restricted mode).
   - **No leverage, no negative cash.** Cash is checked before the order is
     queued (against an estimate) and again at the fill (against the real price).
   - **Position cap / count cap / gross-exposure cap.** Per agent, from its spec.
@@ -101,13 +106,8 @@ class Broker:
 
     def __init__(self, prices: PriceBook, universe: Optional[set[str]] = None) -> None:
         self.prices = prices
-        self._universe = universe
-
-    @property
-    def universe(self) -> set[str]:
-        if self._universe is None:
-            self._universe = store.tradeable_universe()
-        return self._universe
+        #: An explicit allowlist, or None: any symbol with a price.
+        self.universe = universe
 
     # ── Submit ──────────────────────────────────────────────────────────────
 
@@ -180,13 +180,13 @@ class Broker:
             raise OrderRejected("quantity must be greater than zero")
         if not intent.ticker:
             raise OrderRejected("ticker is required")
-        if intent.ticker not in self.universe:
-            raise OrderRejected(
-                f"{intent.ticker} is not in the tradeable universe "
-                "(actively-traded NYSE/NASDAQ equities and SPY/QQQ)"
-            )
+        if self.universe is not None and intent.ticker not in self.universe:
+            raise OrderRejected(f"{intent.ticker} is not in the tradeable universe")
         if not reference_price or reference_price <= 0:
-            raise OrderRejected(f"no recent price available for {intent.ticker}")
+            raise OrderRejected(
+                f"no recent price available for {intent.ticker} — any symbol "
+                "with a daily close is tradeable, and this one has none"
+            )
 
         nav = portfolio.nav
         if nav <= 0:

@@ -539,51 +539,17 @@ def list_nav_history(agent_id: str, limit: int = 500) -> list[dict[str, Any]]:
 
 
 # ── Universe ─────────────────────────────────────────────────────────────────
-
-_universe_cache: Optional[set[str]] = None
-
-
-def tradeable_universe() -> set[str]:
-    """Symbols an agent is allowed to trade: the actively-traded NYSE/NASDAQ
-    names the rest of the platform already covers, plus the benchmark ETF.
-
-    Restricting the universe is a fairness control, not a convenience: without
-    it one agent can wander into illiquid tickers whose FMP bars are thin, and
-    win or lose on data quality rather than on its approach.
-    """
-    global _universe_cache
-    if _universe_cache is not None:
-        return _universe_cache
-
-    symbols: set[str] = set(BENCHMARK_SYMBOLS)
-    page, size = 0, 1000
-    while True:
-        res = (
-            _tbl("tickers")
-            .select("symbol")
-            .eq("is_actively_trading", True)
-            .range(page * size, page * size + size - 1)
-            .execute()
-        )
-        rows = res.data or []
-        symbols.update((r["symbol"] or "").upper().strip() for r in rows if r.get("symbol"))
-        if len(rows) < size:
-            break
-        page += 1
-
-    _universe_cache = {s for s in symbols if s}
-    return _universe_cache
+#
+# There is no stock universe any more: since 2026-09-15 the broker takes any
+# symbol with a price (see broker.py). This used to be the `tickers` table's
+# actively-traded NYSE/NASDAQ names plus the ETFs below, as a fairness control
+# against wins and losses on thin data. It was dropped deliberately, after it
+# refused Jim Chaos a short in an OTC name, with that cost accepted.
 
 
-#: ETFs every agent may hold regardless of the stock universe.
-#:
-#: The universe filter exists to keep agents out of illiquid names whose bars
-#: are thin — so excluding the most heavily traded instruments in existence was
-#: backwards. It first showed up when the pairs layer handed The Arbitrageur an
-#: IVV/VOO signal (its single widest spread) that the broker then refused as
-#: "not in the tradeable universe". These are all core index/sector ETFs whose
-#: liquidity is not in question, and `ticker_pair_stats` carries pairs across
-#: several of them.
+#: Core index/sector ETFs. They were the universe's ETF allowlist; the replay
+#: still warms their bars up front (backtest.py), since agents reach for them
+#: often and `ticker_pair_stats` carries pairs across several of them.
 BENCHMARK_SYMBOLS = (
     "SPY", "QQQ", "IVV", "VOO", "VTI", "DIA", "IWM",   # broad market
     "XLF", "XLE", "XLK", "XLV", "XLI", "XLY", "XLP",   # sectors

@@ -303,9 +303,16 @@ whole season carries `is_backtest` either way.
 - **No dividends, no corporate actions.** Marks use unadjusted daily closes, so a
   dividend shows as a small drop in NAV that a real account would not take. Over
   months this biases every agent's return slightly low, equally.
-- **Shorts have no borrow cost or margin requirement.** Only `the-arbitrageur`
-  can short, and its gross-exposure cap is the only constraint.
+- **Shorts have no borrow cost, locate or margin requirement.** Every LLM agent
+  except the two controls may short (`allow_shorts` in `roster.py`), and the
+  gross-exposure cap is the only constraint. A short in an OTC or sub-$5 name
+  fills here even though a real broker would usually refuse it.
+- **The universe is any symbol with a price** (since 2026-09-15; it was the
+  actively-traded NYSE/NASDAQ list plus core ETFs). OTC names are in. The only
+  gate is a daily close to size against and a printed open to fill at.
 - **Slippage is a flat 5bp** regardless of size or liquidity — optimistic for
-  small caps, roughly right for large. The universe floor limits the damage.
+  small caps, roughly right for large, and badly optimistic for OTC names
+  trading a few thousand shares a day. There is no longer a universe floor to
+  limit that.
 - **A stale mark keeps the previous price** and is named in
   `arena_nav_history.positions.stale_marks` rather than being valued at zero.

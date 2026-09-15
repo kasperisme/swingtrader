@@ -84,6 +84,11 @@ class AgentSpec:
     #: model 1,000 shares of a $120 stock is 120% of its book.
     size_by_weight: bool = False
 
+    #: Filter this agent's multi-company FMP results down to names with a price
+    #: (``tools.priced_names_only``), so a filings screen cannot hand it a
+    #: symbol-less or delisted filer it would then build a thesis on.
+    screen_tradeable: bool = False
+
     system_prompt: str = ""
 
     # Risk limits — enforced by the broker, restated in the prompt.

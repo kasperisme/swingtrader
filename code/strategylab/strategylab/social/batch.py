@@ -233,8 +233,8 @@ def reconstruct(ticker: str, *, lookback: int = 180, claims: int = 60,
     ents = _entities_for(T, n.network)
     brands = [e.label for e in EntityStore().load(T) if e.kind == "product"]
     bp = BusinessStore().ensure(T, brands + list(n.network.get("owns") or []))
-    imp = implied(T, as_of=as_of)
     if as_of:
+        imp = implied(T, as_of=as_of)
         from .pit import market_cap_as_of
         _, px = market_cap_as_of(T, as_of)
 
@@ -243,6 +243,10 @@ def reconstruct(ticker: str, *, lookback: int = 180, claims: int = 60,
         fin = _F()
     else:
         fin = fetch_financials(T)
+        imp = implied(T, fin=fin)
+    if not fin.price:
+        raise RuntimeError("no price — FMP and the yfinance fallback both came "
+                           "back empty")
 
     say("=" * 78)
     say(bp.brief())

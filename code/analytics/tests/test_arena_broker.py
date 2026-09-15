@@ -116,9 +116,6 @@ class FakeStore:
     def upsert_nav(self, row):
         self.nav_rows.append(row)
 
-    def tradeable_universe(self):
-        return {"AAA", "BBB", "SPY"}
-
 
 @pytest.fixture
 def store(monkeypatch):
@@ -153,6 +150,22 @@ def test_rejects_ticker_outside_the_universe(store):
     row = submit(brk, make_portfolio(), "buy", "ZZZ", 10, 100.0)
     assert row["status"] == "rejected"
     assert "not in the tradeable universe" in row["reject_reason"]
+
+
+def test_default_universe_is_any_symbol_with_a_price(store):
+    # No allowlist: an OTC name (LRDC, Sep 2026) is tradeable once it has a
+    # price, short side included.
+    brk = Broker(FakePrices({"LRDC": 0.63}))
+    row = submit(brk, make_portfolio(), "sell", "LRDC", 1_608, 0.63,
+                 agent={**AGENT, "allow_shorts": True})
+    assert row["status"] == "pending", row.get("reject_reason")
+
+
+def test_default_universe_still_needs_a_price(store):
+    brk = Broker(FakePrices({}))
+    row = submit(brk, make_portfolio(), "buy", "NOPX", 10, None)
+    assert row["status"] == "rejected"
+    assert "no recent price" in row["reject_reason"]
 
 
 def test_rejects_a_buy_it_cannot_afford(store):

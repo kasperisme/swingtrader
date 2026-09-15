@@ -26,6 +26,7 @@ malformed tool call teaches the model instead of killing the loop.
 
 from __future__ import annotations
 
+import json
 import logging
 from datetime import date, datetime, timedelta, timezone
 from typing import Any, Callable, Optional
@@ -202,6 +203,70 @@ class _RepriceToSession:
                         vote["median_gap_context"] = ctx
                 except Exception:                              # noqa: BLE001
                     vote.pop("median_gap_context", None)
+
+
+_NO_SYMBOL = {"", "NONE", "NULL", "N/A"}
+
+
+def priced_names_only(
+    dispatch: Callable[[str, dict], Any],
+    quotes: Optional[Callable[[list[str]], dict[str, float]]] = None,
+) -> Callable[[str, dict], Any]:
+    """Wrap an FMP dispatcher so a multi-company screen lists only names the
+    broker can trade: any symbol with a price.
+
+    Jim Chaos's filings screens (``secFilings``) return every SEC filer,
+    including ones with no ticker (FMP writes the string "None") and delisted
+    names with no quote. A thesis built on one of those is a wasted decision:
+    the broker rejects the order after the work is done. Only results naming
+    two or more companies are filtered; a single-company call is the agent
+    asking about that company, and the broker's own price check answers it.
+
+    Live runs check prices with one batched quote. A replay drops only the
+    symbol-less rows, because today's quote says nothing about whether a name
+    traded on the replayed session.
+    """
+    if quotes is None:
+        from .marks import latest_prices as quotes
+
+    def call(name: str, args: dict) -> Any:
+        result = dispatch(name, args)
+        rows = result
+        if isinstance(result, str):
+            try:
+                rows = json.loads(result)
+            except ValueError:
+                return result
+        if not (isinstance(rows, list) and rows and all(isinstance(r, dict) for r in rows)):
+            return result
+        if len({str(r.get("symbol", "")).upper() for r in rows}) < 2:
+            return result
+
+        def sym(r: dict) -> str:
+            s = str(r.get("symbol") or "").upper().strip()
+            return "" if s in _NO_SYMBOL else s
+
+        named = {sym(r) for r in rows} - {""}
+        if as_of() is None and named:
+            try:
+                priced = {s for s, px in quotes(sorted(named)).items() if px and px > 0}
+            except Exception as exc:                          # noqa: BLE001
+                log.warning("arena: price screen failed for %s: %s", name, exc)
+                priced = named
+        else:
+            priced = named
+        kept = [r for r in rows if sym(r) in priced]
+        dropped = sorted({sym(r) or "(no symbol)" for r in rows if sym(r) not in priced})
+        if not dropped:
+            return result
+        return json.dumps({
+            "results": kept,
+            "dropped": dropped,
+            "note": (f"{len(rows) - len(kept)} of {len(rows)} rows dropped: no price, "
+                     "so the broker could not fill an order in them."),
+        }, default=str)
+
+    return call
 
 
 class _BindAsOf:

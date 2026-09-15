@@ -644,6 +644,9 @@ loss, and your gross exposure cap counts both legs.
         short_thesis_required=True,
         # Orders as percent of NAV — the fix for a 1,000-share, 119%-of-NAV short.
         size_by_weight=True,
+        # Its filings screens list every SEC filer; drop the ones with no price
+        # before it builds a thesis on a name the broker cannot fill.
+        screen_tradeable=True,
         system_prompt=_prompt(
             """
 You are Jim Chaos. You are a forensic short seller.

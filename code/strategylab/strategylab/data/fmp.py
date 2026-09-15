@@ -92,7 +92,18 @@ def current_rate() -> float:
     return 1.0 / _INTERVAL[0]
 
 
+# A 429 whose body says "Bandwidth Limit Reach" is the plan's data quota, not
+# the per-minute burst limit, and it does not clear by waiting. Retrying it cost
+# ~33s per call: one priced-in ticker spent 8 minutes backing off before failing.
+# The first one trips this for the life of the process, so every later call
+# fails immediately and callers reach their fallback.
+_BANDWIDTH_EXHAUSTED: list[str] = []
+
+
 def _get(url: str, params: dict | None = None, retries: int = 4, timeout: float = 45.0) -> Any:
+    if _BANDWIDTH_EXHAUSTED:
+        raise FMPError(f"FMP bandwidth quota exhausted (skipping {url}): "
+                       f"{_BANDWIDTH_EXHAUSTED[0]}")
     params = dict(params or {})
     params["apikey"] = fmp_key()
     last: Exception | None = None
@@ -100,6 +111,11 @@ def _get(url: str, params: dict | None = None, retries: int = 4, timeout: float 
         _throttle()
         try:
             r = requests.get(url, params=params, timeout=timeout)
+            if r.status_code == 429 and "bandwidth limit" in r.text.lower():
+                _BANDWIDTH_EXHAUSTED.append(r.text[:160].strip())
+                log.warning("FMP bandwidth quota exhausted — skipping FMP for "
+                            "the rest of this process")
+                raise FMPError(f"FMP bandwidth quota exhausted: {r.text[:160]}")
             if r.status_code == 429:
                 # Record it: without this, exhausting the retries reports
                 # "(None)" and hides the fact that it was a rate limit.

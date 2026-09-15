@@ -142,7 +142,11 @@ def build_registry(spec: AgentSpec, account: AccountTools) -> ToolRegistry:
                     log.warning("arena: %s asks for FMP tools the server does not offer: %s",
                                 spec.slug, sorted(absent))
             if schemas:
-                registry.add_schemas(schemas, call_fmp_tool)
+                registry.add_schemas(
+                    schemas,
+                    arena_tools.priced_names_only(call_fmp_tool)
+                    if spec.screen_tradeable else call_fmp_tool,
+                )
         except Exception as exc:  # a dead MCP must not take the whole run down
             log.warning("arena: FMP tools unavailable for %s: %s", spec.slug, exc)
 

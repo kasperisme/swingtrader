@@ -3,6 +3,7 @@ pandas>=2.1
 scipy>=1.11
 requests>=2.31
 python-dotenv>=1.0
+yfinance>=1.0        # fallback when FMP's plan quota is exhausted
 anthropic>=0.40
 matplotlib>=3.8
 psycopg2-binary>=2.9   # optional: news-impact overlay (Supabase)
