@@ -604,7 +604,7 @@ def build_scene_spec(story: dict, max_rows: int | None) -> dict:
     # readable size, the measurability note sits under it as its own line.
     head, tail = crux, ""
     m = re.search(r"^(.*?)(?:,\s+(?:and|but|which)\s+(?:the\s+)?"
-                  r"(?:wired|available|only|this|while)\b|\s*—\s*(?=(?:and|but|which)\b)|\s+—\s+|(?<=[?.])\s+)(.*)$", crux)
+                  r"(?:wired|available|only|this|while|can)\b|\s*—\s*(?=(?:and|but|which)\b)|\s+—\s+|(?<=[?.])\s+)(.*)$", crux)
     if m and m.group(1):
         head, tail = m.group(1).strip(), m.group(2).strip()
     head = head.rstrip(" ,")
@@ -621,7 +621,10 @@ def build_scene_spec(story: dict, max_rows: int | None) -> dict:
     # half of each — reporting it as wholly unsettleable understates the data.
     affirmed = re.search(r"(?<!not )(?<!cannot )(?:can be (?:tested|measured)|can track|measurable)",
                          note, re.I)
-    if denied and affirmed and affirmed.start() < denied.start():
+    # "can only be partially settled by tracking unit volumes" (AAPL, Sep 2026)
+    # has no negation and no "measurable", and read as wholly unsettleable.
+    partial = re.search(r"\b(?:partially|partly|in part)\b", note, re.I)
+    if partial or (denied and affirmed and affirmed.start() < denied.start()):
         testable = "Partly measurable. The rest isn't."
     elif denied:
         testable = "Nothing wired can settle it. Worth saying."
@@ -670,14 +673,20 @@ def build_scene_spec(story: dict, max_rows: int | None) -> dict:
             # "The market ignored them" is only true when it endorses none —
             # beside "agrees with 12 of them" (MSFT, Sep 2026) it contradicts
             # the narration. Name the refused count instead.
+            # Outside the whole spread, "ignored them" is the checkable fact
+            # and a refused count would undercut the narration beside it.
             "number": (f"{sp['n_targets']} analysts priced {company}. The market ignored them."
-                       if not sp["n_endorsed"] else
+                       if not sp["n_endorsed"] or not (sp["low"] <= price <= sp["high"]) else
                        f"{sp['n_targets']} analysts priced {company}. "
                        f"It won't pay {sp['n_refused_bull'] + sp['n_refused_bear']} of them."),
             "stakes": "Two published cases. Pick the one you believe.",
             "rail": f"The price sits {abs(gap):.0f}% {'below' if gap < 0 else 'above'} the median target.",
-            "believes": f"All {len(pays)} things it already believes.",
-            "refuses": f"All {len(refuses)} things it will not fund.",
+            "believes": (f"All {len(pays)} things it already believes." if len(pays) > 2
+                         else "Both things it already believes." if len(pays) == 2
+                         else "The one thing it already believes."),
+            "refuses": (f"All {len(refuses)} things it will not fund." if len(refuses) > 2
+                        else "Both things it will not fund." if len(refuses) == 2
+                        else "The one thing it will not fund."),
             "crux": "One question decides it.",
             "outro": "The whole reading, free. Link in bio.",
         },
@@ -715,6 +724,13 @@ def _speakable(s: str, lower_first: bool = False) -> str:
                lambda m: f"${m.group(1)} " + {"bn": "billion", "tn": "trillion",
                                               "mn": "million", "m": "million"}[m.group(2)],
                s)
+    # "$375-$400" and "8-15%" are ranges; spoken raw they come out as
+    # "375 dollars-400 dollars" and "eight fifteen percent".
+    s = re.sub(r"\$(\d(?:[\d,]*\d)?(?:\.\d+)?)\s*[–—-]\s*\$(\d(?:[\d,]*\d)?(?:\.\d+)?)(?!\s*(?:trillion|billion|million|bn|tn|mn|m)\b)",
+               r"\1 to \2 dollars", s)
+    s = re.sub(r"(\d(?:[\d,]*\d)?(?:\.\d+)?)\s*%?\s*[–—-]\s*(\d(?:[\d,]*\d)?(?:\.\d+)?)%", r"\1 to \2 percent", s)
+    s = re.sub(r"\bYoY\b", "year over year", s)
+    s = re.sub(r"\bv(\d+(?:\.\d+)?)\b", r"version \1", s)       # "FSD v15"
     _MAG = r"(trillion|billion|million)"
     s = re.sub(rf"\$(\d(?:[\d,]*\d)?(?:\.\d+)?)\s*[–—-]\s*(\d(?:[\d,]*\d)?(?:\.\d+)?)\s*{_MAG}",
                r"\1 to \2 \3 dollars", s, flags=re.I)
