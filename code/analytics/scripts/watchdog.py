@@ -245,7 +245,7 @@ def check_health() -> tuple[list[str], list[str]]:
 
 def main() -> dict:
     """Run all checks and return a summary dict written to job_health metadata."""
-    from shared.health import send_whatsapp_alert
+    from shared.health import send_whatsapp_alert, JobHeartbeat, update_job_metadata
 
     logger.info("━━━ Watchdog started ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
 

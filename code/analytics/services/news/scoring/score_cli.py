@@ -635,6 +635,8 @@ async def _fmp_fetch_articles(
             to_date=td,
             expect_sparse_misses=expect_sparse_misses,
         )
+        if rows is None:
+            return []
         for r in rows:
             r["__stream"] = "fmp_general"
         return rows
@@ -647,6 +649,8 @@ async def _fmp_fetch_articles(
             to_date=td,
             expect_sparse_misses=expect_sparse_misses,
         )
+        if rows is None:
+            return []
         for r in rows:
             r["__stream"] = "fmp_stock"
         return rows
@@ -667,6 +671,8 @@ async def _fmp_fetch_articles(
         expect_sparse_misses=expect_sparse_misses,
     )
     stock_arts, gen_arts = await asyncio.gather(stock_task, general_task)
+    stock_arts = stock_arts or []
+    gen_arts = gen_arts or []
     for r in stock_arts:
         r["__stream"] = "fmp_stock"
     for r in gen_arts:
