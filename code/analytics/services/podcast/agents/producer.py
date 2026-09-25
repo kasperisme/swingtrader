@@ -46,7 +46,7 @@ from typing import Any
 
 import httpx
 
-from services.agent_core import build_market_registry, run_tool_loop
+from services.agent_core import build_market_registry, resolve_model, run_tool_loop
 
 from ..config import OLLAMA_BASE_URL, OLLAMA_PODCAST_SCRIPT_MODEL
 from ..research_agent import _build_podcast_dossier_tools, _parse_dossier_json
@@ -78,15 +78,12 @@ _RETRY_MAX_ATTEMPTS = max(
     1, int(os.environ.get("PODCAST_PRODUCER_OLLAMA_RETRIES", "3"))
 )
 
-# Tool-calling needs a model that supports Ollama's `tools` payload. Falls
-# back through the existing chain so single-model setups don't need extra
-# config.
-OLLAMA_PODCAST_PRODUCER_MODEL = (
-    os.environ.get("OLLAMA_PODCAST_PRODUCER_MODEL")
-    or os.environ.get("OLLAMA_PODCAST_RESEARCH_MODEL")
-    or os.environ.get("OLLAMA_TIKTOK_MODEL")
-    or os.environ.get("OLLAMA_BLOG_MODEL")
-    or OLLAMA_PODCAST_SCRIPT_MODEL
+# Tool-calling needs a model that supports Ollama's `tools` payload. Without an
+# override it follows the shared OLLAMA_MODEL, then the script model.
+OLLAMA_PODCAST_PRODUCER_MODEL = resolve_model(
+    "OLLAMA_PODCAST_PRODUCER_MODEL",
+    "OLLAMA_PODCAST_RESEARCH_MODEL",
+    default=OLLAMA_PODCAST_SCRIPT_MODEL,
 )
 
 

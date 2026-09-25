@@ -37,7 +37,12 @@ from typing import Any
 
 import httpx
 
-from services.agent_core import ToolRegistry, simple_chat
+from services.agent_core import (
+    ToolRegistry,
+    resolve_base_url,
+    resolve_model,
+    simple_chat,
+)
 from shared.i18n import language_instruction
 
 from .fmp_tools import looks_like_access_denied
@@ -51,8 +56,8 @@ from .skills import (
 
 log = logging.getLogger(__name__)
 
-_OLLAMA_URL_ENV = "OLLAMA_BASE_URL"
-_OLLAMA_MODEL_ENV = "OLLAMA_TIKTOK_MODEL"
+# Same model resolution as engine.py: SCREENING_AGENT_MODEL, else OLLAMA_MODEL.
+_OLLAMA_MODEL_ENV = "SCREENING_AGENT_MODEL"
 
 _TICKER_CONCURRENCY = int(os.environ.get("AGENT_MULTI_TICKER_CONCURRENCY", "3"))
 _PLAN_TIMEOUT = float(os.environ.get("AGENT_PLAN_TIMEOUT", "90"))
@@ -882,12 +887,8 @@ async def run_multi_ticker_async(
     planner — the same plan/trial/re-plan path as before.
     """
     trace = trace or RunTrace()
-    base_url = os.environ.get(_OLLAMA_URL_ENV, "http://localhost:11434").rstrip("/")
-    model = (
-        os.environ.get(_OLLAMA_MODEL_ENV)
-        or os.environ.get("OLLAMA_BLOG_MODEL")
-        or "gemma4:e4b"
-    )
+    base_url = resolve_base_url()
+    model = resolve_model(_OLLAMA_MODEL_ENV)
     log.info(
         "Multi-ticker pipeline: start — tickers=%d (%s) model=%s tools=%d has_condition=%s",
         len(tickers),

@@ -3,6 +3,8 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
+from services.agent_core import resolve_base_url, resolve_model
+
 _REPO_ROOT = Path(__file__).resolve().parents[3]
 _ANALYTICS_ROOT = Path(__file__).resolve().parents[2]
 
@@ -24,15 +26,11 @@ ELEVENLABS_SECONDARY_VOICE_NAME = os.environ.get("ELEVENLABS_SECONDARY_VOICE_NAM
 ELEVENLABS_HOOK_VOICE_ID = os.environ.get("ELEVENLABS_HOOK_VOICE_ID", "")
 ELEVENLABS_HOOK_VOICE_NAME = os.environ.get("ELEVENLABS_HOOK_VOICE_NAME", "Hans")
 
-OLLAMA_PODCAST_SCRIPT_MODEL = os.environ.get(
-    "OLLAMA_PODCAST_SCRIPT_MODEL", "glm-5.1:cloud"
-)
-OLLAMA_PODCAST_EXTRACT_MODEL = os.environ.get(
-    "OLLAMA_PODCAST_EXTRACT_MODEL", "glm-5.1:cloud"
-)
-OLLAMA_BASE_URL = os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434").rstrip(
-    "/"
-)
+# Per-subsystem overrides; without them both fall through to the shared
+# OLLAMA_MODEL (services/agent_core/config.py).
+OLLAMA_PODCAST_SCRIPT_MODEL = resolve_model("OLLAMA_PODCAST_SCRIPT_MODEL")
+OLLAMA_PODCAST_EXTRACT_MODEL = resolve_model("OLLAMA_PODCAST_EXTRACT_MODEL")
+OLLAMA_BASE_URL = resolve_base_url()
 
 # OpenAI image generation (cover art)
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "")

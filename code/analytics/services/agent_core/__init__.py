@@ -20,7 +20,7 @@ Typical use:
         final_message, tool_results, rounds_used = await run_tool_loop(
             client,
             base_url=OLLAMA_BASE_URL,
-            model=OLLAMA_MODEL,
+            model=resolve_model("MY_AGENT_MODEL"),
             system=SYSTEM_PROMPT,
             user=USER_PROMPT,
             registry=registry,
@@ -29,6 +29,12 @@ Typical use:
         )
 """
 
+from .config import (
+    DEFAULT_MODEL,
+    SHARED_MODEL_ENV,
+    resolve_base_url,
+    resolve_model,
+)
 from .loop import (
     Tool,
     ToolRegistry,
@@ -44,6 +50,8 @@ from .market_tools import (
 )
 
 __all__ = [
+    "DEFAULT_MODEL",
+    "SHARED_MODEL_ENV",
     "Tool",
     "ToolRegistry",
     "build_market_registry",
@@ -51,6 +59,8 @@ __all__ = [
     "build_user_registry",
     "fetch_url",
     "is_transient_ollama_error",
+    "resolve_base_url",
+    "resolve_model",
     "run_tool_loop",
     "simple_chat",
 ]
