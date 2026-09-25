@@ -30,6 +30,8 @@ from services.agent_core import (
     build_market_registry,
     build_screening_write_registry,
     build_user_registry,
+    resolve_base_url,
+    resolve_model,
     run_tool_loop,
 )
 from services.rag import get_user_trading_strategy
@@ -212,8 +214,9 @@ _AGENT_SYSTEM = _AGENT_SYSTEM.replace("{_CLUSTER_BLOCK_PLACEHOLDER}", _CLUSTER_B
 
 # ── Config ──────────────────────────────────────────────────────────────────
 
-_OLLAMA_URL_ENV = "OLLAMA_BASE_URL"
-_OLLAMA_MODEL_ENV = "OLLAMA_TIKTOK_MODEL"
+# Model: SCREENING_AGENT_MODEL overrides, otherwise the shared OLLAMA_MODEL.
+# See services/agent_core/config.py — nothing borrows another subsystem's var.
+_OLLAMA_MODEL_ENV = "SCREENING_AGENT_MODEL"
 
 _FMP_ENABLED = bool(os.environ.get("FMP_API_KEY"))
 
@@ -554,12 +557,8 @@ async def _run_agent_async(
     system: str, user_prompt: str, registry: ToolRegistry,
     trace: RunTrace | None = None,
 ) -> dict:
-    base_url = os.environ.get(_OLLAMA_URL_ENV, "http://localhost:11434").rstrip("/")
-    model = (
-        os.environ.get(_OLLAMA_MODEL_ENV)
-        or os.environ.get("OLLAMA_BLOG_MODEL")
-        or "gemma4:e4b"
-    )
+    base_url = resolve_base_url()
+    model = resolve_model(_OLLAMA_MODEL_ENV)
     log.info(
         "Screening agent: starting run — model=%s registry_tools=%d "
         "system_len=%d prompt_len=%d prompt_preview=%r",

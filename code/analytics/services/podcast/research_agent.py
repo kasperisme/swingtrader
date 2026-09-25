@@ -29,6 +29,7 @@ import httpx
 from services.agent_core import (
     ToolRegistry,
     build_market_registry,
+    resolve_model,
     run_tool_loop,
 )
 
@@ -60,13 +61,10 @@ _RETRY_MAX_ATTEMPTS = max(
     1, int(os.environ.get("PODCAST_RESEARCH_OLLAMA_RETRIES", "3"))
 )
 
-# Tool-calling needs a model that supports Ollama's `tools` payload; falls
-# back to the script model so single-model setups don't need extra config.
-OLLAMA_PODCAST_RESEARCH_MODEL = (
-    os.environ.get("OLLAMA_PODCAST_RESEARCH_MODEL")
-    or os.environ.get("OLLAMA_TIKTOK_MODEL")
-    or os.environ.get("OLLAMA_BLOG_MODEL")
-    or OLLAMA_PODCAST_SCRIPT_MODEL
+# Tool-calling needs a model that supports Ollama's `tools` payload; without an
+# override it follows the shared OLLAMA_MODEL, then the script model.
+OLLAMA_PODCAST_RESEARCH_MODEL = resolve_model(
+    "OLLAMA_PODCAST_RESEARCH_MODEL", default=OLLAMA_PODCAST_SCRIPT_MODEL
 )
 
 

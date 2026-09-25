@@ -38,6 +38,10 @@ Copy `.env.example` to `.env` (or edit `.env` directly) and fill in the required
 | Variable | Default | Description |
 |---|---|---|
 | `OLLAMA_BASE_URL` | `http://localhost:11434` | Ollama server URL |
+| `OLLAMA_MODEL` | `glm-5.1:cloud` | **Shared model for every Ollama agent** — screening agents scheduled from the UI, podcast agents. One setting moves them all |
+| `SCREENING_AGENT_MODEL` | — | Overrides `OLLAMA_MODEL` for the screening agents only |
+| `OLLAMA_PODCAST_*_MODEL` | — | Override `OLLAMA_MODEL` for one podcast agent (script / extract / research / producer / scene) |
+| `ARENA_MODEL` | `gemma4:31b-cloud` | The arena resolves this **alone**, never `OLLAMA_MODEL` — see `services/arena/README.md` |
 | `OLLAMA_BLOG_MODEL` | `gemma4:e4b` | Model used for blog and X thread generation |
 | `OLLAMA_BLOG_NUM_PREDICT` | `1500` | Max tokens for blog post |
 

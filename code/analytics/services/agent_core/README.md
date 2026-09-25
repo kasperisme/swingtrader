@@ -10,8 +10,14 @@ Shared LLM plumbing for every agent and script in `analytics/` that calls Ollama
   starts with the same knowledge surface (cluster trends, ticker sentiment,
   semantic news search, fetch_url, …).
 
+- A **single model setting**. `resolve_model("MY_AGENT_MODEL")` reads that
+  subsystem's override, then the shared `OLLAMA_MODEL`, then the default. No
+  agent falls back to another subsystem's variable — that is how the screening
+  agents ended up running on whatever `OLLAMA_BLOG_MODEL` was set to. The arena
+  is the deliberate exception (`ARENA_MODEL` alone).
+
 If you're calling Ollama from anywhere new in `analytics/`, use this — don't
-re-implement the streaming/retry plumbing.
+re-implement the streaming/retry plumbing or your own model fallback chain.
 
 ---
 
@@ -24,13 +30,13 @@ captions, JSON outputs.
 
 ```python
 import httpx
-from services.agent_core import simple_chat
+from services.agent_core import resolve_base_url, resolve_model, simple_chat
 
 async with httpx.AsyncClient() as client:
     text = await simple_chat(
         client,
-        base_url="http://localhost:11434",
-        model="glm-5.1:cloud",
+        base_url=resolve_base_url(),
+        model=resolve_model("MY_AGENT_MODEL"),
         system="You are a market analyst.",
         user="Summarize today's tape in 3 sentences.",
         options={"num_predict": 600},
@@ -50,7 +56,12 @@ fetch, and return a structured answer.
 
 ```python
 import httpx
-from services.agent_core import build_market_registry, run_tool_loop
+from services.agent_core import (
+    build_market_registry,
+    resolve_base_url,
+    resolve_model,
+    run_tool_loop,
+)
 
 registry = build_market_registry()  # 9 base RAG tools + fetch_url
 # Add agent-specific tools:
@@ -64,8 +75,8 @@ registry.add_function(
 async with httpx.AsyncClient() as client:
     final_message, tool_results, rounds_used = await run_tool_loop(
         client,
-        base_url="http://localhost:11434",
-        model="glm-5.1:cloud",
+        base_url=resolve_base_url(),
+        model=resolve_model("MY_AGENT_MODEL"),
         system=SYSTEM_PROMPT,
         user=USER_PROMPT,
         registry=registry,
@@ -173,7 +184,7 @@ without threading user context through every call site.
 
 ## Why streaming is mandatory
 
-`OLLAMA_BLOG_MODEL=glm-5.1:cloud` and similar `:cloud` models proxy through
+`OLLAMA_MODEL=glm-5.1:cloud` and similar `:cloud` models proxy through
 Ollama Cloud. The cloud proxy closes idle connections after ~60 s. With
 `stream: false` the proxy waits for the full generation to complete before
 sending any bytes back; for typical `num_predict` sizes (≥ 600) generation

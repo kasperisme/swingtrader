@@ -89,14 +89,8 @@ def cmd_fmp_test(args):
 
 
 def _resolve_ollama() -> tuple[str, str]:
-    import os
-    base_url = os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434").rstrip("/")
-    model = (
-        os.environ.get("OLLAMA_TIKTOK_MODEL")
-        or os.environ.get("OLLAMA_BLOG_MODEL")
-        or "gemma4:e4b"
-    )
-    return base_url, model
+    from services.agent_core import resolve_base_url, resolve_model
+    return resolve_base_url(), resolve_model("SCREENING_AGENT_MODEL")
 
 
 def cmd_validate_skills(args):

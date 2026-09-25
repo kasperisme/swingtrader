@@ -27,3 +27,5 @@ google-analytics-data
 google-analytics-admin
 google-api-python-client
 google-auth
+yfinance 
+lxml
