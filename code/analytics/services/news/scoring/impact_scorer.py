@@ -11,12 +11,13 @@ import logging
 import os
 import re
 from dataclasses import dataclass, field
-from typing import Optional, Union
+from typing import Callable, Optional, Union
 
 from services.news.scoring.article_tags import parse_article_tags, tag_prompt_guidance
 from services.news.scoring.claim_rationale import normalize_novelty, rationale_adds_information
 from services.news.scoring.dimensions import CLUSTERS, DIMENSION_MAP
 from shared.llm import chat as _chat, LLMError
+from services.news.scoring import impact_summary
 
 # NEWS_IMPACT_BACKEND=ollama (default) | anthropic | do_agent
 _raw_backend = os.environ.get("NEWS_IMPACT_BACKEND", "ollama").lower()
@@ -80,6 +81,7 @@ SPECIAL_HEAD_CLUSTERS: frozenset[str] = frozenset({
     "TICKER_SENTIMENT",
     "STORY_KEY_POINTS",
     "ARTICLE_TAGS",
+    "IMPACT_SUMMARY",
 })
 
 EXPECTED_HEAD_COUNT: int = len(CLUSTERS) + len(SPECIAL_HEAD_CLUSTERS)
@@ -89,6 +91,8 @@ ALL_HEAD_CLUSTERS: tuple[str, ...] = tuple(CLUSTERS.keys()) + (
     "TICKER_SENTIMENT",
     "STORY_KEY_POINTS",
     "ARTICLE_TAGS",
+    # Last on purpose: it reads every head above (see score_article).
+    "IMPACT_SUMMARY",
 )
 
 _HEAD_ALIASES: dict[str, str] = {
@@ -103,6 +107,9 @@ _HEAD_ALIASES: dict[str, str] = {
     "tags": "ARTICLE_TAGS",
     "article_tags": "ARTICLE_TAGS",
     "search_tags": "ARTICLE_TAGS",
+    "summary": "IMPACT_SUMMARY",
+    "impact_summary": "IMPACT_SUMMARY",
+    "priced_in": "IMPACT_SUMMARY",
 }
 
 
@@ -1006,6 +1013,8 @@ async def _run_cluster_head(
         )
     if cluster == "ARTICLE_TAGS":
         return await _run_tags_head(article_text)
+    if cluster == "IMPACT_SUMMARY":
+        raise ValueError("IMPACT_SUMMARY needs prior heads — run it via score_article")
     raise ValueError(f"Unknown head cluster: {cluster}")
 
 
@@ -1015,9 +1024,12 @@ async def score_article(
     *,
     title: Optional[str] = None,
     published_at: object = None,
+    prior_heads: Optional[list[HeadOutput]] = None,
+    normalize_heads: Optional[Callable[[list[HeadOutput]], None]] = None,
+    priced_in_loader: Optional[impact_summary.PricedInLoader] = None,
 ) -> list[HeadOutput]:
     """
-    Run LLM heads in parallel.
+    Run LLM heads in parallel, then IMPACT_SUMMARY over their results.
 
     When ``clusters`` is None, runs every head (dimension clusters + special heads).
     Otherwise runs only the requested canonical cluster names (see ``normalize_head_clusters``).
@@ -1026,9 +1038,18 @@ async def score_article(
     "new vs priced in" judgement is meaningless without knowing WHEN the piece
     ran — a commentary on last week's earnings reads exactly like the release.
 
+    IMPACT_SUMMARY is a second phase: it summarises the other heads in the
+    context of each affected company's latest priced-in reconstruction, so it
+    starts only once they have all finished. When it is requested without them
+    (a backfill), ``prior_heads`` supplies the stored ones. ``normalize_heads``
+    runs in place between the phases, so the summary looks up priced-in rows
+    by canonical ticker; ``priced_in_loader`` replaces the Supabase lookup.
+
     Failed heads have error set and confidence=0.0 with empty scores.
     """
     run_clusters = list(ALL_HEAD_CLUSTERS) if clusters is None else list(clusters)
+    want_summary = "IMPACT_SUMMARY" in run_clusters
+    run_clusters = [c for c in run_clusters if c != "IMPACT_SUMMARY"]
 
     results = await asyncio.gather(
         *[
@@ -1053,6 +1074,26 @@ async def score_article(
             ))
         else:
             outputs.append(result)
+
+    if normalize_heads is not None:
+        normalize_heads(outputs)
+
+    if want_summary:
+        fresh = {h.cluster for h in outputs}
+        context = outputs + [h for h in (prior_heads or []) if h.cluster not in fresh]
+        try:
+            summary = await impact_summary.run_impact_summary_head(
+                article_text, context,
+                title=title, published_at=published_at,
+                priced_in_loader=priced_in_loader,
+            )
+        except Exception as exc:
+            logger.error("[impact_scorer] unexpected exception in IMPACT_SUMMARY: %s", exc)
+            summary = HeadOutput(
+                cluster="IMPACT_SUMMARY", scores={}, reasoning={}, confidence=0.0,
+                model=_default_model(), latency_ms=0, raw_response="", error=str(exc),
+            )
+        outputs.append(summary)
 
     return outputs
 

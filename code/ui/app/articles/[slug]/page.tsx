@@ -34,6 +34,8 @@ import {
 } from "@/lib/news/article-verdict";
 import { getScoreDistribution } from "@/lib/news/score-distribution";
 import { AnchorCaption, ScoreRail } from "./_components/score-rail";
+import { parseImpactSummary } from "@/lib/news/impact-summary";
+import { ImpactSummaryBanner } from "./_components/impact-summary-banner";
 import {
   PricePart,
   PricePartSkeleton,
@@ -950,6 +952,11 @@ async function ArticleData({ params }: { params: Promise<{ slug?: string }> }) {
   const relationshipHead = heads.find(
     (h) => h.cluster === "TICKER_RELATIONSHIPS",
   );
+  // The lead when present: the article read against what each company's price
+  // already assumes. Articles scored before the head existed keep the verdict.
+  const impactSummary = parseImpactSummary(
+    heads.find((h) => h.cluster === "IMPACT_SUMMARY"),
+  );
 
   const keyPointScores = asNumberMap(keyPointsHead?.scores_json ?? {});
   const keyPointReasoning = asStringMap(keyPointsHead?.reasoning_json ?? {});
@@ -1109,9 +1116,6 @@ async function ArticleData({ params }: { params: Promise<{ slug?: string }> }) {
         type="application/ld+json"
         dangerouslySetInnerHTML={{ __html: JSON.stringify(articleJsonLd) }}
       />
-      <div className="mb-6">
-        <BriefingBanner />
-      </div>
       <div className="mb-8">
         <Link
           href="/articles"
@@ -1133,7 +1137,20 @@ async function ArticleData({ params }: { params: Promise<{ slug?: string }> }) {
           {article.title || "Untitled article"}
         </h1>
 
-        {verdict ? (
+        {impactSummary ? (
+          <ImpactSummaryBanner
+            impact={impactSummary}
+            priceSlot={(row) => (
+              <Suspense fallback={<PricePartSkeleton />}>
+                <PricePart
+                  ticker={row.ticker}
+                  publishedIso={publishedIso}
+                  expected={row.score}
+                />
+              </Suspense>
+            )}
+          />
+        ) : verdict ? (
           <VerdictBanner
             verdict={verdict}
             subject={primary?.ticker ?? null}
@@ -1194,6 +1211,12 @@ async function ArticleData({ params }: { params: Promise<{ slug?: string }> }) {
 
         <ArticleTagsRow tags={searchTags} trending={trendingLookup} />
       </article>
+
+      {/* Below the header, not above it: the headline and its priced-in read
+          are what a search visitor came for, so they get the first screen. */}
+      <div className="mt-10">
+        <BriefingBanner />
+      </div>
 
       <div className="mt-12">
         <AnalyticsRegion

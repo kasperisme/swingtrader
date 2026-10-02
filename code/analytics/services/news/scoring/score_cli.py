@@ -447,19 +447,24 @@ async def _score_article_heads(
 
     ``title`` / ``published_at`` feed the key-points head's novelty judgement.
     """
+    # Canonicalise before IMPACT_SUMMARY runs, so it looks up priced-in rows by
+    # the same ticker the quote page uses.
+    def normalize(hs: list[HeadOutput]) -> None:
+        _normalize_relationship_and_sentiment_heads(hs, ticker_alias_map, company_alias_map)
+
     if heads_filter is None:
         heads, extracted = await asyncio.gather(
-            score_article(body, title=title, published_at=published_at),
+            score_article(
+                body, title=title, published_at=published_at, normalize_heads=normalize
+            ),
             extract_tickers(body),
         )
     else:
         heads = await score_article(
-            body, clusters=heads_filter, title=title, published_at=published_at
+            body, clusters=heads_filter, title=title, published_at=published_at,
+            normalize_heads=normalize,
         )
         extracted = []
-    _normalize_relationship_and_sentiment_heads(
-        heads, ticker_alias_map, company_alias_map
-    )
     extracted = [
         t
         for t in (
