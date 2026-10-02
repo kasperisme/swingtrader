@@ -132,27 +132,27 @@ def _fetch_rescore_ids(head_cluster: str) -> list[int]:
 
 
 def _fetch_recent_ids(head_cluster: str, days: int) -> list[int]:
-    """Articles published in the last ``days`` that already have ``head_cluster``
-    (newest first) — the pages readers actually land on, for re-running a head
-    after its prompt changes. Implies --rescore."""
+    """Scored articles published in the last ``days`` (newest first) — the pages
+    readers actually land on. Covers both re-running a head after its prompt
+    changes and filling a brand-new head: --rescore deletes the article's row for
+    the head first, which is a no-op where there is none yet."""
     sql = """
         select distinct h.article_id
         from swingtrader.news_impact_heads h
         join swingtrader.news_articles a on a.id = h.article_id
-        where h.cluster = %s
-          and a.published_at > now() - make_interval(days => %s)
+        where a.published_at > now() - make_interval(days => %s)
           and a.has_analysis is not false
         order by h.article_id desc
     """
     conn = get_pg_connection()
     try:
         with conn.cursor() as cur:
-            cur.execute(sql, (head_cluster, days))
+            cur.execute(sql, (days,))
             ids = [row[0] for row in cur.fetchall()]
     finally:
         conn.close()
     console.print(
-        f"[dim]Articles from the last {days}d with {head_cluster}: [bold]{len(ids)}[/bold][/dim]"
+        f"[dim]Scored articles from the last {days}d for {head_cluster}: [bold]{len(ids)}[/bold][/dim]"
     )
     return ids
 
@@ -182,7 +182,7 @@ def _fetch_existing_heads(client, article_id: int) -> list[HeadOutput]:
     res = (
         client.schema("swingtrader")
         .table("news_impact_heads")
-        .select("cluster, scores_json, reasoning_json, confidence, model, latency_ms")
+        .select("cluster, scores_json, reasoning_json, meta_json, confidence, model, latency_ms")
         .eq("article_id", article_id)
         .execute()
     )
@@ -197,6 +197,7 @@ def _fetch_existing_heads(client, article_id: int) -> list[HeadOutput]:
                 model=row.get("model") or "",
                 latency_ms=int(row.get("latency_ms") or 0),
                 raw_response="",
+                meta=row.get("meta_json") or {},
             )
         )
     return out
@@ -255,6 +256,13 @@ async def _backfill_one(
         console.print(f"  [{index}/{total}] id={article_id} — skipped (empty body)")
         return False
 
+    # IMPACT_SUMMARY summarises the heads already stored for the article.
+    prior = (
+        _fetch_existing_heads(client, article_id)
+        if head_cluster == "IMPACT_SUMMARY"
+        else None
+    )
+
     async with semaphore:
         console.print(
             f"[bold cyan][{index}/{total}][/bold cyan] id={article_id}  {title[:65]}"
@@ -265,6 +273,7 @@ async def _backfill_one(
                 clusters=[head_cluster],
                 title=title,
                 published_at=row.get("published_at"),
+                prior_heads=prior,
             )
         except Exception as exc:
             console.print(f"  [red]id={article_id} scoring failed: {exc}[/red]")
@@ -464,7 +473,7 @@ def _build_parser() -> argparse.ArgumentParser:
         dest="since_days",
         type=int,
         default=None,
-        help="Re-run the head for articles published in the last N days (implies --rescore).",
+        help="Run (or re-run) the head for scored articles published in the last N days (implies --rescore).",
     )
     p.add_argument(
         "--dry-run",

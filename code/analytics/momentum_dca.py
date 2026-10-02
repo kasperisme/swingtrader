@@ -59,8 +59,19 @@ def download_prices(tickers, start, end):
 
 # ---------------------------------------------------------------- engine
 def backtest(
-    raw, bench_raw, start, amount, lookback=12, skip=0, top=1, universe=None, stop=0.2
+    raw,
+    bench_raw,
+    start,
+    amount,
+    lookback=12,
+    skip=0,
+    top=1,
+    universe=None,
+    stop=0.2,
+    rank=None,
 ):
+    # rank: optional date x ticker frame of scores to pick the top N by (e.g.
+    # market cap) instead of trailing return; read as of the signal date.
     prices = raw.ffill()  # last known price carried after a delisting
     bench = bench_raw.reindex(raw.index).ffill()
     days = raw.index
@@ -96,7 +107,13 @@ def backtest(
             members = universe[universe.index <= t]
             if len(members):
                 ok &= raw.columns.isin(members.iloc[-1])
-        ret = (prices.loc[t_now] / prices.loc[t_then] - 1)[ok].dropna()
+        if rank is None:
+            ret = (prices.loc[t_now] / prices.loc[t_then] - 1)[ok].dropna()
+        else:
+            row = rank[rank.index <= t]
+            if row.empty:
+                continue
+            ret = row.iloc[-1].reindex(raw.columns)[ok].dropna()
         if ret.empty:
             continue
 
