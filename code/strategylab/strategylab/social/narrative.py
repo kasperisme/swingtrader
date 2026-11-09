@@ -14,8 +14,10 @@ already exist in the swingtrader news pipeline:
 * **`GROWTH_PROFILE`** — one of six scored dimensions per article. It answers
   "what does the coverage currently believe about this company's growth?",
   which is exactly the axis a growth thesis has to differ from.
-* **`news_article_embeddings`** — 1.8M chunks in pgvector, so "is anyone already
-  saying this?" is a similarity query rather than a reading exercise.
+* **`news_articles.body`** — the article text itself, vectorised in memory
+  over Postgres full-text lexemes (`lexical.py`), so "is anyone already saying
+  this?" is a similarity query rather than a reading exercise. (Stored
+  embeddings in `news_article_embeddings` did this until Nov 2026.)
 
 **The network matters as much as the ticker.** A company's narrative is carried
 substantially by coverage of its competitors, suppliers and customers: a claim

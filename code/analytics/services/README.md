@@ -17,8 +17,8 @@ Python service packages for the swingtrader analytics backend. Each subdirectory
 ┌───────▼────────┐         ┌──────────▼─────────┐         ┌──────────▼────────────┐
 │ news/          │         │ rag/               │         │ screener/             │
 │ Score articles │         │ Read-only data     │         │ Full-market scan      │
-│ + embeddings + │◀────────│ access layer + LLM │         │ (Minervini trend      │
-│ daily          │         │ tool schemas (used │         │ template, NYSE+       │
+│ + daily        │◀────────│ access layer + LLM │         │ (Minervini trend      │
+│                │         │ tool schemas (used │         │ template, NYSE+       │
 │ narrative      │         │ by every agent)    │         │ NASDAQ, FMP)          │
 └────────────────┘         └─────────┬──────────┘         └───────────────────────┘
                                      │
@@ -45,7 +45,7 @@ Python service packages for the swingtrader analytics backend. Each subdirectory
 | [`agent/`](agent/README.md) | Scheduled **user** screening agent (LLM + Telegram). Own OpenClaw cron `screening-tick` → `agent.cli tick`. | `python -m services.agent.cli {tick,run,setup-cron,fmp-test}` |
 | [`market_screenings/`](market_screenings/README.md) | Script-backed shared screenings: own scheduler + OpenClaw cron `market-screening-tick`; cron date logic shared via `shared/screening_schedule.py`. | `python -m services.market_screenings.cli {tick,run,setup-cron}` |
 | [`bulk_analysis/`](bulk_analysis/README.md) | Per-ticker technical-analysis worker. UI inserts a job row → cron tick dispatches a subprocess that fetches OHLCV, runs LLM analysis, writes to chat workspace. | `python -m services.bulk_analysis.cli {tick,run}` |
-| [`news/`](news/README.md) | News ingestion + impact scoring + embeddings + daily narrative. The factor-scoring core that feeds every other service. | `score_cli`, `embeddings_cli`, `narrative_generator` |
+| [`news/`](news/README.md) | News ingestion + impact scoring + daily narrative. The factor-scoring core that feeds every other service. | `score_cli`, `narrative_generator` |
 | [`podcast/`](podcast/README.md) | Daily audio digest: LLM script → ElevenLabs → MP3 → RSS. Telegram approval gate. | `python scripts/run_podcast.py` |
 | [`rag/`](rag/README.md) | Read-only data access layer. Wraps Supabase queries (clusters, dimensions, ticker sentiment, semantic search, the priced-in drivers + per-driver cases). Defines the canonical LLM tool schemas. | Imported as a library |
 | [`screener/`](screener/README.md) | Full-market scan (NYSE + NASDAQ) using Minervini's trend template. Persists to `scan_jobs` + the screenings HTTP API. | `services.screener.engine.run` |
@@ -57,7 +57,6 @@ Python service packages for the swingtrader analytics backend. Each subdirectory
 ```
 News ingestion (news/scoring) ─▶ news_articles + news_impact_vectors
                                   │
-                                  ├─▶ news/embeddings (chunk + vector) ─▶ news_chunk_embeddings
                                   │
                                   ├─▶ news/narrative ──▶ user_daily_narratives
                                   │

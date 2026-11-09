@@ -24,7 +24,7 @@ articles. What is being tested is whether driver-matched days move MORE than
 that ticker's ordinary news day, not whether they move at all.
 
 **Known weakness, stated up front.** Matching articles to drivers is done by
-embedding similarity, and `saturation.retrieval_discrimination` already showed
+full-text similarity, and `saturation.retrieval_discrimination` already showed
 that is not selective on a thin corpus — 23 articles cannot be partitioned into
 eight drivers. Expect the matching to be noisy, and read `selective` before
 reading anything else.
@@ -42,7 +42,7 @@ import numpy as np
 from ..config import CACHE_ROOT
 from ..data.news import _connect
 from ..data.prices import PriceStore
-from .saturation import _unit, embed
+from .lexical import LexicalSpace, article_chunks, lexemes
 
 log = logging.getLogger(__name__)
 
@@ -138,7 +138,10 @@ _TEMPLATE = re.compile(
 def forward_articles(ticker: str, since: date, until: date,
                      names: list[str] | None = None,
                      max_articles: int = 3000) -> list[tuple]:
-    """(article_id, title, published, chunk_text, embedding) after `since`.
+    """(article_id, title, published, chunk_text) after `since`.
+
+    Chunks are cut from `news_articles.body` on the fly (`lexical.article_chunks`)
+    — the stored embedding chunks were retired in Nov 2026.
 
     Deliberately re-queried rather than reusing a NarrativeSpace: that space is
     built on a LOOKBACK window ending at as_of, and the events we need are the
@@ -146,10 +149,9 @@ def forward_articles(ticker: str, since: date, until: date,
     """
     # Two steps, and a cache.
     #
-    # One query with the tag OR-filter joined against the 1.8M-row embeddings
-    # table times out — the same shape that broke the narrative space earlier.
-    # Resolve ids against `news_articles` (218k rows, indexed on both paths),
-    # then fetch chunks by id. The result is cached because a parameter sweep
+    # Resolve the article set against `news_articles` (indexed on both the
+    # tag and ticker paths), then chunk the bodies in Python, capped at
+    # `max_articles` chunk rows. The result is cached because a parameter sweep
     # re-runs selection seven times over identical data, and the fetch is the
     # only expensive part.
     key = (ticker, since.isoformat(), until.isoformat(), max_articles)
@@ -170,15 +172,17 @@ def forward_articles(ticker: str, since: date, until: date,
             rows = []
             if ids:
                 cur.execute(f"""
-                    SELECT a.id, a.title, a.published_at::date, e.chunk_text,
-                           e.embedding::text
-                    FROM {SCHEMA_NS}.news_article_embeddings e
-                    JOIN {SCHEMA_NS}.news_articles a ON a.id = e.article_id
-                    WHERE e.article_id = ANY(%s)
+                    SELECT a.id, a.title, a.published_at::date, a.body
+                    FROM {SCHEMA_NS}.news_articles a
+                    WHERE a.id = ANY(%s) AND a.has_analysis IS NOT FALSE
                     ORDER BY a.published_at
-                    LIMIT %s
-                """, (ids, max_articles))
-                rows = cur.fetchall()
+                """, (ids,))
+                for aid, title, published, body in cur.fetchall():
+                    for ch in article_chunks(title or "", body or ""):
+                        rows.append((aid, title, published, ch))
+                    if len(rows) >= max_articles:
+                        break
+                rows = rows[:max_articles]
         _FETCH_CACHE[key] = rows
 
     # Keep only articles that are ABOUT this company: the name (or a brand) in
@@ -222,17 +226,23 @@ def run(ticker: str, as_of: date, drivers: list[dict], horizon_days: int = 365,
     # information at all while still counting toward n. An article's similarity
     # to a driver is the MAX over its chunks; one strongly-matching passage is
     # what makes the article about that driver.
-    import json as _json
+    #
+    # Vectors are full-text TF-IDF over Postgres lexemes, fitted on this
+    # forward corpus (`lexical.LexicalSpace`) — one tokenisation round trip.
     from collections import defaultdict
     by_article: dict[int, dict] = {}
-    chunk_vecs = defaultdict(list)
     for r in rows:
         by_article.setdefault(r[0], {"title": r[1], "published": r[2]})
-        chunk_vecs[r[0]].append(_unit(_json.loads(r[4])))
     art_ids = list(by_article)
     if not art_ids:
         return {"error": f"no usable forward articles for {ticker}"}
-    mats = {a: np.vstack(v) for a, v in chunk_vecs.items()}
+    lex = lexemes([r[3] for r in rows])
+    space = LexicalSpace(lex)
+    vecs = space.vectorize(lex)
+    chunk_rows = defaultdict(list)
+    for i, r in enumerate(rows):
+        chunk_rows[r[0]].append(i)
+    mats = {a: vecs[idx] for a, idx in chunk_rows.items()}
     # Baseline: this ticker's average |CAR| across ALL its forward article days.
     # Without it, a driver matched to earnings-week articles looks important
     # when it has only been matched to volatile days.
@@ -266,7 +276,7 @@ def run(ticker: str, as_of: date, drivers: list[dict], horizon_days: int = 365,
     driver_sims: list = []
     for d in usable:
         text = f"{d.get('driver','')} {d.get('basis','')}"
-        q = _unit(embed(text))
+        q = space.embed(text)
         sims = np.array([float((mats[a] @ q).max()) for a in art_ids])
         driver_sims.append(sims)
     if not driver_sims:
@@ -320,7 +330,7 @@ def run(ticker: str, as_of: date, drivers: list[dict], horizon_days: int = 365,
                          f"percentile of this ticker's whole driver x article "
                          f"similarity matrix (floor {floor:.3f})",
             "car_days": car_days,
-            "caveat": ("Driver-to-article matching is embedding similarity, which "
+            "caveat": ("Driver-to-article matching is full-text (TF-IDF) similarity, which "
                        "is not selective on a thin corpus. Few drivers and few "
                        "events per driver mean this is a direction check, not a "
                        "significance test.")}

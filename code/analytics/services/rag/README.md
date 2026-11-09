@@ -30,7 +30,7 @@ Before `rag/`, every LLM-driven service redefined its own queries against Supaba
 
               embeddings.py             portfolio.py                 screening.py
               ─ search_news             ─ get_user_positions         ─ apply_scan_filters
-              ─ embed_query             ─ get_user_alerts            ─ get_filtered_tickers_from_scan
+                                        ─ get_user_alerts            ─ get_filtered_tickers_from_scan
                                         ─ get_user_screening_notes
                                         ─ get_user_trading_strategy
 
@@ -63,7 +63,7 @@ All exports are surfaced from `services/rag/__init__.py` — import `from servic
 | `articles.py` | `news_articles`, `news_impact_vectors`, `news_article_tickers` | Top articles by impact magnitude; per-ticker article feeds; ticker-list backfill for a set of articles. |
 | `sentiment.py` | `news_impact_vectors` | Cluster-level + dimension-level sentiment time series. |
 | `graph.py` | `ticker_relationships`, `company_vectors` | Ticker neighborhood (1-hop / N-hop) for "show me what else is related to NVDA"; company factor vectors for downstream scoring. |
-| `embeddings.py` | `news_chunk_embeddings` (pgvector) | Semantic search via `gte-small` embeddings. Resolves a query string → ranked article snippets. |
+| `embeddings.py` | `news_articles` (`search_tags`, `fts`) | `search_news`: tag overlap when tickers are named, else ranked Postgres full-text. (Name kept for import stability; vector search was retired Nov 2026.) |
 | `portfolio.py` | `user_trades`, `user_alerts`, `user_scan_row_notes`, `user_settings` | Per-user portfolio context. Each fn takes `user_id` as the first arg. |
 | `screening.py` | `user_scan_runs`, `user_scan_rows` | Filter the rows of a scan run by column-level criteria; resolve filtered ticker lists for use as agent input. |
 | `context.py` | `user_scan_runs` (latest) | Render a "linked scan context" string for the agent's system prompt — the active screening's results in compact form. |
@@ -107,9 +107,8 @@ from services.rag import (
     expand_related_tickers,
     build_neighborhood_from_seed,
 
-    # embeddings
-    search_news,              # (query, lookback_hours, tickers, limit) → semantic hits
-    embed_query,
+    # news search (tag overlap → full-text)
+    search_news,              # (query, lookback_hours, tickers, limit) → tag overlap, then full-text
 
     # portfolio (per-user — pass user_id as first arg)
     get_user_positions, get_user_alerts, get_user_screening_notes,
@@ -187,7 +186,7 @@ Three further things the shape will not tell you:
 | `services.agent.skills` | `get_priced_in_drivers` in the `news_impact` skill's hardcoded `tool_plan` — a skill's plan is literal, so a tool being in the registry is not enough to reach it. |
 | `services.podcast.research_agent` | The base market registry (transitively, via `agent_core.build_market_registry`). |
 | `services.news.narrative.narrative_generator` | Most of the data-access surface (positions, alerts, ticker news, expansions, semantic search). |
-| `scripts/generate_blog_post.py` | Indirectly, via `services.news.embeddings.semantic_retrieval` (which delegates to `rag.search_news`). |
+| `scripts/generate_blog_post.py`, `scripts/process_telegram_updates.py` | `search_news` directly (blog evidence snippets; Telegram `/search`). |
 
 ---
 

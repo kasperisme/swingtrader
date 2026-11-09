@@ -41,7 +41,6 @@ from zoneinfo import ZoneInfo
 
 from shared.db import get_pg_connection, get_supabase_client, _tbl
 from services.news.llm.ollama_client import chat as ollama_chat, OllamaError
-from services.news.embeddings.semantic_retrieval import search_news_embeddings
 from services.rag import (
     RelationshipEdge,
     fetch_relationship_edges as _rag_fetch_relationship_edges,
@@ -50,6 +49,7 @@ from services.rag import (
     get_user_positions as _rag_get_user_positions,
     get_user_screening_notes as _rag_get_user_screening_notes,
     get_ticker_news as _rag_get_ticker_news,
+    search_news as _rag_search_news,
 )
 
 logger = logging.getLogger(__name__)
@@ -1220,7 +1220,7 @@ def _build_user_context(
                     f"Alerts: {', '.join(a.ticker for a in ctx.alert_items) or 'none'}. "
                     "Find the most relevant recent news snippets for a pre-market swing-trading brief."
                 )
-                ctx.semantic_evidence = search_news_embeddings(
+                ctx.semantic_evidence = _rag_search_news(
                     retrieval_query,
                     lookback_hours=lookback_hours,
                     tickers=all_tickers,

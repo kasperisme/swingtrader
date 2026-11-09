@@ -34,27 +34,9 @@ curl "https://financialmodelingprep.com/stable/news/general-latest?apikey=YOUR_K
 
 ---
 
-### 2. Embeddings 400 Bad Request (Ollama)
+### 2. (retired) Embeddings 400 Bad Request
 
-**Symptoms:**
-- `[embeddings] article_id=XXX failed: Client error '400 Bad Request' for url 'http://localhost:11434/api/embed'`
-
-**Cause:** 
-- Ollama model not loaded
-- Model name changed (e.g., `mxbai-embed-large` vs `mxbai-embed-large:latest`)
-
-**Fix:**
-```bash
-# Check Ollama status
-ollama list
-
-# Pull model if missing
-ollama pull mxbai-embed-large:latest
-
-# Restart embeddings processing
-cd ~/projects/swingtrader/code/analytics
-.venv/bin/python -m news_impact.embeddings_cli --process-pending --limit 10
-```
+The embedding pipeline was retired in Nov 2026 (`news_article_embeddings` dropped); there is no embeddings job to fix any more.
 
 ---
 
@@ -134,10 +116,6 @@ ollama serve
 ```bash
 # Restart news ingestion
 ~/projects/swingtrader/.local/bin/swingtrader-news --fmp-news --fmp-news-feed stock
-
-# Retry failed embeddings
-cd ~/projects/swingtrader/code/analytics
-.venv/bin/python -m news_impact.embeddings_cli --process-pending --retry-failed --limit 50
 
 # Force blog post run (test mode)
 cd ~/projects/swingtrader/code/analytics

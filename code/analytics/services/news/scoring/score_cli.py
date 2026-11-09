@@ -110,7 +110,6 @@ from services.news.scoring.news_ingester import (
     _persist,
     _sha256,
 )
-from services.news.embeddings.embeddings import enqueue_article_embedding_job
 from shared.db import (
     _as_json,
     clear_dry_days,
@@ -1430,15 +1429,6 @@ async def _main(args: argparse.Namespace) -> None:
                     published_at=args.published_at,
                     article_stream=_manual_stream_from_args(args),
                 )
-            if article_id >= 0:
-                try:
-                    enqueue_article_embedding_job(article_id)
-                except Exception as exc:
-                    logger.warning(
-                        "[score_news] failed to enqueue embedding job for article %s: %s",
-                        article_id,
-                        exc,
-                    )
 
     # 2b. Persist detected tickers to DB
     if not args.no_persist and article_id >= 0 and (extracted_tickers or args.tickers):
@@ -1461,15 +1451,6 @@ async def _main(args: argparse.Namespace) -> None:
         except Exception as exc:
             logger.warning("[score_news] failed to persist tickers: %s", exc)
 
-    if not args.no_persist and article_id >= 0:
-        try:
-            enqueue_article_embedding_job(article_id)
-        except Exception as exc:
-            logger.warning(
-                "[score_news] failed to enqueue embedding job for article %s: %s",
-                article_id,
-                exc,
-            )
 
     # 3. Merge explicit --tickers with extracted ones
     explicit_tickers = []
@@ -1702,15 +1683,6 @@ async def _process_one_fmp_article(
     if symbol_canonical and symbol_canonical not in extracted_tickers:
         extracted_tickers = [symbol_canonical] + extracted_tickers
 
-    if article_id >= 0 and client is not None:
-        try:
-            enqueue_article_embedding_job(article_id)
-        except Exception as exc:
-            logger.warning(
-                "[score_news] failed to enqueue embedding job for article %s: %s",
-                article_id,
-                exc,
-            )
 
     if client is not None and article_id >= 0 and extracted_tickers:
         save_article_tickers(client, article_id, extracted_tickers, source="extracted")
@@ -1877,15 +1849,6 @@ async def _process_one_x_post(
     if symbol_canonical and symbol_canonical not in extracted_tickers:
         extracted_tickers = [symbol_canonical] + extracted_tickers
 
-    if article_id >= 0 and client is not None:
-        try:
-            enqueue_article_embedding_job(article_id)
-        except Exception as exc:
-            logger.warning(
-                "[score_news] failed to enqueue embedding job for article %s: %s",
-                article_id,
-                exc,
-            )
 
     if client is not None and article_id >= 0 and extracted_tickers:
         save_article_tickers(client, article_id, extracted_tickers, source="extracted")

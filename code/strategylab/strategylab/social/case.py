@@ -208,11 +208,9 @@ def narrative_read(space, driver_text: str, claims: list, top_k: int = 6) -> dic
     The relatedness bar is measured off this ticker's own distribution (mean +
     1 sd) rather than chosen. A fixed cosine threshold is the mistake
     `saturation.py` documents at length: it does not survive a different
-    embedding model, a different company, or a thinner corpus, and it silently
+    vectoriser, a different company, or a thinner corpus, and it silently
     admitted word salad the one time it was guessed.
     """
-    from .saturation import _unit, embed
-
     vecs = getattr(space, "claim_vecs", None)
     if vecs is None or not len(vecs) or not claims:
         return {"n_claims_scanned": 0, "n_related": 0, "net_impact": 0.0,
@@ -220,7 +218,7 @@ def narrative_read(space, driver_text: str, claims: list, top_k: int = 6) -> dic
                 "note": "no scored claims in the corpus for this ticker"}
 
     n = min(len(vecs), len(claims))
-    sims = (vecs[:n] @ _unit(embed(driver_text))).astype(float)
+    sims = (vecs[:n] @ space.embed(driver_text)).astype(float)
     bar = float(sims.mean() + sims.std())
     order = np.argsort(-sims)[:top_k]
     related = [i for i in order if sims[i] >= bar]

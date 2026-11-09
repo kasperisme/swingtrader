@@ -5,8 +5,8 @@ description: >-
   building any data structure, or computing any relationship/aggregate over its data.
   84 tables and views, 851 columns and 51 RPC functions already cover the full
   inter-company relationship graph (suppliers, customers, partners, competitors,
-  subsidiaries, acquirers), news scoring and claims, ticker sentiment, embeddings and
-  semantic search,
+  subsidiaries, acquirers), news scoring and claims, ticker sentiment, tag and
+  full-text news search,
   trend aggregates, coverage, pair/cointegration stats, screening and attribution — and
   the intent behind each is generated from the migration headers so it says what an
   object is FOR, not just its columns. Use whenever a task touches swingtrader data:
@@ -101,7 +101,7 @@ Read the index anyway — this list is a safety net, not a substitute.
 | per-article claims / "what is being said" | `news_impact_heads`, `cluster='STORY_KEY_POINTS'` — `reasoning_json` is claim text, `scores_json` the signed impact, zipped on the same `kp_N` key |
 | what the market thinks about growth/valuation | `news_impact_heads` clusters `GROWTH_PROFILE`, `VALUATION_POSITIONING`, `BUSINESS_MODEL`, `MACRO_SENSITIVITY`, `GEOGRAPHY_TRADE`, `FINANCIAL_STRUCTURE`. `scores_json` holds **sub-dimensions**, not one number |
 | per-ticker sentiment | `ticker_sentiment_heads` (pre-exploded, indexed) — not a re-parse of the JSONB heads |
-| semantic search over news | `news_article_embeddings` + the `search_news_embeddings()` RPC (HNSW, oversample/post-filter) |
+| searching news by words or tickers | `search_news_by_tags()` then `search_news_fulltext()` RPCs (Python: `services.rag.search_news`). Vector search (`news_article_embeddings`) was **retired Nov 2026** — do not rebuild it without reading migration `20261109120000` |
 | trending tags or tickers | `news_trends_tag_daily_v`, `news_trends_ticker_daily_v` — **bounded to a rolling 120 days** |
 | company factor exposures | `company_vectors` (`dimensions_json`, `raw_json`) — powers `/protected/relations` and `/protected/vectors` |
 
@@ -155,14 +155,12 @@ GROUP BY nat.article_id HAVING COUNT(*) <= 4
 The same applies to co-occurrence of any kind: an article naming fifteen tickers
 asserts nothing about any pair of them but contributes 105 co-occurrences.
 
-**Never OR-filter straight into `news_article_embeddings`.** The shape
-`JOIN news_article_embeddings e ... WHERE (a.search_tags && ... OR EXISTS(...))`
-times out — 1.8M rows, and the OR defeats every index. It has caused three
-separate outages in one project. Resolve article ids against `news_articles`
-first (218k rows, indexed on both the tag array and the ticker link), then look
-up chunks with `WHERE e.article_id = ANY(%s)`. Bound the id list too: an
-unfiltered window returns 14,392 ids for AAPL and the follow-up `ANY()` dies on
-exactly the best-covered names.
+**Bound any article-id list before an `ANY()`.** Resolve article ids against
+`news_articles` first (indexed on both the tag array and the ticker link), then
+fetch by `WHERE id = ANY(%s)`. An unfiltered 180-day window returns 14,392 ids
+for AAPL and the follow-up `ANY()` dies on exactly the best-covered names. (The
+original trap — OR-filtering straight into the retired 32 GB
+`news_article_embeddings` — caused three outages.)
 
 **Row counts in the catalog are planner estimates**, and views show no count at
 all because `reltuples` does not apply to them. Check `fresh to <date>` before

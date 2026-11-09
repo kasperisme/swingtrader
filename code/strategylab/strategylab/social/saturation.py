@@ -47,68 +47,37 @@ this" from "this is not about anything":
 
 `python -m strategylab.social.cli control <TICKER>` calibrates the thresholds
 against a matched null and verifies them on known-answer probes. Re-run it after
-any change to the embedding model.
+any change to how text is vectorised.
+
+## Full-text, not embeddings (Nov 2026)
+
+Similarity used to be cosine over stored `mxbai-embed-large` chunk vectors.
+That store (`news_article_embeddings`, 32 GB) was retired platform-wide, and
+similarity is now cosine over TF-IDF vectors of Postgres `to_tsvector('english')`
+lexemes — the same tokeniser as `search_news_fulltext` — built in memory from
+`news_articles.body` on each run (see `lexical.py`). The mechanics below are
+unchanged because none of them depends on absolute similarity: every bar is
+measured against a null pushed through the same transformation. **Specific
+similarity figures quoted in the comments of this file (0.816, 0.615 and so on)
+are from the embedding era** and are kept as the record of why each guard
+exists, not as values to expect now.
 """
 
 from __future__ import annotations
 
-import json
 import logging
-import os
 import re
-import urllib.error
-import urllib.request
 from dataclasses import dataclass, field
 from datetime import date, timedelta
 
 import numpy as np
 
 from ..data.news import _connect
+from .lexical import LexicalSpace, article_chunks, lexemes
 
 log = logging.getLogger(__name__)
 
 SCHEMA = "swingtrader"
-OLLAMA = os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434").rstrip("/")
-EMBED_MODEL = os.environ.get("OLLAMA_EMBED_MODEL", "mxbai-embed-large")
-
-# mxbai-embed-large is asymmetric: queries must carry this prefix and documents
-# must not. The corpus was embedded document-side, so a query embedded without
-# the prefix lands in a different part of the space and every similarity comes
-# back uniformly low — which would read as "nothing is being said about this",
-# the exact false positive this module exists to prevent.
-QUERY_PREFIX = "Represent this sentence for searching relevant passages: "
-
-
-def embed(text: str, timeout: float = 60.0) -> list[float]:
-    """Embed a query string via Ollama.
-
-    Tries `/api/embed` then `/api/embeddings`. The fallback is not decoration:
-    the installed Ollama answers `/api/embed` by dropping the connection rather
-    than returning 404, so a handler that only catches HTTP 404 (as the
-    analytics copy of this does) raises `RemoteProtocolError` and never reaches
-    the endpoint that works.
-    """
-    q = (text or "").strip()
-    if not q:
-        return []
-    payloads = [("/api/embed", {"model": EMBED_MODEL, "input": [QUERY_PREFIX + q]}),
-                ("/api/embeddings", {"model": EMBED_MODEL, "prompt": QUERY_PREFIX + q})]
-    for path, body in payloads:
-        req = urllib.request.Request(
-            OLLAMA + path, data=json.dumps(body).encode(),
-            headers={"Content-Type": "application/json"})
-        try:
-            with urllib.request.urlopen(req, timeout=timeout) as fh:
-                d = json.load(fh)
-        except Exception as exc:                             # noqa: BLE001
-            log.debug("ollama %s failed: %s", path, exc)
-            continue
-        if isinstance(d.get("embeddings"), list) and d["embeddings"]:
-            return [float(x) for x in d["embeddings"][0]]
-        if isinstance(d.get("embedding"), list):
-            return [float(x) for x in d["embedding"]]
-    raise RuntimeError(
-        f"could not embed via {OLLAMA} (model {EMBED_MODEL}). Is ollama running?")
 
 
 # Chunks of cookie banners, nav furniture and inlined CSS. They are embedded
@@ -143,10 +112,6 @@ def _boilerplate(text: str, title: str = "") -> bool:
         # Title echoed at the head of a short chunk: a summary card, not content.
         return True
     return False
-
-
-def _vec(v: list[float]) -> str:
-    return "[" + ",".join(f"{x:.6f}" for x in v) + "]"
 
 
 # Below this many claims about the ticker ITSELF, saturation cannot separate
@@ -214,14 +179,14 @@ def _unit(v) -> np.ndarray:
 
 
 class NarrativeSpace:
-    """A ticker's corpus, embedded once, with its thresholds calibrated to it.
+    """A ticker's corpus, vectorised once, with its thresholds calibrated to it.
 
     Two reasons this is an object rather than a function.
 
     **Speed.** Scoring one thesis needs its similarity to every chunk and every
-    claim. Doing that with a pgvector query per probe makes calibration — which
-    needs ~60 null probes — cost 60 round trips. Pulling the ticker's chunk
-    vectors once (a few hundred rows) turns all of it into one matrix multiply.
+    claim. Vectorising the ticker's chunks once (a few hundred rows, one
+    tokenisation round trip) turns all of it into one matrix multiply, and the
+    ~60 calibration probes into one more round trip.
 
     **Calibration.** Fixed similarity thresholds do not survive contact with a
     different embedding model, a different ticker, or a thinner corpus. The
@@ -256,58 +221,51 @@ class NarrativeSpace:
             # the same array the public /articles?tag=SBUX search reads. Using
             # either alone silently drops part of the coverage, and coverage is
             # the baseline this whole module is trying to measure.
-            # Resolve article IDs FIRST, then filter the embeddings by id.
-            # Expressing the union as an OR inside the join over 1.8M embedding
-            # rows defeats every index and the query times out; `news_articles`
-            # is 218k rows with indexes on both paths, so the id set is cheap
-            # and the second query becomes a straight lookup. Same shape as the
-            # Wikidata fix — bind the expensive scan to a small known set.
             # Bounded and ordered. Unbounded, this returns every article in the
-            # window — 14,392 for AAPL — and the follow-up chunk query with that
-            # many ids in an ANY() times out. The chunk pull is already capped,
-            # so all the extra ids buy is a query that fails on exactly the
-            # best-covered names.
+            # window — 14,392 for AAPL — and all the extra bodies buy is a slow
+            # fetch on exactly the best-covered names; the chunk pool is capped
+            # below anyway.
+            # `has_analysis IS NOT FALSE` drops paywalled teasers the scorer
+            # found nothing in — the same rule every article read path follows.
             cur.execute(f"""
-                SELECT a.id FROM {SCHEMA}.news_articles a
+                SELECT a.id, a.title, a.body,
+                       COALESCE(a.published_at, a.created_at)::date,
+                       (a.search_tags && %s
+                        OR EXISTS (SELECT 1 FROM {SCHEMA}.news_article_tickers n2
+                                   WHERE n2.article_id = a.id
+                                     AND n2.ticker = %s)) AS is_own,
+                       a.slug
+                FROM {SCHEMA}.news_articles a
                 WHERE COALESCE(a.published_at, a.created_at) >= %s
+                  AND a.has_analysis IS NOT FALSE
                   AND (a.search_tags && %s
                        OR EXISTS (SELECT 1 FROM {SCHEMA}.news_article_tickers nat
                                   WHERE nat.article_id = a.id
                                     AND nat.ticker = ANY(%s)))
                 ORDER BY COALESCE(a.published_at, a.created_at) DESC
                 LIMIT %s
-            """, (since, self.scope, self.scope, max_articles))
-            art_ids = [r[0] for r in cur.fetchall()]
-            self.n_articles = len(art_ids)
+            """, ([ticker], ticker, since, self.scope, self.scope, max_articles))
+            arts = cur.fetchall()
+            self.n_articles = len(arts)
+            # Rows keep the shape the embedding era used —
+            # (chunk_text, <unused>, title, published, is_own, slug) — so every
+            # positional read below is untouched.
             rows = []
-            if art_ids:
-                cur.execute(f"""
-                    SELECT e.chunk_text, e.embedding::text, a.title,
-                           e.published_at::date,
-                           (a.search_tags && %s
-                            OR EXISTS (SELECT 1 FROM {SCHEMA}.news_article_tickers n2
-                                       WHERE n2.article_id = a.id
-                                         AND n2.ticker = %s)) AS is_own,
-                           -- Appended, so every positional index above is
-                           -- untouched. It is what makes a cited headline a
-                           -- link to the article rather than a dead string.
-                           a.slug
-                    FROM {SCHEMA}.news_article_embeddings e
-                    JOIN {SCHEMA}.news_articles a ON a.id = e.article_id
-                    WHERE e.article_id = ANY(%s)
-                    ORDER BY e.published_at DESC
-                    LIMIT %s
-                """, ([ticker], ticker, art_ids, max_chunks * 3))
-                rows = [r for r in cur.fetchall()
-                        if not _boilerplate(r[0], r[2])][:max_chunks]
+            for aid, title, body, published, is_own, slug in arts:
+                for ch in article_chunks(title or "", body or ""):
+                    if not _boilerplate(ch, title or ""):
+                        rows.append((ch, None, title, published, is_own, slug))
+                if len(rows) >= max_chunks:
+                    break
+            rows = rows[:max_chunks]
 
             # A BACKGROUND corpus of everyone else's chunks, over the same
-            # period. Absolute cosine similarity is close to useless here:
-            # mxbai puts all financial prose in a narrow band, so a claim taken
-            # VERBATIM from Crocs' own coverage scored 0.615 against Crocs
-            # chunks while random other-company claims averaged 0.599. A 0.016
-            # separation cannot support a threshold, and the first calibration
-            # duly classified that verbatim claim as OFF_TOPIC.
+            # period. Absolute similarity is close to useless here: all
+            # financial prose shares a vocabulary, so a claim taken VERBATIM
+            # from Crocs' own coverage scored 0.615 against Crocs chunks while
+            # random other-company claims averaged 0.599. A 0.016 separation
+            # cannot support a threshold, and the first calibration duly
+            # classified that verbatim claim as OFF_TOPIC.
             #
             # Subtracting the background cancels the compression. What matters
             # is not "how similar is this to Crocs" but "how much MORE similar
@@ -322,17 +280,32 @@ class NarrativeSpace:
             # OFF_TOPIC. This is the third place the same order-statistic bias
             # appeared in this metric (topicality pool, claim count, and here);
             # any max- or top-k comparison in it must be matched on N.
-            cur.execute(f"""
-                SELECT e.embedding::text
-                FROM {SCHEMA}.news_article_embeddings e
-                WHERE e.published_at >= %s
-                  AND NOT EXISTS (
-                      SELECT 1 FROM {SCHEMA}.news_article_tickers nat
-                      WHERE nat.article_id = e.article_id AND nat.ticker = ANY(%s))
-                ORDER BY e.id DESC
-                LIMIT %s
-            """, (since, self.scope, max(1, len(rows))))
-            bg = cur.fetchall()
+            bg_texts: list[str] = []
+            if rows:
+                # ~8 chunks per article on average; over-fetch so the chunk
+                # count can be matched exactly, then cut.
+                cur.execute(f"""
+                    SELECT a.title, a.body
+                    FROM {SCHEMA}.news_articles a
+                    WHERE COALESCE(a.published_at, a.created_at) >= %s
+                      AND a.has_analysis IS NOT FALSE
+                      AND NOT EXISTS (
+                          SELECT 1 FROM {SCHEMA}.news_article_tickers nat
+                          WHERE nat.article_id = a.id AND nat.ticker = ANY(%s))
+                    ORDER BY COALESCE(a.published_at, a.created_at) DESC
+                    LIMIT %s
+                """, (since, self.scope, max(20, len(rows) // 2)))
+                for title, body in cur.fetchall():
+                    bg_texts.extend(article_chunks(title or "", body or ""))
+                    if len(bg_texts) >= len(rows):
+                        break
+                bg_texts = bg_texts[:len(rows)]
+
+        # One tokenisation round trip for both pools, and the IDF is fitted on
+        # exactly the documents that will be scored against.
+        lex = lexemes([r[0] for r in rows] + bg_texts)
+        own_lex, bg_lex = lex[:len(rows)], lex[len(rows):]
+        self.lex = LexicalSpace(own_lex + bg_lex)
 
         self.chunk_meta = [(r[0] or "", r[2] or "", str(r[3])) for r in rows]
         # Title -> slug for everything retrievable from this corpus.
@@ -379,10 +352,10 @@ class NarrativeSpace:
             log.info("%s: only %d chunks survive the title filter (entity list is "
                      "probably missing the company name); falling back to "
                      "tag-scoped retrieval", ticker, n_titled)
-        self.chunks = (np.vstack([_unit(json.loads(r[1])) for r in rows])
-                       if rows else np.zeros((0, 1)))
-        self.background = (np.vstack([_unit(json.loads(r[0])) for r in bg])
-                           if bg else np.zeros((0, 1)))
+        self.chunks = (self.lex.vectorize(own_lex) if rows
+                       else np.zeros((0, self.lex.dim), dtype=np.float32))
+        self.background = (self.lex.vectorize(bg_lex) if bg_lex
+                           else np.zeros((0, self.lex.dim), dtype=np.float32))
         # OWN claims and PEER claims are kept apart, because they answer
         # different questions and pooling them answered neither.
         #
@@ -401,10 +374,8 @@ class NarrativeSpace:
         #                     statement that the Crocs version is priced.
         self.own_claims = list(own_claims if own_claims is not None else claims)
         self.peer_claims = [c for c in self.claims if c not in set(self.own_claims)]
-        self.claim_vecs = (np.vstack([_unit(embed(c)) for c in self.own_claims])
-                           if self.own_claims else np.zeros((0, 1)))
-        self.peer_vecs = (np.vstack([_unit(embed(c)) for c in self.peer_claims])
-                          if self.peer_claims else np.zeros((0, 1)))
+        self.claim_vecs = self.lex.embed_texts(self.own_claims)
+        self.peer_vecs = self.lex.embed_texts(self.peer_claims)
         # A background claim set of the SAME SIZE as the target's. Saturation is
         # a max over N claims, and the max of N draws grows with N whatever the
         # draws mean — random other-company claims scored 0.63 max-similarity
@@ -422,6 +393,12 @@ class NarrativeSpace:
         self.saturation_bar = float("nan")
 
     # ------------------------------------------------------------------
+    def embed(self, text: str) -> np.ndarray:
+        """Unit vector for `text` in this corpus's space — what `_unit(embed())`
+        used to be. Callers outside this class (case.py) use it so
+        their vectors live in the same space as `chunks` and `claim_vecs`."""
+        return self.lex.embed(text)
+
     @staticmethod
     def _mean_top(mat: np.ndarray, qv: np.ndarray, top_k: int) -> float:
         if not len(mat):
@@ -562,13 +539,11 @@ class NarrativeSpace:
         perm = rng.permutation(len(pool))
         bg_idx, probe_idx = perm[:n_bg], perm[n_bg:n_bg + min(n_null, len(pool) - n_bg)]
         self.bg_claims = [pool[int(i)] for i in bg_idx]
-        self.bg_claim_vecs = (np.vstack([_unit(embed(c)) for c in self.bg_claims])
-                              if self.bg_claims else np.zeros((0, 1)))
+        self.bg_claim_vecs = self.lex.embed_texts(self.bg_claims)
 
-        pick = probe_idx
+        probe_vecs = self.lex.embed_texts([pool[int(i)] for i in probe_idx])
         tops, sats = [], []
-        for i in pick:
-            qv = _unit(embed(pool[int(i)]))
+        for qv in probe_vecs:
             t, _ = self._topicality(qv)
             s, _ = self._saturation(qv)
             tops.append(t)
@@ -594,9 +569,9 @@ class NarrativeSpace:
                  own_only: bool = False) -> list[tuple[str, str]]:
         """The k most related passages, as (title, text), for a reader.
 
-        This is what embeddings are actually good for. Deciding whether a
+        This is what similarity is actually good for. Deciding whether a
         proposition is asserted is left to a reader; narrowing hundreds of
-        thousands of chunks to the dozen worth reading is not.
+        chunks to the dozen worth reading is not.
 
         `own_only` restricts to articles about this ticker. Use it for anything
         reconstructing THIS company's drivers; leave it off for the narrative,
@@ -604,7 +579,7 @@ class NarrativeSpace:
         """
         if not len(self.chunks):
             return []
-        sims = self.chunks @ _unit(embed(thesis))
+        sims = self.chunks @ self.embed(thesis)
         own = getattr(self, "is_own", [True] * len(self.chunks))
         out, seen = [], set()
         for i in np.argsort(-sims):
@@ -647,7 +622,7 @@ class NarrativeSpace:
                   "is only a sample of what the market has heard.")
         tbar, sbar = self.topicality_bar, self.saturation_bar
         if not np.isfinite(sbar):
-            # Checked before anything else, including the embedding call: an
+            # Checked before anything else, including the tokenisation call: an
             # uncalibrated threshold is the configuration that reported literal
             # word salad as a narrative gap, and it must not be reachable.
             raise RuntimeError("call calibrate() before score(): an uncalibrated "
@@ -655,7 +630,7 @@ class NarrativeSpace:
         if not len(self.chunks):
             return SaturationScore(thesis=thesis, ticker=self.ticker, topicality=0.0,
                                    saturation=0.0, verdict="NO_CORPUS", caveat=caveat)
-        qv = _unit(embed(thesis))
+        qv = self.embed(thesis)
         top, tidx = self._topicality(qv, top_k)
         sat, sidx = self._saturation(qv, top_k)
         raw_sat = 0.0
