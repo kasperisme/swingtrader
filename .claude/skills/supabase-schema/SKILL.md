@@ -101,7 +101,7 @@ Read the index anyway — this list is a safety net, not a substitute.
 | per-article claims / "what is being said" | `news_impact_heads`, `cluster='STORY_KEY_POINTS'` — `reasoning_json` is claim text, `scores_json` the signed impact, zipped on the same `kp_N` key |
 | what the market thinks about growth/valuation | `news_impact_heads` clusters `GROWTH_PROFILE`, `VALUATION_POSITIONING`, `BUSINESS_MODEL`, `MACRO_SENSITIVITY`, `GEOGRAPHY_TRADE`, `FINANCIAL_STRUCTURE`. `scores_json` holds **sub-dimensions**, not one number |
 | per-ticker sentiment | `ticker_sentiment_heads` (pre-exploded, indexed) — not a re-parse of the JSONB heads |
-| searching news by words or tickers | `search_news_by_tags()` then `search_news_fulltext()` RPCs (Python: `services.rag.search_news`). Vector search (`news_article_embeddings`) was **retired Nov 2026** — do not rebuild it without reading migration `20261109120000` |
+| searching news by words or tickers | `search_news_by_tags()` then `search_news_fulltext()` RPCs (Python: `services.rag.search_news`). Vector search (`news_article_embeddings`) was **retired Nov 2026** — do not rebuild it without reading migration `20261109074545` |
 | trending tags or tickers | `news_trends_tag_daily_v`, `news_trends_ticker_daily_v` — **bounded to a rolling 120 days** |
 | company factor exposures | `company_vectors` (`dimensions_json`, `raw_json`) — powers `/protected/relations` and `/protected/vectors` |
 

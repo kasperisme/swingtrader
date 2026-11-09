@@ -1,5 +1,5 @@
 {
- "generated": "2026-09-14",
+ "generated": "2026-11-09",
  "objects": [
   {
    "name": "api_rate_limits",
@@ -46,7 +46,7 @@
      "uuid"
     ]
    ],
-   "last_row_at": "2026-09-13",
+   "last_row_at": "2026-11-06",
    "fresh_col": "updated_at",
    "values": {},
    "intent": "\u2500\u2500 5) Cash + NAV history \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500 `arena_accounts` is the single mutable cash row per agent; `arena_nav_history` is the append-only daily curve the leaderboard and charts read.",
@@ -158,7 +158,7 @@
      "text"
     ]
    ],
-   "last_row_at": "2026-09-13",
+   "last_row_at": "2026-09-15",
    "fresh_col": "updated_at",
    "values": {},
    "intent": "\u2500\u2500 1) The competitors \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500",
@@ -394,7 +394,7 @@
   {
    "name": "arena_decisions",
    "kind": "table",
-   "rows_est": 443,
+   "rows_est": 773,
    "columns": [
     [
      "id",
@@ -489,7 +489,7 @@
      "date"
     ]
    ],
-   "last_row_at": "2026-09-13",
+   "last_row_at": "2026-11-06",
    "fresh_col": "created_at",
    "values": {
     "status": [
@@ -737,7 +737,7 @@
   {
    "name": "arena_nav_history",
    "kind": "table",
-   "rows_est": 406,
+   "rows_est": 718,
    "columns": [
     [
      "id",
@@ -804,7 +804,7 @@
      "uuid"
     ]
    ],
-   "last_row_at": "2026-09-13",
+   "last_row_at": "2026-11-06",
    "fresh_col": "created_at",
    "values": {},
    "intent": "Arena: competing AI paper-trading agents What: - A set of autonomous agents, each funded with the same starting cash, each restricted to a DIFFERENT slice of the platform's data (news impact scores, the priced-in decomposition, the NIS Momentum screenings, FMP fundamentals, the relationship graph, pair z-scores, sentiment trends), trading against each other on a daily clock. The point is not to make money \u2014 it is to make the comparison between approaches falsifiable and public. Why the accounting lives here and not in the model: - The LLM's only write is an ORDER INTENT (arena_orders). Cash, p",
@@ -880,7 +880,7 @@
   {
    "name": "arena_orders",
    "kind": "table",
-   "rows_est": 501,
+   "rows_est": 807,
    "columns": [
     [
      "id",
@@ -991,7 +991,7 @@
      "text"
     ]
    ],
-   "last_row_at": "2026-09-13",
+   "last_row_at": "2026-11-06",
    "fresh_col": "created_at",
    "values": {
     "status": [
@@ -1110,7 +1110,7 @@
   {
    "name": "arena_positions",
    "kind": "table",
-   "rows_est": 60,
+   "rows_est": 67,
    "columns": [
     [
      "id",
@@ -1153,7 +1153,7 @@
      "uuid"
     ]
    ],
-   "last_row_at": "2026-09-13",
+   "last_row_at": "2026-11-06",
    "fresh_col": "updated_at",
    "values": {},
    "intent": "\u2500\u2500 4) Positions \u2014 current book, one row per (agent, ticker) \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500",
@@ -1566,7 +1566,7 @@
      "timestamp with time zone"
     ]
    ],
-   "last_row_at": "2026-09-10",
+   "last_row_at": "2026-10-23",
    "fresh_col": "created_at",
    "values": {
     "source": [
@@ -1576,6 +1576,7 @@
      "briefings_preset",
      "landing",
      "landing-hero",
+     "quote_page",
      "screening_detail_subscribe"
     ]
    },
@@ -1585,7 +1586,7 @@
   {
    "name": "job_health",
    "kind": "table",
-   "rows_est": 15,
+   "rows_est": 16,
    "columns": [
     [
      "job_name",
@@ -1621,14 +1622,19 @@
     ]
    ],
    "last_row_at": null,
-   "values": {},
+   "values": {
+    "last_status": [
+     "failed",
+     "success"
+    ]
+   },
    "intent": "",
    "domain": "Agents & jobs"
   },
   {
    "name": "job_runs",
    "kind": "table",
-   "rows_est": 256091,
+   "rows_est": 353172,
    "columns": [
     [
      "id",
@@ -1663,7 +1669,7 @@
      "timestamp with time zone"
     ]
    ],
-   "last_row_at": "2026-09-14",
+   "last_row_at": "2026-11-09",
    "fresh_col": "created_at",
    "values": {
     "status": [
@@ -1736,7 +1742,7 @@
      "timestamp with time zone"
     ]
    ],
-   "last_row_at": "2026-08-19",
+   "last_row_at": "2026-09-26",
    "fresh_col": "updated_at",
    "values": {
     "status": [
@@ -1755,7 +1761,7 @@
   {
    "name": "market_screening_result_rows",
    "kind": "table",
-   "rows_est": 145294,
+   "rows_est": 183608,
    "columns": [
     [
      "id",
@@ -1794,7 +1800,7 @@
      "timestamp with time zone"
     ]
    ],
-   "last_row_at": "2026-09-14",
+   "last_row_at": "2026-11-09",
    "fresh_col": "created_at",
    "values": {},
    "intent": "",
@@ -1803,7 +1809,7 @@
   {
    "name": "market_screening_results",
    "kind": "table",
-   "rows_est": 4739,
+   "rows_est": 4974,
    "columns": [
     [
      "id",
@@ -1866,7 +1872,7 @@
      "text"
     ]
    ],
-   "last_row_at": "2026-09-14",
+   "last_row_at": "2026-11-09",
    "fresh_col": "created_at",
    "values": {
     "status": [
@@ -1994,7 +2000,7 @@
      "text"
     ]
    ],
-   "last_row_at": "2026-09-14",
+   "last_row_at": "2026-11-09",
    "fresh_col": "updated_at",
    "values": {
     "category": [
@@ -2013,105 +2019,9 @@
    "domain": "Screening & scans"
   },
   {
-   "name": "news_article_embedding_jobs",
-   "kind": "table",
-   "rows_est": 231502,
-   "columns": [
-    [
-     "article_id",
-     "bigint"
-    ],
-    [
-     "status",
-     "text"
-    ],
-    [
-     "attempt_count",
-     "integer"
-    ],
-    [
-     "last_error",
-     "text"
-    ],
-    [
-     "last_attempt_at",
-     "timestamp with time zone"
-    ],
-    [
-     "completed_at",
-     "timestamp with time zone"
-    ],
-    [
-     "created_at",
-     "timestamp with time zone"
-    ],
-    [
-     "updated_at",
-     "timestamp with time zone"
-    ]
-   ],
-   "last_row_at": "2026-09-14",
-   "fresh_col": "updated_at",
-   "values": {
-    "status": [
-     "completed",
-     "processing"
-    ]
-   },
-   "intent": "Embedding setup for semantic retrieval over scored news.",
-   "domain": "News: articles & scoring"
-  },
-  {
-   "name": "news_article_embeddings",
-   "kind": "table",
-   "rows_est": 1864998,
-   "columns": [
-    [
-     "id",
-     "bigint"
-    ],
-    [
-     "article_id",
-     "bigint"
-    ],
-    [
-     "chunk_index",
-     "integer"
-    ],
-    [
-     "chunk_hash",
-     "text"
-    ],
-    [
-     "chunk_text",
-     "text"
-    ],
-    [
-     "embedding",
-     "USER-DEFINED"
-    ],
-    [
-     "embedding_model",
-     "text"
-    ],
-    [
-     "created_at",
-     "timestamp with time zone"
-    ],
-    [
-     "published_at",
-     "timestamp with time zone"
-    ]
-   ],
-   "last_row_at": null,
-   "values": {},
-   "intent": "Embedding setup for semantic retrieval over scored news.",
-   "domain": "News: articles & scoring"
-  },
-  {
    "name": "news_article_tickers",
    "kind": "table",
-   "rows_est": 766447,
+   "rows_est": 846722,
    "columns": [
     [
      "article_id",
@@ -2134,7 +2044,7 @@
   {
    "name": "news_articles",
    "kind": "table",
-   "rows_est": 213657,
+   "rows_est": 256341,
    "columns": [
     [
      "id",
@@ -2201,7 +2111,7 @@
      "boolean"
     ]
    ],
-   "last_row_at": "2026-09-14",
+   "last_row_at": "2026-11-09",
    "fresh_col": "created_at",
    "values": {
     "article_stream": [
@@ -2221,7 +2131,7 @@
   {
    "name": "news_briefing_subscriptions",
    "kind": "table",
-   "rows_est": 35,
+   "rows_est": 37,
    "columns": [
     [
      "id",
@@ -2284,7 +2194,7 @@
      "timestamp with time zone"
     ]
    ],
-   "last_row_at": "2026-09-14",
+   "last_row_at": "2026-11-06",
    "fresh_col": "updated_at",
    "values": {
     "status": [
@@ -2294,250 +2204,17 @@
     "source": [
      "article_briefing",
      "briefings_page",
-     "briefings_preset"
+     "briefings_preset",
+     "quote_page"
     ]
    },
    "intent": "News briefing subscriptions: the free, no-account email service that sends a nicely structured PDF of the last 24h of news, summaries and impact for the tickers / tags a visitor cares about. Mirrors market_screening_email_subscriptions (email-only, soft-unsubscribe, service-role access) but the unit a visitor subscribes to is their OWN watchlist of tickers + tags rather than a curated screening. One briefing per email \u2014 editing the watchlist is an in-place update via a signed manage link, no login required. Delivery: * On signup we set initial_briefing_requested_at; the Python briefing tick ge",
    "domain": "News: articles & scoring"
   },
   {
-   "name": "news_embedding_daily_cluster_articles",
-   "kind": "table",
-   "rows_est": 0,
-   "columns": [
-    [
-     "bucket_start",
-     "timestamp with time zone"
-    ],
-    [
-     "embedding_model",
-     "text"
-    ],
-    [
-     "article_id",
-     "bigint"
-    ],
-    [
-     "cluster_index",
-     "integer"
-    ],
-    [
-     "computed_at",
-     "timestamp with time zone"
-    ]
-   ],
-   "last_row_at": null,
-   "values": {},
-   "intent": "Hourly / daily embedding clusters over swingtrader.news_article_embeddings (UTC buckets). Populated by services/news/embeddings/time_bucket_clustering.py (scripts/cluster_news_embedding_buckets.py). Per bucket: run metadata, one centroid row per cluster (float8[] + nearest-chunk reverse text), one article assignment row per article.",
-   "domain": "News: articles & scoring"
-  },
-  {
-   "name": "news_embedding_daily_cluster_centroids",
-   "kind": "table",
-   "rows_est": 0,
-   "columns": [
-    [
-     "bucket_start",
-     "timestamp with time zone"
-    ],
-    [
-     "embedding_model",
-     "text"
-    ],
-    [
-     "cluster_index",
-     "integer"
-    ],
-    [
-     "centroid",
-     "ARRAY"
-    ],
-    [
-     "reverse_embedding_text",
-     "text"
-    ],
-    [
-     "reverse_embedding_article_id",
-     "bigint"
-    ],
-    [
-     "reverse_embedding_chunk_index",
-     "integer"
-    ],
-    [
-     "member_count",
-     "integer"
-    ],
-    [
-     "computed_at",
-     "timestamp with time zone"
-    ]
-   ],
-   "last_row_at": null,
-   "values": {},
-   "intent": "Hourly / daily embedding clusters over swingtrader.news_article_embeddings (UTC buckets). Populated by services/news/embeddings/time_bucket_clustering.py (scripts/cluster_news_embedding_buckets.py). Per bucket: run metadata, one centroid row per cluster (float8[] + nearest-chunk reverse text), one article assignment row per article.",
-   "domain": "News: articles & scoring"
-  },
-  {
-   "name": "news_embedding_daily_cluster_runs",
-   "kind": "table",
-   "rows_est": 0,
-   "columns": [
-    [
-     "bucket_start",
-     "timestamp with time zone"
-    ],
-    [
-     "embedding_model",
-     "text"
-    ],
-    [
-     "n_clusters",
-     "integer"
-    ],
-    [
-     "article_count",
-     "integer"
-    ],
-    [
-     "chunk_rows_used",
-     "integer"
-    ],
-    [
-     "embedding_dim",
-     "integer"
-    ],
-    [
-     "computed_at",
-     "timestamp with time zone"
-    ]
-   ],
-   "last_row_at": null,
-   "values": {},
-   "intent": "\u2500\u2500 Daily \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500",
-   "domain": "News: articles & scoring"
-  },
-  {
-   "name": "news_embedding_hourly_cluster_articles",
-   "kind": "table",
-   "rows_est": 57,
-   "columns": [
-    [
-     "bucket_start",
-     "timestamp with time zone"
-    ],
-    [
-     "embedding_model",
-     "text"
-    ],
-    [
-     "article_id",
-     "bigint"
-    ],
-    [
-     "cluster_index",
-     "integer"
-    ],
-    [
-     "computed_at",
-     "timestamp with time zone"
-    ]
-   ],
-   "last_row_at": null,
-   "values": {},
-   "intent": "Hourly / daily embedding clusters over swingtrader.news_article_embeddings (UTC buckets). Populated by services/news/embeddings/time_bucket_clustering.py (scripts/cluster_news_embedding_buckets.py). Per bucket: run metadata, one centroid row per cluster (float8[] + nearest-chunk reverse text), one article assignment row per article.",
-   "domain": "News: articles & scoring"
-  },
-  {
-   "name": "news_embedding_hourly_cluster_centroids",
-   "kind": "table",
-   "rows_est": 0,
-   "columns": [
-    [
-     "bucket_start",
-     "timestamp with time zone"
-    ],
-    [
-     "embedding_model",
-     "text"
-    ],
-    [
-     "cluster_index",
-     "integer"
-    ],
-    [
-     "centroid",
-     "ARRAY"
-    ],
-    [
-     "reverse_embedding_text",
-     "text"
-    ],
-    [
-     "reverse_embedding_article_id",
-     "bigint"
-    ],
-    [
-     "reverse_embedding_chunk_index",
-     "integer"
-    ],
-    [
-     "member_count",
-     "integer"
-    ],
-    [
-     "computed_at",
-     "timestamp with time zone"
-    ]
-   ],
-   "last_row_at": null,
-   "values": {},
-   "intent": "Hourly / daily embedding clusters over swingtrader.news_article_embeddings (UTC buckets). Populated by services/news/embeddings/time_bucket_clustering.py (scripts/cluster_news_embedding_buckets.py). Per bucket: run metadata, one centroid row per cluster (float8[] + nearest-chunk reverse text), one article assignment row per article.",
-   "domain": "News: articles & scoring"
-  },
-  {
-   "name": "news_embedding_hourly_cluster_runs",
-   "kind": "table",
-   "rows_est": 0,
-   "columns": [
-    [
-     "bucket_start",
-     "timestamp with time zone"
-    ],
-    [
-     "embedding_model",
-     "text"
-    ],
-    [
-     "n_clusters",
-     "integer"
-    ],
-    [
-     "article_count",
-     "integer"
-    ],
-    [
-     "chunk_rows_used",
-     "integer"
-    ],
-    [
-     "embedding_dim",
-     "integer"
-    ],
-    [
-     "computed_at",
-     "timestamp with time zone"
-    ]
-   ],
-   "last_row_at": null,
-   "values": {},
-   "intent": "\u2500\u2500 Hourly \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500",
-   "domain": "News: articles & scoring"
-  },
-  {
    "name": "news_impact_heads",
    "kind": "table",
-   "rows_est": 2651283,
+   "rows_est": 3060028,
    "columns": [
     [
      "id",
@@ -2580,7 +2257,7 @@
      "jsonb"
     ]
    ],
-   "last_row_at": "2026-09-14",
+   "last_row_at": "2026-11-09",
    "fresh_col": "created_at",
    "values": {
     "cluster": [
@@ -2589,6 +2266,7 @@
      "FINANCIAL_STRUCTURE",
      "GEOGRAPHY_TRADE",
      "GROWTH_PROFILE",
+     "IMPACT_SUMMARY",
      "MACRO_SENSITIVITY",
      "MARKET_BEHAVIOUR",
      "SECTOR_ROTATION",
@@ -2597,10 +2275,6 @@
      "TICKER_RELATIONSHIPS",
      "TICKER_SENTIMENT",
      "VALUATION_POSITIONING"
-    ],
-    "model": [
-     "gemma4:31b-cloud",
-     "glm-5.1:cloud"
     ]
    },
    "intent": "news_impact_heads: per-cluster LLM scoring results",
@@ -2609,7 +2283,7 @@
   {
    "name": "news_impact_vectors",
    "kind": "table",
-   "rows_est": 225284,
+   "rows_est": 246679,
    "columns": [
     [
      "id",
@@ -2636,7 +2310,7 @@
      "double precision"
     ]
    ],
-   "last_row_at": "2026-09-14",
+   "last_row_at": "2026-11-09",
    "fresh_col": "created_at",
    "values": {},
    "intent": "news_impact_vectors: aggregated impact dimension vectors",
@@ -3973,7 +3647,7 @@
   {
    "name": "research_priced_in",
    "kind": "table",
-   "rows_est": 1025,
+   "rows_est": 1308,
    "columns": [
     [
      "id",
@@ -4080,7 +3754,7 @@
      "jsonb"
     ]
    ],
-   "last_row_at": "2026-09-13",
+   "last_row_at": "2026-09-24",
    "fresh_col": "created_at",
    "values": {
     "model": [
@@ -4224,7 +3898,7 @@
   {
    "name": "research_priced_in_runs",
    "kind": "table",
-   "rows_est": 0,
+   "rows_est": 66,
    "columns": [
     [
      "id",
@@ -4366,13 +4040,12 @@
      "timestamp with time zone"
     ]
    ],
-   "last_row_at": "2026-09-13",
+   "last_row_at": "2026-11-08",
    "fresh_col": "updated_at",
    "values": {
     "last_run_status": [
      "failed",
      "ineligible",
-     "ok",
      "skipped"
     ]
    },
@@ -4575,7 +4248,7 @@
   {
    "name": "sitemap_article_urls",
    "kind": "table",
-   "rows_est": 31010,
+   "rows_est": 31083,
    "columns": [
     [
      "slug",
@@ -4586,7 +4259,7 @@
      "timestamp with time zone"
     ]
    ],
-   "last_row_at": "2026-09-14",
+   "last_row_at": "2026-11-09",
    "fresh_col": "published_at",
    "values": {},
    "intent": "sitemap_article_urls: which article URLs are worth asking Google to index The sitemap shipped the newest 5,000 /articles/* URLs with no filter at all, which made 74% of everything offered to a crawler a wrapper around a third-party headline. Sampling that set returned, verbatim: \"A.C.L. Construction Secures Civil Package for Linda's Friendship Center in Fort Nelson BC\", \"ASICS Europe Expands Global Partnership with Teamwork Commerce\", and three separate securities-class-action notices. Search Console's verdict on the whole domain was consistent with that: every hub page sat at \"Crawled - curre",
@@ -4595,7 +4268,7 @@
   {
    "name": "telegram_message_log",
    "kind": "table",
-   "rows_est": 1253,
+   "rows_est": 1802,
    "columns": [
     [
      "id",
@@ -4726,7 +4399,7 @@
   {
    "name": "ticker_coverage_daily",
    "kind": "table",
-   "rows_est": 58226,
+   "rows_est": 54054,
    "columns": [
     [
      "bucket_day",
@@ -4753,7 +4426,7 @@
      "double precision"
     ]
    ],
-   "last_row_at": "2026-09-14",
+   "last_row_at": "2026-11-09",
    "fresh_col": "bucket_day",
    "values": {},
    "intent": "Materialize the /quote directory's daily rollup. get_top_covered_tickers read news_trends_ticker_daily_v directly, which rescans 120 days of news_article_tickers + news_articles + ticker_sentiment heads on every call: measured 4.6s for a plain page and 7.6s for a search \u2014 against the REST role's 8s statement_timeout. That is a page that breaks the first time the corpus grows. Same split the topic hubs use: membership stays live, the expensive rollup is materialized and rebuilt post-ingest. A table (not a matview) so it can carry RLS like its siblings. Only the daily rollup is stored, NOT the w",
@@ -4889,7 +4562,7 @@
   {
    "name": "ticker_relationship_edge_evidence",
    "kind": "table",
-   "rows_est": 89973,
+   "rows_est": 99815,
    "columns": [
     [
      "edge_id",
@@ -4936,7 +4609,7 @@
      "timestamp with time zone"
     ]
    ],
-   "last_row_at": "2026-09-14",
+   "last_row_at": "2026-11-09",
    "fresh_col": "created_at",
    "values": {
     "rel_type": [
@@ -5043,7 +4716,7 @@
   {
    "name": "ticker_relationship_edges",
    "kind": "table",
-   "rows_est": 40241,
+   "rows_est": 43110,
    "columns": [
     [
      "id",
@@ -5094,7 +4767,7 @@
      "jsonb"
     ]
    ],
-   "last_row_at": "2026-09-14",
+   "last_row_at": "2026-11-09",
    "fresh_col": "updated_at",
    "values": {
     "rel_type": [
@@ -5317,7 +4990,7 @@
   {
    "name": "ticker_sentiment_heads",
    "kind": "table",
-   "rows_est": 371050,
+   "rows_est": 406318,
    "columns": [
     [
      "head_id",
@@ -5364,11 +5037,10 @@
      "timestamp with time zone"
     ]
    ],
-   "last_row_at": "2026-09-14",
+   "last_row_at": "2026-11-09",
    "fresh_col": "updated_at",
    "values": {
     "model": [
-     "claude-haiku-4-5",
      "do-agent",
      "gemma4:31b-cloud",
      "gemma4:e4b"
@@ -5554,7 +5226,7 @@
   {
    "name": "topic_claim_stats",
    "kind": "table",
-   "rows_est": 1539,
+   "rows_est": 1760,
    "columns": [
     [
      "topic_slug",
@@ -5597,7 +5269,7 @@
      "timestamp with time zone"
     ]
    ],
-   "last_row_at": "2026-09-14",
+   "last_row_at": "2026-11-09",
    "fresh_col": "updated_at",
    "values": {},
    "intent": "topic_claim_stats \u2014 the materialized half. Ranked STORY_KEY_POINTS across a topic's whole arc. This CANNOT be live: it scans every matching article's heads, and the REST role (`authenticator`) caps statements at 8s. Refreshed after each ingest, exactly like ticker_sentiment_heads / ticker_relationship_edges. Every claim keeps `article_ts`. A permanent page that aggregates claims will otherwise enshrine stale numbers as evergreen fact \u2014 observed repeatedly: NVIDIA \"$119B supply commitments / $91B guide\" (pre-quarter, reports Aug 26) and Micron \"+346% to $41.46B\" (a prior quarter) both resurface",
@@ -5997,7 +5669,7 @@
      "timestamp with time zone"
     ]
    ],
-   "last_row_at": "2026-09-07",
+   "last_row_at": "2026-10-16",
    "fresh_col": "updated_at",
    "values": {},
    "intent": "user_profiles Per-user app state that doesn't belong in auth.users.user_metadata. Designed to grow: free-form `metadata` jsonb for ad-hoc flags so adding a new piece of profile state doesn't require a migration. `welcomed_at` drives the first-login welcome dialog: NULL = show, set = skip.",
@@ -6006,7 +5678,7 @@
   {
    "name": "user_scan_jobs",
    "kind": "table",
-   "rows_est": 306,
+   "rows_est": 391,
    "columns": [
     [
      "id",
@@ -6073,7 +5745,7 @@
      "uuid"
     ]
    ],
-   "last_row_at": "2026-09-14",
+   "last_row_at": "2026-11-08",
    "fresh_col": "created_at",
    "values": {
     "status": [
@@ -6098,7 +5770,7 @@
   {
    "name": "user_scan_row_notes",
    "kind": "table",
-   "rows_est": 21384,
+   "rows_est": 31287,
    "columns": [
     [
      "id",
@@ -6157,7 +5829,7 @@
      "uuid"
     ]
    ],
-   "last_row_at": "2026-09-10",
+   "last_row_at": "2026-11-06",
    "fresh_col": "updated_at",
    "values": {
     "status": [
@@ -6173,7 +5845,7 @@
   {
    "name": "user_scan_rows",
    "kind": "table",
-   "rows_est": 68397,
+   "rows_est": 77408,
    "columns": [
     [
      "id",
@@ -6204,7 +5876,7 @@
      "uuid"
     ]
    ],
-   "last_row_at": "2026-09-10",
+   "last_row_at": "2026-11-06",
    "fresh_col": "scan_date",
    "values": {},
    "intent": "",
@@ -6213,7 +5885,7 @@
   {
    "name": "user_scan_runs",
    "kind": "table",
-   "rows_est": 216,
+   "rows_est": 331,
    "columns": [
     [
      "id",
@@ -6248,7 +5920,7 @@
      "character varying"
     ]
    ],
-   "last_row_at": "2026-09-14",
+   "last_row_at": "2026-11-08",
    "fresh_col": "created_at",
    "values": {
     "source": [
@@ -6361,7 +6033,7 @@
      "ARRAY"
     ]
    ],
-   "last_row_at": "2026-09-14",
+   "last_row_at": "2026-11-09",
    "fresh_col": "updated_at",
    "values": {},
    "intent": "\u2500\u2500 user_scheduled_screenings \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500",
@@ -6370,7 +6042,7 @@
   {
    "name": "user_screening_results",
    "kind": "table",
-   "rows_est": 2748,
+   "rows_est": 4323,
    "columns": [
     [
      "id",
@@ -6425,7 +6097,7 @@
      "jsonb"
     ]
    ],
-   "last_row_at": "2026-09-14",
+   "last_row_at": "2026-11-09",
    "fresh_col": "created_at",
    "values": {
     "status": [
@@ -6552,7 +6224,7 @@
   {
    "name": "user_ticker_chart_workspace",
    "kind": "table",
-   "rows_est": 4871,
+   "rows_est": 6044,
    "columns": [
     [
      "user_id",
@@ -6579,7 +6251,7 @@
      "text"
     ]
    ],
-   "last_row_at": "2026-09-13",
+   "last_row_at": "2026-11-06",
    "fresh_col": "updated_at",
    "values": {},
    "intent": "Per-user chart workspace: annotations + Chart AI conversation, keyed by ticker. Used by protected/charts; RLS restricts rows to the owning user.",
@@ -6964,24 +6636,10 @@
    "domain": "Other"
   },
   {
-   "name": "search_news_article_embeddings_gte",
-   "args": "query_embedding double precision[], match_count integer, lookback_days integer, stream_filter text",
-   "returns": "TABLE(article_id bigint, title text, url text, source text, slug text, image_url text, article_stream text, published_at timestamp with time zone, snippet text, similarity double precision)",
-   "intent": "Secondary embedding table for Supabase Edge Runtime model parity (gte-small). Query-time embeddings from Edge Functions should match this dimension/model.",
-   "domain": "Other"
-  },
-  {
    "name": "search_news_by_tags",
    "args": "tag_filter text[], match_count integer, lookback_hours integer, stream_filter text",
    "returns": "TABLE(article_id bigint, title text, url text, source text, slug text, image_url text, article_stream text, published_at timestamp with time zone, snippet text, similarity double precision)",
    "intent": "Read paths. Each body below is the live definition (pg_get_functiondef / pg_get_viewdef, 2026-09-11) with one added predicate: has_analysis IS NOT FALSE. Deliberately unchanged, because they cannot return an empty article: get_ticker_impact_news, get_relationship_node_sentiment, ticker_sentiment_heads_v, news_trends_ticker_daily_v \u2014 driven by ticker_sentiment_heads; refresh_topic_claims \u2014 driven by claims; refresh_sitemap_article_urls \u2014 requires a covered ticker's sentiment head. search_news_article_embeddings_gte \u2014 reads news_article_embeddings_gte, a table that no longer exists; the function",
-   "domain": "Other"
-  },
-  {
-   "name": "search_news_embeddings",
-   "args": "query_embedding double precision[], match_count integer, lookback_hours integer, stream_filter text, ticker_filter text[], as_of timestamp with time zone",
-   "returns": "TABLE(article_id bigint, title text, url text, source text, slug text, image_url text, article_stream text, published_at timestamp with time zone, snippet text, similarity double precision)",
-   "intent": "news_articles.has_analysis \u2014 hide articles the scorer found nothing in Why: 15.5% of the corpus (35,554 of 229,633 on 2026-09-11) was scored and came back with no claim and no ticker verdict. They are paywalled teasers \u2014 Seeking Alpha transcripts, WSJ / Barron's pieces \u2014 whose feed body is ~100 chars (scored articles: ~4,700). The page for one is a headline and some tags, yet The Tape, related articles, topic hubs, tag search, semantic search and the agents' RAG all served them, and Bing reported 88 of them for thin meta descriptions. sitemap_article_urls already leaves them out; this makes ev",
    "domain": "Other"
   },
   {
@@ -7188,5 +6846,5 @@
    "domain": "Other"
   }
  ],
- "index": "# swingtrader schema index (generated 2026-09-14)\n\n## Relationships & graph\n- `ticker_relationship_edge_evidence` (table, ~89,973 @2026-09-14) Ticker relationship edge traceability Goal: - Provide deterministic traceability from ticker_relationship_edge\n- `ticker_relationship_edges` (table, ~40,241 @2026-09-14) Ticker Relationship Network (graph-ready adjacency structure) Why: - Avoid scanning/parsing JSONB relationship\n- `ticker_relationship_network_resolved_mv` (matview, ~21,734) Relationship network materialization Problem (statement timeout on /protected/relations): ticker_relationship_\n- `ticker_pair_stats` (table, ~795 @2026-09-03) Ticker Pair Stats (cointegration / pairs-trading metrics on the graph) Why: - The news-derived relationship gr\n- `ticker_pair_candidates_v` (view) Candidate pairs: order-normalized, deduped across rel_types, off the canonicalized graph\n- `ticker_relationship_edge_traceability_v` (view) Ticker relationship edge traceability Goal: - Provide deterministic traceability from ticker_relationship_edge\n- `ticker_relationship_network_pairs_v` (view) The stitched view: every news-derived edge, now carrying its pair's live cointegration metrics\n- `ticker_relationship_network_resolved_v` (view) Canonicalized graph view for adjacency traversal.\n- `ticker_relationship_network_v` (view) Ticker Relationship Network (graph-ready adjacency structure) Why: - Avoid scanning/parsing JSONB relationship\n\n## News: articles & scoring\n- `news_impact_heads` (table, ~2,651,283 @2026-09-14) news_impact_heads: per-cluster LLM scoring results\n- `news_article_embeddings` (table, ~1,864,998) Embedding setup for semantic retrieval over scored news.\n- `news_article_tickers` (table, ~766,447) news_article_tickers: ticker mentions extracted from articles\n- `news_article_embedding_jobs` (table, ~231,502 @2026-09-14) Embedding setup for semantic retrieval over scored news.\n- `news_impact_vectors` (table, ~225,284 @2026-09-14) news_impact_vectors: aggregated impact dimension vectors\n- `news_articles` (table, ~213,657 @2026-09-14) news_articles: article content and metadata\n- `news_source_dry_days` (table, ~718) Track calendar days where a news source stream has been fully exhausted (all available articles fetched/proces\n- `news_embedding_hourly_cluster_articles` (table, ~57) Hourly / daily embedding clusters over swingtrader.news_article_embeddings (UTC buckets)\n- `news_briefing_subscriptions` (table, ~35 @2026-09-14) News briefing subscriptions: the free, no-account email service that sends a nicely structured PDF of the last\n- `news_embedding_daily_cluster_articles` (table, ~0) Hourly / daily embedding clusters over swingtrader.news_article_embeddings (UTC buckets)\n- `news_embedding_daily_cluster_centroids` (table, ~0) Hourly / daily embedding clusters over swingtrader.news_article_embeddings (UTC buckets)\n- `news_embedding_daily_cluster_runs` (table, ~0) \u2500\u2500 Daily \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n- `news_embedding_hourly_cluster_centroids` (table, ~0) Hourly / daily embedding clusters over swingtrader.news_article_embeddings (UTC buckets)\n- `news_embedding_hourly_cluster_runs` (table, ~0) \u2500\u2500 Hourly \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n- `news_trends_article_base_v` (view) news_articles.has_analysis \u2014 hide articles the scorer found nothing in Why: 15.5% of the corpus (35,554 of 229\n- `news_trends_cluster_daily_v` (view) 4) Cluster rollups from dimensions, matching UI logic: per-article cluster = mean(dimensions in cluster), then\n- `news_trends_cluster_hourly_v` (view) Bound hourly news-trends views to last 60 days so their CTEs don't scan the full base table\n- `news_trends_dimension_cluster_map_v` (view) \n- `news_trends_dimension_daily_v` (view) 3) Dimension aggregates (daily / hourly), weighted and unweighted.\n- `news_trends_dimension_hourly_v` (view) Bound hourly news-trends views to last 60 days so their CTEs don't scan the full base table\n- `news_trends_dimension_points_v` (view) 2) One row per article/dimension with numeric value.\n- `news_trends_heads_daily_v` (view) 5) Head-level aggregates for diagnostics/trend overlays.\n- `news_trends_heads_hourly_v` (view) Pre-aggregated views for News Trends charts\n- `news_trends_tag_daily_v` (view) news_articles.has_analysis \u2014 hide articles the scorer found nothing in Why: 15.5% of the corpus (35,554 of 229\n- `news_trends_ticker_daily_v` (view) 1) Ticker mentions per day, with sentiment overlay\n\n## News: topics & claims\n- `topic_claim_stats` (table, ~1,539 @2026-09-14) topic_claim_stats \u2014 the materialized half\n- `topic_stats` (table, ~2) Materialize the topic headline counts\n- `topic_article_v` (view) news_articles.has_analysis \u2014 hide articles the scorer found nothing in Why: 15.5% of the corpus (35,554 of 229\n\n## Tickers: sentiment & coverage\n- `ticker_sentiment_heads` (table, ~371,050 @2026-09-14) Ticker Sentiment Materialization (pre-exploded, indexed) Why: - swingtrader.ticker_sentiment_heads_v explodes \n- `ticker_coverage_daily` (table, ~58,226 @2026-09-14) Materialize the /quote directory's daily rollup\n- `ticker_sentiment_heads_v` (view) Ticker Sentiment View (article-level, parsed from TICKER_SENTIMENT heads) Why: - Expose sentiment by (article,\n\n## Company factor vectors\n- `company_vectors` (table, ~3,401 @2026-04-29) company_vectors: fundamental dimension vectors per ticker per date\n- `company_ceos` (table, ~192 @2026-09-13) company_ceos \u2014 who runs each company, and what they are paid The quote page has always printed a CEO name (FMP\n\n## Screening & scans\n- `market_screening_result_rows` (table, ~145,294 @2026-09-14) \n- `market_screening_results` (table, ~4,739 @2026-09-14) \n- `market_screening_email_subscriptions` (table, ~23 @2026-08-19) Market screening EMAIL subscriptions: the lightweight, email-only delivery list that powers the \"Send me the r\n- `market_screenings` (table, ~12 @2026-09-14) \n- `market_screening_subscriptions` (table, ~0) \n\n## Users, plans & billing\n- `user_scan_rows` (table, ~68,397 @2026-09-10) \n- `user_scan_row_notes` (table, ~21,384 @2026-09-10) \n- `user_ticker_chart_workspace` (table, ~4,871 @2026-09-13) Per-user chart workspace: annotations + Chart AI conversation, keyed by ticker\n- `user_screening_results` (table, ~2,748 @2026-09-14) \u2500\u2500 user_screening_results \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n- `user_scan_jobs` (table, ~306 @2026-09-14) \n- `user_scan_runs` (table, ~216 @2026-09-14) \n- `user_trades` (table, ~36 @2026-08-15) user_trades: per-user trade ledger (buy/sell \u00d7 long/short) Semantics: side            : 'buy' | 'sell' (execut\n- `user_profiles` (table, ~15 @2026-09-07) user_profiles Per-user app state that doesn't belong in auth.users.user_metadata\n- `user_bulk_analysis_jobs` (table, ~6 @2026-06-02) user_bulk_analysis_jobs Tracks fire-and-forget bulk per-ticker technical-analysis jobs\n- `user_scheduled_screenings` (table, ~5 @2026-09-14) \u2500\u2500 user_scheduled_screenings \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n- `user_api_keys` (table, ~2 @2026-04-12) user_api_keys\n- `user_subscriptions` (table, ~1 @2026-09-07) user_subscriptions Tracks Stripe subscriptions per user\n- `user_narrative_preferences` (table, ~0 @2026-04-12) \u2500\u2500 user_narrative_preferences \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n- `user_portfolio_alerts` (table, ~0) \u2500\u2500 user_portfolio_alerts \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n- `user_telegram_connections` (table, ~0 @2026-08-06) user_telegram_connections: general-purpose Telegram account linkage Decoupled from user_narrative_preferences \n- `user_trade_reviews` (table, ~0 @2026-06-07) user_trade_reviews: AI post-trade review chats keyed by the closing trade A \"review\" lives on the trade row th\n- `user_trading_strategy` (table, ~0 @2026-08-18) \n\n## Agents & jobs\n- `job_runs` (table, ~256,091 @2026-09-14) \n- `job_health` (table, ~15) \n\n## Other\n- `sitemap_article_urls` (table, ~31,010 @2026-09-14) sitemap_article_urls: which article URLs are worth asking Google to index The sitemap shipped the newest 5,000\n- `tickers` (table, ~5,810 @2026-08-08) tickers: universe of actively-traded NYSE and NASDAQ stocks Seeded via scripts/seed_tickers.py (FMP company-sc\n- `research_priced_in_universe` (table, ~5,807 @2026-09-13) 1) The working universe and its schedule.\n- `security_identity_map` (table, ~2,019 @2026-04-15) Unified security identity map + graph integration Goal: - Keep ticker aliases and company-name aliases in one \n- `telegram_message_log` (table, ~1,253) telegram_message_log \u2014 record every Telegram message sent by the platform Populated by the Mac Mini cron (run_\n- `research_priced_in` (table, ~1,025 @2026-09-13) 1) What a price already contains, reconstructed at a point in time.\n- `arena_orders` (table, ~501 @2026-09-13) \u2500\u2500 3) Orders \u2014 the only thing an agent writes \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500 An order is an INTENT until the f\n- `arena_decisions` (table, ~443 @2026-09-13) \u2500\u2500 2) The decision record \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500 One row per agent per trading day\n- `arena_nav_history` (table, ~406 @2026-09-13) Arena: competing AI paper-trading agents What: - A set of autonomous agents, each funded with the same startin\n- `research_predictions` (table, ~65 @2026-08-25) 2) Forward predictions\n- `arena_positions` (table, ~60 @2026-09-13) \u2500\u2500 4) Positions \u2014 current book, one row per (agent, ticker) \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n- `early_access_signups` (table, ~54 @2026-09-10) Early access signups: waitlist captured when a visitor (anonymous OR authenticated) clicks \"Subscribe\" on a pu\n- `research_charts` (table, ~40 @2026-08-19) Charts for the research lab\n- `research_strategies` (table, ~35 @2026-08-19) The strategies themselves: everything needed to re-run one exactly.\n- `arena_accounts` (table, ~18 @2026-09-13) \u2500\u2500 5) Cash + NAV history \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500 `arena_accounts` is the single mu\n- `arena_agents` (table, ~9 @2026-09-13) \u2500\u2500 1) The competitors \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n- `podcast_episodes` (table, ~6 @2026-05-14) \n- `telegram_update_requests` (table, ~5 @2026-05-08) telegram_update_requests Queue table for on-demand Telegram /update requests\n- `api_rate_limits` (table, ~1) api_rate_limits: 1-minute sliding window buckets\n- `arena_championships` (table, ~0 @2026-09-07) \u2500\u2500 1) The championships \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n- `daily_narratives` (table, ~0) \u2500\u2500 daily_narratives \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n- `research_artifacts` (table, ~0 @2026-08-19) Artifacts attached to a research write-up\n- `research_campaigns` (table, ~0 @2026-08-19) Autonomous quant research lab \u2014 the published record\n- `research_findings` (table, ~0) Findings: claims, and how much evidence stands behind each one.\n- `research_notes` (table, ~0 @2026-08-19) Long-form write-ups (the markdown in research/), versioned by slug.\n- `research_prediction_events` (table, ~0) 3) The ledger's log, moved with the ledger.\n- `research_priced_in_runs` (table, ~0) 2) One row per batch pass.\n- `topics` (table, ~0 @2026-08-03) Topic hubs \u2014 permanent, auto-updating deep-dive pages over the scraped corpus\n- `arena_agents_public_v` (view) The assembled system prompt, published\n- `arena_championships_public_v` (view) Arena: championships and the title lineage Why: - An open-ended leaderboard has no drama and no end state\n- `arena_decisions_public_v` (view) arena_decisions.session_date \u2014 the session the agent actually READ `decision_date` does not hold the date the \n- `arena_leaderboard_v` (view) Arena: championships and the title lineage Why: - An open-ended leaderboard has no drama and no end state\n- `arena_nav_history_public_v` (view) arena public views: expose championship_id The championships migration added `championship_id` to the base tab\n- `arena_orders_public_v` (view) arena_orders.position_effect \u2014 what a fill DID to the book `side` alone stopped being readable the day every a\n- `arena_positions_public_v` (view) arena public views: expose championship_id The championships migration added `championship_id` to the base tab\n- `arena_title_lineage_v` (view) Arena: championships and the title lineage Why: - An open-ended leaderboard has no drama and no end state\n- `ceo_directory_v` (view) \u2500\u2500 The directory: one row per person \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500 Ranked by the largest company they\n- `research_artifacts_public_v` (view) Artifacts attached to a research write-up\n- `research_charts_public_v` (view) Intrinsic pixel dimensions for chart images\n- `research_leaderboard_v` (view) Autonomous quant research lab \u2014 the published record\n- `research_predictions_integrity_v` (view) 5) Integrity\n- `research_predictions_scored_v` (view) 4) Scoring view\n- `research_priced_in_public_v` (view) Structured summary for research_priced_in\n- `research_priced_in_queue_v` (view) 4) What the batch runner asks for: the next names due\n- `research_public_v` (view) Public read access\n\n## Functions\n- `arena_orders_immutable()`\n- `exec_sitemap_article_refresh()`\n- `exec_ticker_coverage_refresh()`\n- `exec_ticker_relationship_heads_refresh()`\n- `exec_ticker_sentiment_heads_refresh()`\n- `exec_topic_claims_refresh()`\n- `get_relationship_neighborhood(p_seed text, p_hops integer, p_min_strength double precision, p_min_mentions integer, p_rel_types text[], p_limit_nodes integer, p_limit_edges integer, p_days_lookback integer)`\n- `get_relationship_node_news(p_ticker text, p_page integer, p_page_size integer, p_days_lookback integer)`\n- `get_relationship_node_sentiment(p_ticker text, p_page integer, p_page_size integer)`\n- `get_relationship_node_sentiment_windows(p_ticker text)`\n- `get_ticker_impact_news(p_ticker text, p_days integer, p_limit integer, p_per_bucket integer)`\n- `get_top_covered_tickers(p_days integer, p_limit integer, p_offset integer, p_search text)`\n- `get_topic_visuals(p_slug text)`\n- `head_carries_analysis(p_cluster text, p_scores jsonb, p_reasoning jsonb)`\n- `impact_score_distribution(p_days integer)`\n- `impact_vector_magnitude(p_impact jsonb)`\n- `increment_market_screening_download(p_id uuid)`\n- `link_subscription_on_signup()`\n- `news_article_fts(title text, search_tags text[], body text)`\n- `news_articles_fts_maintain()`\n- `recompute_market_screenings_next_run_at()`\n- `refresh_relationship_network_mv()`\n- `refresh_sitemap_article_urls(p_days integer, p_min_scored integer)`\n- `refresh_ticker_coverage_daily()`\n- `refresh_ticker_relationship_edge_evidence(p_lookback interval)`\n- `refresh_ticker_relationship_edges(p_lookback interval)`\n- `refresh_ticker_sentiment_heads(p_lookback interval)`\n- `refresh_topic_claims(p_slug text)`\n- `refresh_topic_stats()`\n- `research_predictions_immutable()`\n- `resolve_canonical_graph_ticker(p_alias_value text)`\n- `resolve_canonical_ticker(p_alias_value text, p_alias_kind text)`\n- `search_news_article_embeddings_gte(query_embedding double precision[], match_count integer, lookback_days integer, stream_filter text)`\n- `search_news_by_tags(tag_filter text[], match_count integer, lookback_hours integer, stream_filter text)`\n- `search_news_embeddings(query_embedding double precision[], match_count integer, lookback_hours integer, stream_filter text, ticker_filter text[], as_of timestamp with time zone)`\n- `search_news_fulltext(query_text text, match_count integer, lookback_hours integer, stream_filter text)`\n- `set_news_article_slug()`\n- `set_user_profiles_updated_at()`\n- `sync_article_has_analysis(p_article_ids bigint[])`\n- `topic_keywords(p_slug text)`\n- `touch_arena_championship()`\n- `touch_arena_updated_at()`\n- `touch_company_ceos_updated_at()`\n- `touch_market_screenings_updated_at()`\n- `touch_narrative_prefs_updated_at()`\n- `touch_portfolio_alerts_updated_at()`\n- `touch_scheduled_screenings_updated_at()`\n- `touch_security_identity_map_updated_at()`\n- `touch_telegram_connections_updated_at()`\n- `touch_telegram_update_requests_updated_at()`\n- `touch_ticker_pair_stats_updated_at()`\n- `touch_ticker_relationship_edges_updated_at()`\n- `touch_user_subscriptions()`\n- `touch_user_ticker_chart_workspace_updated_at()`\n- `touch_user_trade_reviews_updated_at()`\n- `touch_user_trades_updated_at()`\n- `trg_set_impact_magnitude()`\n- `trg_stmt_nih_has_analysis_del()`\n- `trg_stmt_nih_has_analysis_ins()`\n- `trg_stmt_nih_has_analysis_upd()`\n- `trg_stmt_nih_rel_graph_del()`\n- `trg_stmt_nih_rel_graph_ins()`\n- `trg_stmt_nih_rel_graph_upd()`\n- `validate_api_key(p_key_hash text, p_rate_limit_per_minute integer)`"
+ "index": "# swingtrader schema index (generated 2026-11-09)\n\n## Relationships & graph\n- `ticker_relationship_edge_evidence` (table, ~99,815 @2026-11-09) Ticker relationship edge traceability Goal: - Provide deterministic traceability from ticker_relationship_edge\n- `ticker_relationship_edges` (table, ~43,110 @2026-11-09) Ticker Relationship Network (graph-ready adjacency structure) Why: - Avoid scanning/parsing JSONB relationship\n- `ticker_relationship_network_resolved_mv` (matview, ~21,734) Relationship network materialization Problem (statement timeout on /protected/relations): ticker_relationship_\n- `ticker_pair_stats` (table, ~795 @2026-09-03) Ticker Pair Stats (cointegration / pairs-trading metrics on the graph) Why: - The news-derived relationship gr\n- `ticker_pair_candidates_v` (view) Candidate pairs: order-normalized, deduped across rel_types, off the canonicalized graph\n- `ticker_relationship_edge_traceability_v` (view) Ticker relationship edge traceability Goal: - Provide deterministic traceability from ticker_relationship_edge\n- `ticker_relationship_network_pairs_v` (view) The stitched view: every news-derived edge, now carrying its pair's live cointegration metrics\n- `ticker_relationship_network_resolved_v` (view) Canonicalized graph view for adjacency traversal.\n- `ticker_relationship_network_v` (view) Ticker Relationship Network (graph-ready adjacency structure) Why: - Avoid scanning/parsing JSONB relationship\n\n## News: articles & scoring\n- `news_impact_heads` (table, ~3,060,028 @2026-11-09) news_impact_heads: per-cluster LLM scoring results\n- `news_article_tickers` (table, ~846,722) news_article_tickers: ticker mentions extracted from articles\n- `news_articles` (table, ~256,341 @2026-11-09) news_articles: article content and metadata\n- `news_impact_vectors` (table, ~246,679 @2026-11-09) news_impact_vectors: aggregated impact dimension vectors\n- `news_source_dry_days` (table, ~718) Track calendar days where a news source stream has been fully exhausted (all available articles fetched/proces\n- `news_briefing_subscriptions` (table, ~37 @2026-11-06) News briefing subscriptions: the free, no-account email service that sends a nicely structured PDF of the last\n- `news_trends_article_base_v` (view) news_articles.has_analysis \u2014 hide articles the scorer found nothing in Why: 15.5% of the corpus (35,554 of 229\n- `news_trends_cluster_daily_v` (view) 4) Cluster rollups from dimensions, matching UI logic: per-article cluster = mean(dimensions in cluster), then\n- `news_trends_cluster_hourly_v` (view) Bound hourly news-trends views to last 60 days so their CTEs don't scan the full base table\n- `news_trends_dimension_cluster_map_v` (view) \n- `news_trends_dimension_daily_v` (view) 3) Dimension aggregates (daily / hourly), weighted and unweighted.\n- `news_trends_dimension_hourly_v` (view) Bound hourly news-trends views to last 60 days so their CTEs don't scan the full base table\n- `news_trends_dimension_points_v` (view) 2) One row per article/dimension with numeric value.\n- `news_trends_heads_daily_v` (view) 5) Head-level aggregates for diagnostics/trend overlays.\n- `news_trends_heads_hourly_v` (view) Pre-aggregated views for News Trends charts\n- `news_trends_tag_daily_v` (view) news_articles.has_analysis \u2014 hide articles the scorer found nothing in Why: 15.5% of the corpus (35,554 of 229\n- `news_trends_ticker_daily_v` (view) 1) Ticker mentions per day, with sentiment overlay\n\n## News: topics & claims\n- `topic_claim_stats` (table, ~1,760 @2026-11-09) topic_claim_stats \u2014 the materialized half\n- `topic_stats` (table, ~2) Materialize the topic headline counts\n- `topic_article_v` (view) news_articles.has_analysis \u2014 hide articles the scorer found nothing in Why: 15.5% of the corpus (35,554 of 229\n\n## Tickers: sentiment & coverage\n- `ticker_sentiment_heads` (table, ~406,318 @2026-11-09) Ticker Sentiment Materialization (pre-exploded, indexed) Why: - swingtrader.ticker_sentiment_heads_v explodes \n- `ticker_coverage_daily` (table, ~54,054 @2026-11-09) Materialize the /quote directory's daily rollup\n- `ticker_sentiment_heads_v` (view) Ticker Sentiment View (article-level, parsed from TICKER_SENTIMENT heads) Why: - Expose sentiment by (article,\n\n## Company factor vectors\n- `company_vectors` (table, ~3,401 @2026-04-29) company_vectors: fundamental dimension vectors per ticker per date\n- `company_ceos` (table, ~192 @2026-09-13) company_ceos \u2014 who runs each company, and what they are paid The quote page has always printed a CEO name (FMP\n\n## Screening & scans\n- `market_screening_result_rows` (table, ~183,608 @2026-11-09) \n- `market_screening_results` (table, ~4,974 @2026-11-09) \n- `market_screening_email_subscriptions` (table, ~23 @2026-09-26) Market screening EMAIL subscriptions: the lightweight, email-only delivery list that powers the \"Send me the r\n- `market_screenings` (table, ~12 @2026-11-09) \n- `market_screening_subscriptions` (table, ~0) \n\n## Users, plans & billing\n- `user_scan_rows` (table, ~77,408 @2026-11-06) \n- `user_scan_row_notes` (table, ~31,287 @2026-11-06) \n- `user_ticker_chart_workspace` (table, ~6,044 @2026-11-06) Per-user chart workspace: annotations + Chart AI conversation, keyed by ticker\n- `user_screening_results` (table, ~4,323 @2026-11-09) \u2500\u2500 user_screening_results \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n- `user_scan_jobs` (table, ~391 @2026-11-08) \n- `user_scan_runs` (table, ~331 @2026-11-08) \n- `user_trades` (table, ~36 @2026-08-15) user_trades: per-user trade ledger (buy/sell \u00d7 long/short) Semantics: side            : 'buy' | 'sell' (execut\n- `user_profiles` (table, ~15 @2026-10-16) user_profiles Per-user app state that doesn't belong in auth.users.user_metadata\n- `user_bulk_analysis_jobs` (table, ~6 @2026-06-02) user_bulk_analysis_jobs Tracks fire-and-forget bulk per-ticker technical-analysis jobs\n- `user_scheduled_screenings` (table, ~5 @2026-11-09) \u2500\u2500 user_scheduled_screenings \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n- `user_api_keys` (table, ~2 @2026-04-12) user_api_keys\n- `user_subscriptions` (table, ~1 @2026-09-07) user_subscriptions Tracks Stripe subscriptions per user\n- `user_narrative_preferences` (table, ~0 @2026-04-12) \u2500\u2500 user_narrative_preferences \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n- `user_portfolio_alerts` (table, ~0) \u2500\u2500 user_portfolio_alerts \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n- `user_telegram_connections` (table, ~0 @2026-08-06) user_telegram_connections: general-purpose Telegram account linkage Decoupled from user_narrative_preferences \n- `user_trade_reviews` (table, ~0 @2026-06-07) user_trade_reviews: AI post-trade review chats keyed by the closing trade A \"review\" lives on the trade row th\n- `user_trading_strategy` (table, ~0 @2026-08-18) \n\n## Agents & jobs\n- `job_runs` (table, ~353,172 @2026-11-09) \n- `job_health` (table, ~16) \n\n## Other\n- `sitemap_article_urls` (table, ~31,083 @2026-11-09) sitemap_article_urls: which article URLs are worth asking Google to index The sitemap shipped the newest 5,000\n- `tickers` (table, ~5,810 @2026-08-08) tickers: universe of actively-traded NYSE and NASDAQ stocks Seeded via scripts/seed_tickers.py (FMP company-sc\n- `research_priced_in_universe` (table, ~5,807 @2026-11-08) 1) The working universe and its schedule.\n- `security_identity_map` (table, ~2,019 @2026-04-15) Unified security identity map + graph integration Goal: - Keep ticker aliases and company-name aliases in one \n- `telegram_message_log` (table, ~1,802) telegram_message_log \u2014 record every Telegram message sent by the platform Populated by the Mac Mini cron (run_\n- `research_priced_in` (table, ~1,308 @2026-09-24) 1) What a price already contains, reconstructed at a point in time.\n- `arena_orders` (table, ~807 @2026-11-06) \u2500\u2500 3) Orders \u2014 the only thing an agent writes \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500 An order is an INTENT until the f\n- `arena_decisions` (table, ~773 @2026-11-06) \u2500\u2500 2) The decision record \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500 One row per agent per trading day\n- `arena_nav_history` (table, ~718 @2026-11-06) Arena: competing AI paper-trading agents What: - A set of autonomous agents, each funded with the same startin\n- `arena_positions` (table, ~67 @2026-11-06) \u2500\u2500 4) Positions \u2014 current book, one row per (agent, ticker) \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n- `research_priced_in_runs` (table, ~66) 2) One row per batch pass.\n- `research_predictions` (table, ~65 @2026-08-25) 2) Forward predictions\n- `early_access_signups` (table, ~54 @2026-10-23) Early access signups: waitlist captured when a visitor (anonymous OR authenticated) clicks \"Subscribe\" on a pu\n- `research_charts` (table, ~40 @2026-08-19) Charts for the research lab\n- `research_strategies` (table, ~35 @2026-08-19) The strategies themselves: everything needed to re-run one exactly.\n- `arena_accounts` (table, ~18 @2026-11-06) \u2500\u2500 5) Cash + NAV history \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500 `arena_accounts` is the single mu\n- `arena_agents` (table, ~9 @2026-09-15) \u2500\u2500 1) The competitors \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n- `podcast_episodes` (table, ~6 @2026-05-14) \n- `telegram_update_requests` (table, ~5 @2026-05-08) telegram_update_requests Queue table for on-demand Telegram /update requests\n- `api_rate_limits` (table, ~1) api_rate_limits: 1-minute sliding window buckets\n- `arena_championships` (table, ~0 @2026-09-07) \u2500\u2500 1) The championships \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n- `daily_narratives` (table, ~0) \u2500\u2500 daily_narratives \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n- `research_artifacts` (table, ~0 @2026-08-19) Artifacts attached to a research write-up\n- `research_campaigns` (table, ~0 @2026-08-19) Autonomous quant research lab \u2014 the published record\n- `research_findings` (table, ~0) Findings: claims, and how much evidence stands behind each one.\n- `research_notes` (table, ~0 @2026-08-19) Long-form write-ups (the markdown in research/), versioned by slug.\n- `research_prediction_events` (table, ~0) 3) The ledger's log, moved with the ledger.\n- `topics` (table, ~0 @2026-08-03) Topic hubs \u2014 permanent, auto-updating deep-dive pages over the scraped corpus\n- `arena_agents_public_v` (view) The assembled system prompt, published\n- `arena_championships_public_v` (view) Arena: championships and the title lineage Why: - An open-ended leaderboard has no drama and no end state\n- `arena_decisions_public_v` (view) arena_decisions.session_date \u2014 the session the agent actually READ `decision_date` does not hold the date the \n- `arena_leaderboard_v` (view) Arena: championships and the title lineage Why: - An open-ended leaderboard has no drama and no end state\n- `arena_nav_history_public_v` (view) arena public views: expose championship_id The championships migration added `championship_id` to the base tab\n- `arena_orders_public_v` (view) arena_orders.position_effect \u2014 what a fill DID to the book `side` alone stopped being readable the day every a\n- `arena_positions_public_v` (view) arena public views: expose championship_id The championships migration added `championship_id` to the base tab\n- `arena_title_lineage_v` (view) Arena: championships and the title lineage Why: - An open-ended leaderboard has no drama and no end state\n- `ceo_directory_v` (view) \u2500\u2500 The directory: one row per person \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500 Ranked by the largest company they\n- `research_artifacts_public_v` (view) Artifacts attached to a research write-up\n- `research_charts_public_v` (view) Intrinsic pixel dimensions for chart images\n- `research_leaderboard_v` (view) Autonomous quant research lab \u2014 the published record\n- `research_predictions_integrity_v` (view) 5) Integrity\n- `research_predictions_scored_v` (view) 4) Scoring view\n- `research_priced_in_public_v` (view) Structured summary for research_priced_in\n- `research_priced_in_queue_v` (view) 4) What the batch runner asks for: the next names due\n- `research_public_v` (view) Public read access\n\n## Functions\n- `arena_orders_immutable()`\n- `exec_sitemap_article_refresh()`\n- `exec_ticker_coverage_refresh()`\n- `exec_ticker_relationship_heads_refresh()`\n- `exec_ticker_sentiment_heads_refresh()`\n- `exec_topic_claims_refresh()`\n- `get_relationship_neighborhood(p_seed text, p_hops integer, p_min_strength double precision, p_min_mentions integer, p_rel_types text[], p_limit_nodes integer, p_limit_edges integer, p_days_lookback integer)`\n- `get_relationship_node_news(p_ticker text, p_page integer, p_page_size integer, p_days_lookback integer)`\n- `get_relationship_node_sentiment(p_ticker text, p_page integer, p_page_size integer)`\n- `get_relationship_node_sentiment_windows(p_ticker text)`\n- `get_ticker_impact_news(p_ticker text, p_days integer, p_limit integer, p_per_bucket integer)`\n- `get_top_covered_tickers(p_days integer, p_limit integer, p_offset integer, p_search text)`\n- `get_topic_visuals(p_slug text)`\n- `head_carries_analysis(p_cluster text, p_scores jsonb, p_reasoning jsonb)`\n- `impact_score_distribution(p_days integer)`\n- `impact_vector_magnitude(p_impact jsonb)`\n- `increment_market_screening_download(p_id uuid)`\n- `link_subscription_on_signup()`\n- `news_article_fts(title text, search_tags text[], body text)`\n- `news_articles_fts_maintain()`\n- `recompute_market_screenings_next_run_at()`\n- `refresh_relationship_network_mv()`\n- `refresh_sitemap_article_urls(p_days integer, p_min_scored integer)`\n- `refresh_ticker_coverage_daily()`\n- `refresh_ticker_relationship_edge_evidence(p_lookback interval)`\n- `refresh_ticker_relationship_edges(p_lookback interval)`\n- `refresh_ticker_sentiment_heads(p_lookback interval)`\n- `refresh_topic_claims(p_slug text)`\n- `refresh_topic_stats()`\n- `research_predictions_immutable()`\n- `resolve_canonical_graph_ticker(p_alias_value text)`\n- `resolve_canonical_ticker(p_alias_value text, p_alias_kind text)`\n- `search_news_by_tags(tag_filter text[], match_count integer, lookback_hours integer, stream_filter text)`\n- `search_news_fulltext(query_text text, match_count integer, lookback_hours integer, stream_filter text)`\n- `set_news_article_slug()`\n- `set_user_profiles_updated_at()`\n- `sync_article_has_analysis(p_article_ids bigint[])`\n- `topic_keywords(p_slug text)`\n- `touch_arena_championship()`\n- `touch_arena_updated_at()`\n- `touch_company_ceos_updated_at()`\n- `touch_market_screenings_updated_at()`\n- `touch_narrative_prefs_updated_at()`\n- `touch_portfolio_alerts_updated_at()`\n- `touch_scheduled_screenings_updated_at()`\n- `touch_security_identity_map_updated_at()`\n- `touch_telegram_connections_updated_at()`\n- `touch_telegram_update_requests_updated_at()`\n- `touch_ticker_pair_stats_updated_at()`\n- `touch_ticker_relationship_edges_updated_at()`\n- `touch_user_subscriptions()`\n- `touch_user_ticker_chart_workspace_updated_at()`\n- `touch_user_trade_reviews_updated_at()`\n- `touch_user_trades_updated_at()`\n- `trg_set_impact_magnitude()`\n- `trg_stmt_nih_has_analysis_del()`\n- `trg_stmt_nih_has_analysis_ins()`\n- `trg_stmt_nih_has_analysis_upd()`\n- `trg_stmt_nih_rel_graph_del()`\n- `trg_stmt_nih_rel_graph_ins()`\n- `trg_stmt_nih_rel_graph_upd()`\n- `validate_api_key(p_key_hash text, p_rate_limit_per_minute integer)`"
 }
