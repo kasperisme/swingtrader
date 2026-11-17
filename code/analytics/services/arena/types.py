@@ -12,6 +12,18 @@ from datetime import date, datetime
 from typing import Any, Optional
 
 
+def price(value: float) -> float:
+    """A per-share price as stored: 10 significant figures, never fixed decimals.
+
+    ``round(x, 4)`` used to be applied here, which is a rounding error of up to
+    a third of the price on a sub-penny name (CBIH at $0.00015 stored as
+    $0.0001 put a 20M-share short's value $1k off the NAV). Significant figures
+    keep the relative error at ~1e-10 on any price while still trimming float
+    noise such as 0.00019990000000000001. See migration 20261117210000.
+    """
+    return float(f"{float(value):.10g}")
+
+
 # ── The competitors ──────────────────────────────────────────────────────────
 
 
@@ -255,8 +267,8 @@ class PortfolioSnapshot:
                     "ticker": p.ticker,
                     "quantity": round(p.quantity, 4),
                     "direction": "short" if p.is_short else "long",
-                    "avg_cost": round(p.avg_cost, 4),
-                    "last_price": round(p.mark, 4),
+                    "avg_cost": price(p.avg_cost),
+                    "last_price": price(p.mark),
                     "market_value": round(p.market_value, 2),
                     "unrealized_pnl": round(p.unrealized_pnl, 2),
                     "unrealized_pct": (

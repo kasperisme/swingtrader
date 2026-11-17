@@ -1,6 +1,5 @@
 import { NextResponse } from "next/server";
 import { createServiceClient } from "@/lib/supabase/service";
-import { embedQuery } from "@/lib/embeddings/query-embedding";
 import {
   expandSearchTagCandidates,
   tagCandidatesFromQuery,
@@ -41,8 +40,15 @@ export async function POST(req: Request) {
   const streamFilter = body?.stream_filter ? String(body.stream_filter) : null;
   const lookbackHours = lookbackDays * 24;
   const rawMode = body?.mode ? String(body.mode).toLowerCase() : "";
-  const mode: "tags" | "semantic" | "hybrid" =
-    rawMode === "tags" || rawMode === "semantic" ? rawMode : "hybrid";
+  // "text" = full-text only (skip the tag overlap). "semantic" is the legacy
+  // name for it: vector search was retired in Nov 2026 with the
+  // news_article_embeddings table, and older clients may still send it.
+  const mode: "tags" | "text" | "hybrid" =
+    rawMode === "tags"
+      ? "tags"
+      : rawMode === "text" || rawMode === "semantic"
+        ? "text"
+        : "hybrid";
 
   // Expand each requested tag into its plausible stored forms (lowercase theme
   // slug + uppercase ticker) so the GIN overlap matches regardless of how the
@@ -68,7 +74,7 @@ export async function POST(req: Request) {
   try {
     // Explicit tag chips (e.g. a clicked ticker/theme) stay an exact GIN-overlap
     // filter — precise and index-fast, no ranking needed.
-    if (mode !== "semantic" && explicitTags.length > 0) {
+    if (mode !== "text" && explicitTags.length > 0) {
       const tagRpc = await supabase.schema("swingtrader").rpc("search_news_by_tags", {
         tag_filter: explicitTags,
         match_count: limit,
@@ -93,12 +99,14 @@ export async function POST(req: Request) {
       }
     }
 
-    // Free-text path (forced "tags"/keyword mode or hybrid-first): ranked
-    // full-text search over title + tags + body. ORs the query terms, so
-    // "iran oil crisis" matches iran OR oil OR crisis, ranked by ts_rank_cd.
-    if (mode !== "semantic" && explicitTags.length === 0 && query.length >= 2) {
+    // Free-text path: ranked full-text search over title + tags + body. ORs
+    // the query terms, so "iran oil crisis" matches iran OR oil OR crisis,
+    // ranked by ts_rank_cd. Reached by every mode except a "tags" search with
+    // tag chips (which returned above), including hybrid when the chips matched
+    // nothing — the slot the retired vector fallback used to fill.
+    if (searchQuery.length >= 2) {
       const ftsRpc = await supabase.schema("swingtrader").rpc("search_news_fulltext", {
-        query_text: query,
+        query_text: searchQuery,
         match_count: limit,
         lookback_hours: lookbackHours,
         stream_filter: streamFilter,
@@ -116,27 +124,7 @@ export async function POST(req: Request) {
       }
     }
 
-    const embedding = await embedQuery(searchQuery);
-    if (!embedding) {
-      return NextResponse.json({ results: [], note: "embedding_failed" });
-    }
-
-    const rpc = await supabase.schema("swingtrader").rpc("search_news_embeddings", {
-      query_embedding: embedding,
-      match_count: limit,
-      lookback_hours: lookbackHours,
-      stream_filter: streamFilter,
-    });
-
-    if (rpc.error) {
-      console.error("[semantic-search] rpc failed:", rpc.error);
-      return NextResponse.json({ results: [], note: "rpc_failed" });
-    }
-
-    return NextResponse.json({
-      results: (rpc.data ?? []) as SemanticSearchRow[],
-      note: "semantic",
-    });
+    return NextResponse.json({ results: [], note: "no_match" });
   } catch (err) {
     console.error("[semantic-search] failed:", err);
     return NextResponse.json({ results: [], note: "search_failed" });

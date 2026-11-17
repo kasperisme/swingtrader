@@ -66,7 +66,7 @@ sys.path.insert(0, str(_REPO_ROOT))
 
 from shared.db import get_supabase_client, _as_json  # noqa: E402
 from services.agent_core import simple_chat  # noqa: E402
-from services.news.embeddings.semantic_retrieval import search_news_embeddings  # noqa: E402
+from services.rag import search_news  # noqa: E402
 
 logging.basicConfig(
     level=logging.INFO,
@@ -359,7 +359,7 @@ def _build_prompt(
             f"Key factor dimensions: {', '.join(_fmt_dim(d) for d, _ in agg[:5])}. "
             "Provide the most relevant recent snippets to support blog analysis."
         )
-        semantic_hits = search_news_embeddings(
+        semantic_hits = search_news(
             retrieval_query,
             lookback_hours=LOOKBACK_HOURS.get(mode, 14),
             tickers=top_tickers or None,

@@ -354,13 +354,6 @@ async def run_decision(
     tool_calls: list[dict[str, Any]] = []
     registry = provenance.wrap_registry(registry, tool_calls)
 
-    # Baseline for the embed-vs-RPC split. Taken as a DELTA rather than by
-    # resetting the counters: the accumulator is module-level, so a reset here
-    # would zero the numbers of any agent deciding concurrently. With
-    # --concurrency > 1 the split is still shared across agents and should be
-    # read as a process-wide figure, not this agent's alone.
-    search_before = _search_timings()
-
     nav_at_decision = portfolio.nav
     cash_at_decision = portfolio.cash
 
@@ -448,7 +441,7 @@ async def run_decision(
     log.info(
         "arena: %s timing — %s",
         agent["slug"],
-        _timing_summary(tool_calls, search_before, _elapsed_ms(started)),
+        _timing_summary(tool_calls, _elapsed_ms(started)),
     )
 
     try:
@@ -549,21 +542,11 @@ markdown headings — just the paragraph.
         return ""
 
 
-def _search_timings() -> dict[str, dict[str, float]]:
-    """Semantic-search stage counters, or {} if the module cannot be imported."""
-    try:
-        from services.news.embeddings.semantic_retrieval import search_timings
-        return search_timings()
-    except Exception:  # instrumentation must never break a decision
-        return {}
-
-
 def _timing_summary(
     calls: list[dict[str, Any]],
-    search_before: dict[str, dict[str, float]],
     total_ms: int,
 ) -> str:
-    """Where the wall clock went: model thinking vs each tool vs embed/RPC.
+    """Where the wall clock went: model thinking vs each tool.
 
     `total - tools` is the interesting residual. It is the time the process was
     NOT inside a tool, which is overwhelmingly the LLM generating tokens. If
@@ -580,23 +563,11 @@ def _timing_summary(
         f"{name} {len(v)}x {sum(v) / 1000.0:.1f}s" for name, v in ranked[:5]
     ) or "no tool calls"
 
-    # Delta the semantic-search stages against the baseline.
-    after = _search_timings()
-    split = []
-    for stage in sorted(after):
-        b = search_before.get(stage, {})
-        n = after[stage]["n"] - b.get("n", 0.0)
-        ms = after[stage]["ms"] - b.get("ms", 0.0)
-        if n > 0:
-            split.append(f"{stage} {int(n)}x {ms / 1000.0:.1f}s (avg {ms / n:.0f}ms)")
-
     out = (
         f"total {total_ms / 1000.0:.0f}s "
         f"= tools {tool_ms / 1000.0:.0f}s + model/other {(total_ms - tool_ms) / 1000.0:.0f}s "
         f"| {top}"
     )
-    if split:
-        out += " | search: " + ", ".join(split)
     return out
 
 

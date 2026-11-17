@@ -31,7 +31,7 @@ if str(_ANALYTICS) not in sys.path:
 load_dotenv(_ANALYTICS / ".env")
 
 from services.news.narrative.narrative_generator import _DEFAULT_LOOKBACK_HOURS, generate_for_user  # noqa: E402
-from services.news.embeddings.semantic_retrieval import search_news_embeddings  # noqa: E402
+from services.rag import search_news  # noqa: E402
 from shared.db import get_supabase_client  # noqa: E402
 # FIXME: cross-script import — consider moving shared helpers to a common module
 from scripts.run_daily_narrative import _narrative_to_telegram, _send_telegram_chunks  # noqa: E402
@@ -168,7 +168,7 @@ def _build_search_response(query: str, *, lookback_hours: int) -> str:
             "🔎 <b>Search request is empty.</b>\n\n"
             "Usage: <code>/search &lt;search terms&gt;</code>"
         )
-    matches = search_news_embeddings(
+    matches = search_news(
         q,
         lookback_hours=max(24, lookback_hours),
         limit=5,
@@ -186,12 +186,11 @@ def _build_search_response(query: str, *, lookback_hours: int) -> str:
     for i, item in enumerate(matches, start=1):
         title = html.escape(str(item.get("title") or "Untitled"))
         url = html.escape(str(item.get("url") or ""), quote=True)
-        similarity = float(item.get("similarity") or 0.0)
         snippet = html.escape(str(item.get("snippet") or "").strip())
         if url:
-            lines.append(f"{i}. <a href=\"{url}\">{title}</a> ({similarity:.2f})")
+            lines.append(f"{i}. <a href=\"{url}\">{title}</a>")
         else:
-            lines.append(f"{i}. {title} ({similarity:.2f})")
+            lines.append(f"{i}. {title}")
         if snippet:
             lines.append(f"   {snippet[:180]}")
         lines.append("")

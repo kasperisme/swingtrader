@@ -37,12 +37,10 @@ class _Space:
 
 @pytest.fixture
 def unit_embed(monkeypatch):
-    """`embed` returns the vector named by the text; `_unit` passes it through."""
-    from strategylab.social import saturation
-
+    """`space.embed` returns the unit vector named by the text."""
     table = {"a": [1.0, 0.0], "b": [0.0, 1.0], "mid": [0.7071, 0.7071]}
-    monkeypatch.setattr(saturation, "embed", lambda t, **k: table[t])
-    monkeypatch.setattr(saturation, "_unit", lambda v: np.array(v, dtype=float))
+    monkeypatch.setattr(_Space, "embed", lambda self, t: np.array(table[t], dtype=float),
+                        raising=False)
 
 
 def test_impact_comes_from_the_aligned_claim(unit_embed):

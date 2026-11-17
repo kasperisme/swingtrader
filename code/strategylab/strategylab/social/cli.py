@@ -255,7 +255,7 @@ def cmd_control(args) -> int:
     """Calibrate the saturation metric and verify it on known-answer probes.
 
     Run this before trusting any GAP verdict, and again after changing the
-    embedding model or the corpus window. The first two versions of this metric
+    vectoriser (`lexical.py`) or the corpus window. The first two versions of this metric
     each passed casual inspection and each failed here: one reported literal
     word salad as a narrative gap, the next reported a verbatim quote from the
     ticker's own coverage as off-topic.

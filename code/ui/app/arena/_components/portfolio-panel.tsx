@@ -52,6 +52,24 @@ function fmtMoney(v: number | null | undefined, digits = 0) {
   })}`;
 }
 
+/** Signed money with a real minus sign — a short book is a liability. */
+function fmtSigned(v: number) {
+  return `${v < 0 ? "−" : ""}${fmtMoney(Math.abs(v))}`;
+}
+
+/** Per-share prices: sub-penny names would otherwise all print "$0.00". */
+function fmtPrice(v: number | null | undefined) {
+  if (v == null) return "—";
+  const a = Math.abs(v);
+  if (a === 0 || a >= 1) return fmtMoney(v, 2);
+  // Enough decimals to show two significant digits (0.65, 0.0011, 0.0001).
+  const digits = Math.min(6, Math.max(2, 1 - Math.floor(Math.log10(a))));
+  return fmtMoney(v, digits);
+}
+
+/** Mirrors `SLIPPAGE_BPS` in services/arena/broker.py (commission is zero). */
+const CLOSE_OUT_SLIPPAGE = 5 / 10_000;
+
 function fmtPct(v: number | null | undefined, digits = 2) {
   if (v == null) return "—";
   return `${v >= 0 ? "+" : ""}${(v * 100).toFixed(digits)}%`;
@@ -132,11 +150,29 @@ export function PortfolioPanel({
   const ordered = [...rows].sort(
     (a, b) => Math.abs(b.marketValue) - Math.abs(a.marketValue),
   );
-  const invested = ordered.reduce((n, r) => n + Math.abs(r.marketValue), 0);
+  // `marketValue` is SIGNED: longs are assets, shorts are the liability to buy
+  // the shares back. Short-sale proceeds already sit in cash, so the account is
+  // cash + longs + shorts (shorts negative). Summing absolute values here once
+  // made a fully-short book read as $142k cash + $35k "invested" = $106k.
+  const longValue = ordered.reduce((n, r) => n + Math.max(r.marketValue, 0), 0);
+  const shortValue = ordered.reduce((n, r) => n + Math.min(r.marketValue, 0), 0);
+  const gross = longValue - shortValue;
+  const hasLongs = ordered.some((r) => r.marketValue > 0);
+  const hasShorts = shortValue < 0;
+  // Close-out value: every long sold and every short bought back at the mark,
+  // paying the broker's slippage on the gross traded. Account value (NAV) is
+  // the same thing before trading costs.
+  const closeOutCost = gross * CLOSE_OUT_SLIPPAGE;
   const pnl = ordered.reduce((n, r) => n + r.unrealizedPnl, 0);
   const shownNav = isLive ? nav : point?.nav ?? null;
   const shownCash = isLive ? cash : point?.cash ?? null;
   const stale = point?.positions?.stale_marks ?? [];
+  // Anchored on the stored NAV, not cash + the summed rows: the broker marks at
+  // full precision while the positions table stores prices at 4 decimals, so
+  // on a sub-penny short (20M shares at $0.00015 stored as $0.0001) re-adding
+  // the rows understates the buy-back by ~$1k. NAV is the close-out value
+  // before trading costs, so the only difference between the rows is slippage.
+  const closeOut = shownNav != null ? shownNav - closeOutCost : null;
 
   return (
     <>
@@ -254,11 +290,11 @@ export function PortfolioPanel({
                     {Math.abs(r.quantity).toLocaleString()}
                   </td>
                   <td className="py-2.5 pr-4 text-right text-muted-foreground">
-                    {fmtMoney(r.avgCost, 2)}
+                    {fmtPrice(r.avgCost)}
                   </td>
-                  <td className="py-2.5 pr-4 text-right">{fmtMoney(r.mark, 2)}</td>
+                  <td className="py-2.5 pr-4 text-right">{fmtPrice(r.mark)}</td>
                   <td className="py-2.5 pr-4 text-right text-muted-foreground">
-                    {fmtMoney(Math.abs(r.marketValue))}
+                    {fmtSigned(r.marketValue)}
                   </td>
                   <td className={`py-2.5 text-right font-medium ${toneFor(r.unrealizedPct)}`}>
                     {fmtPct(r.unrealizedPct)}
@@ -267,27 +303,44 @@ export function PortfolioPanel({
               ))}
             </tbody>
             <tfoot>
-              {/* `marketValue` is SIGNED — negative for shorts — so the invested
-                  total takes absolute values (gross exposure). P&L sums signed,
-                  because there the direction is the point. */}
-              <tr className="border-t-2 font-mono tabular-nums">
-                <td className="py-3 pr-4 text-[11px] uppercase tracking-widest text-muted-foreground">
-                  Invested
-                </td>
-                <td className="py-3 pr-4 text-right text-muted-foreground">
-                  {ordered.length}
-                  <span className="ml-1 text-[11px]">
-                    {ordered.length === 1 ? "name" : "names"}
-                  </span>
-                </td>
-                <td className="py-3 pr-4" />
-                <td className="py-3 pr-4" />
-                <td className="py-3 pr-4 text-right font-medium">{fmtMoney(invested)}</td>
-                <td className={`py-3 text-right font-medium ${toneFor(pnl)}`}>
-                  {pnl >= 0 ? "+" : "−"}
-                  {fmtMoney(Math.abs(pnl))}
-                </td>
-              </tr>
+              {/* Long and short books are footed separately and SIGNED, so the
+                  rows below visibly add up to the account value. A short is a
+                  liability: its proceeds are already inside cash. */}
+              {hasLongs && (
+                <tr className="border-t-2 font-mono tabular-nums">
+                  <td className="py-3 pr-4 text-[11px] uppercase tracking-widest text-muted-foreground">
+                    Long book
+                  </td>
+                  <td className="py-3 pr-4 text-right text-muted-foreground">
+                    {ordered.filter((r) => r.marketValue > 0).length}
+                    <span className="ml-1 text-[11px]">names</span>
+                  </td>
+                  <td className="py-3 pr-4" />
+                  <td className="py-3 pr-4" />
+                  <td className="py-3 pr-4 text-right font-medium">{fmtSigned(longValue)}</td>
+                  <td className="py-3" />
+                </tr>
+              )}
+              {hasShorts && (
+                <tr className={`font-mono tabular-nums ${hasLongs ? "" : "border-t-2"}`}>
+                  <td className="py-3 pr-4 text-[11px] uppercase tracking-widest text-muted-foreground">
+                    Short book
+                  </td>
+                  <td className="py-3 pr-4 text-right text-muted-foreground">
+                    {ordered.filter((r) => r.marketValue < 0).length}
+                    <span className="ml-1 text-[11px]">names</span>
+                  </td>
+                  <td className="py-3 pr-4" />
+                  <td className="py-3 pr-4" />
+                  <td
+                    className="py-3 pr-4 text-right font-medium"
+                    title="What it would cost to buy every shorted share back at the mark"
+                  >
+                    {fmtSigned(shortValue)}
+                  </td>
+                  <td className="py-3" />
+                </tr>
+              )}
               {/* The cash the agent has NOT put to work. Without it the table
                   reads as the whole account, and an agent sitting 80% in cash
                   looks identical to one fully invested. */}
@@ -296,7 +349,7 @@ export function PortfolioPanel({
                   Cash
                 </td>
                 <td className="py-2 pr-4 text-right text-[11px] text-muted-foreground/70">
-                  uninvested
+                  {hasShorts ? "incl. short proceeds" : "uninvested"}
                 </td>
                 <td className="py-2 pr-4" />
                 <td className="py-2 pr-4" />
@@ -305,9 +358,7 @@ export function PortfolioPanel({
                 </td>
                 <td className="py-2" />
               </tr>
-              {/* Positions + cash = the account. Stated rather than left for the
-                  reader to add up, because shorts carry a NEGATIVE market value
-                  while the rows above print gross exposure. */}
+              {/* Cash + long book + short book (negative) = the account. */}
               <tr className="border-t font-mono tabular-nums">
                 <td className="py-3 pr-4 text-[11px] uppercase tracking-widest text-muted-foreground">
                   Account value
@@ -316,8 +367,41 @@ export function PortfolioPanel({
                 <td className="py-3 pr-4" />
                 <td className="py-3 pr-4" />
                 <td className="py-3 pr-4 text-right font-medium">{fmtMoney(shownNav)}</td>
-                <td className="py-3" />
+                <td
+                  className={`py-3 text-right font-medium ${toneFor(pnl)}`}
+                  title="Unrealised P&L across open positions"
+                >
+                  {pnl >= 0 ? "+" : "−"}
+                  {fmtMoney(Math.abs(pnl))}
+                </td>
               </tr>
+              {/* What the agent would hold if it closed every position today
+                  and kept the cash — the number a reader actually wants when
+                  the book is short and the cash line is inflated by proceeds. */}
+              {closeOut != null && (
+                <tr className="font-mono tabular-nums">
+                  <td className="py-2 pr-4 text-[11px] uppercase tracking-widest text-muted-foreground">
+                    {isLive ? "Closed out today" : "Closed out that day"}
+                  </td>
+                  <td
+                    colSpan={3}
+                    className="py-2 pr-4 text-right text-[11px] text-muted-foreground/70"
+                  >
+                    {hasShorts && hasLongs
+                      ? "longs sold, shorts bought back"
+                      : hasShorts
+                        ? "all shorts bought back"
+                        : "all longs sold"}{" "}
+                    · −{fmtMoney(closeOutCost)} slippage
+                  </td>
+                  <td className="py-2 pr-4 text-right text-muted-foreground">
+                    {fmtMoney(closeOut)}
+                  </td>
+                  <td className={`py-2 text-right ${toneFor(closeOut - startingCash)}`}>
+                    {fmtPct(startingCash ? closeOut / startingCash - 1 : null)}
+                  </td>
+                </tr>
+              )}
             </tfoot>
           </table>
         </div>
@@ -325,8 +409,16 @@ export function PortfolioPanel({
 
       {ordered.length > 0 && shownNav != null && shownNav !== 0 && (
         <p className="mt-3 font-mono text-xs text-muted-foreground">
-          {Math.round((invested / shownNav) * 100)}% of the account deployed ·{" "}
-          {fmtMoney(shownCash)} held in cash
+          {Math.round((gross / shownNav) * 100)}% gross exposure
+          {hasLongs && hasShorts
+            ? ` (${Math.round((longValue / shownNav) * 100)}% long, ${Math.round((-shortValue / shownNav) * 100)}% short)`
+            : hasShorts
+              ? " (all short)"
+              : ""}
+          {" · "}
+          {hasShorts
+            ? `cash of ${fmtMoney(shownCash)} includes the short-sale proceeds`
+            : `${fmtMoney(shownCash)} held in cash`}
         </p>
       )}
     </>

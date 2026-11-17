@@ -7,7 +7,6 @@ import {
   Loader2,
   Newspaper,
   Search,
-  Sparkles,
   Hash,
 } from "lucide-react";
 import { normalizeSearchTag } from "@/lib/news/search-tags";
@@ -23,7 +22,7 @@ type ArticleItem = {
   snippet: string | null;
 };
 
-type SearchMode = "tags" | "semantic";
+type SearchMode = "tags" | "text";
 
 function formatAge(iso: string | null | undefined): string {
   if (!iso) return "—";
@@ -49,8 +48,8 @@ function articleHref(a: { slug: string | null; article_id: number }): string {
  * Per-ticker articles list. Hits the same `/api/news/semantic-search`
  * endpoint the public articles page uses, with the ticker symbol passed as
  * a tag. Users can refine the search within the ticker via the input
- * (defaults to "tags" mode, can switch to "semantic" for natural-language
- * queries scoped to the same ticker).
+ * (defaults to "tags" mode, can switch to "text" for a ranked full-text
+ * search on the typed words).
  */
 export function ScreeningsArticlesView({
   selectedTicker,
@@ -73,14 +72,14 @@ export function ScreeningsArticlesView({
       const trimmed = q.trim();
       const isRefining = trimmed.length > 0;
       // Tag mode: always include the ticker as a tag, plus any user-typed tag.
-      // Semantic mode: pass the ticker as a constraint tag with the natural
-      // language query body.
+      // Text mode: full-text over the typed words (falls back to the ticker
+      // symbol itself when nothing is typed).
       const tags: string[] = [normalizedSym];
       if (m === "tags" && isRefining) {
         tags.push(normalizeSearchTag(trimmed));
       }
       const queryBody =
-        m === "semantic" && isRefining
+        m === "text" && isRefining
           ? trimmed
           : `${normalizedSym}${isRefining ? ` ${trimmed}` : ""}`;
 
@@ -177,12 +176,12 @@ export function ScreeningsArticlesView({
             }}
           />
           <ModeButton
-            active={mode === "semantic"}
-            label="Semantic"
-            icon={<Sparkles className="h-3 w-3" />}
+            active={mode === "text"}
+            label="Text"
+            icon={<Search className="h-3 w-3" />}
             onClick={() => {
-              setMode("semantic");
-              void fetchArticles(symbol, query, "semantic");
+              setMode("text");
+              void fetchArticles(symbol, query, "text");
             }}
           />
           {note && (

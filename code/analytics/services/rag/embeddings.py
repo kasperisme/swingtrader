@@ -25,10 +25,10 @@ full-text second. It mirrors the order the public /articles page uses
 
 What this gives up is pure semantic recall — matching an article that shares no
 words with the query. Full-text ORs the query's lexemes, so "catalyst" will not
-find "surged on unexpected approval". That is a real loss and the reason
-``semantic_search_news`` is still exported: it is the right tool for a human
-typing into a search box, and the wrong one for an agent making 3 calls a
-session against a 40-second latency.
+find "surged on unexpected approval". That loss was accepted platform-wide in
+Nov 2026: the vector store (news_article_embeddings, 32 GB of a 38 GB database)
+was retired and every caller — agents, the pre-market brief, the blog
+generator, Telegram /search and /articles — now uses this cascade.
 """
 
 from __future__ import annotations
@@ -103,41 +103,6 @@ def search_news(
     if not rows and q:
         rows = _by_fulltext(q, hours, limit, article_stream, as_of)
     return rows
-
-
-def semantic_search_news(
-    query: str,
-    *,
-    lookback_hours: int = 24,
-    tickers: Optional[list[str]] = None,
-    article_stream: Optional[str] = None,
-    limit: int = 12,
-    as_of: "date | None" = None,
-) -> list[dict[str, Any]]:
-    """Vector search via the embedding RPC — meaning-level recall, higher latency.
-
-    Honours ``as_of`` (migration 20260904190000 onward), so unlike before it is
-    usable in a replay. Still the slower path: prefer ``search_news`` unless the
-    query genuinely needs to match articles that share no words with it.
-    """
-    from services.news.embeddings.semantic_retrieval import search_news_embeddings
-    return [
-        _row(r)
-        for r in search_news_embeddings(
-            query,
-            lookback_hours=lookback_hours,
-            tickers=tickers,
-            article_stream=article_stream,
-            limit=limit,
-            as_of=as_of,
-        )
-    ]
-
-
-def embed_query(text: str, model: Optional[str] = None) -> list[float]:
-    """Embed a query string via Ollama (mxbai-embed-large)."""
-    from services.news.embeddings.semantic_retrieval import embed_query as _embed
-    return _embed(text, model=model)
 
 
 # ── Tag overlap ──────────────────────────────────────────────────────────────
