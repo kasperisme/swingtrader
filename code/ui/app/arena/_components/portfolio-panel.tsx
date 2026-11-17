@@ -167,8 +167,12 @@ export function PortfolioPanel({
   const shownNav = isLive ? nav : point?.nav ?? null;
   const shownCash = isLive ? cash : point?.cash ?? null;
   const stale = point?.positions?.stale_marks ?? [];
-  const closeOut =
-    shownCash != null ? shownCash + longValue + shortValue - closeOutCost : null;
+  // Anchored on the stored NAV, not cash + the summed rows: the broker marks at
+  // full precision while the positions table stores prices at 4 decimals, so
+  // on a sub-penny short (20M shares at $0.00015 stored as $0.0001) re-adding
+  // the rows understates the buy-back by ~$1k. NAV is the close-out value
+  // before trading costs, so the only difference between the rows is slippage.
+  const closeOut = shownNav != null ? shownNav - closeOutCost : null;
 
   return (
     <>
