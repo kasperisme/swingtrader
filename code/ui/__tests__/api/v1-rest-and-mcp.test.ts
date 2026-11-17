@@ -60,7 +60,7 @@ const screeningsWriteKey = {
   rawKey: "st_live_fedcba9876543210fedcba9876543210",
 };
 
-function req(url: string, init?: RequestInit) {
+function req(url: string, init?: ConstructorParameters<typeof NextRequest>[1]) {
   return new NextRequest(new URL(url, "http://localhost"), init);
 }
 
