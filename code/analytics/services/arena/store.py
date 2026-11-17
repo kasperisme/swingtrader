@@ -17,7 +17,7 @@ from typing import Any, Optional
 
 from shared.db import get_supabase_client, reset_supabase_client
 
-from .types import PortfolioSnapshot, PositionRow
+from .types import PortfolioSnapshot, PositionRow, price
 
 log = logging.getLogger(__name__)
 
@@ -226,11 +226,11 @@ def upsert_position(
         "championship_id": _champ(),
         "ticker": ticker.upper().strip(),
         "quantity": round(float(quantity), 4),
-        "avg_cost": round(float(avg_cost), 4),
+        "avg_cost": price(avg_cost),
         "updated_at": _now(),
     }
     if last_price is not None:
-        payload["last_price"] = round(float(last_price), 4)
+        payload["last_price"] = price(last_price)
         payload["marked_at"] = _now()
     _tbl("arena_positions").upsert(
         payload, on_conflict="championship_id,agent_id,ticker"
@@ -243,9 +243,9 @@ def delete_position(agent_id: str, ticker: str) -> None:
     ).eq("ticker", ticker.upper().strip()).execute()
 
 
-def mark_position(agent_id: str, ticker: str, price: float) -> None:
+def mark_position(agent_id: str, ticker: str, price_: float) -> None:
     _tbl("arena_positions").update(
-        {"last_price": round(float(price), 4), "marked_at": _now()}
+        {"last_price": price(price_), "marked_at": _now()}
     ).eq("agent_id", agent_id).eq("championship_id", _champ()).eq(
         "ticker", ticker.upper().strip()
     ).execute()

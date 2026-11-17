@@ -36,6 +36,7 @@ from shared.db import get_supabase_client
 from . import store
 from .broker import Broker
 from .types import OrderIntent, PortfolioSnapshot
+from .types import price as price_sf
 
 log = logging.getLogger(__name__)
 
@@ -175,7 +176,7 @@ class _RepriceToSession:
             return
 
         original = row.get("price")
-        row["price"] = round(live, 4)
+        row["price"] = price_sf(live)
         row["reconstruction_price"] = original
         row["price_note"] = (
             f"`price` is the close on the session you are trading. The "
@@ -395,7 +396,7 @@ class AccountTools:
             if price is None:
                 price = self._warm(sym)
             if price:
-                out[sym] = round(float(price), 4)
+                out[sym] = price_sf(price)
             else:
                 missing.append(sym)
         return {
@@ -645,7 +646,7 @@ class AccountTools:
             "ticker": intent.ticker,
             "side": intent.side,
             "quantity": intent.quantity,
-            "estimated_price": round(reference, 4) if reference else None,
+            "estimated_price": price_sf(reference) if reference else None,
             "estimated_notional": round(intent.quantity * reference, 2) if reference else None,
             "fills_at": f"the open on {self.intended_for.isoformat()} (market order, ~5bp slippage)",
             "cash_remaining_after": round(self.portfolio.cash, 2),

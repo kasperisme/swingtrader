@@ -43,6 +43,7 @@ from typing import Any, Callable, Optional
 from . import store
 from .marks import PriceBook
 from .types import OrderIntent, PortfolioSnapshot
+from .types import price as price_sf
 
 log = logging.getLogger(__name__)
 
@@ -451,8 +452,8 @@ class Broker:
             {
                 "status": "filled",
                 "filled_at": _now(),
-                "fill_price": round(price, 4),
-                "reference_price": round(reference, 4),
+                "fill_price": price_sf(price),
+                "reference_price": price_sf(reference),
                 "slippage_bps": SLIPPAGE_BPS,
                 "commission": COMMISSION_PER_ORDER,
                 "notional": round(cash_effect, 2),
@@ -527,8 +528,8 @@ class Broker:
                     {
                         "ticker": p.ticker,
                         "quantity": round(p.quantity, 4),
-                        "avg_cost": round(p.avg_cost, 4),
-                        "mark": round(p.mark, 4),
+                        "avg_cost": price_sf(p.avg_cost),
+                        "mark": price_sf(p.mark),
                         "market_value": round(p.market_value, 2),
                     }
                     for p in positions

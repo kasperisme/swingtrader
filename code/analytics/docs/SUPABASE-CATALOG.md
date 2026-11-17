@@ -1,6 +1,6 @@
 # Supabase `swingtrader` catalog
 
-Generated 2026-11-09 by `python -m services.catalog.build`. **Do not hand-edit** — regenerate instead.
+Generated 2026-11-17 by `python -m services.catalog.build`. **Do not hand-edit** — regenerate instead.
 
 103 tables/views, 1232 columns, 62 functions.
 
@@ -10,7 +10,7 @@ Generated 2026-11-09 by `python -m services.catalog.build`. **Do not hand-edit**
 
 ### `ticker_relationship_edge_evidence` (table)
 
-*~99,815 rows, fresh to 2026-11-09*
+*~101,577 rows, fresh to 2026-11-17*
 
 Ticker relationship edge traceability Goal: - Provide deterministic traceability from ticker_relationship_edges back to source articles and impact-vector dimensions.
 
@@ -32,7 +32,7 @@ Ticker relationship edge traceability Goal: - Provide deterministic traceability
 
 ### `ticker_relationship_edges` (table)
 
-*~43,110 rows, fresh to 2026-11-09*
+*~43,459 rows, fresh to 2026-11-17*
 
 Ticker Relationship Network (graph-ready adjacency structure) Why: - Avoid scanning/parsing JSONB relationship heads for every narrative run. - Materialize ticker->ticker edges with indexed lookup for multi-hop traversal. - Keep provenance + recency so downstream ranking can prioritize fresh edges.
 
@@ -197,7 +197,7 @@ Ticker Relationship Network (graph-ready adjacency structure) Why: - Avoid scann
 
 ### `news_impact_heads` (table)
 
-*~3,060,028 rows, fresh to 2026-11-09*
+*~3,060,028 rows, fresh to 2026-11-17*
 
 news_impact_heads: per-cluster LLM scoring results
 
@@ -230,7 +230,7 @@ news_article_tickers: ticker mentions extracted from articles
 
 ### `news_articles` (table)
 
-*~256,341 rows, fresh to 2026-11-09*
+*~256,341 rows, fresh to 2026-11-17*
 
 news_articles: article content and metadata
 
@@ -259,7 +259,7 @@ news_articles: article content and metadata
 
 ### `news_impact_vectors` (table)
 
-*~246,679 rows, fresh to 2026-11-09*
+*~246,679 rows, fresh to 2026-11-17*
 
 news_impact_vectors: aggregated impact dimension vectors
 
@@ -291,7 +291,7 @@ Track calendar days where a news source stream has been fully exhausted (all ava
 
 ### `news_briefing_subscriptions` (table)
 
-*~37 rows, fresh to 2026-11-06*
+*~38 rows, fresh to 2026-11-17*
 
 News briefing subscriptions: the free, no-account email service that sends a nicely structured PDF of the last 24h of news, summaries and impact for the tickers / tags a visitor cares about. Mirrors market_screening_email_subscriptions (email-only, soft-unsubscribe, service-role access) but the unit a visitor subscribes to is their OWN watchlist of tickers + tags rather than a curated screening. One briefing per email — editing the watchlist is an in-place update via a signed manage link, no login required. Delivery: * On signup we set initial_briefing_requested_at; the Python briefing tick ge
 
@@ -487,7 +487,7 @@ news_articles.has_analysis — hide articles the scorer found nothing in Why: 15
 
 ### `topic_claim_stats` (table)
 
-*~1,760 rows, fresh to 2026-11-09*
+*~1,781 rows, fresh to 2026-11-17*
 
 topic_claim_stats — the materialized half. Ranked STORY_KEY_POINTS across a topic's whole arc. This CANNOT be live: it scans every matching article's heads, and the REST role (`authenticator`) caps statements at 8s. Refreshed after each ingest, exactly like ticker_sentiment_heads / ticker_relationship_edges. Every claim keeps `article_ts`. A permanent page that aggregates claims will otherwise enshrine stale numbers as evergreen fact — observed repeatedly: NVIDIA "$119B supply commitments / $91B guide" (pre-quarter, reports Aug 26) and Micron "+346% to $41.46B" (a prior quarter) both resurface
 
@@ -539,7 +539,7 @@ news_articles.has_analysis — hide articles the scorer found nothing in Why: 15
 
 ### `ticker_sentiment_heads` (table)
 
-*~406,318 rows, fresh to 2026-11-09*
+*~410,756 rows, fresh to 2026-11-17*
 
 Ticker Sentiment Materialization (pre-exploded, indexed) Why: - swingtrader.ticker_sentiment_heads_v explodes EVERY TICKER_SENTIMENT head's scores_json (text->jsonb cast + jsonb_each_text) and joins news_articles on every request. The `ticker` column is derived from JSON keys and `article_ts` from a join, so neither a `ticker IN (...)` nor a date filter can be pushed down or indexed — the view is O(all sentiment heads) per call and was taking 4–8s for a single ticker (and growing with ingestion). - This pre-explodes the same data into a real table keyed by (head_id, ticker) with an index on (t
 
@@ -557,11 +557,11 @@ Ticker Sentiment Materialization (pre-exploded, indexed) Why: - swingtrader.tick
 | `article_ts` | timestamp with time zone |
 | `updated_at` | timestamp with time zone |
 
-`model` values: `do-agent`, `gemma4:31b-cloud`, `gemma4:e4b`
+`model` values: `claude-haiku-4-5`, `do-agent`, `gemma4:31b-cloud`, `gemma4:e4b`
 
 ### `ticker_coverage_daily` (table)
 
-*~54,054 rows, fresh to 2026-11-09*
+*~53,236 rows, fresh to 2026-11-17*
 
 Materialize the /quote directory's daily rollup. get_top_covered_tickers read news_trends_ticker_daily_v directly, which rescans 120 days of news_article_tickers + news_articles + ticker_sentiment heads on every call: measured 4.6s for a plain page and 7.6s for a search — against the REST role's 8s statement_timeout. That is a page that breaks the first time the corpus grows. Same split the topic hubs use: membership stays live, the expensive rollup is materialized and rebuilt post-ingest. A table (not a matview) so it can carry RLS like its siblings. Only the daily rollup is stored, NOT the w
 
@@ -650,7 +650,7 @@ company_ceos — who runs each company, and what they are paid The quote page ha
 
 ### `market_screening_result_rows` (table)
 
-*~183,608 rows, fresh to 2026-11-09*
+*~194,744 rows, fresh to 2026-11-16*
 
 | column | type |
 |---|---|
@@ -666,7 +666,7 @@ company_ceos — who runs each company, and what they are paid The quote page ha
 
 ### `market_screening_results` (table)
 
-*~4,974 rows, fresh to 2026-11-09*
+*~5,050 rows, fresh to 2026-11-16*
 
 | column | type |
 |---|---|
@@ -719,7 +719,7 @@ Market screening EMAIL subscriptions: the lightweight, email-only delivery list 
 
 ### `market_screenings` (table)
 
-*~12 rows, fresh to 2026-11-09*
+*~12 rows, fresh to 2026-11-17*
 
 | column | type |
 |---|---|
@@ -761,7 +761,7 @@ Market screening EMAIL subscriptions: the lightweight, email-only delivery list 
 
 ### `user_scan_rows` (table)
 
-*~77,408 rows, fresh to 2026-11-06*
+*~77,408 rows, fresh to 2026-11-16*
 
 | column | type |
 |---|---|
@@ -775,7 +775,7 @@ Market screening EMAIL subscriptions: the lightweight, email-only delivery list 
 
 ### `user_scan_row_notes` (table)
 
-*~31,287 rows, fresh to 2026-11-06*
+*~34,850 rows, fresh to 2026-11-16*
 
 | column | type |
 |---|---|
@@ -798,7 +798,7 @@ Market screening EMAIL subscriptions: the lightweight, email-only delivery list 
 
 ### `user_ticker_chart_workspace` (table)
 
-*~6,044 rows, fresh to 2026-11-06*
+*~6,319 rows, fresh to 2026-11-16*
 
 Per-user chart workspace: annotations + Chart AI conversation, keyed by ticker. Used by protected/charts; RLS restricts rows to the owning user.
 
@@ -813,7 +813,7 @@ Per-user chart workspace: annotations + Chart AI conversation, keyed by ticker. 
 
 ### `user_screening_results` (table)
 
-*~4,323 rows, fresh to 2026-11-09*
+*~4,625 rows, fresh to 2026-11-17*
 
 ── user_screening_results ──────────────────────────────────────────────────
 
@@ -837,7 +837,7 @@ Per-user chart workspace: annotations + Chart AI conversation, keyed by ticker. 
 
 ### `user_scan_jobs` (table)
 
-*~391 rows, fresh to 2026-11-08*
+*~391 rows, fresh to 2026-11-16*
 
 | column | type |
 |---|---|
@@ -864,7 +864,7 @@ Per-user chart workspace: annotations + Chart AI conversation, keyed by ticker. 
 
 ### `user_scan_runs` (table)
 
-*~331 rows, fresh to 2026-11-08*
+*~331 rows, fresh to 2026-11-16*
 
 | column | type |
 |---|---|
@@ -908,7 +908,7 @@ user_trades: per-user trade ledger (buy/sell × long/short) Semantics: side     
 
 ### `user_profiles` (table)
 
-*~15 rows, fresh to 2026-10-16*
+*~15 rows, fresh to 2026-11-14*
 
 user_profiles Per-user app state that doesn't belong in auth.users.user_metadata. Designed to grow: free-form `metadata` jsonb for ad-hoc flags so adding a new piece of profile state doesn't require a migration. `welcomed_at` drives the first-login welcome dialog: NULL = show, set = skip.
 
@@ -952,7 +952,7 @@ user_bulk_analysis_jobs Tracks fire-and-forget bulk per-ticker technical-analysi
 
 ### `user_scheduled_screenings` (table)
 
-*~5 rows, fresh to 2026-11-09*
+*~5 rows, fresh to 2026-11-17*
 
 ── user_scheduled_screenings ────────────────────────────────────────────────
 
@@ -1099,7 +1099,7 @@ user_trade_reviews: AI post-trade review chats keyed by the closing trade A "rev
 
 ### `user_trading_strategy` (table)
 
-*~0 rows, fresh to 2026-08-18*
+*~0 rows, fresh to 2026-11-14*
 
 | column | type |
 |---|---|
@@ -1111,7 +1111,7 @@ user_trade_reviews: AI post-trade review chats keyed by the closing trade A "rev
 
 ### `job_runs` (table)
 
-*~353,172 rows, fresh to 2026-11-09*
+*~388,540 rows, fresh to 2026-11-17*
 
 | column | type |
 |---|---|
@@ -1147,7 +1147,7 @@ user_trade_reviews: AI post-trade review chats keyed by the closing trade A "rev
 
 ### `sitemap_article_urls` (table)
 
-*~31,083 rows, fresh to 2026-11-09*
+*~30,492 rows, fresh to 2026-11-17*
 
 sitemap_article_urls: which article URLs are worth asking Google to index The sitemap shipped the newest 5,000 /articles/* URLs with no filter at all, which made 74% of everything offered to a crawler a wrapper around a third-party headline. Sampling that set returned, verbatim: "A.C.L. Construction Secures Civil Package for Linda's Friendship Center in Fort Nelson BC", "ASICS Europe Expands Global Partnership with Teamwork Commerce", and three separate securities-class-action notices. Search Console's verdict on the whole domain was consistent with that: every hub page sat at "Crawled - curre
 
@@ -1180,7 +1180,7 @@ tickers: universe of actively-traded NYSE and NASDAQ stocks Seeded via scripts/s
 
 ### `research_priced_in_universe` (table)
 
-*~5,807 rows, fresh to 2026-11-08*
+*~5,807 rows, fresh to 2026-11-15*
 
 1) The working universe and its schedule.
 
@@ -1290,7 +1290,7 @@ telegram_message_log — record every Telegram message sent by the platform Popu
 
 ### `arena_orders` (table)
 
-*~807 rows, fresh to 2026-11-06*
+*~807 rows, fresh to 2026-11-16*
 
 ── 3) Orders — the only thing an agent writes ────────────────────────────── An order is an INTENT until the fill pass runs. `status` walks pending -> filled | rejected | cancelled. Rejections keep their reason.
 
@@ -1328,7 +1328,7 @@ telegram_message_log — record every Telegram message sent by the platform Popu
 
 ### `arena_decisions` (table)
 
-*~773 rows, fresh to 2026-11-06*
+*~773 rows, fresh to 2026-11-16*
 
 ── 2) The decision record ────────────────────────────────────────────────── One row per agent per trading day. This is the public "why" — the narrative the agent gives for what it did, alongside the machine trace (which tools it called, how many rounds, how long) so a bad day can be diagnosed.
 
@@ -1364,7 +1364,7 @@ telegram_message_log — record every Telegram message sent by the platform Popu
 
 ### `arena_nav_history` (table)
 
-*~718 rows, fresh to 2026-11-06*
+*~718 rows, fresh to 2026-11-16*
 
 Arena: competing AI paper-trading agents What: - A set of autonomous agents, each funded with the same starting cash, each restricted to a DIFFERENT slice of the platform's data (news impact scores, the priced-in decomposition, the NIS Momentum screenings, FMP fundamentals, the relationship graph, pair z-scores, sentiment trends), trading against each other on a daily clock. The point is not to make money — it is to make the comparison between approaches falsifiable and public. Why the accounting lives here and not in the model: - The LLM's only write is an ORDER INTENT (arena_orders). Cash, p
 
@@ -1389,7 +1389,7 @@ Arena: competing AI paper-trading agents What: - A set of autonomous agents, eac
 
 ### `arena_positions` (table)
 
-*~67 rows, fresh to 2026-11-06*
+*~74 rows, fresh to 2026-11-17*
 
 ── 4) Positions — current book, one row per (agent, ticker) ────────────────
 
@@ -1462,7 +1462,7 @@ Arena: competing AI paper-trading agents What: - A set of autonomous agents, eac
 
 ### `early_access_signups` (table)
 
-*~54 rows, fresh to 2026-10-23*
+*~54 rows, fresh to 2026-11-10*
 
 Early access signups: waitlist captured when a visitor (anonymous OR authenticated) clicks "Subscribe" on a public screening in the gallery. We do not auto-create a real subscription row. The product is in early- access mode; conversions to `public_screening_subscriptions` happen later via an admin/manual approval flow.
 
@@ -1536,7 +1536,7 @@ The strategies themselves: everything needed to re-run one exactly.
 
 ### `arena_accounts` (table)
 
-*~18 rows, fresh to 2026-11-06*
+*~18 rows, fresh to 2026-11-16*
 
 ── 5) Cash + NAV history ─────────────────────────────────────────────────── `arena_accounts` is the single mutable cash row per agent; `arena_nav_history` is the append-only daily curve the leaderboard and charts read.
 
@@ -1816,7 +1816,7 @@ arena public views: expose championship_id The championships migration added `ch
 
 *view — row count n/a*
 
-arena_orders.position_effect — what a fill DID to the book `side` alone stopped being readable the day every agent could short. A SELL is either closing a long or opening a short; a BUY is either opening a long or covering a short. The public order table rendered side as green/red, which inverts the meaning for both short cases: a new bearish position showed in the "exit" colour, and closing a bearish bet showed in the "entry" colour. It cannot be inferred reliably after the fact either. `realized_pnl` is set only on the portion of a fill that closes exposure, so side + realized_pnl separates 
+arena: store per-share prices at full precision avg_cost, last_price, fill_price and reference_price were NUMERIC(18,4), and broker.py/store.py rounded to 4 decimals before writing. That is a rounding error of up to 0.00005 per share — invisible on a $30 stock, and a third of the price on a sub-penny one. Agents may short sub-penny names (no minimum price, by design), and Jim Chaos held 20,283,961 CBIH short at ~$0.00015: * last_price stored as 0.0001, so the public positions view valued the buy-back at $2,028 when the true figure was $3,043, $1,014 off the NAV; * avg_cost stored as 0.0002 (tr
 
 | column | type |
 |---|---|
@@ -1848,7 +1848,7 @@ arena_orders.position_effect — what a fill DID to the book `side` alone stoppe
 
 *view — row count n/a*
 
-arena public views: expose championship_id The championships migration added `championship_id` to the base tables but did not add it to the public views. The UI then scoped its reads by that column, so every query failed with 42703 — and because the server actions catch errors and return an empty array, the failure surfaced as "No sessions marked yet" on charts for agents that had 46 sessions of history. Silent-empty is the worst failure shape available here: a broken query and a genuinely new agent look identical on the page. The columns are added to all four views, not just the NAV one, so p
+arena: store per-share prices at full precision avg_cost, last_price, fill_price and reference_price were NUMERIC(18,4), and broker.py/store.py rounded to 4 decimals before writing. That is a rounding error of up to 0.00005 per share — invisible on a $30 stock, and a third of the price on a sub-penny one. Agents may short sub-penny names (no minimum price, by design), and Jim Chaos held 20,283,961 CBIH short at ~$0.00015: * last_price stored as 0.0001, so the public positions view valued the buy-back at $2,028 when the true figure was $3,043, $1,014 off the NAV; * avg_cost stored as 0.0002 (tr
 
 | column | type |
 |---|---|
