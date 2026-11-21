@@ -168,6 +168,41 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
     console.warn("[sitemap] failed to list research", e);
   }
 
+  // The correction stress test: the board plus one breakdown per valued name.
+  // lastmod is the run date the scores were written for — the page changes
+  // exactly when a new run lands, never on a request.
+  const correctionRoutes: MetadataRoute.Sitemap = [];
+  try {
+    const st = createServiceClient().schema("swingtrader");
+    const { data: runs, error: runErr } = await st
+      .from("drawdown_narrative_runs")
+      .select("as_of")
+      .order("as_of", { ascending: false })
+      .limit(1);
+    if (runErr) throw runErr;
+    const asOf = runs?.[0]?.as_of as string | undefined;
+    if (asOf) {
+      const { data, error } = await st
+        .from("drawdown_narrative_scores")
+        .select("ticker")
+        .eq("as_of", asOf)
+        .in("grp", ["on_top", "holds", "fragile", "drowns"]);
+      if (error) throw error;
+      const lastModified = toDate(asOf);
+      correctionRoutes.push(
+        { url: `${baseUrl}/correction`, lastModified, changeFrequency: "daily" as const, priority: 0.8 },
+        ...(data ?? []).map((r) => ({
+          url: `${baseUrl}/correction/${r.ticker as string}`,
+          lastModified,
+          changeFrequency: "daily" as const,
+          priority: 0.5,
+        })),
+      );
+    }
+  } catch (e) {
+    console.warn("[sitemap] failed to list correction stress test", e);
+  }
+
   // One page per competing arena agent. Reads the public view, so an agent that
   // is still being tuned (is_published = false) never reaches the sitemap.
   // An agent page changes when its book is marked, so lastmod is the agent's
@@ -398,6 +433,7 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
     ...docRoutes,
     ...blogRoutes,
     ...researchRoutes,
+    ...correctionRoutes,
     ...arenaRoutes,
     ...traderRoutes,
     ...ceoRoutes,
