@@ -31,6 +31,7 @@ import {
 import { EarlyAccessSignupForm } from "@/components/early-access-signup-form";
 import { InstagramSection } from "@/components/instagram-section";
 import { ArenaLeaderboardSection } from "@/components/arena-leaderboard-section";
+import { CorrectionStressTestSection } from "@/components/correction-stress-test-section";
 import { isSanityConfigured, sanityFetch } from "@/lib/sanity/client";
 import { landingPageQuery } from "@/lib/sanity/queries";
 import type { LandingPage, LandingCardItem, LandingStep } from "@/lib/sanity/types";
@@ -378,6 +379,14 @@ export default async function Home() {
 
   return (
     <main className="min-h-screen bg-background text-foreground">
+      {/* ── CORRECTION STRESS TEST ───────────────────────────────────
+          Leads the page while a drawdown is on. Its own boundary: the board is
+          cached for hours, but a cold read must not hold up the hero. Renders
+          nothing when no complete run exists. */}
+      <Suspense fallback={null}>
+        <CorrectionStressTestSection />
+      </Suspense>
+
       {/* ── HERO ─────────────────────────────────────────────────── */}
       <section className="relative overflow-hidden pb-0 pt-10 md:pt-16">
         {/* Ambient amber glow — single accent, soft, behind the choice panel. */}
