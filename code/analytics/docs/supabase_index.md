@@ -99,6 +99,8 @@
 - `api_rate_limits` (table, ~1) api_rate_limits: 1-minute sliding window buckets
 - `arena_championships` (table, ~0 @2026-09-07) ── 1) The championships ────────────────────────────────────────────────────
 - `daily_narratives` (table, ~0) ── daily_narratives ─────────────────────────────────────────────────────────
+- `drawdown_narrative_runs` (table, ~0) drawdown: the narrative stress test, published to /correction Why: services/drawdown/narrative.py asks, for ev
+- `drawdown_narrative_scores` (table, ~0) drawdown: the narrative stress test, published to /correction Why: services/drawdown/narrative.py asks, for ev
 - `drawdown_snapshot_runs` (table, ~0) Run manifest: written LAST by each run
 - `research_artifacts` (table, ~0 @2026-08-19) Artifacts attached to a research write-up
 - `research_campaigns` (table, ~0 @2026-08-19) Autonomous quant research lab — the published record

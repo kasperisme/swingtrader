@@ -2,7 +2,7 @@
 
 Generated 2026-11-21 by `python -m services.catalog.build`. **Do not hand-edit** — regenerate instead.
 
-106 tables/views, 1261 columns, 62 functions.
+108 tables/views, 1302 columns, 62 functions.
 
 `rows` is a planner estimate, not a count. `fresh` is the newest row's timestamp — an object with an old date is likely abandoned, and that is as important to know as whether it exists.
 
@@ -213,8 +213,6 @@ news_impact_heads: per-cluster LLM scoring results
 | `latency_ms` | integer |
 | `created_at` | timestamp with time zone |
 | `meta_json` | jsonb |
-
-`cluster` values: `ARTICLE_TAGS`, `BUSINESS_MODEL`, `FINANCIAL_STRUCTURE`, `GEOGRAPHY_TRADE`, `GROWTH_PROFILE`, `IMPACT_SUMMARY`, `MACRO_SENSITIVITY`, `MARKET_BEHAVIOUR`, `SECTOR_ROTATION`, `STORY_KEY_POINTS`, `SUPPLY_CHAIN_EXPOSURE`, `TICKER_RELATIONSHIPS`, `TICKER_SENTIMENT`, `VALUATION_POSITIONING`
 
 ### `news_article_tickers` (table)
 
@@ -557,7 +555,7 @@ Ticker Sentiment Materialization (pre-exploded, indexed) Why: - swingtrader.tick
 | `article_ts` | timestamp with time zone |
 | `updated_at` | timestamp with time zone |
 
-`model` values: `claude-haiku-4-5`, `do-agent`, `gemma4:31b-cloud`, `gemma4:e4b`
+`model` values: `gemma4:31b-cloud`, `glm-5.1:cloud`
 
 ### `ticker_coverage_daily` (table)
 
@@ -1970,6 +1968,65 @@ Arena: championships and the title lineage Why: - An open-ended leaderboard has 
 | `market_pulse_sources` | jsonb |
 
 `model` values: `gemma4:31b-cloud`, `gemma4:e4b`
+
+### `drawdown_narrative_runs` (table)
+
+*~0 rows*
+
+drawdown: the narrative stress test, published to /correction Why: services/drawdown/narrative.py asks, for every name with a priced-in reconstruction, whether the revenue growth its share price REQUIRES (10y reverse DCF re-solved at today's close) still fits inside what analysts FORECAST (3y consensus from drawdown_estimate_snapshots, faded to terminal growth) once a correction cuts those forecasts. It is a description of whether a narrative is funded, NOT a return forecast: the priced-in walk-forward found implied growth alone is no return signal (strategylab/research/PRICED-IN-FINDINGS.md §
+
+| column | type |
+|---|---|
+| `as_of` | date |
+| `estimate_snapshot` | date |
+| `drop_date` | date |
+| `universe` | integer |
+| `groups` | jsonb |
+| `params` | jsonb |
+| `seal_sha256` | text |
+| `finished_at` | timestamp with time zone |
+
+### `drawdown_narrative_scores` (table)
+
+*~0 rows*
+
+drawdown: the narrative stress test, published to /correction Why: services/drawdown/narrative.py asks, for every name with a priced-in reconstruction, whether the revenue growth its share price REQUIRES (10y reverse DCF re-solved at today's close) still fits inside what analysts FORECAST (3y consensus from drawdown_estimate_snapshots, faded to terminal growth) once a correction cuts those forecasts. It is a description of whether a narrative is funded, NOT a return forecast: the priced-in walk-forward found implied growth alone is no return signal (strategylab/research/PRICED-IN-FINDINGS.md §
+
+| column | type |
+|---|---|
+| `as_of` | date |
+| `ticker` | text |
+| `company` | text |
+| `sector` | text |
+| `grp` | text |
+| `rank` | integer |
+| `reason` | text |
+| `thesis` | text |
+| `breaks_if` | text |
+| `price` | double precision |
+| `close_date` | date |
+| `drawdown_from_peak` | double precision |
+| `move_since_model` | double precision |
+| `required_cagr` | double precision |
+| `consensus_3y` | double precision |
+| `supported_cagr` | double precision |
+| `breakeven_cut` | double precision |
+| `margin_used` | double precision |
+| `upside_to_median` | double precision |
+| `n_targets` | integer |
+| `targets_predate_drop` | boolean |
+| `model_as_of` | date |
+| `epicenter` | boolean |
+| `epicenter_linked` | boolean |
+| `linked_with` | text |
+| `beta` | double precision |
+| `exposure` | text |
+| `flags` | text |
+| `crux` | text |
+| `position` | text |
+| `pays_for` | jsonb |
+| `declines` | jsonb |
+| `created_at` | timestamp with time zone |
 
 ### `drawdown_snapshot_runs` (table)
 
