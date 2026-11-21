@@ -745,7 +745,17 @@ def cmd_batch(args) -> int:
                         predict=args.predict, horizon=args.horizon,
                         max_seconds=args.max_seconds, dry_run=args.dry_run,
                         verbose=args.verbose)
-    return 0 if summary.get("failed", 0) == 0 else 1
+    # Exit codes feed shared.heartbeat_run (job_health + alerts):
+    #   1 = attempted names but none succeeded — the pipeline is broken. A
+    #       retired model once made every night exit "cleanly" with 0
+    #       successes for two months, all of it logged only as warnings.
+    #   3 = partial: some names failed alongside successes (alert, not fatal).
+    attempted = summary.get("attempted", 0)
+    if attempted and not summary.get("succeeded", 0):
+        return 1
+    if summary.get("failed", 0):
+        return 3
+    return 0
 
 
 def cmd_investigate(args) -> int:

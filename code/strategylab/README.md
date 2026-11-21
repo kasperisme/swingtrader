@@ -338,7 +338,7 @@ arrives with its author's own question to management attached.
 | `social/tools.py` | The evidence surface — everything except news, and it reports what it cannot measure |
 | `social/predict.py` | Tier 3 — locked forward predictions, mechanical resolvers, Brier vs base rate |
 | `social/persist.py` | Mirrors the record to `research_priced_in` / `research_predictions` |
-| `social/llm.py` | One JSON completion, two backends. Ollama (`glm-5.1:cloud`) or Anthropic — same prompts, same schemas, only the wire changes |
+| `social/llm.py` | One JSON completion, two backends. Ollama (`glm-5.3-flash:cloud`) or Anthropic — same prompts, same schemas, only the wire changes |
 | `social/ledger.py` | The sealed prediction ledger, with Supabase as the source of truth and the immutability trigger enforcing it server-side |
 | `social/universe.py` | Which of the 5,810 NYSE + NASDAQ names this can actually be run on. Coverage is the only gate — 1,110 clear the mention floor, and of those the ones with the ≥5 published models the grounded tier needs qualify. Size is recorded, never tested: whether the sell-side and the press care is the question, and a $200m company they both cover qualifies over a $3tn one they do not |
 | `social/batch.py` | The scheduled pass — resumable, isolated per ticker, and the **publish gate** that decides what goes live |

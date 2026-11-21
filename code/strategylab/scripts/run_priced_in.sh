@@ -23,7 +23,7 @@
 #       FMP calls re-checking analyst coverage on names whose verdict is stale.
 #
 # Sizing the nightly pass: ~725 names are eligible and a reconstruction takes
-# ~110s on glm-5.1:cloud, so a 7-day refresh cycle needs ~105 names a night,
+# ~110s on glm-5.3-flash:cloud, so a 7-day refresh cycle needs ~105 names a night,
 # about three hours. PRICED_IN_LIMIT and PRICED_IN_MAX_SECONDS are the two knobs;
 # the time budget is a ceiling, not a target, and a pass that hits it simply
 # resumes tomorrow where it stopped.
@@ -46,7 +46,7 @@
 #
 # Env: loaded from code/strategylab/.env (falling back to code/analytics/.env).
 #   STRATEGYLAB_LLM_BACKEND=ollama        route the pipeline through Ollama
-#   STRATEGYLAB_OLLAMA_MODELS=glm-5.1:cloud
+#   STRATEGYLAB_OLLAMA_MODELS=glm-5.3-flash:cloud
 #   OLLAMA_URL                            default http://localhost:11434
 #   PRICED_IN_LIMIT                       names per nightly pass (default 105)
 #   PRICED_IN_DUE_DAYS                    refresh cycle in days (default 7)
@@ -83,8 +83,20 @@ case "$MODE" in
     "$VENV_PYTHON" -m strategylab.social.cli predict status
     ;;
   batch)
-    "$VENV_PYTHON" -m strategylab.social.cli batch \
-      --limit "$LIMIT" --due-days "$DUE_DAYS" --max-seconds "$MAX_SECONDS"
+    # Run under analytics' JobHeartbeat so the batch shows up in job_health and
+    # the watchdog/alerts. The CLI exits 1 when it attempted names but none
+    # succeeded, 3 on a partial night. Falls back to an unwrapped run if the
+    # analytics venv is missing.
+    ANALYTICS_DIR="$(dirname "$LAB_DIR")/analytics"
+    ANALYTICS_PYTHON="${ANALYTICS_DIR}/.venv/bin/python"
+    BATCH_CMD=("$VENV_PYTHON" -m strategylab.social.cli batch
+      --limit "$LIMIT" --due-days "$DUE_DAYS" --max-seconds "$MAX_SECONDS")
+    if [[ -x "$ANALYTICS_PYTHON" ]]; then
+      (cd "$ANALYTICS_DIR" && "$ANALYTICS_PYTHON" -m shared.heartbeat_run \
+        --job priced_in_batch --interval 24 --cwd "$LAB_DIR" -- "${BATCH_CMD[@]}")
+    else
+      "${BATCH_CMD[@]}"
+    fi
     ;;
   universe)
     "$VENV_PYTHON" -m strategylab.social.cli universe seed

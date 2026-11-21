@@ -16,7 +16,7 @@ change; only the wire does.
 `resolve()` returns a backend and an ordered model chain:
 
 * `STRATEGYLAB_LLM_BACKEND=ollama` -> Ollama, chain from
-  `STRATEGYLAB_OLLAMA_MODELS` (comma-separated), default `glm-5.1:cloud`.
+  `STRATEGYLAB_OLLAMA_MODELS` (comma-separated), default `glm-5.3-flash:cloud`.
 * `STRATEGYLAB_LLM_BACKEND=anthropic` -> Anthropic, one model.
 * unset -> Anthropic if `ANTHROPIC_API_KEY` is set, else Ollama if a daemon
   answers. The batch runner sets it explicitly rather than relying on this.
@@ -57,7 +57,7 @@ from dataclasses import dataclass
 
 log = logging.getLogger(__name__)
 
-OLLAMA_DEFAULT_CHAIN = ["glm-5.1:cloud"]
+OLLAMA_DEFAULT_CHAIN = ["glm-5.3-flash:cloud"]
 
 # Ollama truncates the FRONT of an overlong prompt, which for these prompts is
 # the question rather than the evidence. Size the window instead, and refuse

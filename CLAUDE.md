@@ -124,7 +124,7 @@ cd code/strategylab
 
 Three things to know before touching it:
 
-- **The LLM backend is Ollama** (`glm-5.1:cloud`), set in `code/strategylab/.env`
+- **The LLM backend is Ollama** (`glm-5.3-flash:cloud`), set in `code/strategylab/.env`
   via `STRATEGYLAB_LLM_BACKEND=ollama`. ~110s/ticker; a full 725-name pass is one
   week of nightly runs. `investigate` needs tool use and stays on Anthropic.
 - **`batch` promotes rows to the PUBLIC quote pages.** The gate publishes only a
