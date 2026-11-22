@@ -1,8 +1,8 @@
 # Supabase `swingtrader` catalog
 
-Generated 2026-11-21 by `python -m services.catalog.build`. **Do not hand-edit** — regenerate instead.
+Generated 2026-11-22 by `python -m services.catalog.build`. **Do not hand-edit** — regenerate instead.
 
-108 tables/views, 1302 columns, 62 functions.
+110 tables/views, 1346 columns, 62 functions.
 
 `rows` is a planner estimate, not a count. `fresh` is the newest row's timestamp — an object with an old date is likely abandoned, and that is as important to know as whether it exists.
 
@@ -10,7 +10,7 @@ Generated 2026-11-21 by `python -m services.catalog.build`. **Do not hand-edit**
 
 ### `ticker_relationship_edge_evidence` (table)
 
-*~102,656 rows, fresh to 2026-11-21*
+*~104,901 rows, fresh to 2026-11-22*
 
 Ticker relationship edge traceability Goal: - Provide deterministic traceability from ticker_relationship_edges back to source articles and impact-vector dimensions.
 
@@ -32,7 +32,7 @@ Ticker relationship edge traceability Goal: - Provide deterministic traceability
 
 ### `ticker_relationship_edges` (table)
 
-*~43,661 rows, fresh to 2026-11-21*
+*~43,695 rows, fresh to 2026-11-22*
 
 Ticker Relationship Network (graph-ready adjacency structure) Why: - Avoid scanning/parsing JSONB relationship heads for every narrative run. - Materialize ticker->ticker edges with indexed lookup for multi-hop traversal. - Keep provenance + recency so downstream ranking can prioritize fresh edges.
 
@@ -197,7 +197,7 @@ Ticker Relationship Network (graph-ready adjacency structure) Why: - Avoid scann
 
 ### `news_impact_heads` (table)
 
-*~3,366,330 rows, fresh to 2026-11-21*
+*~3,366,330 rows, fresh to 2026-11-22*
 
 news_impact_heads: per-cluster LLM scoring results
 
@@ -214,6 +214,8 @@ news_impact_heads: per-cluster LLM scoring results
 | `created_at` | timestamp with time zone |
 | `meta_json` | jsonb |
 
+`cluster` values: `ARTICLE_TAGS`, `BUSINESS_MODEL`, `FINANCIAL_STRUCTURE`, `GEOGRAPHY_TRADE`, `GROWTH_PROFILE`, `IMPACT_SUMMARY`, `MACRO_SENSITIVITY`, `MARKET_BEHAVIOUR`, `SECTOR_ROTATION`, `STORY_KEY_POINTS`, `SUPPLY_CHAIN_EXPOSURE`, `TICKER_RELATIONSHIPS`, `TICKER_SENTIMENT`, `VALUATION_POSITIONING`
+
 ### `news_article_tickers` (table)
 
 *~846,722 rows*
@@ -228,7 +230,7 @@ news_article_tickers: ticker mentions extracted from articles
 
 ### `news_articles` (table)
 
-*~256,341 rows, fresh to 2026-11-21*
+*~256,341 rows, fresh to 2026-11-22*
 
 news_articles: article content and metadata
 
@@ -257,7 +259,7 @@ news_articles: article content and metadata
 
 ### `news_impact_vectors` (table)
 
-*~246,679 rows, fresh to 2026-11-21*
+*~246,679 rows, fresh to 2026-11-22*
 
 news_impact_vectors: aggregated impact dimension vectors
 
@@ -485,7 +487,7 @@ news_articles.has_analysis — hide articles the scorer found nothing in Why: 15
 
 ### `topic_claim_stats` (table)
 
-*~1,785 rows, fresh to 2026-11-21*
+*~1,789 rows, fresh to 2026-11-22*
 
 topic_claim_stats — the materialized half. Ranked STORY_KEY_POINTS across a topic's whole arc. This CANNOT be live: it scans every matching article's heads, and the REST role (`authenticator`) caps statements at 8s. Refreshed after each ingest, exactly like ticker_sentiment_heads / ticker_relationship_edges. Every claim keeps `article_ts`. A permanent page that aggregates claims will otherwise enshrine stale numbers as evergreen fact — observed repeatedly: NVIDIA "$119B supply commitments / $91B guide" (pre-quarter, reports Aug 26) and Micron "+346% to $41.46B" (a prior quarter) both resurface
 
@@ -537,7 +539,7 @@ news_articles.has_analysis — hide articles the scorer found nothing in Why: 15
 
 ### `ticker_sentiment_heads` (table)
 
-*~413,814 rows, fresh to 2026-11-21*
+*~414,618 rows, fresh to 2026-11-22*
 
 Ticker Sentiment Materialization (pre-exploded, indexed) Why: - swingtrader.ticker_sentiment_heads_v explodes EVERY TICKER_SENTIMENT head's scores_json (text->jsonb cast + jsonb_each_text) and joins news_articles on every request. The `ticker` column is derived from JSON keys and `article_ts` from a join, so neither a `ticker IN (...)` nor a date filter can be pushed down or indexed — the view is O(all sentiment heads) per call and was taking 4–8s for a single ticker (and growing with ingestion). - This pre-explodes the same data into a real table keyed by (head_id, ticker) with an index on (t
 
@@ -555,11 +557,11 @@ Ticker Sentiment Materialization (pre-exploded, indexed) Why: - swingtrader.tick
 | `article_ts` | timestamp with time zone |
 | `updated_at` | timestamp with time zone |
 
-`model` values: `gemma4:31b-cloud`, `glm-5.1:cloud`
+`model` values: `claude-haiku-4-5`, `do-agent`, `gemma4:31b-cloud`, `gemma4:e4b`
 
 ### `ticker_coverage_daily` (table)
 
-*~52,850 rows, fresh to 2026-11-21*
+*~52,731 rows, fresh to 2026-11-22*
 
 Materialize the /quote directory's daily rollup. get_top_covered_tickers read news_trends_ticker_daily_v directly, which rescans 120 days of news_article_tickers + news_articles + ticker_sentiment heads on every call: measured 4.6s for a plain page and 7.6s for a search — against the REST role's 8s statement_timeout. That is a page that breaks the first time the corpus grows. Same split the topic hubs use: membership stays live, the expensive rollup is materialized and rebuilt post-ingest. A table (not a matview) so it can carry RLS like its siblings. Only the daily rollup is stored, NOT the w
 
@@ -717,7 +719,7 @@ Market screening EMAIL subscriptions: the lightweight, email-only delivery list 
 
 ### `market_screenings` (table)
 
-*~12 rows, fresh to 2026-11-21*
+*~12 rows, fresh to 2026-11-22*
 
 | column | type |
 |---|---|
@@ -811,7 +813,7 @@ Per-user chart workspace: annotations + Chart AI conversation, keyed by ticker. 
 
 ### `user_screening_results` (table)
 
-*~4,625 rows, fresh to 2026-11-21*
+*~4,625 rows, fresh to 2026-11-22*
 
 ── user_screening_results ──────────────────────────────────────────────────
 
@@ -950,7 +952,7 @@ user_bulk_analysis_jobs Tracks fire-and-forget bulk per-ticker technical-analysi
 
 ### `user_scheduled_screenings` (table)
 
-*~5 rows, fresh to 2026-11-21*
+*~5 rows, fresh to 2026-11-22*
 
 ── user_scheduled_screenings ────────────────────────────────────────────────
 
@@ -1109,7 +1111,7 @@ user_trade_reviews: AI post-trade review chats keyed by the closing trade A "rev
 
 ### `job_runs` (table)
 
-*~388,540 rows, fresh to 2026-11-21*
+*~388,540 rows, fresh to 2026-11-22*
 
 | column | type |
 |---|---|
@@ -1145,7 +1147,7 @@ user_trade_reviews: AI post-trade review chats keyed by the closing trade A "rev
 
 ### `sitemap_article_urls` (table)
 
-*~30,974 rows, fresh to 2026-11-21*
+*~30,756 rows, fresh to 2026-11-22*
 
 sitemap_article_urls: which article URLs are worth asking Google to index The sitemap shipped the newest 5,000 /articles/* URLs with no filter at all, which made 74% of everything offered to a crawler a wrapper around a third-party headline. Sampling that set returned, verbatim: "A.C.L. Construction Secures Civil Package for Linda's Friendship Center in Fort Nelson BC", "ASICS Europe Expands Global Partnership with Teamwork Commerce", and three separate securities-class-action notices. Search Console's verdict on the whole domain was consistent with that: every hub page sat at "Crawled - curre
 
@@ -1201,7 +1203,7 @@ tickers: universe of actively-traded NYSE and NASDAQ stocks Seeded via scripts/s
 
 ### `research_priced_in_universe` (table)
 
-*~5,807 rows, fresh to 2026-11-21*
+*~5,807 rows, fresh to 2026-11-22*
 
 1) The working universe and its schedule.
 
@@ -1291,7 +1293,7 @@ Unified security identity map + graph integration Goal: - Keep ticker aliases an
 
 ### `research_priced_in` (table)
 
-*~1,401 rows, fresh to 2026-11-21*
+*~1,497 rows, fresh to 2026-11-22*
 
 1) What a price already contains, reconstructed at a point in time.
 
@@ -1969,6 +1971,43 @@ Arena: championships and the title lineage Why: - An open-ended leaderboard has 
 
 `model` values: `gemma4:31b-cloud`, `gemma4:e4b`
 
+### `drawdown_analysis_notifications` (table)
+
+*~0 rows*
+
+Correction stress test: email updates when a new analysis is published. Why: /correction is the drawdown stress test (services/drawdown). It is republished whenever the panel reviews a new day, and a reader who found it once has no way to know a new one exists. This is the lead magnet behind the header link and the site-wide promo: leave an email and get one mail per new analysis. Mirrors news_briefing_subscriptions / market_screening_email_subscriptions: email-only, no account, soft unsubscribe through an HMAC-signed link (UNSUBSCRIBE_SECRET, slug "correction"), written only by the service ro
+
+| column | type |
+|---|---|
+| `as_of` | date |
+| `started_at` | timestamp with time zone |
+| `finished_at` | timestamp with time zone |
+| `recipients` | integer |
+| `sent` | integer |
+| `failed` | integer |
+
+### `drawdown_analysis_subscriptions` (table)
+
+*~0 rows*
+
+Correction stress test: email updates when a new analysis is published. Why: /correction is the drawdown stress test (services/drawdown). It is republished whenever the panel reviews a new day, and a reader who found it once has no way to know a new one exists. This is the lead magnet behind the header link and the site-wide promo: leave an email and get one mail per new analysis. Mirrors news_briefing_subscriptions / market_screening_email_subscriptions: email-only, no account, soft unsubscribe through an HMAC-signed link (UNSUBSCRIBE_SECRET, slug "correction"), written only by the service ro
+
+| column | type |
+|---|---|
+| `id` | uuid |
+| `email` | text |
+| `status` | text |
+| `source` | text |
+| `user_id` | uuid |
+| `referrer` | text |
+| `user_agent` | text |
+| `metadata` | jsonb |
+| `confirmation_sent_at` | timestamp with time zone |
+| `last_notified_as_of` | date |
+| `unsubscribed_at` | timestamp with time zone |
+| `created_at` | timestamp with time zone |
+| `updated_at` | timestamp with time zone |
+
 ### `drawdown_narrative_runs` (table)
 
 *~0 rows*
@@ -1988,7 +2027,7 @@ drawdown: the narrative stress test, published to /correction Why: services/draw
 
 ### `drawdown_narrative_scores` (table)
 
-*~0 rows*
+*~0 rows, fresh to 2026-11-22*
 
 drawdown: the narrative stress test, published to /correction Why: services/drawdown/narrative.py asks, for every name with a priced-in reconstruction, whether the revenue growth its share price REQUIRES (10y reverse DCF re-solved at today's close) still fits inside what analysts FORECAST (3y consensus from drawdown_estimate_snapshots, faded to terminal growth) once a correction cuts those forecasts. It is a description of whether a narrative is funded, NOT a return forecast: the priced-in walk-forward found implied growth alone is no return signal (strategylab/research/PRICED-IN-FINDINGS.md §
 
@@ -2027,6 +2066,31 @@ drawdown: the narrative stress test, published to /correction Why: services/draw
 | `pays_for` | jsonb |
 | `declines` | jsonb |
 | `created_at` | timestamp with time zone |
+| `margin_basis` | text |
+| `breakeven_consensus` | double precision |
+| `breakeven_quality` | double precision |
+| `quality_margin` | double precision |
+| `cash_conversion` | double precision |
+| `cash_margin` | double precision |
+| `consensus_margin` | double precision |
+| `quality` | text |
+| `quality_flags` | text |
+| `cfo_to_ni` | double precision |
+| `accruals` | double precision |
+| `sbc_to_revenue` | double precision |
+| `share_growth` | double precision |
+| `one_off_share` | double precision |
+| `quality_years` | integer |
+| `cost_of_equity` | double precision |
+| `midcycle_margin` | double precision |
+| `hist_net_margin` | double precision |
+| `loss_making` | boolean |
+| `sector_pct` | double precision |
+| `value_basis` | text |
+| `events` | text |
+| `rule_grp` | text |
+| `correction_cut` | double precision |
+| `judgement` | jsonb |
 
 ### `drawdown_snapshot_runs` (table)
 
