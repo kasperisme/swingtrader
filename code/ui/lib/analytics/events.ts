@@ -50,6 +50,17 @@ type EventMap = {
     /** The value-prop experiment variant the reader was assigned, if any. */
     value_prop_variant: string | null;
   };
+  // Visible-time milestones (15/30/60/120s). Sent while the reader is still on the
+  // page, so they survive the exits that never fire pagehide (most mobile closes):
+  // in Nov 2026 81% of real article sessions sent no article_engagement at all.
+  article_heartbeat: {
+    article_id: number;
+    slug: string;
+    /** The milestone just crossed, in seconds of VISIBLE time on this article. */
+    seconds: number;
+    max_scroll_pct: number;
+    reached_cta: boolean;
+  };
   trade_logged: { trade_id: string; ticker: string; side: string };
 
   feature_viewed: { feature: string };
@@ -196,9 +207,12 @@ type EventMap = {
 export function track<K extends keyof EventMap>(
   event: K,
   properties?: EventMap[K],
+  options?: { beacon?: boolean },
 ) {
   const ph = getPosthog();
-  ph?.capture(event, properties);
+  // sendBeacon survives the page being torn down (tab close, hard navigation),
+  // where a normal request is often cancelled before it leaves.
+  ph?.capture(event, properties, options?.beacon ? { transport: "sendBeacon" } : undefined);
 
   // Forward the confirmed lead-magnet conversion to GA4 as `sign_up`, so GA4 stops
   // showing 0 conversions against real leads. Mark `sign_up` a Key event in GA4

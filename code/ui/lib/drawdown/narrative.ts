@@ -35,14 +35,21 @@ import type {
 
 export * from "./narrative-format";
 
-const ROW_COLUMNS =
+const BASE_COLUMNS =
   "ticker, company, sector, grp, rank, thesis, breaks_if, reason, price, close_date, drawdown_from_peak, " +
   "required_cagr, consensus_3y, supported_cagr, breakeven_cut, margin_used, upside_to_median, n_targets, " +
-  "targets_predate_drop, model_as_of, epicenter, epicenter_linked, linked_with, beta, exposure, flags, " +
-  "margin_basis, breakeven_consensus, breakeven_quality, consensus_margin, quality_margin, quality, quality_flags";
+  "targets_predate_drop, model_as_of, epicenter, epicenter_linked, linked_with, beta, exposure, flags";
+const ROW_COLUMNS =
+  `${BASE_COLUMNS}, margin_basis, breakeven_consensus, breakeven_quality, consensus_margin, quality_margin, ` +
+  "quality, quality_flags";
 const DETAIL_COLUMNS =
   `${ROW_COLUMNS}, cash_conversion, cash_margin, cfo_to_ni, accruals, sbc_to_revenue, share_growth, ` +
   "one_off_share, quality_years, crux, position, pays_for";
+const BASE_DETAIL_COLUMNS = `${BASE_COLUMNS}, crux, position, pays_for`;
+
+/** Postgres "undefined column": the earnings-quality migration is not applied yet. */
+const missingColumn = (e: { code?: string; message?: string } | null) =>
+  !!e && (e.code === "42703" || /column .* does not exist/i.test(e.message ?? ""));
 
 const n = (v: unknown): number | null => (v == null || !Number.isFinite(Number(v)) ? null : Number(v));
 const s = (v: unknown): string | null => (v == null || v === "" ? null : String(v));
@@ -124,14 +131,19 @@ export async function getCorrectionBoard(): Promise<{ run: NarrativeRun; rows: N
   try {
     const run = await latestRun();
     if (!run) return null;
-    const { data, error } = await createServiceClient()
-      .schema(SCHEMA)
-      .from("drawdown_narrative_scores")
-      .select(ROW_COLUMNS)
-      .eq("as_of", run.asOf)
-      .order("grp")
-      .order("rank")
-      .limit(2000);
+    const query = (cols: string) =>
+      createServiceClient()
+        .schema(SCHEMA)
+        .from("drawdown_narrative_scores")
+        .select(cols)
+        .eq("as_of", run.asOf)
+        .order("grp")
+        .order("rank")
+        .limit(2000);
+    let { data, error } = await query(ROW_COLUMNS);
+    // Until migration 20261121180000 is applied the quality columns do not exist;
+    // render the board without them rather than not at all.
+    if (missingColumn(error)) ({ data, error } = await query(BASE_COLUMNS));
     if (error) throw error;
     return { run, rows: ((data ?? []) as unknown as Record<string, unknown>[]).map(toRow) };
   } catch {
@@ -149,13 +161,16 @@ export async function getCorrectionDetail(
   try {
     const run = await latestRun();
     if (!run) return null;
-    const { data, error } = await createServiceClient()
-      .schema(SCHEMA)
-      .from("drawdown_narrative_scores")
-      .select(DETAIL_COLUMNS)
-      .eq("as_of", run.asOf)
-      .eq("ticker", symbol)
-      .limit(1);
+    const query = (cols: string) =>
+      createServiceClient()
+        .schema(SCHEMA)
+        .from("drawdown_narrative_scores")
+        .select(cols)
+        .eq("as_of", run.asOf)
+        .eq("ticker", symbol)
+        .limit(1);
+    let { data, error } = await query(DETAIL_COLUMNS);
+    if (missingColumn(error)) ({ data, error } = await query(BASE_DETAIL_COLUMNS));
     if (error || !data?.length) return null;
     const r = data[0] as unknown as Record<string, unknown>;
     return {
