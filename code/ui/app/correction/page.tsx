@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import Link from "next/link";
+import { CorrectionSubscribeForm } from "@/components/correction-subscribe-form";
 import { Suspense } from "react";
 import { fmtDay, getCorrectionBoard, GROUP_LABEL, GROUP_RULE, type NarrativeGroup } from "@/lib/drawdown/narrative";
 import { SITE_URL } from "@/lib/site";
@@ -68,6 +69,19 @@ export default function CorrectionPage() {
         ask how far those forecasts can be cut before the price is paying for growth nobody expects. A correction is
         exactly when forecasts get cut.
       </p>
+
+      <section
+        aria-labelledby="correction-updates-heading"
+        className="mt-6 max-w-xl rounded-2xl border border-border bg-card/40 p-5"
+      >
+        <h2 id="correction-updates-heading" className="text-sm font-semibold">
+          Get the next analysis by email
+        </h2>
+        <p className="mt-1 mb-3 text-sm text-muted-foreground">
+          The stress test is re-run as forecasts move. Leave your email and we&apos;ll send you each new one.
+        </p>
+        <CorrectionSubscribeForm source="correction_page" />
+      </section>
 
       <Suspense fallback={<div className="mt-10 h-96 animate-pulse rounded-2xl bg-card/40" />}>
         <Board />

@@ -469,4 +469,12 @@ def apply(as_of: str | None = None, db: bool = False, manifest: str | None = Non
         except Exception as exc:  # noqa: BLE001
             status = f"failed: {exc}"
     jmeta["db"] = status
+    if status == "written":
+        # The day is now public on /correction: mail the update list (idempotent per day).
+        try:
+            from . import notify
+
+            jmeta["notify"] = notify.send(day)
+        except Exception as exc:  # noqa: BLE001 - a mail failure never undoes the publish
+            jmeta["notify"] = {"ok": False, "error": str(exc)}
     return {"ok": True, "meta": jmeta, "out": str(OUT_ROOT / day / "scorecard.json")}

@@ -14,6 +14,7 @@ import {
 import { SiteHeader, SiteHeaderFallback } from "@/components/site-header";
 import { CavemanModeProvider } from "@/lib/caveman-mode";
 import { AnalyticsProvider } from "@/lib/analytics/AnalyticsProvider";
+import { CorrectionPromoGate } from "@/components/correction-promo-gate";
 import { Pixels } from "@/components/pixels";
 import { AttributionCapture } from "@/components/attribution-capture";
 import {
@@ -169,6 +170,9 @@ export default function RootLayout({
               </Suspense>
               {children}
               <SiteFooter />
+              <Suspense fallback={null}>
+                <CorrectionPromoGate />
+              </Suspense>
             </CavemanModeProvider>
           </Suspense>
         </ThemeProvider>

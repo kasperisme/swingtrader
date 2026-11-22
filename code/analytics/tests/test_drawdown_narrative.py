@@ -262,3 +262,14 @@ def test_stratified_control_is_proportional_and_seeded():
     b = _stratified(rows, 10, random.Random("seal:long"))
     assert a == b and len(a) == 10
     assert sum(r["sector"] == "A" for r in a) == 6
+
+
+def test_notify_email_is_public_only_and_has_unsubscribe(monkeypatch):
+    monkeypatch.setenv("UNSUBSCRIBE_SECRET", "test")
+    from services.drawdown.notify import render
+    run = {"as_of": "2026-11-23", "universe": 627, "groups": {"on_top": 14, "holds": 104, "fragile": 98, "drowns": 222}}
+    prev = {"as_of": "2026-11-21", "groups": {"on_top": 10, "holds": 100, "fragile": 98, "drowns": 230}}
+    subject, html, text = render(run, prev, "a@b.co")
+    assert "2026-11-23" in subject and "/api/correction/unsubscribe?token=" in html
+    assert "+4 since 2026-11-21" in text and "-8 since 2026-11-21" in text
+    assert "declines" not in html.lower()

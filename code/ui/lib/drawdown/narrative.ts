@@ -124,6 +124,23 @@ async function latestRun(): Promise<NarrativeRun | null> {
 }
 
 /** The latest complete day: its run row and every scored name, ranked within group. */
+/** The latest complete day, or null. Used outside the board (email confirmations). */
+export async function getLatestRun(): Promise<NarrativeRun | null> {
+  try {
+    return await latestRun();
+  } catch {
+    return null;
+  }
+}
+
+/** Whether any analysis is published. The site-wide promo shows only when it is. */
+export async function hasPublishedCorrection(): Promise<boolean> {
+  "use cache";
+  cacheLife("hours");
+  cacheTag("correction-board");
+  return (await getLatestRun()) !== null;
+}
+
 export async function getCorrectionBoard(): Promise<{ run: NarrativeRun; rows: NarrativeRow[] } | null> {
   "use cache";
   cacheLife("hours");

@@ -17,6 +17,10 @@ import { PendingDot } from "@/components/nav-link";
  */
 
 export const INSIGHTS_LINKS = [
+  // The drawdown stress test: which priced-in stories survive the Nov 2026
+  // correction. First while the correction is the story; it also has its own
+  // site-wide promo (components/correction-promo.tsx) and email updates.
+  { href: "/correction", label: "Correction Stress Test" },
   { href: "/articles", label: "Articles" },
   { href: "/topics", label: "Topics" },
   { href: "/quote", label: "Quotes" },

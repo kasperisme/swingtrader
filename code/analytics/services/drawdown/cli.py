@@ -10,6 +10,7 @@
     python -m services.drawdown.cli judge reveal --batch <batch_NN.json>  # the rule's answer, after commit
     python -m services.drawdown.cli judge check --batch <batch_NN.json>   # panel + verdict vs the arithmetic
     python -m services.drawdown.cli judge apply [--db]       # merge -> output/drawdown/judged/<date>/scorecard.json
+    python -m services.drawdown.cli notify --dry-run         # who the latest published analysis would mail
     python -m services.drawdown.cli picks pool               # reviewed long/short pools (unranked) -> output/drawdown/picks/<date>/
     python -m services.drawdown.cli picks dossiers --tickers MU,PINS   # evidence bundles for the names chosen to research
     python -m services.drawdown.cli picks deep --file <research_queue.json>   # deep-panel batches
@@ -44,6 +45,10 @@ def main() -> None:
     n = sub.add_parser("narrative", help="stress-test every priced-in narrative against today's consensus")
     n.add_argument("--drop-date", type=date.fromisoformat, default=date(2026, 11, 20))
     n.add_argument("--no-db", action="store_true", help="write files only")
+
+    nt = sub.add_parser("notify", help="email correction-update subscribers about the latest published analysis")
+    nt.add_argument("--as-of", default=None, help="a published day (default: latest)")
+    nt.add_argument("--dry-run", action="store_true", help="count recipients, send nothing")
 
     pk = sub.add_parser("picks", help="long/short picks: pool -> (agents choose + research) -> dossiers -> seal -> grade")
     pk.add_argument("action", choices=["pool", "dossiers", "deep", "deep-check", "seal", "control", "grade"])
@@ -96,6 +101,11 @@ def main() -> None:
             print(json.dumps(res.get("meta", res), indent=2, default=str))
             if not res["ok"] or not res["meta"]["db"].startswith(("written", "skipped")):
                 sys.exit(5)
+        return
+    if a.cmd == "notify":
+        from . import notify
+
+        print(json.dumps(notify.send(a.as_of, dry_run=a.dry_run), indent=2, default=str))
         return
     if a.cmd == "picks":
         from . import picks

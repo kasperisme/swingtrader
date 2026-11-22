@@ -3,6 +3,9 @@
 import { gaEvent } from "./ga";
 import { getPosthog } from "./posthog";
 
+/** news_briefing / market_screening, and correction: the stress-test updates list. */
+type LeadMagnet = "news_briefing" | "market_screening" | "correction";
+
 type EventMap = {
   signup_completed: { method: "email" | "oauth"; plan?: string };
   // "email" = password, "oauth" = Google, "otp" = passwordless email code.
@@ -72,22 +75,25 @@ type EventMap = {
   // feature so PostHog funnels segment by campaign. Pairs with the server-side
   // `briefing_subscribed` / screening subscribe events for the confirmed conversion.
   lead_form_viewed: {
-    magnet: "news_briefing" | "market_screening";
+    magnet: LeadMagnet;
     utm_content?: string;
     preset?: boolean;
   };
   lead_form_submitted: {
-    magnet: "news_briefing" | "market_screening";
+    magnet: LeadMagnet;
     utm_content?: string;
   };
   lead_form_error: {
-    magnet: "news_briefing" | "market_screening";
+    magnet: LeadMagnet;
     reason: string;
   };
   lead_subscribed: {
-    magnet: "news_briefing" | "market_screening";
+    magnet: LeadMagnet;
     utm_content?: string;
   };
+  // Site-wide promo for /correction (components/correction-promo.tsx).
+  correction_promo_shown: { pathname: string; seconds_on_site: number; pageviews: number };
+  correction_promo_clicked: { action: "open" | "subscribe" | "dismiss" };
   cta_exposed: { cta: string; variant: string };
   checkout_initiated: { plan: string; interval: string };
   api_key_created: { scopes: string[] };
