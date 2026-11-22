@@ -3,8 +3,8 @@
 import { gaEvent } from "./ga";
 import { getPosthog } from "./posthog";
 
-/** news_briefing / market_screening, and correction: the stress-test updates list. */
-type LeadMagnet = "news_briefing" | "market_screening" | "correction";
+/** news_briefing / market_screening; correction (stress-test updates) and arena (daily digest). */
+type LeadMagnet = "news_briefing" | "market_screening" | "correction" | "arena";
 
 type EventMap = {
   signup_completed: { method: "email" | "oauth"; plan?: string };

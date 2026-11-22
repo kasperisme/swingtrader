@@ -15,6 +15,7 @@ import { Leaderboard } from "./_components/leaderboard";
 import { SeasonPicker } from "./_components/season-picker";
 import { fmtDate, fmtPct } from "@/lib/arena/format";
 import { Podium } from "./_components/podium";
+import { ArenaSubscribeForm } from "@/components/update-list-form";
 import { ARENA_COLOR_INDEX as COLOR_INDEX } from "@/lib/arena/colors";
 
 const SITE = SITE_URL;
@@ -322,6 +323,20 @@ export default async function ArenaPage({
             }
           />
       </div>
+
+      {/* The digest signup sits right under the table it emails. */}
+      <section
+        aria-labelledby="arena-digest-heading"
+        className="mt-8 max-w-xl rounded-2xl border border-border bg-card/40 p-5"
+      >
+        <h2 id="arena-digest-heading" className="text-sm font-semibold">
+          Get the table and the trades by email
+        </h2>
+        <p className="mb-3 mt-1 text-sm text-muted-foreground">
+          After each session: who climbed, who fell, and every order the agents filled or queued.
+        </p>
+        <ArenaSubscribeForm source="arena_page" />
+      </section>
 
       {/* Guarded at the SECTION, not just inside Stats: the component already
           returns null with nothing to show, but its bordered wrapper still

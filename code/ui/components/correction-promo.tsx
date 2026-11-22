@@ -5,7 +5,7 @@ import { usePathname } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { ArrowRight, X } from "lucide-react";
 import { track } from "@/lib/analytics/events";
-import { CorrectionSubscribeForm, CORRECTION_SUBSCRIBED_KEY } from "@/components/correction-subscribe-form";
+import { CorrectionSubscribeForm, CORRECTION_SUBSCRIBED_KEY } from "@/components/update-list-form";
 
 /**
  * Site-wide nudge toward /correction (the drawdown stress test) for visitors who

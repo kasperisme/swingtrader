@@ -22,7 +22,6 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime, timezone
-from urllib.parse import quote
 
 log = logging.getLogger(__name__)
 
@@ -37,9 +36,9 @@ GROUP_COPY = [
 
 
 def _unsub_url(email: str) -> str:
-    from shared.email import app_url, sign_unsubscribe_token
+    from shared.update_lists import unsubscribe_url
 
-    return f"{app_url()}/api/correction/unsubscribe?token={quote(sign_unsubscribe_token(email, [SLUG]), safe='')}"
+    return unsubscribe_url("/api/correction/unsubscribe", email, SLUG)
 
 
 def render(run: dict, prev: dict | None, email: str) -> tuple[str, str, str]:
@@ -77,21 +76,10 @@ def render(run: dict, prev: dict | None, email: str) -> tuple[str, str, str]:
     return subject, html, text
 
 
-def _backfill(st) -> int:
-    """Move signups made before the migration from early_access_signups into the list."""
-    rows = st.table("early_access_signups").select("email,created_at,metadata").eq("source", "correction_updates").execute().data or []
-    if not rows:
-        return 0
-    st.table("drawdown_analysis_subscriptions").upsert(
-        [{"email": r["email"].strip().lower(), "status": "active", "source": "correction_updates_backfill",
-          "metadata": r.get("metadata") or {}, "created_at": r["created_at"]} for r in rows],
-        on_conflict="email", ignore_duplicates=True).execute()
-    return len(rows)
-
-
 def send(as_of: str | None = None, dry_run: bool = False, sb=None) -> dict:
     from shared.db import get_supabase_client
     from shared.email import send_email
+    from shared.update_lists import backfill
 
     st = (sb or get_supabase_client()).schema(SCHEMA)
     runs = st.table("drawdown_narrative_runs").select("as_of,universe,groups,finished_at").order("as_of", desc=True).limit(10).execute().data or []
@@ -101,7 +89,7 @@ def send(as_of: str | None = None, dry_run: bool = False, sb=None) -> dict:
     prev = next((r for r in runs if r["as_of"] < run["as_of"]), None)
     if st.table("drawdown_analysis_notifications").select("as_of").eq("as_of", run["as_of"]).execute().data:
         return {"ok": True, "as_of": run["as_of"], "skipped": "already notified"}
-    backfilled = 0 if dry_run else _backfill(st)
+    backfilled = 0 if dry_run else backfill(st, "drawdown_analysis_subscriptions", SLUG)
     published = run.get("finished_at") or datetime.now(timezone.utc).isoformat()
     subs = st.table("drawdown_analysis_subscriptions").select("email,created_at,last_notified_as_of") \
         .eq("status", "active").lt("created_at", published).execute().data or []

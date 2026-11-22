@@ -17,20 +17,66 @@ const ERROR_COPY: Record<string, string> = {
 
 /** Remembered so the site-wide promo stops asking once someone has signed up. */
 export const CORRECTION_SUBSCRIBED_KEY = "nis:correction-subscribed";
+export const ARENA_SUBSCRIBED_KEY = "nis:arena-subscribed";
+
+type ListConfig = {
+  magnet: "correction" | "arena";
+  endpoint: string;
+  storageKey: string;
+  button: string;
+  compactButton: string;
+  done: string;
+  hint: string;
+};
+
+const LISTS: Record<ListConfig["magnet"], ListConfig> = {
+  correction: {
+    magnet: "correction",
+    endpoint: "/api/correction/subscribe",
+    storageKey: CORRECTION_SUBSCRIBED_KEY,
+    button: "Email me new analyses",
+    compactButton: "Notify me",
+    done: "You\u2019re on the list. We\u2019ll email you when the next analysis is out.",
+    hint: "One email per new analysis. Unsubscribe in one click.",
+  },
+  arena: {
+    magnet: "arena",
+    endpoint: "/api/arena/subscribe",
+    storageKey: ARENA_SUBSCRIBED_KEY,
+    button: "Email me the daily table",
+    compactButton: "Subscribe",
+    done: "You\u2019re on the list. The standings and trades land after the next session.",
+    hint: "One email per trading session. Unsubscribe in one click.",
+  },
+};
+
+/** Correction stress-test updates: one mail per new analysis. */
+export function CorrectionSubscribeForm(props: { source: string; compact?: boolean; onSubscribed?: () => void }) {
+  return <UpdateListForm list="correction" {...props} />;
+}
+
+/** The Arena daily digest: standings + the day's trades, after each session. */
+export function ArenaSubscribeForm(props: { source: string; compact?: boolean; onSubscribed?: () => void }) {
+  return <UpdateListForm list="arena" {...props} />;
+}
 
 /**
- * Email-only signup for correction stress-test updates: one mail per new analysis.
- * Same funnel events as the other lead magnets (magnet "correction").
+ * Email-only signup for an update list. Same funnel events as the other lead
+ * magnets (magnet = the list).
  */
-export function CorrectionSubscribeForm({
+function UpdateListForm({
+  list,
   source,
   compact = false,
   onSubscribed,
 }: {
+  list: ListConfig["magnet"];
   source: string;
   compact?: boolean;
   onSubscribed?: () => void;
 }) {
+  const cfg = LISTS[list];
+  const magnet = cfg.magnet;
   const emailId = useId();
   const [email, setEmail] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -39,27 +85,27 @@ export function CorrectionSubscribeForm({
 
   useEffect(() => {
     captureAttribution();
-    track("lead_form_viewed", { magnet: "correction", utm_content: getAttribution().utm_content });
-  }, []);
+    track("lead_form_viewed", { magnet, utm_content: getAttribution().utm_content });
+  }, [magnet]);
 
   const submit = (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
     const utm_content = getAttribution().utm_content;
-    track("lead_form_submitted", { magnet: "correction", utm_content });
+    track("lead_form_submitted", { magnet, utm_content });
     startTransition(async () => {
       try {
-        const res = await fetch("/api/correction/subscribe", {
+        const res = await fetch(cfg.endpoint, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ email, source, attribution: getAttribution() }),
         });
         const data = (await res.json().catch(() => ({}))) as { success?: boolean; error?: string };
         if (data.success) {
-          trackLead({ content_name: "correction" });
-          track("lead_subscribed", { magnet: "correction", utm_content });
+          trackLead({ content_name: magnet });
+          track("lead_subscribed", { magnet, utm_content });
           try {
-            localStorage.setItem(CORRECTION_SUBSCRIBED_KEY, "1");
+            localStorage.setItem(cfg.storageKey, "1");
           } catch {
             /* storage blocked: the promo may ask again, nothing breaks */
           }
@@ -69,10 +115,10 @@ export function CorrectionSubscribeForm({
         }
         const reason = data.error ?? "network";
         setError(ERROR_COPY[reason] ?? ERROR_COPY.network);
-        track("lead_form_error", { magnet: "correction", reason });
+        track("lead_form_error", { magnet, reason });
       } catch {
         setError(ERROR_COPY.network);
-        track("lead_form_error", { magnet: "correction", reason: "network" });
+        track("lead_form_error", { magnet, reason: "network" });
       }
     });
   };
@@ -83,7 +129,7 @@ export function CorrectionSubscribeForm({
         <span className="mt-0.5 inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-emerald-500/15 text-emerald-500">
           <Check className="h-3.5 w-3.5" />
         </span>
-        <span>You&rsquo;re on the list. We&rsquo;ll email you when the next analysis is out.</span>
+        <span>{cfg.done}</span>
       </div>
     );
   }
@@ -108,7 +154,7 @@ export function CorrectionSubscribeForm({
           className="min-w-0 flex-1"
         />
         <Button type="submit" disabled={isPending} className="shrink-0">
-          {isPending ? "Adding…" : compact ? "Notify me" : "Email me new analyses"}
+          {isPending ? "Adding…" : compact ? cfg.compactButton : cfg.button}
         </Button>
       </div>
       {error ? (
@@ -116,7 +162,7 @@ export function CorrectionSubscribeForm({
           {error}
         </p>
       ) : (
-        <p className="text-xs text-muted-foreground">One email per new analysis. Unsubscribe in one click.</p>
+        <p className="text-xs text-muted-foreground">{cfg.hint}</p>
       )}
     </form>
   );

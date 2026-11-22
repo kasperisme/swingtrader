@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { CorrectionSubscribeForm } from "@/components/correction-subscribe-form";
+import { CorrectionSubscribeForm } from "@/components/update-list-form";
 import { Suspense } from "react";
 import { fmtDay, getCorrectionBoard, GROUP_LABEL, GROUP_RULE, type NarrativeGroup } from "@/lib/drawdown/narrative";
 import { SITE_URL } from "@/lib/site";

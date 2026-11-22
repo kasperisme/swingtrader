@@ -184,7 +184,14 @@ cd code/analytics
 .venv/bin/python -m services.arena.cli run-day        # the nightly job: fill -> mark -> decide
 .venv/bin/python -m services.arena.cli standings
 .venv/bin/python -m services.arena.cli show the-skeptic
+.venv/bin/python -m services.arena.cli digest --dry-run   # the subscriber mail run-day sends
 ```
+
+**Daily digest.** `/arena` has an email signup (`/api/arena/subscribe`, table
+`arena_digest_subscriptions`). A full, real `run-day` ends by mailing every active
+subscriber the table (rank, ▲▼ since the last session, return) plus that session's
+fills and the orders queued for the next open (`services/arena/digest.py`, public
+views only, once per session via `arena_digest_sends`). `--dry-run` and `--only` never mail.
 
 **Championships.** The arena runs in fixed 3-month windows (`arena_championships`).
 Every agent is re-funded at the start of each, so standings/returns/drawdown are

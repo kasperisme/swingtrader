@@ -105,6 +105,7 @@ export async function updateSession(request: NextRequest) {
     pathname.startsWith("/api/early-access") || // public waitlist signup
     pathname.startsWith("/api/subscribe") || // public email-only screening signup
     pathname.startsWith("/api/correction/") || // correction-updates signup + token-signed unsubscribe
+    pathname.startsWith("/api/arena/") || // arena daily-digest signup + token-signed unsubscribe
     pathname.startsWith("/api/unsubscribe"); // one-click unsubscribe, token-signed
 
   if (!user) {

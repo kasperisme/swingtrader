@@ -7,6 +7,7 @@ arena CLI — run and inspect the competing paper-trading agents.
 
     # The nightly job (fill -> mark -> decide). This is what cron runs.
     python -m services.arena.cli run-day
+    python -m services.arena.cli digest --dry-run      # tonight's subscriber mail, unsent
 
     # Individual passes, for debugging or backfill
     python -m services.arena.cli fill   [--session 2026-09-02]
@@ -211,8 +212,21 @@ def cmd_run_day(args) -> int:
     # `--only` run is not the nightly job, and marking it as one would either
     # mask a genuinely missed night or fire a false alert for a debug run. The
     # cron wrapper passes it; nothing else should.
+    def _digest(result: dict) -> None:
+        # A full, real night mails the digest (idempotent per session). A dry run or
+        # an --only run is not the night's table, so it never mails.
+        if result.get("error") or args.dry_run or args.only:
+            return
+        try:
+            from . import digest
+
+            result["digest"] = digest.send()
+        except Exception as exc:  # noqa: BLE001 - a mail failure never fails the trading day
+            result["digest"] = {"ok": False, "error": str(exc)}
+
     if not args.heartbeat:
         result = _go()
+        _digest(result)
         print(json.dumps(result, indent=2, default=str))
         return 1 if result.get("error") else 0
 
@@ -221,12 +235,24 @@ def cmd_run_day(args) -> int:
     # Weekdays only, so a missed run should be noticed within a day.
     with JobHeartbeat("arena_run_day", expected_interval=24.0):
         result = _go()
+        _digest(result)
         print(json.dumps(result, indent=2, default=str))
         if result.get("error"):
             # Raise so the heartbeat records a failure rather than a clean run
             # that happened to return an error object.
             raise RuntimeError(result["error"])
     return 0
+
+
+def cmd_digest(args) -> int:
+    from . import digest
+
+    result = digest.send(args.session, dry_run=args.dry_run)
+    preview = result.pop("preview", None)
+    print(json.dumps(result, indent=2, default=str))
+    if preview:
+        print("\n" + preview)
+    return 0 if result.get("ok") else 1
 
 
 def cmd_fill(args) -> int:
@@ -552,6 +578,11 @@ def main(argv=None) -> int:
                    help="record the run in job_health so the watchdog alerts on a "
                         "missed or failed night. For the cron wrapper only.")
     p.set_defaults(func=cmd_run_day)
+
+    p = sub.add_parser("digest", help="email the daily standings + trades to /arena subscribers")
+    p.add_argument("--session", help="YYYY-MM-DD (must be the latest marked session)")
+    p.add_argument("--dry-run", action="store_true", help="count recipients and print the mail, send nothing")
+    p.set_defaults(func=cmd_digest)
 
     p = sub.add_parser("fill", help="execute pending orders at a session's open")
     p.add_argument("--session", help="YYYY-MM-DD")
