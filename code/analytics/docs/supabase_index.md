@@ -1,8 +1,8 @@
 # swingtrader schema index (generated 2026-11-22)
 
 ## Relationships & graph
-- `ticker_relationship_edge_evidence` (table, ~104,901 @2026-11-22) Ticker relationship edge traceability Goal: - Provide deterministic traceability from ticker_relationship_edge
-- `ticker_relationship_edges` (table, ~43,695 @2026-11-22) Ticker Relationship Network (graph-ready adjacency structure) Why: - Avoid scanning/parsing JSONB relationship
+- `ticker_relationship_edge_evidence` (table, ~102,221 @2026-11-22) Ticker relationship edge traceability Goal: - Provide deterministic traceability from ticker_relationship_edge
+- `ticker_relationship_edges` (table, ~43,697 @2026-11-22) Ticker Relationship Network (graph-ready adjacency structure) Why: - Avoid scanning/parsing JSONB relationship
 - `ticker_relationship_network_resolved_mv` (matview, ~21,734) Relationship network materialization Problem (statement timeout on /protected/relations): ticker_relationship_
 - `ticker_pair_stats` (table, ~795 @2026-09-03) Ticker Pair Stats (cointegration / pairs-trading metrics on the graph) Why: - The news-derived relationship gr
 - `ticker_pair_candidates_v` (view) Candidate pairs: order-normalized, deduped across rel_types, off the canonicalized graph
@@ -36,8 +36,8 @@
 - `topic_article_v` (view) news_articles.has_analysis — hide articles the scorer found nothing in Why: 15.5% of the corpus (35,554 of 229
 
 ## Tickers: sentiment & coverage
-- `ticker_sentiment_heads` (table, ~414,618 @2026-11-22) Ticker Sentiment Materialization (pre-exploded, indexed) Why: - swingtrader.ticker_sentiment_heads_v explodes 
-- `ticker_coverage_daily` (table, ~52,731 @2026-11-22) Materialize the /quote directory's daily rollup
+- `ticker_sentiment_heads` (table, ~495,678 @2026-11-22) Ticker Sentiment Materialization (pre-exploded, indexed) Why: - swingtrader.ticker_sentiment_heads_v explodes 
+- `ticker_coverage_daily` (table, ~52,723 @2026-11-22) Materialize the /quote directory's daily rollup
 - `ticker_sentiment_heads_v` (view) Ticker Sentiment View (article-level, parsed from TICKER_SENTIMENT heads) Why: - Expose sentiment by (article,
 
 ## Company factor vectors
@@ -75,7 +75,7 @@
 - `job_health` (table, ~13) 
 
 ## Other
-- `sitemap_article_urls` (table, ~30,756 @2026-11-22) sitemap_article_urls: which article URLs are worth asking Google to index The sitemap shipped the newest 5,000
+- `sitemap_article_urls` (table, ~30,753 @2026-11-22) sitemap_article_urls: which article URLs are worth asking Google to index The sitemap shipped the newest 5,000
 - `drawdown_estimate_snapshots` (table, ~10,981 @2026-11-21) drawdown: point-in-time snapshots that FMP and FRED cannot give back later Why: the drawdown recon (services/d
 - `tickers` (table, ~5,810 @2026-08-08) tickers: universe of actively-traded NYSE and NASDAQ stocks Seeded via scripts/seed_tickers.py (FMP company-sc
 - `research_priced_in_universe` (table, ~5,807 @2026-11-22) 1) The working universe and its schedule.
@@ -86,6 +86,7 @@
 - `arena_orders` (table, ~885 @2026-11-20) ── 3) Orders — the only thing an agent writes ────────────────────────────── An order is an INTENT until the f
 - `arena_nav_history` (table, ~844 @2026-11-20) Arena: competing AI paper-trading agents What: - A set of autonomous agents, each funded with the same startin
 - `arena_decisions` (table, ~842 @2026-11-20) ── 2) The decision record ────────────────────────────────────────────────── One row per agent per trading day
+- `drawdown_narrative_scores` (table, ~627 @2026-11-22) drawdown: the narrative stress test, published to /correction Why: services/drawdown/narrative.py asks, for ev
 - `research_priced_in_runs` (table, ~95) 2) One row per batch pass.
 - `arena_positions` (table, ~74 @2026-11-20) ── 4) Positions — current book, one row per (agent, ticker) ────────────────
 - `research_predictions` (table, ~65 @2026-08-25) 2) Forward predictions
@@ -98,11 +99,12 @@
 - `telegram_update_requests` (table, ~5 @2026-05-08) telegram_update_requests Queue table for on-demand Telegram /update requests
 - `api_rate_limits` (table, ~1) api_rate_limits: 1-minute sliding window buckets
 - `arena_championships` (table, ~0 @2026-09-07) ── 1) The championships ────────────────────────────────────────────────────
+- `arena_digest_sends` (table, ~0) The Arena daily digest: email the standings and the day's trades after each session
+- `arena_digest_subscriptions` (table, ~0) The Arena daily digest: email the standings and the day's trades after each session
 - `daily_narratives` (table, ~0) ── daily_narratives ─────────────────────────────────────────────────────────
 - `drawdown_analysis_notifications` (table, ~0) Correction stress test: email updates when a new analysis is published
 - `drawdown_analysis_subscriptions` (table, ~0) Correction stress test: email updates when a new analysis is published
 - `drawdown_narrative_runs` (table, ~0) drawdown: the narrative stress test, published to /correction Why: services/drawdown/narrative.py asks, for ev
-- `drawdown_narrative_scores` (table, ~0 @2026-11-22) drawdown: the narrative stress test, published to /correction Why: services/drawdown/narrative.py asks, for ev
 - `drawdown_snapshot_runs` (table, ~0) Run manifest: written LAST by each run
 - `research_artifacts` (table, ~0 @2026-08-19) Artifacts attached to a research write-up
 - `research_campaigns` (table, ~0 @2026-08-19) Autonomous quant research lab — the published record

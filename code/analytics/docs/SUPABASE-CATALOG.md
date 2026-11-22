@@ -2,7 +2,7 @@
 
 Generated 2026-11-22 by `python -m services.catalog.build`. **Do not hand-edit** — regenerate instead.
 
-110 tables/views, 1346 columns, 62 functions.
+112 tables/views, 1366 columns, 62 functions.
 
 `rows` is a planner estimate, not a count. `fresh` is the newest row's timestamp — an object with an old date is likely abandoned, and that is as important to know as whether it exists.
 
@@ -10,7 +10,7 @@ Generated 2026-11-22 by `python -m services.catalog.build`. **Do not hand-edit**
 
 ### `ticker_relationship_edge_evidence` (table)
 
-*~104,901 rows, fresh to 2026-11-22*
+*~102,221 rows, fresh to 2026-11-22*
 
 Ticker relationship edge traceability Goal: - Provide deterministic traceability from ticker_relationship_edges back to source articles and impact-vector dimensions.
 
@@ -32,7 +32,7 @@ Ticker relationship edge traceability Goal: - Provide deterministic traceability
 
 ### `ticker_relationship_edges` (table)
 
-*~43,695 rows, fresh to 2026-11-22*
+*~43,697 rows, fresh to 2026-11-22*
 
 Ticker Relationship Network (graph-ready adjacency structure) Why: - Avoid scanning/parsing JSONB relationship heads for every narrative run. - Materialize ticker->ticker edges with indexed lookup for multi-hop traversal. - Keep provenance + recency so downstream ranking can prioritize fresh edges.
 
@@ -539,7 +539,7 @@ news_articles.has_analysis — hide articles the scorer found nothing in Why: 15
 
 ### `ticker_sentiment_heads` (table)
 
-*~414,618 rows, fresh to 2026-11-22*
+*~495,678 rows, fresh to 2026-11-22*
 
 Ticker Sentiment Materialization (pre-exploded, indexed) Why: - swingtrader.ticker_sentiment_heads_v explodes EVERY TICKER_SENTIMENT head's scores_json (text->jsonb cast + jsonb_each_text) and joins news_articles on every request. The `ticker` column is derived from JSON keys and `article_ts` from a join, so neither a `ticker IN (...)` nor a date filter can be pushed down or indexed — the view is O(all sentiment heads) per call and was taking 4–8s for a single ticker (and growing with ingestion). - This pre-explodes the same data into a real table keyed by (head_id, ticker) with an index on (t
 
@@ -557,11 +557,9 @@ Ticker Sentiment Materialization (pre-exploded, indexed) Why: - swingtrader.tick
 | `article_ts` | timestamp with time zone |
 | `updated_at` | timestamp with time zone |
 
-`model` values: `claude-haiku-4-5`, `do-agent`, `gemma4:31b-cloud`, `gemma4:e4b`
-
 ### `ticker_coverage_daily` (table)
 
-*~52,731 rows, fresh to 2026-11-22*
+*~52,723 rows, fresh to 2026-11-22*
 
 Materialize the /quote directory's daily rollup. get_top_covered_tickers read news_trends_ticker_daily_v directly, which rescans 120 days of news_article_tickers + news_articles + ticker_sentiment heads on every call: measured 4.6s for a plain page and 7.6s for a search — against the REST role's 8s statement_timeout. That is a page that breaks the first time the corpus grows. Same split the topic hubs use: membership stays live, the expensive rollup is materialized and rebuilt post-ingest. A table (not a matview) so it can carry RLS like its siblings. Only the daily rollup is stored, NOT the w
 
@@ -1147,7 +1145,7 @@ user_trade_reviews: AI post-trade review chats keyed by the closing trade A "rev
 
 ### `sitemap_article_urls` (table)
 
-*~30,756 rows, fresh to 2026-11-22*
+*~30,753 rows, fresh to 2026-11-22*
 
 sitemap_article_urls: which article URLs are worth asking Google to index The sitemap shipped the newest 5,000 /articles/* URLs with no filter at all, which made 74% of everything offered to a crawler a wrapper around a third-party headline. Sampling that set returned, verbatim: "A.C.L. Construction Secures Civil Package for Linda's Friendship Center in Fort Nelson BC", "ASICS Europe Expands Global Partnership with Teamwork Commerce", and three separate securities-class-action notices. Search Console's verdict on the whole domain was consistent with that: every hub page sat at "Crawled - curre
 
@@ -1426,6 +1424,73 @@ Arena: competing AI paper-trading agents What: - A set of autonomous agents, eac
 `status` values: `error`, `ok`
 
 `llm_model` values: `gemma4:31b-cloud`, `glm-5.1:cloud`
+
+### `drawdown_narrative_scores` (table)
+
+*~627 rows, fresh to 2026-11-22*
+
+drawdown: the narrative stress test, published to /correction Why: services/drawdown/narrative.py asks, for every name with a priced-in reconstruction, whether the revenue growth its share price REQUIRES (10y reverse DCF re-solved at today's close) still fits inside what analysts FORECAST (3y consensus from drawdown_estimate_snapshots, faded to terminal growth) once a correction cuts those forecasts. It is a description of whether a narrative is funded, NOT a return forecast: the priced-in walk-forward found implied growth alone is no return signal (strategylab/research/PRICED-IN-FINDINGS.md §
+
+| column | type |
+|---|---|
+| `as_of` | date |
+| `ticker` | text |
+| `company` | text |
+| `sector` | text |
+| `grp` | text |
+| `rank` | integer |
+| `reason` | text |
+| `thesis` | text |
+| `breaks_if` | text |
+| `price` | double precision |
+| `close_date` | date |
+| `drawdown_from_peak` | double precision |
+| `move_since_model` | double precision |
+| `required_cagr` | double precision |
+| `consensus_3y` | double precision |
+| `supported_cagr` | double precision |
+| `breakeven_cut` | double precision |
+| `margin_used` | double precision |
+| `upside_to_median` | double precision |
+| `n_targets` | integer |
+| `targets_predate_drop` | boolean |
+| `model_as_of` | date |
+| `epicenter` | boolean |
+| `epicenter_linked` | boolean |
+| `linked_with` | text |
+| `beta` | double precision |
+| `exposure` | text |
+| `flags` | text |
+| `crux` | text |
+| `position` | text |
+| `pays_for` | jsonb |
+| `declines` | jsonb |
+| `created_at` | timestamp with time zone |
+| `margin_basis` | text |
+| `breakeven_consensus` | double precision |
+| `breakeven_quality` | double precision |
+| `quality_margin` | double precision |
+| `cash_conversion` | double precision |
+| `cash_margin` | double precision |
+| `consensus_margin` | double precision |
+| `quality` | text |
+| `quality_flags` | text |
+| `cfo_to_ni` | double precision |
+| `accruals` | double precision |
+| `sbc_to_revenue` | double precision |
+| `share_growth` | double precision |
+| `one_off_share` | double precision |
+| `quality_years` | integer |
+| `cost_of_equity` | double precision |
+| `midcycle_margin` | double precision |
+| `hist_net_margin` | double precision |
+| `loss_making` | boolean |
+| `sector_pct` | double precision |
+| `value_basis` | text |
+| `events` | text |
+| `rule_grp` | text |
+| `correction_cut` | double precision |
+| `judgement` | jsonb |
 
 ### `research_priced_in_runs` (table)
 
@@ -1789,6 +1854,44 @@ arena_decisions.session_date — the session the agent actually READ `decision_d
 | `finished_at` | timestamp with time zone |
 | `is_backtest` | boolean |
 
+### `arena_digest_sends` (table)
+
+*~0 rows*
+
+The Arena daily digest: email the standings and the day's trades after each session. Why: /arena changes every trading day (nine AI agents, one fill at each open), and a visitor who found it once has no way to follow the season short of coming back daily. This is the lead magnet on /arena: leave an email, get one mail per session with the table (rank, movement, return) and every order filled or queued. Same shape as drawdown_analysis_subscriptions (20261122120000): email-only, soft unsubscribe through an HMAC-signed link (UNSUBSCRIBE_SECRET, slug "arena"), written only by the service role. Rea
+
+| column | type |
+|---|---|
+| `session` | date |
+| `championship_id` | uuid |
+| `started_at` | timestamp with time zone |
+| `finished_at` | timestamp with time zone |
+| `recipients` | integer |
+| `sent` | integer |
+| `failed` | integer |
+
+### `arena_digest_subscriptions` (table)
+
+*~0 rows*
+
+The Arena daily digest: email the standings and the day's trades after each session. Why: /arena changes every trading day (nine AI agents, one fill at each open), and a visitor who found it once has no way to follow the season short of coming back daily. This is the lead magnet on /arena: leave an email, get one mail per session with the table (rank, movement, return) and every order filled or queued. Same shape as drawdown_analysis_subscriptions (20261122120000): email-only, soft unsubscribe through an HMAC-signed link (UNSUBSCRIBE_SECRET, slug "arena"), written only by the service role. Rea
+
+| column | type |
+|---|---|
+| `id` | uuid |
+| `email` | text |
+| `status` | text |
+| `source` | text |
+| `user_id` | uuid |
+| `referrer` | text |
+| `user_agent` | text |
+| `metadata` | jsonb |
+| `confirmation_sent_at` | timestamp with time zone |
+| `last_sent_session` | date |
+| `unsubscribed_at` | timestamp with time zone |
+| `created_at` | timestamp with time zone |
+| `updated_at` | timestamp with time zone |
+
 ### `arena_leaderboard_v` (view)
 
 *view — row count n/a*
@@ -2024,73 +2127,6 @@ drawdown: the narrative stress test, published to /correction Why: services/draw
 | `params` | jsonb |
 | `seal_sha256` | text |
 | `finished_at` | timestamp with time zone |
-
-### `drawdown_narrative_scores` (table)
-
-*~0 rows, fresh to 2026-11-22*
-
-drawdown: the narrative stress test, published to /correction Why: services/drawdown/narrative.py asks, for every name with a priced-in reconstruction, whether the revenue growth its share price REQUIRES (10y reverse DCF re-solved at today's close) still fits inside what analysts FORECAST (3y consensus from drawdown_estimate_snapshots, faded to terminal growth) once a correction cuts those forecasts. It is a description of whether a narrative is funded, NOT a return forecast: the priced-in walk-forward found implied growth alone is no return signal (strategylab/research/PRICED-IN-FINDINGS.md §
-
-| column | type |
-|---|---|
-| `as_of` | date |
-| `ticker` | text |
-| `company` | text |
-| `sector` | text |
-| `grp` | text |
-| `rank` | integer |
-| `reason` | text |
-| `thesis` | text |
-| `breaks_if` | text |
-| `price` | double precision |
-| `close_date` | date |
-| `drawdown_from_peak` | double precision |
-| `move_since_model` | double precision |
-| `required_cagr` | double precision |
-| `consensus_3y` | double precision |
-| `supported_cagr` | double precision |
-| `breakeven_cut` | double precision |
-| `margin_used` | double precision |
-| `upside_to_median` | double precision |
-| `n_targets` | integer |
-| `targets_predate_drop` | boolean |
-| `model_as_of` | date |
-| `epicenter` | boolean |
-| `epicenter_linked` | boolean |
-| `linked_with` | text |
-| `beta` | double precision |
-| `exposure` | text |
-| `flags` | text |
-| `crux` | text |
-| `position` | text |
-| `pays_for` | jsonb |
-| `declines` | jsonb |
-| `created_at` | timestamp with time zone |
-| `margin_basis` | text |
-| `breakeven_consensus` | double precision |
-| `breakeven_quality` | double precision |
-| `quality_margin` | double precision |
-| `cash_conversion` | double precision |
-| `cash_margin` | double precision |
-| `consensus_margin` | double precision |
-| `quality` | text |
-| `quality_flags` | text |
-| `cfo_to_ni` | double precision |
-| `accruals` | double precision |
-| `sbc_to_revenue` | double precision |
-| `share_growth` | double precision |
-| `one_off_share` | double precision |
-| `quality_years` | integer |
-| `cost_of_equity` | double precision |
-| `midcycle_margin` | double precision |
-| `hist_net_margin` | double precision |
-| `loss_making` | boolean |
-| `sector_pct` | double precision |
-| `value_basis` | text |
-| `events` | text |
-| `rule_grp` | text |
-| `correction_cut` | double precision |
-| `judgement` | jsonb |
 
 ### `drawdown_snapshot_runs` (table)
 
