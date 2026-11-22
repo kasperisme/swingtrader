@@ -39,9 +39,13 @@ export const INSIGHTS_LINKS = [
   { href: "/research", label: "Research" },
 ] as const;
 
+// Everything here has a free email signup. The stress test and the Arena are also
+// in Insights (they are pages to read as well as lists to join).
 export const FREE_SERVICE_LINKS = [
   { href: "/briefings", label: "Daily News Briefing" },
   { href: "/marketscreenings", label: "Market Screenings" },
+  { href: "/correction", label: "Correction Stress Test" },
+  { href: "/arena", label: "Agent Arena" },
 ] as const;
 
 // Sits in the header's right cluster next to the plain text links, so it matches
