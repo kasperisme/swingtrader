@@ -87,6 +87,14 @@ export default function CorrectionPage() {
             correction runs, even if its story holds.
           </li>
           <li>
+            <b className="font-semibold text-foreground">Earnings quality</b> checks whether the profit behind the
+            analysts&apos; margin arrives as cash, from the last three filed annual statements. Where it does not, the
+            test also runs at the margin cut by that shortfall and keeps the smaller cushion. Two or more red flags
+            (cash conversion, accruals, stock-based pay, dilution, one-off gains, negative free cash flow) rule a name
+            out of &ldquo;comes out on top&rdquo;. Heavy capex is shown but not penalised: investment is not bad
+            earnings.
+          </li>
+          <li>
             <b className="font-semibold text-foreground">This is not a forecast that a stock will rise.</b> Our own test
             of the price-implied growth on its own found it does not predict returns. The groups describe whether a
             narrative is still paid for by analyst forecasts. Each day&apos;s list is sealed with a hash so it can be

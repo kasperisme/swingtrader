@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { ExposureChip } from "@/components/correction/narrative-card";
+import { ExposureChip, QualityChip } from "@/components/correction/narrative-card";
 import {
   fmtDay,
   fmtPct,
@@ -102,6 +102,93 @@ function StressGauge({ row }: { row: NarrativeDetail }) {
   );
 }
 
+/** Mirrors services/drawdown/quality.py THRESHOLDS. */
+const Q_LIMIT = { cfoToNi: 0.8, accruals: 0.1, sbcToRevenue: 0.1, shareGrowth: 0.03, oneOffShare: 0.25 };
+
+const ratio = (v: number | null) => (v == null ? "—" : `${v.toFixed(2)}×`);
+const share = (v: number | null) => (v == null ? "—" : `${(v * 100).toFixed(1)}%`);
+
+function EarningsQuality({ row }: { row: NarrativeDetail }) {
+  if (row.quality === "unknown") {
+    return (
+      <section className="mt-8" aria-labelledby="quality-heading">
+        <h2 id="quality-heading" className="text-sm font-semibold">Earnings quality</h2>
+        <p className="mt-2 text-sm text-muted-foreground">
+          No annual statements were available for this name, so whether its reported profit turns into cash was not
+          checked.
+        </p>
+      </section>
+    );
+  }
+  const items: { label: string; value: string; bad: boolean; note: string }[] = [
+    {
+      label: "Operating cash ÷ net income",
+      value: ratio(row.cfoToNi),
+      bad: row.cfoToNi != null && row.cfoToNi < Q_LIMIT.cfoToNi,
+      note: "How much of reported profit arrived as operating cash. Below 0.8× is a red flag.",
+    },
+    {
+      label: "Accruals",
+      value: share(row.accruals),
+      bad: row.accruals != null && row.accruals > Q_LIMIT.accruals,
+      note: "Profit not backed by cash, as a share of assets, latest year. Above 10% is a red flag.",
+    },
+    {
+      label: "Stock-based pay ÷ revenue",
+      value: share(row.sbcToRevenue),
+      bad: row.sbcToRevenue != null && row.sbcToRevenue > Q_LIMIT.sbcToRevenue,
+      note: "Staff paid in shares instead of cash, which flatters margins. Above 10% is a red flag.",
+    },
+    {
+      label: "Share count growth",
+      value: row.shareGrowth == null ? "—" : `${fmtPct(row.shareGrowth)}/yr`,
+      bad: row.shareGrowth != null && row.shareGrowth > Q_LIMIT.shareGrowth,
+      note: "Dilution of each share's claim on the business. Above 3% a year is a red flag.",
+    },
+    {
+      label: "One-off gains ÷ pre-tax profit",
+      value: share(row.oneOffShare),
+      bad: row.oneOffShare != null && row.oneOffShare > Q_LIMIT.oneOffShare,
+      note: "Non-operating gains in the latest year. Above 25% is a red flag.",
+    },
+    {
+      label: "Free-cash-flow margin",
+      value: row.cashMargin == null ? "—" : fmtPct(row.cashMargin),
+      bad: row.cashMargin != null && row.cashMargin <= 0,
+      note: "After capex. Shown for context: heavy investment is not bad earnings, so it is never solved under.",
+    },
+  ];
+  const adjusted = row.marginBasis === "quality";
+  return (
+    <section className="mt-8" aria-labelledby="quality-heading">
+      <h2 id="quality-heading" className="text-sm font-semibold">Earnings quality</h2>
+      <p className="mt-2 max-w-2xl text-sm leading-6 text-muted-foreground">
+        Does the profit analysts build their margin on actually arrive as cash? Measured over the last{" "}
+        {row.qualityYears ?? 3} annual statements filed before this test.{" "}
+        {row.cashConversion != null && (
+          <>
+            After stock-based pay, {Math.round(Math.max(0, row.cashConversion) * 100)}% of reported profit arrived as
+            operating cash
+            {adjusted
+              ? `, so the test cuts the analysts' ${fmtPct(row.consensusMargin, 0).replace("+", "")} margin to ${fmtPct(row.qualityMargin, 0).replace("+", "")}. That leaves a cushion of ${fmtPts(row.breakevenQuality)} instead of ${fmtPts(row.breakevenConsensus)}, and the smaller of the two decides the group.`
+              : ", so the analysts' margin stands."}
+          </>
+        )}
+        {row.quality === "weak" && " Two or more red flags: this name cannot come out on top, however large its cushion."}
+      </p>
+      <dl className="mt-4 grid gap-px overflow-hidden rounded-2xl border border-border bg-border sm:grid-cols-2 lg:grid-cols-3">
+        {items.map((it) => (
+          <div key={it.label} className="bg-background p-4">
+            <dt className="text-xs text-muted-foreground">{it.label}</dt>
+            <dd className={`mt-1 text-lg font-semibold tabular-nums ${it.bad ? "text-red-500" : ""}`}>{it.value}</dd>
+            <p className="mt-1 text-[11px] leading-4 text-muted-foreground">{it.note}</p>
+          </div>
+        ))}
+      </dl>
+    </section>
+  );
+}
+
 function Stat({ label, value, note }: { label: string; value: string; note?: string }) {
   return (
     <div className="bg-background p-4">
@@ -137,6 +224,7 @@ export default async function CorrectionTickerPage({ params }: { params: Promise
       <div className="mt-3 flex flex-wrap items-center gap-2">
         <span className={`rounded-full border px-3 py-1 text-sm font-semibold ${TONE[row.group]}`}>{GROUP_LABEL[row.group]}</span>
         <ExposureChip exposure={row.exposure} />
+        {valued && <QualityChip quality={row.quality} always />}
         <span className="text-xs text-muted-foreground">
           {fmtUsd(row.price)} at the {fmtDay(row.closeDate)} close · scored {fmtDay(run.asOf)}
         </span>
@@ -165,7 +253,11 @@ export default async function CorrectionTickerPage({ params }: { params: Promise
 
       {valued && (
         <dl className="mt-8 grid grid-cols-2 gap-px overflow-hidden rounded-2xl border border-border bg-border sm:grid-cols-3">
-          <Stat label="Growth the price needs" value={`${fmtPct(row.requiredCagr)}/yr`} note={`10 years, at a ${fmtPct(row.marginUsed, 0).replace("+", "")} margin analysts expect`} />
+          <Stat
+            label="Growth the price needs"
+            value={`${fmtPct(row.requiredCagr)}/yr`}
+            note={`10 years, at a ${fmtPct(row.marginUsed, 0).replace("+", "")} margin ${row.marginBasis === "quality" ? "(analysts' margin, cut for cash conversion)" : "analysts expect"}`}
+          />
           <Stat label="Analyst forecast, next 3 years" value={`${fmtPct(row.consensus3y)}/yr`} note={`${fmtPct(row.supportedCagr)}/yr over 10 years once faded to terminal growth`} />
           <Stat label={short ? "Shortfall" : "Cut it can absorb"} value={fmtPts(row.breakevenCut)} note="points off 3-year analyst growth" />
           <Stat label="From recent peak" value={fmtPct(row.drawdownFromPeak)} />
@@ -177,6 +269,8 @@ export default async function CorrectionTickerPage({ params }: { params: Promise
           <Stat label="Beta" value={row.beta == null ? "—" : row.beta.toFixed(2)} note={row.epicenter ? "Part of the AI epicenter" : row.linkedWith.length ? `Linked to ${row.linkedWith.join(", ")}` : undefined} />
         </dl>
       )}
+
+      {valued && <EarningsQuality row={row} />}
 
       {row.flags.length > 0 && (
         <section className="mt-8" aria-labelledby="flags-heading">

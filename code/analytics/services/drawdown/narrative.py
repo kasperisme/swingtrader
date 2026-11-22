@@ -25,8 +25,18 @@ DESCRIPTION that can be checked as estimates move:
     (bust cut = max(BUST_CUT, half the 3y consensus): a name whose consensus
     calls for +60% loses far more than 10 points in a bust)
     fragile   0 <= breakeven < FLUSH_CUT, or short of consensus at 9% but not at 8%
-    drowns    breakeven < 0 at BOTH 9% and 8% discount (price already needs
-              more than consensus, and not because of the discount rate)
+    drowns    breakeven < 0 at the name's own cost of equity AND one point lower
+              (CAPM on the 10y yield, clipped 6-11%: a flat 9% made every slow
+              grower drown whatever the correction did)
+
+Earnings quality (quality.py). The margin is the lever: an accounting margin
+built on accruals, one-offs or share-based pay makes the price "need" little
+growth. So every name is solved twice: at the consensus net margin, and at
+that margin cut by how much reported profit failed to arrive as operating
+cash (net of stock-based pay) over the last 3 filed years. The group rests on
+the SMALLER cushion (`margin_basis` says which). A 'weak' quality grade (2+
+red flags) can never be on_top. Capex is NOT a quality failure, so the FCF
+margin is shown but never solved under.
 
 FLUSH_CUT / BUST_CUT are stated assumptions, not fitted values. Nothing here
 is evidence that the groups will outperform; the sealed list exists so that
@@ -45,15 +55,28 @@ from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from pathlib import Path
 
+from . import quality as eq
+from .events import check as evcheck
 from .snapshots import FMP_BASE, ET, _fmp_key, _get, market_date
 
 log = logging.getLogger(__name__)
 
 HORIZON = 10
-ROBUST_R = 0.08    # a drowns verdict must also hold at this discount rate
 FLUSH_CUT = 0.03   # 3pp off 3y consensus growth: a flush (2020, Aug 2024)
 BUST_CUT = 0.10    # 10pp: a bust (2001, 2008, 2022 tech)
 TOP_UPSIDE = 0.15
+ERP = 0.045        # equity risk premium for the CAPM cost of equity
+R_MIN, R_MAX = 0.06, 0.11
+R_FALLBACK_RF = 0.045
+ROBUST_STEP = 0.01  # a drowns verdict must also hold one point lower
+MIDCYCLE_TRIGGER = 1.25
+CYCLICAL_SECTORS = {"Basic Materials", "Energy"}
+CYCLICAL_INDUSTRIES = {
+    "Semiconductors", "Computer Hardware", "Hardware, Equipment & Parts", "Auto - Manufacturers", "Auto - Parts",
+    "Agricultural - Machinery", "Airlines, Airports & Air Services", "Residential Construction",
+    "Construction Materials", "Industrial Materials", "Solar", "Marine Shipping", "Trucking", "Steel", "Aluminum",
+    "Copper", "Chemicals", "Chemicals - Specialty", "Paper, Lumber & Forest Products", "Packaging & Containers",
+    "Auto - Recreational Vehicles", "Furnishings, Fixtures & Appliances"}
 EPICENTER = ["NVDA", "AVGO", "AMD", "TSM", "ASML", "MU", "MSFT", "GOOGL", "AMZN", "META", "ORCL"]
 LINK_TYPES = ("supplier", "customer", "partner")
 LINK_MIN_ARTICLES = 3
@@ -69,12 +92,17 @@ def dcf_value(revenue: float, margin: float, g: float, r: float, gt: float, year
     return pv + rev * margin * (1 + gt) / (r - gt) / (1 + r) ** years
 
 
-def solve_growth(ev: float, revenue: float, margin: float, r: float, gt: float) -> float | None:
+def solve_growth(ev: float, revenue: float, margin: float, r: float, gt: float, clamp: bool = False) -> float | None:
+    """Growth that makes the DCF equal `ev`. Outside -30%..+60% it returns None,
+    or with `clamp` the bound itself (used for the cash-margin solve, where
+    "needs more than +60%" is an answer, not missing data)."""
     if not (ev and revenue and margin) or ev <= 0 or margin <= 0 or r <= gt:
         return None
     lo, hi = -0.30, 0.60
-    if dcf_value(revenue, margin, lo, r, gt) > ev or dcf_value(revenue, margin, hi, r, gt) < ev:
-        return None
+    if dcf_value(revenue, margin, lo, r, gt) > ev:
+        return lo if clamp else None
+    if dcf_value(revenue, margin, hi, r, gt) < ev:
+        return hi if clamp else None
     for _ in range(80):
         mid = (lo + hi) / 2
         lo, hi = (mid, hi) if dcf_value(revenue, margin, mid, r, gt) < ev else (lo, mid)
@@ -130,12 +158,26 @@ def consensus_margin(rows: list[dict], snapshot: date) -> float | None:
 
 
 def required_now(p: dict, price_now: float, mcap_now: float | None, revenue: float | None,
-                 margin: float | None = None, solve_r: float | None = None) -> tuple[float | None, str]:
-    """Re-solve the stored reconstruction at today's price, holding net debt fixed.
+                 margin: float | None = None, solve_r: float | None = None, clamp: bool = False,
+                 method: str | None = None) -> tuple[float | None, str]:
+    """Growth today's price requires, solved under `margin` (consensus forward NET margin).
 
-    The stored FCF margin rebuilds the EV the market paid on the model date;
-    `margin` (consensus forward net margin) is what the growth is then solved
-    under, so a capex-heavy year does not demand 40%+ growth for a decade."""
+    method "equity" (the default whenever the caller has a same-currency market cap):
+    net income is the owners' cash flow, after interest, so it is valued against the
+    MARKET CAP at the cost of equity. Council 4 (forensic) found the old basis set a
+    net margin against an enterprise value rebuilt from the stored model, which made
+    the implied net debt up: FERG $143.5B against $6.0B on its balance sheet, AVGO
+    $1,022B against $49B, and a debt charge levied twice on every indebted name.
+
+    Any other method is the legacy basis, kept for non-USD reporters (whose market
+    cap would need an FX rate) and so solve dicts sealed before this change still
+    re-solve to the numbers they were judged on."""
+    if method == "equity":
+        if not revenue:
+            return None, "no_revenue"
+        if not mcap_now or mcap_now <= 0:
+            return None, "no_market_cap"
+        return solve_growth(mcap_now, revenue, margin, solve_r, p.get("terminal_growth"), clamp=clamp), "equity"
     g0, m, r, gt, p0 = (p.get(k) for k in ("implied_revenue_cagr", "fcf_margin", "discount_rate", "terminal_growth", "price"))
     if None in (g0, m, r, gt, p0) or m <= 0 or not p0:
         return None, "no_cash_flow_model"
@@ -148,7 +190,24 @@ def required_now(p: dict, price_now: float, mcap_now: float | None, revenue: flo
         ev_now = ev0 + (mcap_now - mcap0)
     else:  # currency mismatch or bad cap: assume EV moves with the price
         ev_now, method = ev0 * price_now / p0, "ev_scaled"
-    return solve_growth(ev_now, revenue, margin or m, solve_r or r, gt), method
+    return solve_growth(ev_now, revenue, margin or m, solve_r or r, gt, clamp=clamp), method
+
+
+def cost_of_equity(rf: float | None, beta: float | None) -> float:
+    """CAPM, clipped to R_MIN..R_MAX. Missing beta -> 1.0; missing rf -> R_FALLBACK_RF."""
+    b = beta if beta is not None and 0 < beta < 4 else 1.0
+    return min(R_MAX, max(R_MIN, (rf if rf is not None else R_FALLBACK_RF) + b * ERP))
+
+
+def midcycle_margin(ticker: dict, consensus: float, hist: float | None) -> float | None:
+    """Cyclical industries only: when consensus runs well above the 5-year reported
+    average, solve halfway between them. A rule floor; the agents refine it."""
+    cyclical = (ticker.get("sector") in CYCLICAL_SECTORS) or (ticker.get("industry") in CYCLICAL_INDUSTRIES)
+    if not cyclical or hist is None or consensus is None:
+        return None
+    if consensus <= max(hist, 0.0) * MIDCYCLE_TRIGGER:
+        return None
+    return (consensus + max(hist, 0.0)) / 2
 
 
 # --- inputs ----------------------------------------------------------------
@@ -193,7 +252,11 @@ def load_inputs(sb) -> dict:
                 continue
             links[me]["articles"] += r.get("article_count") or 0
             links[me]["with"].add(r[col_other])
-    return {"priced_in": latest, "tickers": tick, "estimates": est, "snapshot_date": snap_date, "links": links}
+    rf_row = st.table("drawdown_macro_snapshots").select("value,obs_date").eq("series_id", "FRED:DGS10") \
+        .order("obs_date", desc=True).limit(1).execute().data
+    rf = float(rf_row[0]["value"]) / 100 if rf_row and rf_row[0].get("value") is not None else None
+    return {"priced_in": latest, "tickers": tick, "estimates": est, "snapshot_date": snap_date, "links": links,
+            "rf": rf, "rf_date": rf_row[0]["obs_date"] if rf_row else None}
 
 
 def fetch_prices(symbols: list[str], since: date, workers: int = 6) -> tuple[dict[str, list[dict]], list[str]]:
@@ -249,6 +312,32 @@ class Row:
     thesis: str | None = None
     breaks_if: str | None = None
     rank: int | None = None
+    # earnings quality (quality.py): the verdict rests on the smaller cushion
+    margin_basis: str | None = None        # 'consensus' | 'quality': which margin decided the group
+    breakeven_consensus: float | None = None
+    breakeven_quality: float | None = None
+    quality_margin: float | None = None    # consensus margin x min(1, cash conversion)
+    cash_conversion: float | None = None   # (operating cash flow - SBC) / net income, 3y
+    cash_margin: float | None = None       # 3y FCF / revenue: shown, not used (capex is not bad earnings)
+    consensus_margin: float | None = None
+    quality: str = "unknown"               # clean | watch | weak | unknown
+    quality_flags: str = ""
+    cfo_to_ni: float | None = None
+    accruals: float | None = None
+    sbc_to_revenue: float | None = None
+    share_growth: float | None = None
+    one_off_share: float | None = None
+    quality_years: int = 0
+    cost_of_equity: float | None = None
+    midcycle_margin: float | None = None
+    hist_net_margin: float | None = None
+    loss_making: bool = False
+    sector_pct: float | None = None
+    value_basis: str | None = None         # 'equity' (net margin vs market cap) | legacy EV method
+    events: str = ""                       # corporate events (events.py) found before any agent ran
+    # Everything needed to re-solve this name under a different margin, cut or
+    # discount rate (judge.py's what-if). Not written to the database.
+    solve: dict | None = None
 
 
 def hypothesis(group: str, sym: str, px: float, req: float, g3: float, supported: float, be: float, bust: float,
@@ -284,8 +373,9 @@ def _close_on(bars: list[dict], d: str) -> float | None:
     return float(prior[-1]["price"]) if prior else None
 
 
-def score(inputs: dict, prices: dict[str, list[dict]], drop_date: date) -> list[Row]:
+def score(inputs: dict, prices: dict[str, list[dict]], drop_date: date, as_of: date | None = None) -> list[Row]:
     snap = date.fromisoformat(inputs["snapshot_date"])
+    as_of = as_of or market_date()
     out = []
     for sym, p in inputs["priced_in"].items():
         t = inputs["tickers"].get(sym, {})
@@ -323,28 +413,78 @@ def score(inputs: dict, prices: dict[str, list[dict]], drop_date: date) -> list[
         rows = inputs["estimates"].get(sym, [])
         shares = (t["market_cap"] / t["price"]) if t.get("market_cap") and t.get("price") else None
         cm = consensus_margin(rows, snap)
-        req, method = required_now(p, px, shares * px if shares else None, base_revenue(rows, snap), cm)
+        rev0 = base_revenue(rows, snap)
+        mcap = shares * px if shares else None
+        q = eq.assess(inputs.get("statements", {}).get(sym), as_of, cm)
+        qf = dict(cash_margin=q["cash_margin"], consensus_margin=cm, quality=q["quality"],
+                  cash_conversion=q["cash_conversion"], quality_margin=q["quality_margin"],
+                  quality_flags="; ".join(q["quality_flags"]), cfo_to_ni=q["cfo_to_ni"], accruals=q["accruals"],
+                  sbc_to_revenue=q["sbc_to_revenue"], share_growth=q["share_growth"],
+                  one_off_share=q["one_off_share"], quality_years=q["quality_years"])
         g3, _ = consensus_cagr(rows, snap)
-        if req is None or g3 is None:
+        m_cons = cm or p["fcf_margin"]
+        # Cost of equity per company (CAPM on the latest 10y yield), not one 9% for all:
+        # a flat 9% makes every 2-4% grower "drown" whatever the correction does.
+        r_i = cost_of_equity(inputs.get("rf"), t.get("beta"))
+        # Equity basis when the market cap and the estimates are in the same currency:
+        # dollar reporters whose consensus revenue sits within 0.5-2x the last filed year.
+        same_ccy = (q.get("reported_currency") == "USD" and q.get("revenue_last") and rev0
+                    and 0.5 <= rev0 / q["revenue_last"] <= 2.0)
+        vb = "equity" if same_ccy and mcap else None
+        req_cons, method = required_now(p, px, mcap, rev0, m_cons, solve_r=r_i, method=vb)
+        if req_cons is None or g3 is None:
             why = ("no consensus revenue" if g3 is None else
-                   "price needs growth outside -30%..+60% or FCF <= 0" if method == "net_debt_fixed" else method.replace("_", " "))
-            out.append(Row(**base, **{**empty, **stats}, group="not_cash_flow", reason=why, flags=""))
+                   "price needs growth outside -30%..+60% or FCF <= 0" if method in ("net_debt_fixed", "equity") else method.replace("_", " "))
+            out.append(Row(**base, **{**empty, **stats}, **qf, group="not_cash_flow", reason=why, flags=""))
             continue
         gt = p["terminal_growth"]
         supported = faded_cagr(g3, gt)
+        be_cons = breakeven_cut(g3, gt, req_cons)
+        # Three candidate margins; a lower margin always needs more growth, so the
+        # LOWEST one leaves the smallest cushion and decides:
+        #   consensus  analysts' farthest-year net margin
+        #   quality    consensus cut for profit not arriving as cash (quality.py)
+        #   midcycle   cyclical industries only: halfway between consensus and the
+        #              5-year reported average when consensus runs >25% above it
+        mid = midcycle_margin(t, m_cons, q["hist_net_margin"])
+        cands = {"consensus": m_cons}
+        if q["quality_margin"] and 0 < q["quality_margin"] < m_cons - 1e-9:
+            cands["quality"] = q["quality_margin"]
+        if mid and 0 < mid < m_cons - 1e-9:
+            cands["midcycle"] = mid
+        basis = min(cands, key=cands.get)
+        margin = cands[basis]
+        req, _ = required_now(p, px, mcap, rev0, margin, solve_r=r_i, clamp=basis != "consensus", method=vb)
         be = breakeven_cut(g3, gt, req)
+        be_q = be if basis != "consensus" else None
         upside = (p["target_median"] / px - 1) if p.get("target_median") and (p.get("n_targets") or 0) >= 5 else None
         bust = max(BUST_CUT, g3 / 2)
-        # Drowning must not hinge on the 9% discount rate: re-solve at 8%.
-        req8, _ = required_now(p, px, shares * px if shares else None, base_revenue(rows, snap), cm, solve_r=ROBUST_R)
-        be8 = breakeven_cut(g3, gt, req8) if req8 is not None else be
+        fy1 = next((float(r["revenue_avg"]) for r in sorted(rows, key=lambda r: r["fiscal_date"])
+                    if r.get("revenue_avg") and date.fromisoformat(r["fiscal_date"]) > snap), None)
+        evs = evcheck(sym, inputs.get("events"), p["as_of"], as_of, upside=upside, rev_fy1=fy1,
+                      rev_last=q.get("revenue_last"), g3=g3, share_step=q.get("share_step"))
+        hard = next((e for e in evs if e["action"] in ("refuse", "not_cash_flow")), None)
+        if hard:
+            out.append(Row(**base, **{**empty, **stats}, **qf, group="refused" if hard["action"] == "refuse" else "not_cash_flow",
+                           reason=f"{hard['kind']}: {hard['note']}", flags="",
+                           events="; ".join(f"{e['kind']}: {e['note']}" for e in evs)))
+            continue
+        if any(e["kind"] == "stale_targets" for e in evs):
+            upside = None
+        bar_top = any(e["action"] == "bar_top" for e in evs)
+        # Drowning must not hinge on the discount rate: re-solve one point lower.
+        r_lo = max(R_MIN - 0.01, r_i - ROBUST_STEP)
+        req_lo, _ = required_now(p, px, mcap, rev0, margin, solve_r=r_lo, clamp=True, method=vb)
+        be8 = breakeven_cut(g3, gt, req_lo) if req_lo is not None else be
+        loss = q["loss_making"]
         if be < 0 and be8 < 0:
             group = "drowns"
         elif be < 0:
             group = "fragile"
-        elif be >= bust and upside is not None and upside >= TOP_UPSIDE:
+        elif (be >= bust and upside is not None and upside >= TOP_UPSIDE
+              and q["quality"] != "weak" and not loss and not bar_top):
             group = "on_top"
-        elif be >= FLUSH_CUT:
+        elif be >= FLUSH_CUT and not loss:
             group = "holds"
         else:
             group = "fragile"
@@ -353,17 +493,44 @@ def score(inputs: dict, prices: dict[str, list[dict]], drop_date: date) -> list[
             ("high beta", (t.get("beta") or 0) > 1.3),
             ("targets set before the drop", base["targets_predate_drop"]),
             ("EV scaled (no net-debt check)", method == "ev_scaled"),
+            ("non-dollar reporter: legacy enterprise-value basis", method != "equity"),
+            *[(f"event: {e['note']}", True) for e in evs],
             ("no consensus margin; today's FCF margin used", cm is None),
-            ("thin margin: answer is margin-sensitive", (cm or p["fcf_margin"]) < 0.05),
-            ("over-funded only at a 9% discount", be < 0 <= be8),
+            ("thin margin: answer is margin-sensitive", margin < 0.05),
+            (f"over-funded only at a {r_i:.1%} discount", be < 0 <= be8),
             ("price funds the consensus story", (p.get("n_endorsed") or 0) * 2 >= (p.get("n_targets") or 99)),
+            ("judged on quality-adjusted margin: profit not fully arriving as cash", basis == "quality"),
+            ("judged on mid-cycle margin: consensus runs well above the 5-year average", basis == "midcycle"),
+            ("at its adjusted margin the price needs more than +60%/yr", req >= 0.60),
+            ("held back from on top by earnings quality",
+             (q["quality"] == "weak" or loss) and be >= bust and upside is not None and upside >= TOP_UPSIDE),
+            ("loss-making over 3 years: capped at fragile", loss and be >= 0),
+            ("no statements: earnings quality not checked", q["quality"] == "unknown"),
         ] if on]
         thesis, breaks = hypothesis(group, sym, px, req, g3, supported, be, bust, upside, p.get("n_targets"),
-                                    cm or p["fcf_margin"], base["targets_predate_drop"], linked, sym in EPICENTER)
-        reason = (f"at a {(cm or p['fcf_margin']):.0%} margin the price needs {req:+.1%}/yr for 10y; consensus supports {supported:+.1%} "
-                  f"({g3:+.1%} for 3y, faded); absorbs a {be * 100:+.1f}pt cut")
-        out.append(Row(**base, **stats, required_cagr=req, consensus_3y=g3, supported_cagr=supported,
-                       breakeven_cut=be, margin_used=cm or p["fcf_margin"], upside_to_median=upside, thesis=thesis, breaks_if=breaks, group=group, reason=reason, flags="; ".join(flags)))
+                                    margin, base["targets_predate_drop"], linked, sym in EPICENTER)
+        if basis == "quality":
+            thesis += (f" Only {q['cash_conversion']:.0%} of its reported profit over the last {q['quality_years']} years "
+                       f"arrived as operating cash after stock-based pay, so it is judged at a {margin:.0%} margin, not the "
+                       f"{m_cons:.0%} analysts expect ({be_cons * 100:+.0f} points of cushion at the analysts' margin).")
+        if basis == "midcycle":
+            thesis += (f" Analysts expect a {m_cons:.0%} margin against a {q['hist_net_margin']:.0%} five-year average in a "
+                       f"cyclical industry, so it is judged at a mid-cycle {margin:.0%} "
+                       f"({be_cons * 100:+.0f} points of cushion at the analysts' margin).")
+        if q["quality"] == "weak" or loss:
+            thesis += f" Earnings quality is weak: {', '.join(q['quality_flags'])}."
+        reason = (f"at a {margin:.0%} {basis} margin and {r_i:.1%} cost of equity the price needs {req:+.1%}/yr for 10y; "
+                  f"consensus supports {supported:+.1%} ({g3:+.1%} for 3y, faded); absorbs a {be * 100:+.1f}pt cut")
+        solve = {"p": {k: p.get(k) for k in ("implied_revenue_cagr", "fcf_margin", "discount_rate", "terminal_growth", "price")},
+                 "price_now": px, "mcap_now": mcap, "revenue": rev0, "g3": g3, "gt": gt, "consensus_margin": cm,
+                 "bust_cut": bust, "method": method, "r": r_i, "r_lo": r_lo, "industry": t.get("industry")}
+        events_s = "; ".join(f"{e['kind']}: {e['note']}" for e in evs)
+        out.append(Row(**base, **stats, **qf, solve=solve, required_cagr=req, consensus_3y=g3, supported_cagr=supported,
+                       breakeven_cut=be, margin_used=margin, upside_to_median=upside, thesis=thesis, breaks_if=breaks,
+                       group=group, reason=reason, flags="; ".join(flags), margin_basis=basis,
+                       breakeven_consensus=be_cons, breakeven_quality=be_q, cost_of_equity=r_i,
+                       midcycle_margin=mid, hist_net_margin=q["hist_net_margin"], loss_making=loss,
+                       value_basis=method, events=events_s))
     # rank: top/holds by breakeven desc; drowns by shortfall (most negative first)
     order = {"on_top": 0, "holds": 1, "fragile": 2, "drowns": 3, "not_cash_flow": 4, "refused": 5}
     out.sort(key=lambda r: (order[r.group], -(r.breakeven_cut or 0) if r.group != "drowns" else (r.breakeven_cut or 0), r.ticker))
@@ -371,13 +538,29 @@ def score(inputs: dict, prices: dict[str, list[dict]], drop_date: date) -> list[
     for r in out:
         counters[r.group] += 1
         r.rank = counters[r.group]
+    # Where the cushion sits WITHIN its sector (1 = most cushioned). Book construction
+    # ranks on this, so a long/short list is not long tech and short staples by design.
+    by_sec: dict[str, list[Row]] = defaultdict(list)
+    for r in out:
+        if r.breakeven_cut is not None:
+            by_sec[r.sector or "?"].append(r)
+    for rs in by_sec.values():
+        rs.sort(key=lambda r: r.breakeven_cut)
+        for i, r in enumerate(rs):
+            r.sector_pct = round(i / max(1, len(rs) - 1), 3) if len(rs) > 1 else 0.5
     return out
 
 
 _DB_FIELDS = ["company", "sector", "rank", "reason", "thesis", "breaks_if", "price", "close_date", "drawdown_from_peak",
               "move_since_model", "required_cagr", "consensus_3y", "supported_cagr", "breakeven_cut", "margin_used",
               "upside_to_median", "n_targets", "targets_predate_drop", "model_as_of", "epicenter", "epicenter_linked",
-              "linked_with", "beta", "exposure", "flags", "crux", "position", "pays_for", "declines"]
+              "linked_with", "beta", "exposure", "flags", "crux", "position", "pays_for", "declines",
+              "margin_basis", "breakeven_consensus", "breakeven_quality", "quality_margin", "cash_conversion", "cash_margin", "consensus_margin", "quality",
+              "quality_flags", "cfo_to_ni", "accruals", "sbc_to_revenue", "share_growth", "one_off_share", "quality_years",
+              # set only on an agent-reviewed day (judge.py apply); None on a rule-only run
+              "rule_grp", "correction_cut", "judgement",
+              "cost_of_equity", "midcycle_margin", "hist_net_margin", "loss_making", "sector_pct",
+              "value_basis", "events"]
 
 
 def _finite(v):
@@ -387,14 +570,17 @@ def _finite(v):
 def write_db(sb, meta: dict, rows: list[Row]) -> None:
     """Scores first, run row last: the site renders a day only once its run row exists."""
     st = sb.schema("swingtrader")
-    recs = [{"as_of": meta["as_of"], "ticker": r.ticker, "grp": r.group, **{k: _finite(getattr(r, k)) for k in _DB_FIELDS}}
+    recs = [{"as_of": meta["as_of"], "ticker": r.ticker, "grp": r.group, **{k: _finite(getattr(r, k, None)) for k in _DB_FIELDS}}
             for r in rows]
     for i in range(0, len(recs), 200):
         st.table("drawdown_narrative_scores").upsert(recs[i:i + 200], on_conflict="as_of,ticker").execute()
     st.table("drawdown_narrative_runs").upsert({
         "as_of": meta["as_of"], "estimate_snapshot": meta["estimate_snapshot"], "drop_date": meta["drop_date"],
         "universe": meta["universe"], "groups": meta["groups"], "seal_sha256": meta["seal_sha256"],
-        "params": {k: meta[k] for k in ("flush_cut", "bust_cut", "robust_discount", "top_upside", "horizon_years", "epicenter")},
+        "params": {**{k: meta[k] for k in ("flush_cut", "bust_cut", "robust_discount", "erp", "rf", "top_upside", "horizon_years", "epicenter",
+                                           "quality_thresholds", "judged_on_quality", "quality")},
+                   **{k: meta[k] for k in ("reviewed", "reviewer", "reviewed_at", "rule_seal_sha256", "rule_groups", "moved")
+                      if k in meta}},
         "finished_at": datetime.now(ET).isoformat()}, on_conflict="as_of").execute()
 
 
@@ -408,19 +594,32 @@ def run(drop_date: date = date(2026, 11, 20), workers: int = 6, db: bool = True)
     syms = sorted(inputs["priced_in"])
     earliest = min(date.fromisoformat(p["as_of"]) for p in inputs["priced_in"].values())
     prices, failed = fetch_prices(syms, earliest - timedelta(days=7), workers)
-    rows = score(inputs, prices, drop_date)
     asof = market_date()
+    inputs["statements"] = eq.fetch_statements(syms, workers)
+    from . import events as evm
+
+    inputs["events"] = evm.load(syms, asof, workers)
+    rows = score(inputs, prices, drop_date, asof)
     data = [r.__dict__ for r in rows]
     ranked = [(r.group, r.rank, r.ticker) for r in rows if r.group in ("on_top", "holds", "fragile", "drowns")]
     seal = hashlib.sha256(json.dumps(ranked).encode()).hexdigest()
     meta = {"as_of": asof.isoformat(), "estimate_snapshot": inputs["snapshot_date"], "drop_date": drop_date.isoformat(),
-            "flush_cut": FLUSH_CUT, "bust_cut": "max(%.2f, g3/2)" % BUST_CUT, "robust_discount": ROBUST_R, "top_upside": TOP_UPSIDE, "horizon_years": HORIZON,
+            "flush_cut": FLUSH_CUT, "bust_cut": "max(%.2f, g3/2)" % BUST_CUT, "robust_discount": "cost_of_equity - %.2f" % ROBUST_STEP, "erp": ERP,
+            "rf": inputs.get("rf"), "rf_date": inputs.get("rf_date"), "cost_of_equity_range": [R_MIN, R_MAX],
+            "midcycle_trigger": MIDCYCLE_TRIGGER, "top_upside": TOP_UPSIDE, "horizon_years": HORIZON,
             "epicenter": EPICENTER, "universe": len(syms), "price_failed": failed, "seal_sha256": seal,
+            "quality_thresholds": eq.THRESHOLDS, "statements_found": len(inputs["statements"]),
+            "judged_on_quality": sum(r.margin_basis == "quality" for r in rows),
+            "quality": {k: sum(r.quality == k for r in rows) for k in ("clean", "watch", "weak", "unknown")},
             "groups": {g: sum(r.group == g for r in rows) for g in ("on_top", "holds", "fragile", "drowns", "not_cash_flow", "refused")}}
     out = OUT_ROOT / asof.isoformat()
     out.mkdir(parents=True, exist_ok=True)
-    (out / "scorecard.json").write_text(json.dumps({"meta": meta, "rows": data}, default=str, indent=1))
+    from . import ledger
+
+    body = {"meta": meta, "rows": data}
+    archived = ledger.archive(out, "scorecard.json", body)
     (out / "rows.json").write_text(json.dumps(data, default=str))
+    meta["ledger"] = ledger.append("rule_scorecard", asof.isoformat(), archived, body, seal_sha256=seal)
     status = "skipped"
     if db:
         try:

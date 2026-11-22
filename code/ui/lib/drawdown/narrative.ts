@@ -24,15 +24,25 @@ import { createServiceClient } from "@/lib/supabase/service";
 
 const SCHEMA = "swingtrader";
 
-import type { Exposure, NarrativeDetail, NarrativeGroup, NarrativeRow, NarrativeRun } from "./narrative-format";
+import type {
+  EarningsQuality,
+  Exposure,
+  NarrativeDetail,
+  NarrativeGroup,
+  NarrativeRow,
+  NarrativeRun,
+} from "./narrative-format";
 
 export * from "./narrative-format";
 
 const ROW_COLUMNS =
   "ticker, company, sector, grp, rank, thesis, breaks_if, reason, price, close_date, drawdown_from_peak, " +
   "required_cagr, consensus_3y, supported_cagr, breakeven_cut, margin_used, upside_to_median, n_targets, " +
-  "targets_predate_drop, model_as_of, epicenter, epicenter_linked, linked_with, beta, exposure, flags";
-const DETAIL_COLUMNS = `${ROW_COLUMNS}, crux, position, pays_for`;
+  "targets_predate_drop, model_as_of, epicenter, epicenter_linked, linked_with, beta, exposure, flags, " +
+  "margin_basis, breakeven_consensus, breakeven_quality, consensus_margin, quality_margin, quality, quality_flags";
+const DETAIL_COLUMNS =
+  `${ROW_COLUMNS}, cash_conversion, cash_margin, cfo_to_ni, accruals, sbc_to_revenue, share_growth, ` +
+  "one_off_share, quality_years, crux, position, pays_for";
 
 const n = (v: unknown): number | null => (v == null || !Number.isFinite(Number(v)) ? null : Number(v));
 const s = (v: unknown): string | null => (v == null || v === "" ? null : String(v));
@@ -65,6 +75,13 @@ function toRow(r: Record<string, unknown>): NarrativeRow {
     beta: n(r.beta),
     exposure: (s(r.exposure) ?? "low") as Exposure,
     flags: s(r.flags)?.split("; ").filter(Boolean) ?? [],
+    marginBasis: (s(r.margin_basis) as NarrativeRow["marginBasis"]) ?? null,
+    breakevenConsensus: n(r.breakeven_consensus),
+    breakevenQuality: n(r.breakeven_quality),
+    consensusMargin: n(r.consensus_margin),
+    qualityMargin: n(r.quality_margin),
+    quality: (s(r.quality) ?? "unknown") as EarningsQuality,
+    qualityFlags: s(r.quality_flags)?.split("; ").filter(Boolean) ?? [],
   };
 }
 
@@ -143,7 +160,20 @@ export async function getCorrectionDetail(
     const r = data[0] as unknown as Record<string, unknown>;
     return {
       run,
-      row: { ...toRow(r), crux: s(r.crux), position: s(r.position), paysFor: toStrings(r.pays_for) },
+      row: {
+        ...toRow(r),
+        cashConversion: n(r.cash_conversion),
+        cashMargin: n(r.cash_margin),
+        cfoToNi: n(r.cfo_to_ni),
+        accruals: n(r.accruals),
+        sbcToRevenue: n(r.sbc_to_revenue),
+        shareGrowth: n(r.share_growth),
+        oneOffShare: n(r.one_off_share),
+        qualityYears: n(r.quality_years),
+        crux: s(r.crux),
+        position: s(r.position),
+        paysFor: toStrings(r.pays_for),
+      },
     };
   } catch {
     return null;

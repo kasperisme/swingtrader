@@ -1,9 +1,11 @@
 import Link from "next/link";
 import {
+  type EarningsQuality,
   type Exposure,
   type NarrativeRow,
   fmtPct,
   fmtPts,
+  QUALITY_LABEL,
 } from "@/lib/drawdown/narrative-format";
 
 /**
@@ -30,6 +32,26 @@ export function ExposureChip({ exposure }: { exposure: Exposure }) {
   );
 }
 
+const QUALITY_TONE: Record<EarningsQuality, string> = {
+  clean: "border-emerald-500/40 text-emerald-500",
+  watch: "border-amber-500/40 text-amber-500",
+  weak: "border-red-500/40 text-red-500",
+  unknown: "border-border text-muted-foreground",
+};
+
+/** Shown only when there is something to say: a clean grade is the default reading. */
+export function QualityChip({ quality, always = false }: { quality: EarningsQuality; always?: boolean }) {
+  if (!always && (quality === "clean" || quality === "unknown")) return null;
+  return (
+    <span
+      className={`inline-flex items-center rounded-full border px-2 py-0.5 font-mono text-[10px] uppercase tracking-widest ${QUALITY_TONE[quality]}`}
+      title="Does reported profit arrive as cash? From the last three filed annual statements"
+    >
+      {QUALITY_LABEL[quality]}
+    </span>
+  );
+}
+
 export function NarrativeCard({ row, compact = false }: { row: NarrativeRow; compact?: boolean }) {
   const short = (row.breakevenCut ?? 0) < 0;
   const breaks = (row.breaksIf ?? "").replace(/^already short; it holds only if /, "");
@@ -43,6 +65,7 @@ export function NarrativeCard({ row, compact = false }: { row: NarrativeRow; com
         <span className="min-w-0 flex-1 truncate text-xs text-muted-foreground">
           {[row.company, row.sector].filter(Boolean).join(" · ")}
         </span>
+        <QualityChip quality={row.quality} />
         <ExposureChip exposure={row.exposure} />
       </div>
 
@@ -59,6 +82,11 @@ export function NarrativeCard({ row, compact = false }: { row: NarrativeRow; com
         <span>
           Analysts <b className="font-medium text-foreground">{fmtPct(row.consensus3y)}/yr</b>
         </span>
+        {row.marginBasis === "quality" && (
+          <span title="Analysts' margin cut for profit that did not arrive as cash">
+            at a cash-adjusted <b className="font-medium text-foreground">{fmtPct(row.marginUsed, 0).replace("+", "")}</b> margin
+          </span>
+        )}
         {!compact && (
           <span>
             From peak <b className="font-medium text-foreground">{fmtPct(row.drawdownFromPeak)}</b>

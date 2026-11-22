@@ -30,6 +30,11 @@ const EXPOSURE: { value: string; label: string; keep: Exposure[] }[] = [
   { value: "lowmed", label: "Low and medium", keep: ["low", "medium"] },
   { value: "low", label: "Low only", keep: ["low"] },
 ];
+const QUALITY: { value: string; label: string; drop: NarrativeRow["quality"][] }[] = [
+  { value: "all", label: "Any earnings quality", drop: [] },
+  { value: "noweak", label: "Hide weak earnings", drop: ["weak"] },
+  { value: "clean", label: "Clean earnings only", drop: ["weak", "watch", "unknown"] },
+];
 const PAGE = 24;
 
 const SELECT =
@@ -39,6 +44,7 @@ export function CorrectionBoard({ rows }: { rows: NarrativeRow[] }) {
   const [group, setGroup] = useState<NarrativeGroup>("on_top");
   const [exposure, setExposure] = useState("all");
   const [sector, setSector] = useState("");
+  const [quality, setQuality] = useState("all");
   const [limit, setLimit] = useState(PAGE);
 
   const sectors = useMemo(
@@ -46,9 +52,13 @@ export function CorrectionBoard({ rows }: { rows: NarrativeRow[] }) {
     [rows],
   );
   const keep = EXPOSURE.find((e) => e.value === exposure)!.keep;
+  const drop = QUALITY.find((q) => q.value === quality)!.drop;
   const filtered = useMemo(
-    () => rows.filter((r) => keep.includes(r.exposure) && (!sector || r.sector === sector)),
-    [rows, keep, sector],
+    () =>
+      rows.filter(
+        (r) => keep.includes(r.exposure) && !drop.includes(r.quality) && (!sector || r.sector === sector),
+      ),
+    [rows, keep, drop, sector],
   );
   const counts = useMemo(() => {
     const c: Partial<Record<NarrativeGroup, number>> = {};
@@ -94,6 +104,13 @@ export function CorrectionBoard({ rows }: { rows: NarrativeRow[] }) {
           {EXPOSURE.map((e) => (
             <option key={e.value} value={e.value}>
               {e.label}
+            </option>
+          ))}
+        </select>
+        <select aria-label="Earnings quality" className={SELECT} value={quality} onChange={(e) => setQuality(e.target.value)}>
+          {QUALITY.map((q) => (
+            <option key={q.value} value={q.value}>
+              {q.label}
             </option>
           ))}
         </select>

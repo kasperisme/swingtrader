@@ -6,6 +6,14 @@
 
 export type NarrativeGroup = "on_top" | "holds" | "fragile" | "drowns" | "not_cash_flow" | "refused";
 export type Exposure = "low" | "medium" | "high";
+export type EarningsQuality = "clean" | "watch" | "weak" | "unknown";
+
+export const QUALITY_LABEL: Record<EarningsQuality, string> = {
+  clean: "Clean earnings",
+  watch: "Earnings: one red flag",
+  weak: "Weak earnings quality",
+  unknown: "Earnings not checked",
+};
 
 export const GROUP_LABEL: Record<NarrativeGroup, string> = {
   on_top: "Comes out on top",
@@ -17,7 +25,7 @@ export const GROUP_LABEL: Record<NarrativeGroup, string> = {
 };
 
 export const GROUP_RULE: Record<NarrativeGroup, string> = {
-  on_top: "Survives a bust-sized cut to analyst growth (10 points, or half the forecast if larger), with the median analyst target at least 15% above the price.",
+  on_top: "Survives a bust-sized cut to analyst growth (10 points, or half the forecast if larger), with the median analyst target at least 15% above the price and no more than one earnings-quality red flag.",
   holds: "Survives a correction-sized 3-point cut to analyst growth.",
   fragile: "Paid for today, but breaks on a small cut — or only looks over-priced at a 9% discount rate.",
   drowns: "The price already needs more growth than analysts forecast, at both a 9% and an 8% discount rate.",
@@ -61,9 +69,25 @@ export interface NarrativeRow {
   beta: number | null;
   exposure: Exposure;
   flags: string[];
+  /** Which margin decided the group: analysts' ('consensus') or cut for cash conversion ('quality'). */
+  marginBasis: "consensus" | "quality" | null;
+  breakevenConsensus: number | null;
+  breakevenQuality: number | null;
+  consensusMargin: number | null;
+  qualityMargin: number | null;
+  quality: EarningsQuality;
+  qualityFlags: string[];
 }
 
 export interface NarrativeDetail extends NarrativeRow {
+  cashConversion: number | null;
+  cashMargin: number | null;
+  cfoToNi: number | null;
+  accruals: number | null;
+  sbcToRevenue: number | null;
+  shareGrowth: number | null;
+  oneOffShare: number | null;
+  qualityYears: number | null;
   crux: string | null;
   position: string | null;
   paysFor: string[];
