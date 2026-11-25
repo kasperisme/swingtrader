@@ -17,6 +17,7 @@ import { AnalyticsProvider } from "@/lib/analytics/AnalyticsProvider";
 import { CorrectionPromoGate } from "@/components/correction-promo-gate";
 import { Pixels } from "@/components/pixels";
 import { AttributionCapture } from "@/components/attribution-capture";
+import { FORGED_LANDING_SCRIPT } from "@/lib/analytics/forged-landing";
 import {
   METADATA_BASE,
   SITE_URL,
@@ -128,6 +129,10 @@ export default function RootLayout({
   return (
     <html lang="en" suppressHydrationWarning>
       <head>
+        {/* Must run before any tracker sets a cookie; see lib/analytics/forged-landing.ts. */}
+        <Script id="forged-landing" strategy="beforeInteractive">
+          {FORGED_LANDING_SCRIPT}
+        </Script>
         <Script
           src="https://www.googletagmanager.com/gtag/js?id=G-FQ87KHKLS5"
           strategy="afterInteractive"
@@ -137,7 +142,7 @@ export default function RootLayout({
             window.dataLayer = window.dataLayer || [];
             function gtag(){dataLayer.push(arguments);}
             gtag('js', new Date());
-            gtag('config', 'G-FQ87KHKLS5');
+            if (!window.__nisForgedLanding) gtag('config', 'G-FQ87KHKLS5');
           `}
         </Script>
         <Pixels />

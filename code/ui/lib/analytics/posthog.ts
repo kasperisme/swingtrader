@@ -2,6 +2,8 @@
 
 import posthog, { type PostHog } from "posthog-js";
 
+import { isForgedLanding } from "./forged-landing";
+
 let initialized = false;
 
 /**
@@ -33,6 +35,8 @@ function isLikelyAutomation(): boolean {
 export function getPosthog(): PostHog | null {
   if (typeof window === "undefined") return null;
   if (isLikelyAutomation()) return null;
+  // The farm that passes the edge firewall: see ./forged-landing.ts.
+  if (isForgedLanding()) return null;
   if (!initialized) {
     const key = process.env.NEXT_PUBLIC_POSTHOG_KEY;
     if (!key) return null;
